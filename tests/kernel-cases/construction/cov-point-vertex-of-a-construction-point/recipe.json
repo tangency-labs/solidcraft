@@ -1,0 +1,22 @@
+{
+ "commands": [
+  {
+   "command": "construct.point.three_planes",
+   "params": {
+    "a": "XY",
+    "b": "XZ",
+    "c": "YZ",
+    "name": "Pin"
+   }
+  },
+  {
+   "command": "construct.point.vertex",
+   "params": {
+    "point": {
+     "construct_point": "Pin"
+    },
+    "name": "P"
+   }
+  }
+ ]
+}

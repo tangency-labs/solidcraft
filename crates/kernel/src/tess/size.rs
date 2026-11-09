@@ -1,12 +1,15 @@
 //! Target triangle size: one side length per face, so triangles come out about equilateral
 //! (well-shaped triangles shade evenly) and as small as the surface needs.
 //!
-//! A face's size is the smallest of the body's longest side, the length over which the surface
+//! A flat face (a plane, or a spline lying in one) has no size: any triangulation of its
+//! boundary is exact, so it gets no interior cells and its straight edges no extra nodes.
+//! A curved face's size is the smallest of the body's longest side, the length over which the surface
 //! normal turns the caller's facet angle (when one is given, see [`Turn`]), and the chord that
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::tess::EvalSurface;
 
 use super::uv::Domain;
@@ -26,6 +29,13 @@ const MIN_LEN_FRACTION: f64 = 1.0 / 4.0;
 /// Curvature samples per parameter direction.
 const SAMPLES: usize = 9;
 
+/// Most segments a face's boundary may get from the facet angle: past it, the face's curved
+/// edges are sampled again at twice the angle (a plate with a thousand small holes is not worth
+/// a hundred times the work to draw each hole round).
+pub(crate) const MAX_ANGLE_BOUNDARY: usize = 4096;
+/// How often the angle is doubled for a crowded face before only the chord tolerance is left.
+pub(crate) const MAX_RELAX: u8 = 4;
+
 /// The most one facet may turn (radians): an edge segment's tangent or a cell's surface normal.
 /// The angle divides only where a facet would sag more than `floor` (mm), so a radius far below
 /// the tolerance keeps its chord facets.
@@ -41,12 +51,11 @@ impl Turn {
         sag > self.floor && angle > self.angle
     }
 
-    /// The angle doubled `level` times, as the reference mesher relaxes it for a crowded face;
-    /// from its last level, or past half a turn, no angle at all (the tolerance alone).
+    /// The angle doubled `level` times, for a crowded face (see [`MAX_ANGLE_BOUNDARY`]); from
+    /// level [`MAX_RELAX`], or past half a turn, no angle at all (the tolerance alone).
     pub(crate) fn relaxed(&self, level: u8) -> Option<Turn> {
-        use truck_meshalgo::tessellation::Deflection;
-        let angle = self.angle * f64::from(1u32 << u32::from(level.min(Deflection::MAX_RELAX)));
-        (level == 0 || (level < Deflection::MAX_RELAX && angle < std::f64::consts::PI)).then_some(Turn { angle, ..*self })
+        let angle = self.angle * f64::from(1u32 << u32::from(level.min(MAX_RELAX)));
+        (level == 0 || (level < MAX_RELAX && angle < std::f64::consts::PI)).then_some(Turn { angle, ..*self })
     }
 }
 
@@ -55,35 +64,14 @@ impl Turn {
 pub(crate) struct Rules {
     pub tol: f64,
     pub max_len: f64,
-    /// The body's extent (see [`extent`]); 0 when it has none. Tolerances that measure the
-    /// body's own geometry rather than the mesh are fractions of it.
-    pub extent: f64,
     pub turn: Option<Turn>,
-    /// How far the body's boundaries may lie off their surfaces (mm), as the file the body was
-    /// read from declares; `None` for a body this kernel built (see
-    /// [`crate::body::Body::boundary_tol`]). It raises the planner's bound (a hundredth of the
-    /// extent) where it is larger, never lowers it.
-    pub boundary_tol: Option<f64>,
 }
 
 impl Rules {
-    /// The same rules with a chord tolerance `k` times finer.
-    pub(crate) fn finer(self, k: f64) -> Rules {
-        Rules { tol: self.tol / k, ..self }
-    }
-
-    /// Rules for a body of extent `extent` (see [`extent`]). `boundary_tol`: the body's declared
-    /// off-surface budget (mm), `None` for a body this kernel built.
-    pub(crate) fn new(tol: f64, extent: f64, turn: Option<Turn>, boundary_tol: Option<f64>) -> Rules {
-        let sound = extent.is_finite() && extent > 0.0;
-        let max_len = if sound { extent * MAX_LEN_FRACTION } else { f64::INFINITY };
-        Rules {
-            tol,
-            max_len: max_len.max(tol),
-            extent: if sound { extent } else { 0.0 },
-            turn,
-            boundary_tol: boundary_tol.filter(|t| t.is_finite() && *t > 0.0),
-        }
+    /// Rules for a body of extent `extent` (see [`extent`]).
+    pub(crate) fn new(tol: f64, extent: f64, turn: Option<Turn>) -> Rules {
+        let max_len = if extent.is_finite() && extent > 0.0 { extent * MAX_LEN_FRACTION } else { f64::INFINITY };
+        Rules { tol, max_len: max_len.max(tol), turn }
     }
 
     /// The side length for a curvature `k` (1/mm): the chord sags at most the tolerance across
@@ -121,11 +109,12 @@ pub(crate) fn extent(points: impl Iterator<Item = Vec3>) -> f64 {
 /// so the size is never larger than the face needs).
 pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> (f64, [f64; 2]) {
     if let EvalSurface::Plane { du, dv, .. } = s {
-        return (rules.max_len, [du.len(), dv.len()]);
+        return (f64::INFINITY, [du.len(), dv.len()]);
     }
     let (Some(ru), Some(rv)) = (dom.range[0], dom.range[1]) else { return (rules.max_len, [1.0, 1.0]) };
+    let flat = planar(s);
     // A flat spline (sheet-metal walls, chamfers): no curvature to look for, only the speeds.
-    let samples = if planar(s) { 3 } else { SAMPLES };
+    let samples = if flat { 3 } else { SAMPLES };
     let normal = |u: f64, v: f64| -> Option<(Vec3, Vec3, [f64; 2])> {
         let (p, su, sv) = s.derivs(u, v)?;
         Some((p, su.cross(sv).normalized()?, [su.len(), sv.len()]))
@@ -155,7 +144,9 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> (f64, [
         }
     }
     let speed = if count > 0 { [speed[0] / count as f64, speed[1] / count as f64] } else { [1.0, 1.0] };
-    (rules.for_curvature(k_max), speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }))
+    // A flat face is exact for any triangulation of its boundary: no length cap.
+    let size = if flat { f64::INFINITY } else { rules.for_curvature(k_max) };
+    (size, speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }))
 }
 
 /// A spline surface whose control points lie in one plane, with positive weights: the
@@ -193,38 +184,39 @@ mod tests {
             swap: false,
         };
         // A 20 mm body: sides from 1 mm (the floor, a quarter of the longest) to 4 mm.
-        let rules = Rules::new(0.01, 20.0, THIRTY, None);
+        let rules = Rules::new(0.01, 20.0, THIRTY);
         let (h, speed) = face_size(&s, &super::super::uv::domain(&s), &rules);
         // r = 3: 30° of turn is 1.57 mm; the 0.01 mm sag chord is √(8·3·0.01) = 0.49 mm, times the
         // aspect, unless that is under the floor.
         assert!((h - (ASPECT * (8.0 * 3.0 * 0.01f64).sqrt()).max(20.0 * MAX_LEN_FRACTION * MIN_LEN_FRACTION)).abs() < 0.01, "{h}");
         assert!((speed[0] - 40.0).abs() < 1e-6 && (speed[1] - 3.0).abs() < 1e-6, "{speed:?}");
         // Coarser: the turn limit governs.
-        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &Rules::new(0.5, 100.0, THIRTY, None));
+        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &Rules::new(0.5, 100.0, THIRTY));
         assert!((h - (ASPECT * 3.0 * std::f64::consts::PI / 6.0).max(100.0 * MAX_LEN_FRACTION * MIN_LEN_FRACTION)).abs() < 0.01, "{h}");
         // Without a facet angle the sag alone: √(8·3·0.5) = 3.46 mm, four times along.
-        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &Rules::new(0.5, 100.0, None, None));
+        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &Rules::new(0.5, 100.0, None));
         assert!((h - ASPECT * (8.0 * 3.0 * 0.5f64).sqrt()).abs() < 0.01, "{h}");
         // A turn that sags below its floor does not divide.
         let floored = Some(Turn { angle: std::f64::consts::PI / 6.0, floor: 1.0 });
-        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &Rules::new(0.5, 100.0, floored, None));
+        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &Rules::new(0.5, 100.0, floored));
         assert!((h - ASPECT * (8.0 * 3.0 * 0.5f64).sqrt()).abs() < 0.01, "{h}");
     }
 
     #[test]
     fn a_flat_spline_is_planar_and_a_bent_one_is_not() {
-        let patch = |z: f64| EvalSurface::Nurbs {
-            degree: [1, 1],
-            knots: [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
-            count: [2, 2],
-            ctrl: vec![[0.0, 0.0, 0.0, 1.0], [4.0, 0.0, 0.0, 1.0], [0.0, 3.0, 0.0, 1.0], [4.0, 3.0, z, 1.0]],
-            closed: [false, false],
+        let patch = |z: f64| {
+            EvalSurface::nurbs(
+                [1, 1],
+                [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
+                [2, 2],
+                vec![[0.0, 0.0, 0.0, 1.0], [4.0, 0.0, 0.0, 1.0], [0.0, 3.0, 0.0, 1.0], [4.0, 3.0, z, 1.0]],
+            )
         };
         assert!(planar(&patch(0.0)));
         assert!(!planar(&patch(0.5)));
-        let rules = Rules::new(0.01, 100.0, THIRTY, None);
+        let rules = Rules::new(0.01, 100.0, THIRTY);
         let (h, speed) = face_size(&patch(0.0), &super::super::uv::domain(&patch(0.0)), &rules);
-        assert_eq!(h, rules.max_len);
+        assert_eq!(h, f64::INFINITY);
         assert!((speed[0] - 4.0).abs() < 1e-9 && (speed[1] - 3.0).abs() < 1e-9, "{speed:?}");
         // The twisted patch (a hyperbolic paraboloid) has curvature: a smaller side.
         assert!(face_size(&patch(0.5), &super::super::uv::domain(&patch(0.5)), &rules).0 < rules.max_len);
@@ -239,15 +231,15 @@ mod tests {
             transform: [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]],
             swap: false,
         };
-        let rules = Rules::new(0.1, 100.0, THIRTY, None);
+        let rules = Rules::new(0.1, 100.0, THIRTY);
         let (h, _) = face_size(&s, &super::super::uv::domain(&s), &rules);
         assert!((h - rules.max_len * MIN_LEN_FRACTION).abs() < 1e-9, "{h}");
     }
 
     #[test]
-    fn a_plane_takes_the_longest_side() {
+    fn a_plane_has_no_size_cap() {
         let s = EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y };
-        let rules = Rules::new(0.01, 100.0, THIRTY, None);
-        assert_eq!(face_size(&s, &super::super::uv::domain(&s), &rules).0, 20.0);
+        let rules = Rules::new(0.01, 100.0, THIRTY);
+        assert_eq!(face_size(&s, &super::super::uv::domain(&s), &rules).0, f64::INFINITY);
     }
 }

@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an r5 round on the stock's top front edge",
+ "source": "analytic",
+ "method": "removed (1 - pi/4) r^2 L",
+ "body_count": 1,
+ "volume_mm3": 47678.097245096,
+ "faces": 7
+}

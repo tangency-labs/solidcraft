@@ -1,0 +1,253 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "analytic_specification_not_simulation_result",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "unit_system": "SI_except_explicit_conversion_fixture",
+    "gravity_source_id": "SRC-MOON-FACTSHEET"
+  },
+  "items": [
+    {
+      "id": "PHY-001",
+      "name": "One-meter vacuum flight reference",
+      "kind": "ballistic_equal_height",
+      "gravity_m_s2": [
+        0.0,
+        0.0,
+        -1.62
+      ],
+      "initial_position_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_velocity_m_s": [
+        0.27,
+        0.0,
+        1.8
+      ],
+      "expected": {
+        "apex_time_s": 1.1111111111111112,
+        "flight_time_s": 2.2222222222222223,
+        "rise_m": 1.0,
+        "range_m": 0.6000000000000001,
+        "apex_position_m": [
+          0.30000000000000004,
+          0.0,
+          1.0
+        ],
+        "landing_position_m": [
+          0.6000000000000001,
+          0.0,
+          0.0
+        ],
+        "landing_velocity_m_s": [
+          0.27,
+          0.0,
+          -1.8
+        ]
+      },
+      "absolute_tolerance": 1e-09,
+      "assumptions": [
+        "Local constant gravity.",
+        "Vacuum, with no additional forces.",
+        "Equal release and landing height.",
+        "No contacts before landing."
+      ],
+      "interpretation": "Synthetic analytic fixture; not a demonstrated SELENE trajectory.",
+      "source_id": "SRC-MOON-FACTSHEET"
+    },
+    {
+      "id": "PHY-002",
+      "name": "Small-rover scale planning candidate",
+      "kind": "ballistic_equal_height",
+      "gravity_m_s2": [
+        0.0,
+        0.0,
+        -1.62
+      ],
+      "initial_position_m": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "initial_velocity_m_s": [
+        0.04647580015448901,
+        0.0,
+        0.697137002317335
+      ],
+      "expected": {
+        "apex_time_s": 0.4303314829119352,
+        "flight_time_s": 0.8606629658238704,
+        "rise_m": 0.14999999999999997,
+        "range_m": 0.04,
+        "apex_position_m": [
+          0.02,
+          0.0,
+          0.14999999999999997
+        ],
+        "landing_position_m": [
+          0.04,
+          0.0,
+          0.0
+        ],
+        "landing_velocity_m_s": [
+          0.04647580015448901,
+          0.0,
+          -0.697137002317335
+        ]
+      },
+      "absolute_tolerance": 1e-09,
+      "assumptions": [
+        "Local constant gravity.",
+        "Vacuum, with no additional forces.",
+        "Equal release and landing height.",
+        "No contacts before landing."
+      ],
+      "interpretation": "Planning candidate only; arm reach, actuation, collision and capture remain unverified.",
+      "source_id": "SRC-MOON-FACTSHEET"
+    },
+    {
+      "id": "PHY-003",
+      "name": "Millimeter and derived-unit boundary",
+      "kind": "unit_conversion",
+      "inputs": {
+        "position_mm": [
+          400.0,
+          0.0,
+          150.0
+        ],
+        "velocity_mm_s": [
+          270.0,
+          0.0,
+          1800.0
+        ],
+        "gravity_mm_s2": [
+          0.0,
+          0.0,
+          -1620.0
+        ],
+        "inertia_kg_mm2": [
+          100.0,
+          120.0,
+          140.0
+        ],
+        "torque_n_mm": [
+          0.0,
+          0.0,
+          25.0
+        ]
+      },
+      "expected": {
+        "position_m": [
+          0.4,
+          0.0,
+          0.15
+        ],
+        "velocity_m_s": [
+          0.27,
+          0.0,
+          1.8
+        ],
+        "gravity_m_s2": [
+          0.0,
+          0.0,
+          -1.62
+        ],
+        "inertia_kg_m2": [
+          0.0001,
+          0.00012,
+          0.00014
+        ],
+        "torque_n_m": [
+          0.0,
+          0.0,
+          0.025
+        ]
+      },
+      "absolute_tolerance": 1e-12,
+      "interpretation": "Synthetic boundary fixture, not SELENE mass properties."
+    },
+    {
+      "id": "PHY-004",
+      "name": "Offset release velocity",
+      "kind": "release_velocity",
+      "grip_velocity_m_s": [
+        0.1,
+        0.0,
+        0.2
+      ],
+      "grip_angular_velocity_rad_s": [
+        0.0,
+        0.0,
+        2.0
+      ],
+      "grip_to_center_of_mass_m": [
+        0.02,
+        0.0,
+        0.0
+      ],
+      "expected_center_of_mass_velocity_m_s": [
+        0.1,
+        0.04,
+        0.2
+      ],
+      "absolute_tolerance": 1e-12,
+      "interpretation": "Synthetic rigid-body velocity fixture; expressed in one common world frame."
+    },
+    {
+      "id": "PHY-005",
+      "name": "Principal inertia admissibility",
+      "kind": "principal_inertia_admissibility",
+      "units": "kg*m^2",
+      "cases": [
+        {
+          "moments": [
+            1.0,
+            1.2,
+            1.4
+          ],
+          "expected_valid": true
+        },
+        {
+          "moments": [
+            1.0,
+            1.0,
+            3.0
+          ],
+          "expected_valid": false
+        },
+        {
+          "moments": [
+            0.0,
+            1.0,
+            1.0
+          ],
+          "expected_valid": false
+        },
+        {
+          "moments": [
+            -1.0,
+            1.0,
+            1.0
+          ],
+          "expected_valid": false
+        }
+      ],
+      "interpretation": "Synthetic fully three-dimensional rigid-body fixture: positive moments and triangle inequalities, not positive definiteness alone."
+    },
+    {
+      "id": "PHY-006",
+      "name": "Closed sample mass accounting",
+      "kind": "sample_mass",
+      "container_mass_kg": 0.05,
+      "collected_sample_mass_kg": 0.02,
+      "spilled_sample_mass_kg": 0.003,
+      "expected_retained_sample_mass_kg": 0.017,
+      "expected_total_sealed_mass_kg": 0.067,
+      "absolute_tolerance": 1e-12,
+      "interpretation": "Synthetic bookkeeping fixture; no SELENE container mass has been measured."
+    }
+  ]
+}

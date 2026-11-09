@@ -5,7 +5,8 @@
 //! resort the host chooses, the CPU rasterizer). Every picture names the renderer that drew it.
 //! Without a renderer, a picture is an error and a save simply has no thumbnail.
 
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use solidcraft_render::{Camera, Scene};
 
@@ -43,6 +44,67 @@ pub fn install(renderer: Arc<Renderer>) {
     }
 }
 
+/// Pictures being drawn, and whether the process has stopped drawing them: a picture still on
+/// the GPU when the process exits can crash inside the graphics driver as it is torn down.
+struct Gate {
+    state: Mutex<(usize, bool)>,
+    done: Condvar,
+}
+
+/// A picture being drawn, counted until it is dropped (also when the renderer panics).
+struct Drawing<'a>(&'a Gate);
+
+impl Drop for Drawing<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.0.state.lock() {
+            s.0 = s.0.saturating_sub(1);
+        }
+        self.0.done.notify_all();
+    }
+}
+
+impl Gate {
+    const fn new() -> Gate {
+        Gate { state: Mutex::new((0, false)), done: Condvar::new() }
+    }
+
+    /// One more picture being drawn; none once closed.
+    fn enter(&self) -> Result<Drawing<'_>, String> {
+        let mut s = self.state.lock().map_err(|_| "the picture gate is poisoned".to_string())?;
+        if s.1 {
+            return Err("the app is closing: no more pictures are drawn".into());
+        }
+        s.0 += 1;
+        Ok(Drawing(self))
+    }
+
+    /// No new pictures; waits up to `within` for those being drawn. → whether they all finished.
+    fn close(&self, within: Duration) -> bool {
+        let end = Instant::now() + within;
+        let Ok(mut s) = self.state.lock() else { return false };
+        s.1 = true;
+        while s.0 > 0 {
+            let left = end.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            match self.done.wait_timeout(s, left) {
+                Ok((next, _)) => s = next,
+                Err(_) => return false,
+            }
+        }
+        true
+    }
+}
+
+static GATE: Gate = Gate::new();
+
+/// For a process about to exit: no more pictures are drawn, and those being drawn are waited
+/// for, up to `within`. → whether they all finished.
+pub fn close(within: Duration) -> bool {
+    GATE.close(within)
+}
+
 /// The installed renderer, if any.
 pub fn installed() -> Option<Arc<Renderer>> {
     RENDERER.read().ok().and_then(|r| r.clone())
@@ -61,7 +123,9 @@ pub fn png(scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Png, 
 /// [`rgba`] with `renderer` instead of the installed one.
 pub fn rgba_with(renderer: Option<&Renderer>, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Picture, String> {
     let renderer = renderer.ok_or("no renderer is installed to draw pictures in this process")?;
+    let drawing = GATE.enter()?;
     let picture = renderer(scene, cam, width, height)?;
+    drop(drawing);
     if picture.rgba.len() as u64 != u64::from(width) * u64::from(height) * 4 {
         return Err(format!("the renderer returned {} bytes for {width} × {height} pixels", picture.rgba.len()));
     }
@@ -110,5 +174,30 @@ mod tests {
         assert!(png.bytes.starts_with(b"\x89PNG"));
         assert_eq!(png.renderer, "cpu");
         assert_eq!((warning("cpu"), warning("gpu"), warning("gpu-software")), (Some(CPU_WARNING), None, None));
+    }
+
+    #[test]
+    fn closing_waits_for_pictures_being_drawn_and_refuses_new_ones() {
+        let gate = Arc::new(Gate::new());
+        let (started, go) = std::sync::mpsc::channel();
+        let drawer = Arc::clone(&gate);
+        let thread = std::thread::spawn(move || {
+            let drawing = drawer.enter();
+            let _ = started.send(());
+            std::thread::sleep(Duration::from_millis(200));
+            drop(drawing);
+        });
+        go.recv().unwrap();
+        let t = Instant::now();
+        assert!(gate.close(Duration::from_secs(10)));
+        assert!(t.elapsed() >= Duration::from_millis(100), "it waited for the picture");
+        assert!(gate.enter().is_err());
+        thread.join().unwrap();
+        // A picture that does not finish in time: closing gives up and says so.
+        let stuck = Gate::new();
+        let drawing = stuck.enter().unwrap();
+        assert!(!stuck.close(Duration::from_millis(20)));
+        drop(drawing);
+        assert!(stuck.close(Duration::ZERO));
     }
 }

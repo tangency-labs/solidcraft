@@ -1,0 +1,19 @@
+{
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     20,
+     20
+    ],
+    "diameter": 6.6,
+    "type": "counterbore",
+    "cb_diameter": 11,
+    "cb_depth": 6.4
+   }
+  }
+ ]
+}

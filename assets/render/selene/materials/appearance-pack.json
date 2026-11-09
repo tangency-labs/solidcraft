@@ -1,0 +1,4039 @@
+{
+  "format": "solidcraft-authored-appearance-pack/1",
+  "metadata": {
+    "schema_version": "1.0.0",
+    "language": "en",
+    "title": "SELENE original appearance pack",
+    "status": "prepared_authoring_input",
+    "recipe_count": 48,
+    "authoring_date": "2026-10-21",
+    "license": "MIT OR Apache-2.0",
+    "author": "SolidCraft contributors",
+    "provenance": {
+      "id": "ORIGINAL-2026-10-SELENE-APPEARANCE-PACK",
+      "origin": "Original clean-room descriptions, numeric preview choices and analytic swatch geometry authored for SolidCraft.",
+      "external_assets_bundled": false,
+      "commercial_materials_or_code_copied": false,
+      "measured_material_dataset": false
+    },
+    "document_kind": "Authoring manifest; not a solidcraft-library/1 file and not an executable command script.",
+    "runtime_contract": {
+      "command": "appearance.assign",
+      "parameter_source": "items[].baseline_projection.runtime_parameters",
+      "target_binding": "Copy runtime_parameters and add a nonempty bodies, faces or components selection from the pinned source design.",
+      "native_design_format": 21,
+      "supported_projection": "Uniform opaque PBR with sRGB8 color, opacity exactly 1, metallic, roughness and dielectric_ior.",
+      "bounds": {
+        "metallic": [
+          0.0,
+          1.0
+        ],
+        "roughness": [
+          0.045,
+          1.0
+        ],
+        "dielectric_ior": [
+          1.0,
+          3.0
+        ]
+      },
+      "component_binding": "No source model, body, component, occurrence, joint or motion ID is bound in this file.",
+      "command_sources": [
+        "crates/engine/src/cmd/inspect.rs",
+        "crates/doc/src/pbr_appearance.rs",
+        "docs/render-opaque-pbr.md"
+      ]
+    },
+    "authoring_policy": {
+      "preview_values": "All color, metallic and roughness choices are original illustrative controls, not measurements or grade-specific claims.",
+      "ior": "The shared dielectric_ior value 1.5 is an unmeasured preview control. It affects the nonmetal fraction reflection only and does not enable refraction.",
+      "advanced_values": "Advanced numeric controls are original illustrative geometry or appearance inputs. They do not define engineering, manufacturing or mission requirements.",
+      "unknown_optics": "Spectral constants, optical thicknesses and scattering data remain unspecified where listed under unknown_optical_inputs.",
+      "units": "Procedural geometry uses millimetres; angles use radians; SolidCraft geometry is Z-up.",
+      "capability_references": "CAP IDs refer to docs/render-materials/capabilities.json. They describe target requirements, not proof that a runtime implements them.",
+      "physical_material_separation": "No density, modulus, conductivity, friction, thermal emissivity, electrical performance, sealing or flight-readiness data is assigned.",
+      "lunar_surfaces": "Lunar dust targets are granular deposits or particulate geometry in vacuum, never terrestrial airborne fog.",
+      "model_and_motion": "Appearance-only application must preserve geometry, transforms, engineering material assignment, joints, limits and motion data."
+    },
+    "prepared_evidence": {
+      "runtime_executed": false,
+      "visual_render_reviewed": false,
+      "static_checks": "Recipe count, unique IDs and names, source references, PBR bounds, exact projection keys, swatch-command correspondence and finite authoring values checked by the authoring step."
+    }
+  },
+  "items": [
+    {
+      "id": "SELENE-AP-001",
+      "name": "Neutral matte enclosure",
+      "source_catalog_ids": [
+        "MAT-031"
+      ],
+      "family": "Painted housings",
+      "domains": [
+        "SELENE",
+        "industrial",
+        "electronics"
+      ],
+      "purpose": "A readable neutral finish for instrument housings and first assembly reviews.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-001 Neutral matte enclosure",
+          "color": "#717882",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.68,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Fine paint texture",
+          "Localized wear",
+          "Layer thickness"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque pigmented dielectric coat with a separate structural substrate.",
+        "structure": [
+          "Pigmented dielectric coat",
+          "Structural substrate without an inferred engineering material"
+        ],
+        "authoring_controls": [
+          {
+            "id": "texture_pitch",
+            "value": 0.65,
+            "unit": "mm",
+            "meaning": "Illustrative fine surface texture spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "texture_relief",
+            "value": 0.008,
+            "unit": "mm",
+            "meaning": "Render detail only; does not alter CAD dimensions.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Map texture in object-local millimetres",
+          "Keep part edges and machining datums geometrically unchanged"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Measured spectral reflectance",
+          "Coating optical constants"
+        ],
+        "validation_criteria": [
+          "Fine texture should remain attached while the enclosure moves",
+          "A material change must leave mass and dimensions unchanged"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-002",
+      "name": "White thermal-coating preview",
+      "source_catalog_ids": [
+        "MAT-491"
+      ],
+      "family": "Aerospace coatings",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "space"
+      ],
+      "purpose": "An original white outer-surface appearance for thermal-control design presentations.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-002 White thermal-coating preview",
+          "color": "#d9dde0",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.58,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Coating microstructure",
+          "Measured visible reflectance",
+          "Thermal behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque scattering inorganic coating over an independently specified substrate.",
+        "structure": [
+          "Scattering dielectric coating",
+          "Underlying metal or composite assigned independently"
+        ],
+        "authoring_controls": [
+          {
+            "id": "surface_grain_pitch",
+            "value": 0.18,
+            "unit": "mm",
+            "meaning": "Illustrative visual grain spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "surface_grain_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Small render-only grain relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use stable object-local scale",
+          "Do not derive temperature or thermal emissivity from visible color"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-028",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Measured coating reflectance",
+          "Scattering data if volume scattering is required"
+        ],
+        "validation_criteria": [
+          "The surface should preserve broad white highlights without claiming perfect reflectance",
+          "Visible color must not populate thermal-property fields"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-003",
+      "name": "Matte optical baffle",
+      "source_catalog_ids": [
+        "MAT-468"
+      ],
+      "family": "Absorbing surfaces",
+      "domains": [
+        "SELENE",
+        "LED lighting",
+        "electronics"
+      ],
+      "purpose": "A dark inspection-camera or LED-baffle appearance with deliberately weak broad highlights.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-003 Matte optical baffle",
+          "color": "#141619",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.94,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Baffle microtexture",
+          "Stray-light prediction",
+          "Measured directional reflectance"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque absorbing dielectric finish with controlled fine surface relief.",
+        "structure": [
+          "Absorbing pigment layer",
+          "Baffle geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "grain_pitch",
+            "value": 0.12,
+            "unit": "mm",
+            "meaning": "Illustrative finish grain spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "grain_relief",
+            "value": 0.004,
+            "unit": "mm",
+            "meaning": "Render-only texture amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model ribs and apertures as geometry",
+          "Do not use black color as a claim of zero reflectance"
+        ],
+        "capability_requirements": [
+          "CAP-024",
+          "CAP-033",
+          "CAP-035",
+          "CAP-036"
+        ],
+        "unknown_optical_inputs": [
+          "Directional reflectance measurements"
+        ],
+        "validation_criteria": [
+          "Geometry should reveal baffle edges under grazing illumination",
+          "A dark surface must remain distinguishable from an empty hole"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-004",
+      "name": "Ceramic gripper contact pad",
+      "source_catalog_ids": [
+        "MAT-574"
+      ],
+      "family": "Ceramic contact surfaces",
+      "domains": [
+        "SELENE",
+        "industrial",
+        "robotics"
+      ],
+      "purpose": "A light ceramic appearance for a separate gripper contact pad.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-004 Ceramic gripper contact pad",
+          "color": "#d9d7cf",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.32,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Ceramic microstructure",
+          "Directional polish",
+          "Contact or friction behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque dielectric ceramic with optional fine polishing marks and limited subsurface response.",
+        "structure": [
+          "Ceramic surface",
+          "Separate pad geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "polish_line_pitch",
+            "value": 0.25,
+            "unit": "mm",
+            "meaning": "Illustrative spacing of faint polishing marks.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "polish_line_relief",
+            "value": 0.002,
+            "unit": "mm",
+            "meaning": "Render-only polished texture amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep pad contact dimensions in CAD",
+          "Orient polishing direction in the pad local frame"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-028",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Ceramic optical response for a specified composition"
+        ],
+        "validation_criteria": [
+          "A moving gripper must carry its pad texture with it",
+          "A glossy response must not imply lubrication or a friction coefficient"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-005",
+      "name": "Machined aluminium wheel rim",
+      "source_catalog_ids": [
+        "MAT-561"
+      ],
+      "family": "Machined metals",
+      "domains": [
+        "SELENE",
+        "automotive",
+        "industrial"
+      ],
+      "purpose": "A bright conductor response for a machined wheel rim or wheel hub.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-005 Machined aluminium wheel rim",
+          "color": "#b9c0c7",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.29,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Concentric toolmarks",
+          "Anisotropy",
+          "Oxide layer"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor with concentric machining direction and a separately controllable oxide layer.",
+        "structure": [
+          "Optional thin oxide surface",
+          "Aluminium conductor substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "turning_pitch",
+            "value": 0.55,
+            "unit": "mm",
+            "meaning": "Illustrative concentric toolmark spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "turning_relief",
+            "value": 0.004,
+            "unit": "mm",
+            "meaning": "Shallow render-only toolmark amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use a cylindrical frame tied to the wheel axis",
+          "Keep holes and rim profile as CAD geometry"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-020",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Complex refractive-index spectrum for a selected substrate",
+          "Oxide optical data"
+        ],
+        "validation_criteria": [
+          "Rotating the wheel should rotate the anisotropic response with its local frame",
+          "Toolmarks should not distort the rim silhouette"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-006",
+      "name": "Serrated metal gripper jaw",
+      "source_catalog_ids": [
+        "MAT-573"
+      ],
+      "family": "Machined contact surfaces",
+      "domains": [
+        "SELENE",
+        "industrial",
+        "robotics"
+      ],
+      "purpose": "A restrained metal response for a modeled serrated jaw.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-006 Serrated metal gripper jaw",
+          "color": "#a6adb5",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.4,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Serration geometry generation",
+          "Directional marks",
+          "Contact wear masks"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor with machining marks and contact-polished regions.",
+        "structure": [
+          "Conductor jaw",
+          "Localized wear mask without any inferred force model"
+        ],
+        "authoring_controls": [
+          {
+            "id": "machining_pitch",
+            "value": 0.3,
+            "unit": "mm",
+            "meaning": "Illustrative milling mark spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "contact_mask_extent",
+            "value": 1.5,
+            "unit": "mm",
+            "meaning": "Authored visual width of a contact-polished strip.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Retain serrations as CAD or render geometry",
+          "Bind local wear to contact-facing regions without changing joint limits"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Substrate optical constants",
+          "Evidence for any real wear state"
+        ],
+        "validation_criteria": [
+          "Teeth must come from geometry rather than a flat dark pattern",
+          "Appearance assignment must preserve jaw articulation"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-007",
+      "name": "Linear-brushed stainless housing",
+      "source_catalog_ids": [
+        "MAT-002"
+      ],
+      "family": "Brushed metals",
+      "domains": [
+        "industrial",
+        "automotive",
+        "electronics"
+      ],
+      "purpose": "A stainless-like conductor preview for industrial covers and product panels.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-007 Linear-brushed stainless housing",
+          "color": "#b8bdc2",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.34,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Anisotropic highlights",
+          "Brushed lines",
+          "Layered passivation response"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Conductor with a coherent brushed tangent field; any passive surface layer is separate.",
+        "structure": [
+          "Fine surface layer if required",
+          "Brushed conductor substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "brush_line_pitch",
+            "value": 0.1,
+            "unit": "mm",
+            "meaning": "Illustrative brush-line spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "brush_line_relief",
+            "value": 0.002,
+            "unit": "mm",
+            "meaning": "Small render-only brush relief.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "brush_angle",
+            "value": 0.0,
+            "unit": "rad",
+            "meaning": "Direction in the part local texture frame.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use a continuous local tangent field",
+          "Define deliberate seam direction at panel boundaries"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-033",
+          "CAP-035",
+          "CAP-040"
+        ],
+        "unknown_optical_inputs": [
+          "Complex substrate optical constants",
+          "Measured directional finish response"
+        ],
+        "validation_criteria": [
+          "Rotating the brush direction should rotate the extended highlight",
+          "Cross-part seams must follow manufacturing intent"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-008",
+      "name": "Polished stainless sample cup",
+      "source_catalog_ids": [
+        "MAT-593"
+      ],
+      "family": "Sample containment metals",
+      "domains": [
+        "SELENE",
+        "laboratory",
+        "industrial"
+      ],
+      "purpose": "A smooth metal preview for a visible sample cup with modeled wall thickness.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-008 Polished stainless sample cup",
+          "color": "#c9ced3",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.16,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "True interior reflections",
+          "Polishing anisotropy",
+          "Fine machining marks"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Smooth opaque conductor with restrained polishing marks and explicit cup geometry.",
+        "structure": [
+          "Polished conductor surface",
+          "Cup walls and interior geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "polish_line_pitch",
+            "value": 0.15,
+            "unit": "mm",
+            "meaning": "Illustrative polishing texture spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "polish_line_relief",
+            "value": 0.001,
+            "unit": "mm",
+            "meaning": "Subtle render-only polishing relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model the interior and rim explicitly",
+          "Use real wall geometry for occlusion and interior reflections"
+        ],
+        "capability_requirements": [
+          "CAP-001",
+          "CAP-020",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Complex conductor optical constants"
+        ],
+        "validation_criteria": [
+          "The sample-cup interior must remain hollow after styling",
+          "Polish must not erase the rim profile"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-009",
+      "name": "Titanium wrist finish",
+      "source_catalog_ids": [
+        "MAT-572"
+      ],
+      "family": "Machined aerospace metals",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "robotics"
+      ],
+      "purpose": "A muted metal preview for a robotic wrist or articulation bracket.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-009 Titanium wrist finish",
+          "color": "#8b9098",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.43,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Oxide interference",
+          "Directional machining",
+          "Localized wear"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Conductor plus a separately parameterized surface oxide; finish direction follows machining.",
+        "structure": [
+          "Oxide surface if required",
+          "Titanium-like conductor substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "milling_pitch",
+            "value": 0.45,
+            "unit": "mm",
+            "meaning": "Illustrative milling pass spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "milling_relief",
+            "value": 0.004,
+            "unit": "mm",
+            "meaning": "Render-only toolmark amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Attach the texture frame to the wrist body",
+          "Preserve shafts and bearing interfaces"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-031",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Complex substrate optical constants",
+          "Oxide optical thickness and dispersion"
+        ],
+        "validation_criteria": [
+          "Wrist motion must preserve texture orientation",
+          "No interference color should be claimed by the uniform baseline"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-010",
+      "name": "Exposed copper conductor",
+      "source_catalog_ids": [
+        "MAT-164"
+      ],
+      "family": "Electronics conductors",
+      "domains": [
+        "electronics",
+        "industrial",
+        "LED lighting"
+      ],
+      "purpose": "A warm conductor preview for visible copper pads, busbars or trace samples.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-010 Exposed copper conductor",
+          "color": "#b97850",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.27,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Complex spectral reflection",
+          "Oxidation masks",
+          "Fine polish"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Conductor response with optional separately masked oxidation and polish.",
+        "structure": [
+          "Optional oxide contamination layer",
+          "Copper-like conductor surface"
+        ],
+        "authoring_controls": [
+          {
+            "id": "polish_line_pitch",
+            "value": 0.2,
+            "unit": "mm",
+            "meaning": "Illustrative surface finish spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "oxide_patch_extent",
+            "value": 2.0,
+            "unit": "mm",
+            "meaning": "Authored patch scale for an optional future oxidation mask.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep conductor traces and electrical clearances geometric",
+          "Do not infer electrical conductivity from the swatch"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-020",
+          "CAP-033",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Complex refractive-index spectrum",
+          "Oxide absorption and thickness"
+        ],
+        "validation_criteria": [
+          "Copper-colored highlights should remain distinct from orange paint in a curved reference test",
+          "Visual finish must not assign electrical properties"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-011",
+      "name": "Machined brass printer nozzle",
+      "source_catalog_ids": [
+        "MAT-391"
+      ],
+      "family": "Additive hardware",
+      "domains": [
+        "additive manufacturing",
+        "3D printers",
+        "industrial"
+      ],
+      "purpose": "A brass-like conductor preview for a printer nozzle and exposed metal fittings.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-011 Machined brass printer nozzle",
+          "color": "#b4a06b",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.3,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Concentric finish",
+          "Residue layers",
+          "Temperature-dependent change"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Conductor response with turning marks and a separate local discoloration layer if desired.",
+        "structure": [
+          "Optional oxide or residue layer",
+          "Brass-like conductor substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "turning_pitch",
+            "value": 0.22,
+            "unit": "mm",
+            "meaning": "Illustrative turning mark spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "turning_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Shallow render-only toolmarks.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep nozzle orifice and hex flats as CAD geometry",
+          "Use the nozzle axis as the texture frame"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Complex conductor optical constants",
+          "Evidence for any heat-discoloration state"
+        ],
+        "validation_criteria": [
+          "The nozzle opening must remain visible at close inspection",
+          "A warm color must not imply current temperature"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-012",
+      "name": "Solidified solder joint",
+      "source_catalog_ids": [
+        "MAT-165"
+      ],
+      "family": "Electronics joining",
+      "domains": [
+        "electronics",
+        "LED lighting",
+        "industrial"
+      ],
+      "purpose": "A smooth grey conductor preview for modeled solder fillets.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-012 Solidified solder joint",
+          "color": "#bec3c6",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.25,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Fine cooling texture",
+          "Flux residue",
+          "Real fillet geometry creation"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor with local cooling texture; geometry supplies the fillet shape.",
+        "structure": [
+          "Solder-like conductor",
+          "Optional flux residue as a distinct dielectric layer"
+        ],
+        "authoring_controls": [
+          {
+            "id": "solidification_patch_extent",
+            "value": 0.35,
+            "unit": "mm",
+            "meaning": "Illustrative mottling size.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "solidification_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Small render-only surface variation.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model solder menisci and pad boundaries explicitly",
+          "Keep flux residue separate from the metallic response"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Optical constants for a specified alloy",
+          "Flux absorption if included"
+        ],
+        "validation_criteria": [
+          "A solder fillet should not read as a flat printed disc",
+          "Residue must not become metallic when layered over solder"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-013",
+      "name": "Metal sampling scoop",
+      "source_catalog_ids": [
+        "MAT-575"
+      ],
+      "family": "Sampling tools",
+      "domains": [
+        "SELENE",
+        "industrial",
+        "robotics"
+      ],
+      "purpose": "A durable-looking metal response for the sampling scoop exterior and lip.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-013 Metal sampling scoop",
+          "color": "#9ba4ad",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.44,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Directional finish",
+          "Contact polish mask",
+          "Granular dust coverage"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor with directional fabrication marks and a separately bounded dust deposit.",
+        "structure": [
+          "Optional granular dust deposit",
+          "Conductor scoop surface"
+        ],
+        "authoring_controls": [
+          {
+            "id": "forming_line_pitch",
+            "value": 0.6,
+            "unit": "mm",
+            "meaning": "Illustrative forming mark spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "contact_polish_extent",
+            "value": 2.5,
+            "unit": "mm",
+            "meaning": "Visual width of a polished lip band.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep the scoop cavity and lip as modeled surfaces",
+          "Apply dust only through a separate mask or deposit geometry"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039",
+          "CAP-108"
+        ],
+        "unknown_optical_inputs": [
+          "Substrate optical constants",
+          "Dust phase-response data if required"
+        ],
+        "validation_criteria": [
+          "The scoop cavity must remain geometrically open",
+          "Dust should stay granular and attached, not form airborne terrestrial fog"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-014",
+      "name": "Gold-finished contact pad",
+      "source_catalog_ids": [
+        "MAT-163"
+      ],
+      "family": "Electronics contacts",
+      "domains": [
+        "electronics",
+        "aerospace",
+        "LED lighting"
+      ],
+      "purpose": "An original gold-like conductor preview for electrical contact surfaces.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-014 Gold-finished contact pad",
+          "color": "#bf9c49",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.21,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Plating thickness",
+          "Substrate exposure",
+          "Directional contact wear"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Conductive plated surface with separate underlying substrate and wear-through regions.",
+        "structure": [
+          "Conductor plating",
+          "Independent substrate",
+          "Optional exposed-substrate wear mask"
+        ],
+        "authoring_controls": [
+          {
+            "id": "contact_polish_extent",
+            "value": 0.8,
+            "unit": "mm",
+            "meaning": "Illustrative contact-mark width.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "scratch_pitch",
+            "value": 0.12,
+            "unit": "mm",
+            "meaning": "Authored sparse fine-scratch spacing.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Constrain plating to intended pads or pins",
+          "Use geometry or masks for exposed substrate"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-020",
+          "CAP-033",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Plating complex optical constants",
+          "Actual layer thickness if optical coupling matters"
+        ],
+        "validation_criteria": [
+          "A worn patch should reveal the chosen substrate, not merely darken the plating",
+          "Color must not certify plating composition or thickness"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-015",
+      "name": "Black anodized chassis surrogate",
+      "source_catalog_ids": [
+        "MAT-567"
+      ],
+      "family": "Anodized aerospace surfaces",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "industrial"
+      ],
+      "purpose": "An opaque dark dielectric surrogate for a dyed anodized chassis.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-015 Black anodized chassis surrogate",
+          "color": "#252a30",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.56,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Absorbing oxide transport",
+          "Metal underlayer",
+          "Exposed cut-face differences"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Absorbing porous oxide over a metallic substrate; the baseline represents only its dark outer response.",
+        "structure": [
+          "Dyed absorbing dielectric oxide",
+          "Metallic chassis substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "oxide_texture_pitch",
+            "value": 0.16,
+            "unit": "mm",
+            "meaning": "Illustrative finish texture size.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "oxide_texture_relief",
+            "value": 0.002,
+            "unit": "mm",
+            "meaning": "Render-only microtexture amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Assign chassis cut faces independently when exposed",
+          "Retain machining and assembly features"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-021",
+          "CAP-026",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Oxide absorption and refractive data",
+          "Substrate optical constants",
+          "Actual coating thickness"
+        ],
+        "validation_criteria": [
+          "Cut faces should use their own conductor appearance when required",
+          "The surrogate must be identified as an approximation of a layered surface"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-016",
+      "name": "Silver anodized cover surrogate",
+      "source_catalog_ids": [
+        "MAT-015"
+      ],
+      "family": "Anodized aerospace surfaces",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "electronics"
+      ],
+      "purpose": "A neutral metallic surrogate for an undyed anodized cover or joint housing.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-016 Silver anodized cover surrogate",
+          "color": "#abb3ba",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.39,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Layered oxide Fresnel",
+          "Oxide roughness",
+          "Cut-edge masking"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Dielectric oxide layer over a conductor; the baseline retains the dominant metal-like visual cue only.",
+        "structure": [
+          "Dielectric oxide",
+          "Conductor cover substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "blast_texture_pitch",
+            "value": 0.22,
+            "unit": "mm",
+            "meaning": "Illustrative pre-anodizing finish scale.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "blast_texture_relief",
+            "value": 0.004,
+            "unit": "mm",
+            "meaning": "Render-only finish relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep the finish frame in the cover local coordinates",
+          "Treat machined openings and cut edges separately"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-021",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Oxide optical constants and thickness",
+          "Substrate complex optical constants"
+        ],
+        "validation_criteria": [
+          "This single-lobe metal surrogate must not be presented as an exact anodizing model",
+          "Repeated moving covers should keep consistent local finish"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-017",
+      "name": "Composite arm tube surrogate",
+      "source_catalog_ids": [
+        "MAT-571"
+      ],
+      "family": "Aerospace composites",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "robotics"
+      ],
+      "purpose": "A dark resin-surface preview for a composite arm tube.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-017 Composite arm tube surrogate",
+          "color": "#252a2e",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.42,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Woven reinforcement",
+          "Resin layer",
+          "Directional highlights",
+          "Cut-edge structure"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Dielectric resin over directional reinforcement, with independently modeled cut ends.",
+        "structure": [
+          "Resin surface",
+          "Directional reinforcement",
+          "Cut-edge composite section"
+        ],
+        "authoring_controls": [
+          {
+            "id": "weave_repeat",
+            "value": 4.0,
+            "unit": "mm",
+            "meaning": "Illustrative twill-scale repeat for a future procedural pattern.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "weave_relief",
+            "value": 0.06,
+            "unit": "mm",
+            "meaning": "Authored weave relief beneath the resin finish.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "fiber_angle",
+            "value": 0.0,
+            "unit": "rad",
+            "meaning": "Reinforcement direction relative to the tube axis.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use cylindrical mapping that follows the arm tube",
+          "Keep end-cut structure distinct from the outer skin"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-021",
+          "CAP-033",
+          "CAP-034",
+          "CAP-035",
+          "CAP-104"
+        ],
+        "unknown_optical_inputs": [
+          "Resin optical constants",
+          "Effective directional reinforcement response"
+        ],
+        "validation_criteria": [
+          "The weave must track arm motion and wrap continuously around the tube",
+          "Appearance must not assign laminate stiffness"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-018",
+      "name": "Aluminized blanket metal face",
+      "source_catalog_ids": [
+        "MAT-501"
+      ],
+      "family": "Space blankets",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "space"
+      ],
+      "purpose": "A metallic outer-face preview for a separate blanket panel.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-018 Aluminized blanket metal face",
+          "color": "#c3c8cd",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.18,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Wrinkle geometry",
+          "Layer thickness",
+          "Thin-film effects",
+          "Self-shadowing"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Thin conductor coating on a polymer carrier; visible folds require geometry.",
+        "structure": [
+          "Metal-facing conductor coating",
+          "Polymer carrier",
+          "Blanket folds and seams as geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "wrinkle_span",
+            "value": 18.0,
+            "unit": "mm",
+            "meaning": "Illustrative spacing of broad wrinkles.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "wrinkle_height",
+            "value": 0.7,
+            "unit": "mm",
+            "meaning": "Authored render-only wrinkle height away from controlled interfaces.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "seam_spacing",
+            "value": 80.0,
+            "unit": "mm",
+            "meaning": "Illustrative seam pattern spacing.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use explicit fold geometry for silhouettes and shadowing",
+          "Do not apply displacement across attachment and clearance boundaries"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-018",
+          "CAP-031",
+          "CAP-036",
+          "CAP-043"
+        ],
+        "unknown_optical_inputs": [
+          "Conductor coating optical constants",
+          "Coating continuity and thickness",
+          "Polymer optical data"
+        ],
+        "validation_criteria": [
+          "Large fold highlights must follow actual fold geometry",
+          "The appearance must not certify thermal insulation or blanket construction"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-019",
+      "name": "Polyimide-facing blanket surrogate",
+      "source_catalog_ids": [
+        "MAT-502"
+      ],
+      "family": "Space blankets",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "space"
+      ],
+      "purpose": "An opaque amber inspection surrogate for the polymer-facing side of a metallized film.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-019 Polyimide-facing blanket surrogate",
+          "color": "#80602e",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.3,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Transmission through the polymer",
+          "Spectral absorption",
+          "Conductor seen through film",
+          "Fold self-shadowing"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Absorbing dielectric film over a conductor; the opaque baseline does not transmit through the film.",
+        "structure": [
+          "Absorbing polymer outer layer",
+          "Conductor backing",
+          "Fold geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "wrinkle_span",
+            "value": 14.0,
+            "unit": "mm",
+            "meaning": "Illustrative wrinkle spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "wrinkle_height",
+            "value": 0.5,
+            "unit": "mm",
+            "meaning": "Authored render-only fold height.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep the polymer-facing and metal-facing sides distinct",
+          "Represent folds and overlaps as separate geometry where resolved"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-021",
+          "CAP-025",
+          "CAP-026",
+          "CAP-027",
+          "CAP-036"
+        ],
+        "unknown_optical_inputs": [
+          "Film absorption spectrum and thickness",
+          "Film refractive index",
+          "Conductor complex optical constants"
+        ],
+        "validation_criteria": [
+          "The two blanket sides must not share an identical optical stack",
+          "The amber surrogate must remain labelled opaque"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-020",
+      "name": "Solar-cell opaque preview",
+      "source_catalog_ids": [
+        "MAT-511"
+      ],
+      "family": "Solar assemblies",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "space"
+      ],
+      "purpose": "A dark blue inspection appearance for a solar-cell body beneath a future coverglass layer.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-020 Solar-cell opaque preview",
+          "color": "#172b43",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.24,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Semiconductor spectral response",
+          "Contact lines",
+          "Coating interference",
+          "Coverglass transmission",
+          "Power conversion"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Semiconductor optical surface with separately modeled contacts, antireflection layers and coverglass.",
+        "structure": [
+          "Optional coverglass as separate geometry",
+          "Antireflection stack",
+          "Semiconductor surface",
+          "Metal contact geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "contact_line_pitch",
+            "value": 2.0,
+            "unit": "mm",
+            "meaning": "Illustrative front-contact line spacing for authoring only.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "contact_line_width",
+            "value": 0.1,
+            "unit": "mm",
+            "meaning": "Illustrative contact geometry width; not an electrical design recommendation.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model electrical contact lines or use bounded masks",
+          "Keep coverglass out of this opaque projection"
+        ],
+        "capability_requirements": [
+          "CAP-018",
+          "CAP-025",
+          "CAP-027",
+          "CAP-031",
+          "CAP-038",
+          "CAP-098"
+        ],
+        "unknown_optical_inputs": [
+          "Measured semiconductor optical data",
+          "Coating stack data",
+          "Coverglass optical constants"
+        ],
+        "validation_criteria": [
+          "An opaque solar tile must not be mistaken for a transparent coverglass material",
+          "No electrical efficiency may be inferred from its color"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-021",
+      "name": "Silicone cable jacket",
+      "source_catalog_ids": [
+        "MAT-333"
+      ],
+      "family": "Harness insulation",
+      "domains": [
+        "SELENE",
+        "electronics",
+        "3D printers"
+      ],
+      "purpose": "A soft matte outer-jacket appearance for a separately modeled flexible cable.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-021 Silicone cable jacket",
+          "color": "#484d56",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.77,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Extrusion microtexture",
+          "Subsurface response",
+          "Cable deformation"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque dielectric elastomer surface with subtle extrusion direction.",
+        "structure": [
+          "Elastomer jacket",
+          "Cable path and cross-section geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "extrusion_line_pitch",
+            "value": 0.2,
+            "unit": "mm",
+            "meaning": "Illustrative axial extrusion-line spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "extrusion_line_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Small render-only surface relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use a cable-local longitudinal frame",
+          "Keep cable bending and routing separate from material assignment"
+        ],
+        "capability_requirements": [
+          "CAP-028",
+          "CAP-033",
+          "CAP-034",
+          "CAP-035",
+          "CAP-104"
+        ],
+        "unknown_optical_inputs": [
+          "Jacket optical response",
+          "Scattering data if translucency is later requested"
+        ],
+        "validation_criteria": [
+          "The texture must follow cable bends without a world-space slide",
+          "A visual jacket must not claim dielectric strength or bend life"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-022",
+      "name": "Polyimide harness wrap",
+      "source_catalog_ids": [
+        "MAT-332"
+      ],
+      "family": "Harness insulation",
+      "domains": [
+        "SELENE",
+        "electronics",
+        "aerospace"
+      ],
+      "purpose": "An opaque amber preview of wrapped cable insulation.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-022 Polyimide harness wrap",
+          "color": "#9d713d",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.46,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Thin-film transmission",
+          "Helical overlap geometry",
+          "Spectral absorption"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Absorbing polymer film with geometric helical overlaps and separately specified optical thickness.",
+        "structure": [
+          "Polymer film layer",
+          "Overlapping wrap seams",
+          "Independent cable substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "wrap_pitch",
+            "value": 5.0,
+            "unit": "mm",
+            "meaning": "Illustrative axial distance per helical wrap.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "wrap_overlap",
+            "value": 0.8,
+            "unit": "mm",
+            "meaning": "Authored visible overlap width.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Generate wrap seams from the cable-local curve frame",
+          "Use geometry for overlap silhouette in close views"
+        ],
+        "capability_requirements": [
+          "CAP-025",
+          "CAP-026",
+          "CAP-027",
+          "CAP-033",
+          "CAP-034",
+          "CAP-036",
+          "CAP-104"
+        ],
+        "unknown_optical_inputs": [
+          "Film optical constants",
+          "Actual optical thickness"
+        ],
+        "validation_criteria": [
+          "Wrap pitch should stay stable when the cable deforms",
+          "The opaque preview must not claim real film transparency"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-023",
+      "name": "Fluoropolymer sealing ring",
+      "source_catalog_ids": [
+        "MAT-598"
+      ],
+      "family": "Sample seals",
+      "domains": [
+        "SELENE",
+        "laboratory",
+        "industrial"
+      ],
+      "purpose": "A pale dielectric appearance for a separately modeled sealing ring.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-023 Fluoropolymer sealing ring",
+          "color": "#dbddd7",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.49,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Fine finish marks",
+          "Subsurface scattering",
+          "Compression and leakage behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque or weakly scattering polymer; the visual material does not represent sealing mechanics.",
+        "structure": [
+          "Polymer seal surface",
+          "Explicit seal cross-section geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "finish_mark_pitch",
+            "value": 0.18,
+            "unit": "mm",
+            "meaning": "Illustrative surface finish spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "finish_mark_relief",
+            "value": 0.002,
+            "unit": "mm",
+            "meaning": "Render-only finish amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep seal cross-section and compression as engineering geometry",
+          "Use independent body assignment for the ring"
+        ],
+        "capability_requirements": [
+          "CAP-028",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Polymer optical response and scattering if needed"
+        ],
+        "validation_criteria": [
+          "The ring must remain geometrically distinct from its metal cap",
+          "Appearance must not certify leak tightness or vacuum suitability"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-024",
+      "name": "Elastomer seal candidate",
+      "source_catalog_ids": [
+        "MAT-599"
+      ],
+      "family": "Sample seals",
+      "domains": [
+        "SELENE",
+        "industrial",
+        "automotive"
+      ],
+      "purpose": "A dark visual candidate for an elastomer ring or protected boot.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-024 Elastomer seal candidate",
+          "color": "#26292b",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.86,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Mold seam detail",
+          "Elastic deformation",
+          "Friction, outgassing or sealing qualification"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque absorbing elastomer surface with separate mold seams and contact regions.",
+        "structure": [
+          "Elastomer surface",
+          "Mold seam or trim line",
+          "Optional contact-polished region"
+        ],
+        "authoring_controls": [
+          {
+            "id": "mold_line_width",
+            "value": 0.12,
+            "unit": "mm",
+            "meaning": "Illustrative visible mold-parting line width.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "surface_grain_pitch",
+            "value": 0.25,
+            "unit": "mm",
+            "meaning": "Illustrative elastomer grain scale.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use the ring or boot local frame",
+          "Model large folds and seam ridges geometrically"
+        ],
+        "capability_requirements": [
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Optical data for a selected compound"
+        ],
+        "validation_criteria": [
+          "Mold lines should stay continuous around the ring",
+          "Dark rubber appearance must not imply suitability for a lunar vacuum"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-025",
+      "name": "Opaque sample cassette body",
+      "source_catalog_ids": [
+        "MAT-595"
+      ],
+      "family": "Sample containment polymers",
+      "domains": [
+        "SELENE",
+        "laboratory",
+        "additive manufacturing"
+      ],
+      "purpose": "A neutral opaque polymer finish for a sample cassette or instrument tray.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-025 Opaque sample cassette body",
+          "color": "#424a54",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.54,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Molded grain",
+          "Cavity occlusion",
+          "Mechanical retention behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Pigmented dielectric polymer with a matte manufactured outer surface.",
+        "structure": [
+          "Opaque polymer surface",
+          "Explicit cassette compartments and retention geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "surface_grain_pitch",
+            "value": 0.35,
+            "unit": "mm",
+            "meaning": "Illustrative molded texture scale.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "surface_grain_relief",
+            "value": 0.006,
+            "unit": "mm",
+            "meaning": "Render-only molded texture amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep cells, catches and identification recesses geometric",
+          "Avoid merging contact surfaces through a shared displacement field"
+        ],
+        "capability_requirements": [
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-038"
+        ],
+        "unknown_optical_inputs": [
+          "Optical data for a selected polymer formulation"
+        ],
+        "validation_criteria": [
+          "Separate compartments must remain distinguishable",
+          "Styling must not change sample IDs, geometry or motion constraints"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-026",
+      "name": "Textured ABS instrument shell",
+      "source_catalog_ids": [
+        "MAT-042"
+      ],
+      "family": "Molded polymers",
+      "domains": [
+        "electronics",
+        "industrial",
+        "3D printers"
+      ],
+      "purpose": "A textured polymer-shell preview for industrial and desktop electronics.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-026 Textured ABS instrument shell",
+          "color": "#59616b",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.64,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Mold grain",
+          "Manufacturing seam details",
+          "Spatial roughness variation"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque pigmented dielectric with a deliberate injection-molded surface texture.",
+        "structure": [
+          "Opaque polymer surface",
+          "Mold parting line and ejector details where modeled"
+        ],
+        "authoring_controls": [
+          {
+            "id": "mold_texture_pitch",
+            "value": 0.55,
+            "unit": "mm",
+            "meaning": "Illustrative grain spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "mold_texture_relief",
+            "value": 0.012,
+            "unit": "mm",
+            "meaning": "Authored render-only mold texture height.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Orient grain consistently across adjacent shell parts",
+          "Mask polished windows and labels separately"
+        ],
+        "capability_requirements": [
+          "CAP-033",
+          "CAP-034",
+          "CAP-035",
+          "CAP-038"
+        ],
+        "unknown_optical_inputs": [
+          "Formulation-specific optical response"
+        ],
+        "validation_criteria": [
+          "Mold grain should read at close range without changing the silhouette",
+          "Uniform preview must not be described as a textured runtime shader"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-027",
+      "name": "Powder-printed polyamide preview",
+      "source_catalog_ids": [
+        "MAT-175"
+      ],
+      "family": "Additive polymers",
+      "domains": [
+        "additive manufacturing",
+        "3D printers",
+        "industrial"
+      ],
+      "purpose": "A grainy polymer-print target with a uniform matte baseline response.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-027 Powder-printed polyamide preview",
+          "color": "#abb0b1",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.87,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Powder grain",
+          "Pores",
+          "Local roughness variation",
+          "Manufacturing performance"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque dielectric powder-fused surface with fine pore and particle-scale variation.",
+        "structure": [
+          "Fused polymer surface",
+          "Bounded pore and particle relief"
+        ],
+        "authoring_controls": [
+          {
+            "id": "surface_grain_pitch",
+            "value": 0.16,
+            "unit": "mm",
+            "meaning": "Illustrative surface grain size, not a powder specification.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "surface_grain_relief",
+            "value": 0.025,
+            "unit": "mm",
+            "meaning": "Authored render-only rough-surface amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use object-local millimetres",
+          "Reserve geometry for pores large enough to affect silhouettes"
+        ],
+        "capability_requirements": [
+          "CAP-028",
+          "CAP-033",
+          "CAP-035",
+          "CAP-036"
+        ],
+        "unknown_optical_inputs": [
+          "Polymer scattering data",
+          "Evidence for the chosen print finish"
+        ],
+        "validation_criteria": [
+          "Grain scale must remain stable across differently sized parts",
+          "A visual powder texture must not imply porosity or strength values"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-028",
+      "name": "FDM top-skin preview",
+      "source_catalog_ids": [
+        "MAT-171",
+        "MAT-361"
+      ],
+      "family": "Additive polymers",
+      "domains": [
+        "additive manufacturing",
+        "3D printers",
+        "DIY"
+      ],
+      "purpose": "A printable-polymer appearance target with monotonic top-skin lines.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-028 FDM top-skin preview",
+          "color": "#aab5bd",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.46,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Extrusion lines",
+          "Layer seams",
+          "Toolpath-dependent anisotropy"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque dielectric bead surface with manufacturing-direction relief.",
+        "structure": [
+          "Extruded polymer surface",
+          "Top-skin bead pattern",
+          "Wall seams handled independently"
+        ],
+        "authoring_controls": [
+          {
+            "id": "bead_pitch",
+            "value": 0.45,
+            "unit": "mm",
+            "meaning": "Illustrative top-skin spacing, not a printer recommendation.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "bead_relief",
+            "value": 0.035,
+            "unit": "mm",
+            "meaning": "Authored relief for close-view visualization.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "toolpath_angle",
+            "value": 0.0,
+            "unit": "rad",
+            "meaning": "Top-skin direction in the part local frame.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use planar local mapping on top skins",
+          "Do not continue the top-skin pattern through side walls"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-033",
+          "CAP-034",
+          "CAP-035",
+          "CAP-036"
+        ],
+        "unknown_optical_inputs": [
+          "Selected polymer optical response"
+        ],
+        "validation_criteria": [
+          "Top-skin and wall manufacturing directions must differ where appropriate",
+          "Texture must not modify the engineering layer height or toolpath"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-029",
+      "name": "Sample vial opaque inspection surrogate",
+      "source_catalog_ids": [
+        "MAT-582"
+      ],
+      "family": "Transparent containment targets",
+      "domains": [
+        "SELENE",
+        "laboratory",
+        "space"
+      ],
+      "purpose": "An explicitly opaque inspection stand-in that keeps sample-vial geometry visible until transmission exists.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_inspection_surrogate",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-029 Sample vial opaque inspection surrogate",
+          "color": "#91a2ae",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.35,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Transmission",
+          "Refraction",
+          "Absorption",
+          "Interior medium boundaries",
+          "Caustics"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Finite-thickness dielectric vessel with interior and exterior interfaces, absorption and nested sample medium.",
+        "structure": [
+          "Outer glass interface",
+          "Glass wall with actual thickness",
+          "Inner interface",
+          "Sample or internal medium"
+        ],
+        "authoring_controls": [
+          {
+            "id": "inspection_surrogate_opacity",
+            "value": 1.0,
+            "unit": "normalized",
+            "meaning": "Fixed opaque baseline; not a glass opacity setting.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use closed, consistently oriented vessel walls",
+          "Keep sample contents as a distinct nested volume",
+          "Never use alpha blending as evidence of glass optics"
+        ],
+        "capability_requirements": [
+          "CAP-025",
+          "CAP-026",
+          "CAP-027",
+          "CAP-029"
+        ],
+        "unknown_optical_inputs": [
+          "Glass refractive-index data",
+          "Absorption spectrum",
+          "Actual wall thickness from CAD",
+          "Interior-medium optics"
+        ],
+        "validation_criteria": [
+          "The baseline must visibly remain opaque and be labelled a surrogate",
+          "The advanced target must preserve two vessel interfaces and the internal medium"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-030",
+      "name": "Window opaque inspection surrogate",
+      "source_catalog_ids": [
+        "MAT-583"
+      ],
+      "family": "Optical-window targets",
+      "domains": [
+        "SELENE",
+        "electronics",
+        "space"
+      ],
+      "purpose": "An opaque port/window stand-in for geometric inspection without a transmission claim.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_inspection_surrogate",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-030 Window opaque inspection surrogate",
+          "color": "#537286",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.24,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Transmission",
+          "Refraction",
+          "Dispersion",
+          "Polarization or birefringence",
+          "Optical coatings"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Finite-thickness optical window with optional anisotropic, spectral or polarization-aware response when required.",
+        "structure": [
+          "Outer optical interface",
+          "Window solid",
+          "Inner optical interface",
+          "Optional independent coating stack"
+        ],
+        "authoring_controls": [
+          {
+            "id": "inspection_surrogate_opacity",
+            "value": 1.0,
+            "unit": "normalized",
+            "meaning": "Fixed opaque stand-in; does not represent window transmittance.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model both faces and the window edge",
+          "Keep mounting and optical surfaces independently assignable",
+          "Require crystal orientation only if the advanced model uses it"
+        ],
+        "capability_requirements": [
+          "CAP-025",
+          "CAP-026",
+          "CAP-027",
+          "CAP-030",
+          "CAP-032",
+          "CAP-098"
+        ],
+        "unknown_optical_inputs": [
+          "Optical constants for the specified window material",
+          "Crystal orientation if applicable",
+          "Coating stack data"
+        ],
+        "validation_criteria": [
+          "The opaque preview must not suggest that internal contents are visible",
+          "Polarization or birefringence requires explicit transport support, not an ordinary RGB tint"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-031",
+      "name": "Matte ceramic sample insert",
+      "source_catalog_ids": [
+        "MAT-594"
+      ],
+      "family": "Sample containment ceramics",
+      "domains": [
+        "SELENE",
+        "laboratory",
+        "industrial"
+      ],
+      "purpose": "A light matte ceramic insert that is visually distinct from metal and polymer containment.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-031 Matte ceramic sample insert",
+          "color": "#c9c5bb",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.59,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Ceramic grain",
+          "Subsurface response",
+          "Chemical cleanliness or contamination behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque scattering ceramic with a deliberately unglazed finish.",
+        "structure": [
+          "Ceramic body",
+          "Fine open-surface texture only where authored"
+        ],
+        "authoring_controls": [
+          {
+            "id": "ceramic_grain_pitch",
+            "value": 0.2,
+            "unit": "mm",
+            "meaning": "Illustrative visual grain spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "ceramic_grain_relief",
+            "value": 0.006,
+            "unit": "mm",
+            "meaning": "Render-only unglazed surface relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep insert wall thickness and sample interfaces in CAD",
+          "Use a local texture frame"
+        ],
+        "capability_requirements": [
+          "CAP-028",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Composition-specific scattering and absorption"
+        ],
+        "validation_criteria": [
+          "The matte finish should remain distinct from the polished contact pad",
+          "Appearance must not certify sample compatibility"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-032",
+      "name": "Threaded metal closure cap",
+      "source_catalog_ids": [
+        "MAT-596"
+      ],
+      "family": "Sample containment closures",
+      "domains": [
+        "SELENE",
+        "laboratory",
+        "industrial"
+      ],
+      "purpose": "A conductor preview for a modeled threaded cap, with no inferred sealing performance.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-032 Threaded metal closure cap",
+          "color": "#b6bcc3",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.31,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Thread generation",
+          "Anisotropy",
+          "Gasket response",
+          "Wear and sealing behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor with turning marks and explicit threads, gaskets and seating surfaces.",
+        "structure": [
+          "Conductor cap",
+          "Separately assigned sealing ring",
+          "Optional localized handling wear"
+        ],
+        "authoring_controls": [
+          {
+            "id": "turning_pitch",
+            "value": 0.4,
+            "unit": "mm",
+            "meaning": "Illustrative face-toolmark spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "turning_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Render-only turning relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Retain threads as engineering or render geometry",
+          "Keep cap and seal as separately targetable parts"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-033",
+          "CAP-035",
+          "CAP-039",
+          "CAP-097"
+        ],
+        "unknown_optical_inputs": [
+          "Substrate optical constants",
+          "Evidence for any real wear pattern"
+        ],
+        "validation_criteria": [
+          "Style changes must not alter thread pitch or cap motion",
+          "The closure must not be described as leak-tight based on appearance"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-033",
+      "name": "Graphite thermal-sheet preview",
+      "source_catalog_ids": [
+        "MAT-349"
+      ],
+      "family": "Thermal interface appearances",
+      "domains": [
+        "electronics",
+        "aerospace",
+        "LED lighting"
+      ],
+      "purpose": "A dark matte appearance for a thin thermal-interface sheet.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-033 Graphite thermal-sheet preview",
+          "color": "#35383d",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.91,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Directional graphitic response",
+          "Fine domains",
+          "Measured optical or thermal properties"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Effective absorbing surface with possible directional sheen; the baseline uses a neutral dielectric surrogate.",
+        "structure": [
+          "Graphitic sheet surface",
+          "Explicit thin-sheet boundary geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "flake_pattern_extent",
+            "value": 0.3,
+            "unit": "mm",
+            "meaning": "Illustrative visible domain scale.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "sheet_surface_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Small render-only surface variation.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model sheet thickness and cut edges explicitly",
+          "Do not convert darkness into thermal conductivity"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-024",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Effective directional optical response for the actual sheet"
+        ],
+        "validation_criteria": [
+          "The sheet should remain visually separate from rubber despite a similar dark baseline",
+          "The appearance must not populate thermal-property data"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-034",
+      "name": "Solder-mask board face",
+      "source_catalog_ids": [
+        "MAT-161"
+      ],
+      "family": "Circuit-board surfaces",
+      "domains": [
+        "electronics",
+        "LED lighting",
+        "3D printers"
+      ],
+      "purpose": "A green dielectric preview for the masked board face, separate from metal pads.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-034 Solder-mask board face",
+          "color": "#32624b",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.42,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Layered translucency",
+          "Pad masks",
+          "Trace topography",
+          "Silkscreen"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Pigmented dielectric solder mask over board and conductor structures.",
+        "structure": [
+          "Solder-mask dielectric",
+          "Copper or laminate underlayer as appropriate",
+          "Independent exposed pads and legends"
+        ],
+        "authoring_controls": [
+          {
+            "id": "surface_texture_pitch",
+            "value": 0.12,
+            "unit": "mm",
+            "meaning": "Illustrative mask microtexture size.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "surface_texture_relief",
+            "value": 0.002,
+            "unit": "mm",
+            "meaning": "Render-only mask surface relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use explicit masks or separate faces for exposed metal pads",
+          "Keep silkscreen and copper geometry independent"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-025",
+          "CAP-026",
+          "CAP-033",
+          "CAP-035",
+          "CAP-038"
+        ],
+        "unknown_optical_inputs": [
+          "Mask optical constants and absorption",
+          "Actual layer thickness"
+        ],
+        "validation_criteria": [
+          "Exposed pads must remain metallic while masked regions remain dielectric",
+          "A green color must not imply board certification"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-035",
+      "name": "Exposed glass-epoxy board edge",
+      "source_catalog_ids": [
+        "MAT-162"
+      ],
+      "family": "Circuit-board sections",
+      "domains": [
+        "electronics",
+        "industrial",
+        "LED lighting"
+      ],
+      "purpose": "A muted laminate-edge preview for cut circuit-board sections.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-035 Exposed glass-epoxy board edge",
+          "color": "#9b9270",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.77,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Fiber section structure",
+          "Layer interfaces",
+          "Copper-plane detail"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Dielectric resin and exposed glass-fiber structure with a section-specific orientation.",
+        "structure": [
+          "Resin binder",
+          "Exposed glass-fiber section",
+          "Independent copper planes when present"
+        ],
+        "authoring_controls": [
+          {
+            "id": "weave_repeat",
+            "value": 0.8,
+            "unit": "mm",
+            "meaning": "Illustrative visible laminate structure repeat.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "edge_fiber_relief",
+            "value": 0.025,
+            "unit": "mm",
+            "meaning": "Authored cut-edge relief for close views.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use section-local fiber orientation",
+          "Keep conductor planes as separate regions"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-028",
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-104"
+        ],
+        "unknown_optical_inputs": [
+          "Resin and glass optical properties",
+          "Actual laminate layup"
+        ],
+        "validation_criteria": [
+          "Board faces and cut edges must not share the same planar texture",
+          "Visual laminate does not define electrical or mechanical properties"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-036",
+      "name": "Molded epoxy component body",
+      "source_catalog_ids": [
+        "MAT-166"
+      ],
+      "family": "Electronic packages",
+      "domains": [
+        "electronics",
+        "3D printers",
+        "LED lighting"
+      ],
+      "purpose": "A dark molded package appearance for integrated circuits and sensors.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-036 Molded epoxy component body",
+          "color": "#252727",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.8,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Fine grain",
+          "Package legends",
+          "Filled-resin microstructure"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque filled dielectric encapsulant with restrained grain and independently authored markings.",
+        "structure": [
+          "Filled epoxy surface",
+          "Optional legend decal",
+          "Independent metal leads"
+        ],
+        "authoring_controls": [
+          {
+            "id": "mold_grain_pitch",
+            "value": 0.18,
+            "unit": "mm",
+            "meaning": "Illustrative fine package texture.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "mold_grain_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Render-only grain amplitude.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Assign leads separately as conductors",
+          "Keep package markings as original authored decals if added"
+        ],
+        "capability_requirements": [
+          "CAP-028",
+          "CAP-033",
+          "CAP-035",
+          "CAP-038"
+        ],
+        "unknown_optical_inputs": [
+          "Encapsulant optical data"
+        ],
+        "validation_criteria": [
+          "Metal leads and dark package body should remain visually distinct",
+          "Do not copy commercial package markings or logos"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-037",
+      "name": "Battery-can metal preview",
+      "source_catalog_ids": [
+        "MAT-341"
+      ],
+      "family": "Battery assemblies",
+      "domains": [
+        "electronics",
+        "automotive",
+        "aerospace"
+      ],
+      "purpose": "A metal-can preview for a modeled cylindrical cell housing.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-037 Battery-can metal preview",
+          "color": "#b3bbc3",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.35,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Drawn finish",
+          "Sleeve and label layers",
+          "Weld texture",
+          "Electrochemical behavior"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Conductor shell with separately assignable sleeve, cap, weld and terminal insulation.",
+        "structure": [
+          "Conductor shell",
+          "Optional dielectric label sleeve as a separate layer",
+          "Terminal insulator"
+        ],
+        "authoring_controls": [
+          {
+            "id": "drawing_line_pitch",
+            "value": 0.24,
+            "unit": "mm",
+            "meaning": "Illustrative shell-drawing line spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "drawing_line_relief",
+            "value": 0.003,
+            "unit": "mm",
+            "meaning": "Render-only drawn finish.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use cylinder-local coordinates",
+          "Keep cap, weld seam and insulation independently targetable"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-033",
+          "CAP-035",
+          "CAP-038",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Shell optical constants",
+          "Sleeve optical properties if included"
+        ],
+        "validation_criteria": [
+          "Terminals must remain separate from the can appearance",
+          "A visual can must not imply chemistry, charge state or qualification"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-038",
+      "name": "Unpowered LED phosphor face",
+      "source_catalog_ids": [
+        "MAT-441"
+      ],
+      "family": "LED assemblies",
+      "domains": [
+        "LED lighting",
+        "electronics",
+        "SELENE"
+      ],
+      "purpose": "A pale yellow unpowered phosphor-face preview; it emits no light.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-038 Unpowered LED phosphor face",
+          "color": "#d6bd64",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.65,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Emission",
+          "Excitation and conversion spectra",
+          "Phosphor scattering",
+          "Encapsulant optics",
+          "Photometry"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Scattering conversion material when unpowered; an active spectral-conversion target requires explicit excitation and emission transport.",
+        "structure": [
+          "Phosphor-in-binder layer",
+          "Independent emitter die and package",
+          "Optional transparent encapsulant"
+        ],
+        "authoring_controls": [
+          {
+            "id": "phosphor_visual_grain_pitch",
+            "value": 0.08,
+            "unit": "mm",
+            "meaning": "Illustrative visible mottling scale, not a phosphor particle specification.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "face_mottle_strength",
+            "value": 0.08,
+            "unit": "normalized",
+            "meaning": "Authored visual variation amount for a future map.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep the emitter aperture and encapsulant as separate regions",
+          "Do not drive emission from the base-color value"
+        ],
+        "capability_requirements": [
+          "CAP-013",
+          "CAP-025",
+          "CAP-028",
+          "CAP-101",
+          "CAP-107",
+          "CAP-113"
+        ],
+        "unknown_optical_inputs": [
+          "Excitation spectrum",
+          "Conversion and emission spectra",
+          "Conversion efficiency",
+          "Scattering data",
+          "Package photometry"
+        ],
+        "validation_criteria": [
+          "The baseline must remain unpowered with zero emitted light",
+          "A future emissive approximation must be labelled separately from spectral fluorescence"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-039",
+      "name": "Diffuser opaque inspection surrogate",
+      "source_catalog_ids": [
+        "MAT-451"
+      ],
+      "family": "LED optical targets",
+      "domains": [
+        "LED lighting",
+        "electronics",
+        "SELENE"
+      ],
+      "purpose": "An opaque inspection stand-in for a light-diffuser sheet.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_inspection_surrogate",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-039 Diffuser opaque inspection surrogate",
+          "color": "#dadcdb",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.72,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Transmission",
+          "Scattering distribution",
+          "Embossed geometry",
+          "Angular light redistribution"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Transmissive dielectric with volume scattering or explicitly modeled embossing; those mechanisms remain separate.",
+        "structure": [
+          "Outer dielectric interface",
+          "Scattering volume or embossed geometry",
+          "Inner dielectric interface"
+        ],
+        "authoring_controls": [
+          {
+            "id": "emboss_repeat",
+            "value": 0.7,
+            "unit": "mm",
+            "meaning": "Illustrative geometric emboss repeat.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "emboss_relief",
+            "value": 0.05,
+            "unit": "mm",
+            "meaning": "Authored geometric relief, not a scattering coefficient.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Choose a volume-scatter target or an embossed-surface target explicitly",
+          "Keep physical sheet thickness in CAD"
+        ],
+        "capability_requirements": [
+          "CAP-025",
+          "CAP-026",
+          "CAP-027",
+          "CAP-028",
+          "CAP-033",
+          "CAP-036"
+        ],
+        "unknown_optical_inputs": [
+          "Scattering and absorption data",
+          "Refractive data",
+          "Angular response of a selected diffuser"
+        ],
+        "validation_criteria": [
+          "The baseline must not make an enclosed light appear functional",
+          "Normal-map frosting alone must not be claimed as volume diffusion"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-040",
+      "name": "Aluminium honeycomb cut edge",
+      "source_catalog_ids": [
+        "MAT-481"
+      ],
+      "family": "Aerospace cores",
+      "domains": [
+        "aerospace",
+        "SELENE",
+        "industrial"
+      ],
+      "purpose": "A conductor response for separately modeled honeycomb walls at a panel edge.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-040 Aluminium honeycomb cut edge",
+          "color": "#a5adb6",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.4,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Honeycomb geometry generation",
+          "Wall silhouettes",
+          "Adhesive",
+          "Internal shadows"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor on explicit thin cell-wall geometry with separate adhesive and face sheets.",
+        "structure": [
+          "Conductor cell walls",
+          "Adhesive regions assigned separately",
+          "Independent face sheets"
+        ],
+        "authoring_controls": [
+          {
+            "id": "cell_pitch",
+            "value": 6.0,
+            "unit": "mm",
+            "meaning": "Illustrative render-geometry cell pitch, not a structural core specification.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "wall_thickness",
+            "value": 0.1,
+            "unit": "mm",
+            "meaning": "Authored visual wall thickness requiring geometric review.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use geometry for cells and empty space",
+          "Keep core boundaries and bond regions explicit"
+        ],
+        "capability_requirements": [
+          "CAP-001",
+          "CAP-033",
+          "CAP-036",
+          "CAP-043",
+          "CAP-097"
+        ],
+        "unknown_optical_inputs": [
+          "Foil optical constants",
+          "Adhesive optical response if visible"
+        ],
+        "validation_criteria": [
+          "Cell voids must remain actual empty space, not black painted hexagons",
+          "The appearance does not certify sandwich strength"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-041",
+      "name": "Mare-style regolith surface",
+      "source_catalog_ids": [
+        "MAT-531"
+      ],
+      "family": "Lunar particulate surfaces",
+      "domains": [
+        "SELENE",
+        "lunar",
+        "space"
+      ],
+      "purpose": "A dark granular terrain target with a deliberately uniform baseline approximation.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-041 Mare-style regolith surface",
+          "color": "#5e5c58",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.96,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Grain geometry",
+          "Particulate phase response",
+          "Terrain hierarchy",
+          "Self-shadowing",
+          "Contact tracks"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Vacuum-exposed particulate surface with size-dependent geometric detail and a separately calibrated phase response.",
+        "structure": [
+          "Fine grain population",
+          "Coarser fragments",
+          "Underlying terrain geometry"
+        ],
+        "authoring_controls": [
+          {
+            "id": "fine_detail_extent",
+            "value": 0.6,
+            "unit": "mm",
+            "meaning": "Illustrative visible-detail scale, not a measured grain distribution.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "fragment_extent",
+            "value": 7.0,
+            "unit": "mm",
+            "meaning": "Authored coarse fragment size for a small demonstration patch.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "detail_seed",
+            "value": 4101,
+            "unit": "integer",
+            "meaning": "Deterministic seed for future original procedural detail.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use hierarchical terrain detail in millimetres",
+          "Use explicit granular or instanced geometry for resolved grains",
+          "No terrestrial atmospheric fog or wet glints"
+        ],
+        "capability_requirements": [
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-043",
+          "CAP-108",
+          "CAP-109",
+          "CAP-110"
+        ],
+        "unknown_optical_inputs": [
+          "Measured particulate reflectance or phase data",
+          "Mission-specific texture and grain evidence if needed"
+        ],
+        "validation_criteria": [
+          "Zoom must reveal a stable hierarchy instead of stretching one noise scale",
+          "Dust behavior must remain compatible with vacuum; no airborne fog volume"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-042",
+      "name": "Highland-style regolith surface",
+      "source_catalog_ids": [
+        "MAT-546"
+      ],
+      "family": "Lunar particulate surfaces",
+      "domains": [
+        "SELENE",
+        "lunar",
+        "space"
+      ],
+      "purpose": "A lighter particulate terrain target with its own illustrative fragment structure.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-042 Highland-style regolith surface",
+          "color": "#8b8881",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.96,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Angular fragment geometry",
+          "Particulate phase response",
+          "Terrain self-shadowing",
+          "Composition variation"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Vacuum-exposed mixed particulate dielectric surface with independently controlled fine and coarse populations.",
+        "structure": [
+          "Fine granular matrix",
+          "Angular light-toned fragments",
+          "Underlying terrain"
+        ],
+        "authoring_controls": [
+          {
+            "id": "fine_detail_extent",
+            "value": 0.45,
+            "unit": "mm",
+            "meaning": "Illustrative visible-detail scale, not a measured distribution.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "fragment_extent",
+            "value": 11.0,
+            "unit": "mm",
+            "meaning": "Authored angular fragment extent.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "detail_seed",
+            "value": 4201,
+            "unit": "integer",
+            "meaning": "Deterministic procedural authoring seed.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep fine texture and larger angular fragments separate",
+          "Use a terrestrial lab environment only when intentionally showing a simulant test"
+        ],
+        "capability_requirements": [
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-043",
+          "CAP-108",
+          "CAP-109"
+        ],
+        "unknown_optical_inputs": [
+          "Measured reflectance or phase data for a specified reference",
+          "Mission-specific surface evidence"
+        ],
+        "validation_criteria": [
+          "This target must differ by fragment structure as well as color",
+          "A visual label must not imply a measured lunar sample composition"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-043",
+      "name": "Tool-transferred dust patch",
+      "source_catalog_ids": [
+        "MAT-559"
+      ],
+      "family": "Lunar dust deposits",
+      "domains": [
+        "SELENE",
+        "lunar",
+        "robotics"
+      ],
+      "purpose": "An opaque response for explicit dust-deposit geometry or a future bounded transfer mask.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_deposit_geometry_response",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-043 Tool-transferred dust patch",
+          "color": "#7b766d",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.98,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Substrate-preserving mask",
+          "Individual grains",
+          "Coverage transport",
+          "Transfer history"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Granular particulate deposit layered over a separately preserved substrate.",
+        "structure": [
+          "Finite granular dust deposit",
+          "Independent underlying surface",
+          "Bounded transfer-footprint mask"
+        ],
+        "authoring_controls": [
+          {
+            "id": "patch_extent",
+            "value": 12.0,
+            "unit": "mm",
+            "meaning": "Illustrative size of a localized tool transfer patch.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "deposit_relief",
+            "value": 0.18,
+            "unit": "mm",
+            "meaning": "Authored local deposit relief, not a measured dust thickness.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "detail_seed",
+            "value": 4301,
+            "unit": "integer",
+            "meaning": "Deterministic deposit authoring seed.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Apply the baseline only to an explicit dust patch body or face",
+          "Do not replace the entire rover surface to mimic sparse dust",
+          "Keep deposits granular in vacuum"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-038",
+          "CAP-039",
+          "CAP-108",
+          "CAP-110"
+        ],
+        "unknown_optical_inputs": [
+          "Particle reflectance or phase response",
+          "Evidence for deposit distribution and thickness"
+        ],
+        "validation_criteria": [
+          "Uncovered substrate must remain visible in the advanced target",
+          "A deposited patch must not be rendered as terrestrial airborne haze"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-044",
+      "name": "Woven-metal wheel mesh",
+      "source_catalog_ids": [
+        "MAT-565"
+      ],
+      "family": "Rover wheel structures",
+      "domains": [
+        "SELENE",
+        "aerospace",
+        "robotics"
+      ],
+      "purpose": "A conductor response for actual wire or mesh wheel geometry.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-044 Woven-metal wheel mesh",
+          "color": "#999fa7",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 1.0,
+            "roughness": 0.38,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Mesh geometry",
+          "Wire tangent anisotropy",
+          "Contact deformation",
+          "Self-shadowing"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque conductor on geometric wires with tangent-aligned microtexture.",
+        "structure": [
+          "Geometric metal wires",
+          "Woven crossings",
+          "Independent attachment rings"
+        ],
+        "authoring_controls": [
+          {
+            "id": "mesh_pitch",
+            "value": 5.0,
+            "unit": "mm",
+            "meaning": "Illustrative weave opening pitch, not a traction design.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "wire_diameter",
+            "value": 0.65,
+            "unit": "mm",
+            "meaning": "Authored render-geometry wire diameter.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "wire_finish_pitch",
+            "value": 0.16,
+            "unit": "mm",
+            "meaning": "Illustrative axial wire-finish spacing.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Model openings as empty space and wires as geometry",
+          "Keep render representation separate from the collision or traction model"
+        ],
+        "capability_requirements": [
+          "CAP-020",
+          "CAP-033",
+          "CAP-036",
+          "CAP-043",
+          "CAP-104",
+          "CAP-114"
+        ],
+        "unknown_optical_inputs": [
+          "Wire conductor optical constants",
+          "Evidence for finish and any physical deformation"
+        ],
+        "validation_criteria": [
+          "Open mesh must not be simulated with black paint on a solid wheel",
+          "Appearance must not claim spring stiffness or traction"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-045",
+      "name": "Oiled oak workshop surface",
+      "source_catalog_ids": [
+        "MAT-111"
+      ],
+      "family": "Wood and DIY",
+      "domains": [
+        "woods",
+        "DIY",
+        "industrial"
+      ],
+      "purpose": "A warm uniform baseline for a future anatomically structured workshop-wood surface.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-045 Oiled oak workshop surface",
+          "color": "#a17a51",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.56,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Wood anatomy",
+          "Pores",
+          "Oil treatment",
+          "End grain"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Directional wood substrate with an absorbing oil-treated outer region and separate end-grain structure.",
+        "structure": [
+          "Oil-treated outer region",
+          "Directional wood anatomy",
+          "Separate end-grain mapping"
+        ],
+        "authoring_controls": [
+          {
+            "id": "growth_pattern_span",
+            "value": 18.0,
+            "unit": "mm",
+            "meaning": "Illustrative grain-pattern spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "pore_extent",
+            "value": 0.25,
+            "unit": "mm",
+            "meaning": "Authored pore-detail scale.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "grain_angle",
+            "value": 0.0,
+            "unit": "rad",
+            "meaning": "Longitudinal grain direction in the part frame.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Use wood-local longitudinal, radial and tangential axes",
+          "Change the pattern at end grain",
+          "Keep joinery geometry independent"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-026",
+          "CAP-033",
+          "CAP-034",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Measured wood reflectance if fidelity requires it",
+          "Oil optical response"
+        ],
+        "validation_criteria": [
+          "End grain should not look like a stretched side-grain map",
+          "Appearance must not assign density, moisture or orthotropic stiffness"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-046",
+      "name": "Varnished walnut joinery",
+      "source_catalog_ids": [
+        "MAT-113"
+      ],
+      "family": "Wood and DIY",
+      "domains": [
+        "woods",
+        "DIY",
+        "industrial"
+      ],
+      "purpose": "A darker wooden-furniture target with a uniform polished baseline surrogate.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-046 Varnished walnut joinery",
+          "color": "#6d4d37",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.3,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Wood anatomy",
+          "Separate varnish layer",
+          "Absorption",
+          "End grain"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Transparent dielectric varnish above absorbing directional wood anatomy.",
+        "structure": [
+          "Varnish surface",
+          "Wood substrate",
+          "Separate end-grain mapping"
+        ],
+        "authoring_controls": [
+          {
+            "id": "growth_pattern_span",
+            "value": 14.0,
+            "unit": "mm",
+            "meaning": "Illustrative walnut-like pattern spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "pore_extent",
+            "value": 0.18,
+            "unit": "mm",
+            "meaning": "Authored pore-detail scale.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "varnish_surface_relief",
+            "value": 0.002,
+            "unit": "mm",
+            "meaning": "Illustrative polished coating relief.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Carry wood axes across joined pieces deliberately",
+          "Keep coating separate from grain color and pore relief"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-020",
+          "CAP-021",
+          "CAP-026",
+          "CAP-033",
+          "CAP-034",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Wood reflectance",
+          "Varnish optical data and thickness"
+        ],
+        "validation_criteria": [
+          "Moving the grain direction must not rotate the coating highlight independently of the surface",
+          "The baseline is a uniform surrogate, not a procedural wood shader"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-047",
+      "name": "Automotive smooth clearcoat surrogate",
+      "source_catalog_ids": [
+        "MAT-034",
+        "MAT-204"
+      ],
+      "family": "Automotive paint",
+      "domains": [
+        "automotive",
+        "industrial",
+        "DIY"
+      ],
+      "purpose": "A glossy opaque pigment preview for a future clear-coated body panel.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-047 Automotive smooth clearcoat surrogate",
+          "color": "#4e697e",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.21,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Independent clearcoat lobe",
+          "Layer absorption",
+          "Orange-peel detail",
+          "Paint thickness"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Transparent dielectric clearcoat over an opaque pigment base; no metallic flakes are implied.",
+        "structure": [
+          "Transparent clearcoat",
+          "Opaque pigmented base",
+          "Structural panel substrate"
+        ],
+        "authoring_controls": [
+          {
+            "id": "orange_peel_span",
+            "value": 1.8,
+            "unit": "mm",
+            "meaning": "Illustrative residual surface waviness extent.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "orange_peel_relief",
+            "value": 0.006,
+            "unit": "mm",
+            "meaning": "Authored small-amplitude waviness for a polished finish.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep clearcoat surface detail separate from pigment color",
+          "Use panel-local coordinates and continuous normals"
+        ],
+        "capability_requirements": [
+          "CAP-017",
+          "CAP-021",
+          "CAP-026",
+          "CAP-033",
+          "CAP-035"
+        ],
+        "unknown_optical_inputs": [
+          "Clearcoat optical constants",
+          "Pigment reflectance",
+          "Actual layer thickness if needed"
+        ],
+        "validation_criteria": [
+          "A clearcoat target must have a separate coating response when implemented",
+          "The baseline must not be described as metallic-flake paint"
+        ]
+      }
+    },
+    {
+      "id": "SELENE-AP-048",
+      "name": "Embossed tyre-sidewall preview",
+      "source_catalog_ids": [
+        "MAT-237"
+      ],
+      "family": "Automotive elastomers",
+      "domains": [
+        "automotive",
+        "industrial",
+        "robotics"
+      ],
+      "purpose": "A dark rubber appearance for a geometrically modeled sidewall, distinct from metal lunar wheels.",
+      "status": "prepared_authoring_input",
+      "component_binding": "unbound",
+      "baseline_projection": {
+        "command": "appearance.assign",
+        "role": "opaque_surface",
+        "runtime_parameters": {
+          "appearance": "SELENE-AP-048 Embossed tyre-sidewall preview",
+          "color": "#282a2c",
+          "opacity": 1.0,
+          "pbr": {
+            "metallic": 0.0,
+            "roughness": 0.83,
+            "dielectric_ior": 1.5
+          }
+        },
+        "value_basis": "Original, unmeasured preview choices; no grade-specific optical constants.",
+        "fidelity": "Uniform opaque response only; detailed target behavior is not encoded.",
+        "omitted_target_features": [
+          "Mold grain",
+          "Embossed geometry",
+          "Contact wear",
+          "Tyre deformation and traction"
+        ]
+      },
+      "advanced_target": {
+        "status": "authored_specification_not_runtime_bound",
+        "optical_model": "Opaque filled elastomer with mold grain, embossed geometry and bounded contact-polished regions.",
+        "structure": [
+          "Rubber surface",
+          "Original embossed geometry",
+          "Optional contact-polished region"
+        ],
+        "authoring_controls": [
+          {
+            "id": "mold_grain_pitch",
+            "value": 0.32,
+            "unit": "mm",
+            "meaning": "Illustrative sidewall grain spacing.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "mold_grain_relief",
+            "value": 0.01,
+            "unit": "mm",
+            "meaning": "Authored render-only rubber grain.",
+            "basis": "original illustrative authoring value"
+          },
+          {
+            "id": "emboss_relief",
+            "value": 0.4,
+            "unit": "mm",
+            "meaning": "Illustrative raised-detail height for original geometry.",
+            "basis": "original illustrative authoring value"
+          }
+        ],
+        "geometry_and_mapping_requirements": [
+          "Keep embossed wording original and optional",
+          "Use geometry for silhouette-changing ribs",
+          "Do not assign this tyre candidate to a metal lunar mesh wheel by default"
+        ],
+        "capability_requirements": [
+          "CAP-033",
+          "CAP-035",
+          "CAP-036",
+          "CAP-038",
+          "CAP-039"
+        ],
+        "unknown_optical_inputs": [
+          "Optical response for a specified rubber formulation"
+        ],
+        "validation_criteria": [
+          "A tyre surface must remain distinct from the open metal wheel target",
+          "Visual rubber must not imply vacuum suitability or tire performance"
+        ]
+      }
+    }
+  ]
+}

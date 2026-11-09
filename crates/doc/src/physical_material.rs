@@ -17,6 +17,31 @@ pub struct MaterialCard {
     pub properties: Vec<Property>,
 }
 
+/// Design-owned candidate data. Private storage prevents bypassing admission;
+/// validation does not certify sources, applicability or analysis capability.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct ValidatedCard(MaterialCard);
+
+impl ValidatedCard {
+    pub fn from_value(value: &Value) -> Result<Self> {
+        let card = admit_card(value)?;
+        card.validate()?;
+        Ok(Self(card))
+    }
+
+    pub fn card(&self) -> &MaterialCard {
+        &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for ValidatedCard {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        Self::from_value(&value).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Family {

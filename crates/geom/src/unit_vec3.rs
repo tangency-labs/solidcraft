@@ -1,15 +1,16 @@
 //! A unit vector: a 3D vector of length 1.
 
+use crate::prelude::*;
 use std::ops::{Add, Deref, Mul, Neg, Sub};
 
 use serde::{Deserialize, Serialize};
 
-use crate::Vec3;
+use solidcore_record::Vec3;
 
 /// A unit vector: length 1 up to rounding. Made only from a vector with a length
-/// ([`UnitVec3::new`], [`Vec3::unit`]), so a function taking one need not normalise it or
+/// ([`UnitVec3::new`], [`Vec3Geom::unit`]), so a function taking one need not normalise it or
 /// handle a zero vector again. It reads as the [`Vec3`] it holds (`d.dot(v)`, `*d`), and
-/// [`Vec3::dot`] and [`Vec3::cross`] take one.
+/// [`Vec3Geom::dot`] and [`Vec3Geom::cross`] take one.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(into = "Vec3", try_from = "Vec3")]
 pub struct UnitVec3(Vec3);
@@ -25,13 +26,6 @@ impl UnitVec3 {
     }
     pub fn vec(self) -> Vec3 {
         self.0
-    }
-}
-
-impl Vec3 {
-    /// This vector scaled to length 1 ([`UnitVec3::new`]).
-    pub fn unit(self) -> Option<UnitVec3> {
-        UnitVec3::new(self)
     }
 }
 

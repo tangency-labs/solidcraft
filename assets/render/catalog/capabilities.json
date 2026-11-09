@@ -1,0 +1,1951 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "concept_catalog",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG"
+  },
+  "items": [
+    {
+      "id": "CAP-001",
+      "family": "Light transport",
+      "name": "Global illumination by path tracing",
+      "benefit": "Light exchange between surfaces",
+      "controls": [
+        "Bounce limits",
+        "quality"
+      ],
+      "acceptance": [
+        "An enclosed box converges without an added ambient term."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-002",
+      "family": "Light transport",
+      "name": "Multiple importance sampling for lights and surfaces",
+      "benefit": "Efficient light and BSDF sampling",
+      "controls": [
+        "Sampling strategy"
+      ],
+      "acceptance": [
+        "Small emitters and rough reflections converge to the same reference mean."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-003",
+      "family": "Light transport",
+      "name": "Adaptive sampling",
+      "benefit": "Spend samples where uncertainty remains",
+      "controls": [
+        "Minimum samples",
+        "error target"
+      ],
+      "acceptance": [
+        "Stopping statistics remain defined for dark pixels and bright edges."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-004",
+      "family": "Light transport",
+      "name": "Progressive accumulation",
+      "benefit": "Refine a visible result over time",
+      "controls": [
+        "Pause",
+        "resume",
+        "sample count"
+      ],
+      "acceptance": [
+        "A scene edit invalidates the correct buffers without mixing revisions."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-005",
+      "family": "Light transport",
+      "name": "Spatial antialiasing and pixel filtering",
+      "benefit": "Resolve fine silhouettes and texture detail",
+      "controls": [
+        "Pixel filter",
+        "reconstruction width"
+      ],
+      "acceptance": [
+        "Thin wires retain coverage without unstable stair steps."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-006",
+      "family": "Light transport",
+      "name": "Russian roulette and explicit bounce limits",
+      "benefit": "Bound transport cost transparently",
+      "controls": [
+        "Roulette start",
+        "maximum depth"
+      ],
+      "acceptance": [
+        "Compensated roulette is distinguished from finite-depth truncation."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-007",
+      "family": "Light transport",
+      "name": "Heterogeneous participating media",
+      "benefit": "Represent spatially varying scattering volumes",
+      "controls": [
+        "Density field",
+        "anisotropy"
+      ],
+      "acceptance": [
+        "A bounded test volume has reproducible transmittance and convergence."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-008",
+      "family": "Light transport",
+      "name": "Specialized sampling of difficult paths",
+      "benefit": "Handle rare but important optical paths",
+      "controls": [
+        "Integrator selection",
+        "budget"
+      ],
+      "acceptance": [
+        "A difficult-path benchmark reports error and time against a reference."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-009",
+      "family": "Sources and photometry",
+      "name": "Area lights with several shapes",
+      "benefit": "Control source extent and highlight shape",
+      "controls": [
+        "Shape",
+        "dimensions",
+        "orientation"
+      ],
+      "acceptance": [
+        "Emitter size changes penumbra while the chosen energy policy is preserved."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-010",
+      "family": "Sources and photometry",
+      "name": "Point and spot lights with physical falloff",
+      "benefit": "Support compact sources",
+      "controls": [
+        "Intensity",
+        "cone angles"
+      ],
+      "acceptance": [
+        "An unobstructed receiver follows the declared distance law."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-011",
+      "family": "Sources and photometry",
+      "name": "Sun with finite angular extent",
+      "benefit": "Resolve outdoor shadow softness",
+      "controls": [
+        "Direction",
+        "angular diameter"
+      ],
+      "acceptance": [
+        "Shadow spread follows distance and angular size."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-012",
+      "family": "Sources and photometry",
+      "name": "IES and LDT photometric distributions",
+      "benefit": "Use documented luminaire distributions",
+      "controls": [
+        "Profile",
+        "orientation",
+        "normalization"
+      ],
+      "acceptance": [
+        "Axes, units and total output survive import or documented conversion."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-013",
+      "family": "Sources and photometry",
+      "name": "Sampled emissive meshes",
+      "benefit": "Let visible emitters illuminate the scene",
+      "controls": [
+        "Radiance",
+        "distribution"
+      ],
+      "acceptance": [
+        "A visible panel and its sampling representation contribute energy once."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-014",
+      "family": "Sources and photometry",
+      "name": "Light tree acceleration",
+      "benefit": "Scale scenes containing many sources",
+      "controls": [
+        "Build policy",
+        "budgets"
+      ],
+      "acceptance": [
+        "Many-light output matches a smaller reference within sampling error."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-015",
+      "family": "Sources and photometry",
+      "name": "Light groups and linear gain adjustments",
+      "benefit": "Rebalance contributions in a fixed scene",
+      "controls": [
+        "Group gains",
+        "enabled state"
+      ],
+      "acceptance": [
+        "Linear gains reconstruct the reference; RGB recoloring is labelled editorial."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-016",
+      "family": "Sources and photometry",
+      "name": "Light and shadow linking",
+      "benefit": "Offer deliberate artistic source targeting",
+      "controls": [
+        "Receiver sets",
+        "shadow sets"
+      ],
+      "acceptance": [
+        "Saved exceptions are visible and never silently replace physical transport."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-017",
+      "family": "Opaque surfaces",
+      "name": "OpenPBR-referenced layered appearance",
+      "benefit": "Provide a coherent authoring model",
+      "controls": [
+        "Base",
+        "coat",
+        "surface layers"
+      ],
+      "acceptance": [
+        "Layer combinations respect the declared energy model."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-018",
+      "family": "Opaque surfaces",
+      "name": "Dielectric and conductor Fresnel",
+      "benefit": "Represent angle-dependent reflection",
+      "controls": [
+        "IOR",
+        "conductor response"
+      ],
+      "acceptance": [
+        "Normal and grazing reference cases agree with analytic expectations."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-019",
+      "family": "Opaque surfaces",
+      "name": "Microfacet roughness and energy compensation",
+      "benefit": "Preserve broad rough reflections",
+      "controls": [
+        "Roughness",
+        "compensation"
+      ],
+      "acceptance": [
+        "Increasing roughness does not introduce unexplained energy loss."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-020",
+      "family": "Opaque surfaces",
+      "name": "Orientable anisotropy",
+      "benefit": "Describe brushed and directional finishes",
+      "controls": [
+        "Direction",
+        "strength"
+      ],
+      "acceptance": [
+        "Rotated instances retain their intended material-local direction."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-021",
+      "family": "Opaque surfaces",
+      "name": "Independent transparent coating",
+      "benefit": "Represent varnish and clear finishes",
+      "controls": [
+        "Coat roughness",
+        "thickness model"
+      ],
+      "acceptance": [
+        "Coat and substrate remain independently editable."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-022",
+      "family": "Opaque surfaces",
+      "name": "Surface fibers and textile sheen",
+      "benefit": "Describe fine surface fuzz",
+      "controls": [
+        "Fiber direction",
+        "sheen"
+      ],
+      "acceptance": [
+        "Grazing highlights change consistently with the fiber model."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-023",
+      "family": "Opaque surfaces",
+      "name": "Flakes and effect pigments",
+      "benefit": "Describe structured paint sparkle",
+      "controls": [
+        "Flake scale",
+        "density",
+        "orientation"
+      ],
+      "acceptance": [
+        "Sparkle remains stable across distance and resolution."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-024",
+      "family": "Opaque surfaces",
+      "name": "Measured BSDF and specialized surface models",
+      "benefit": "Admit documented material measurements",
+      "controls": [
+        "Dataset",
+        "interpolation"
+      ],
+      "acceptance": [
+        "Units, angular conventions and provenance survive import."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-025",
+      "family": "Advanced optics",
+      "name": "Smooth and rough refraction",
+      "benefit": "Represent transparent interfaces",
+      "controls": [
+        "IOR",
+        "roughness",
+        "thickness mode"
+      ],
+      "acceptance": [
+        "A slab and a curved lens agree with geometry and interface orientation."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-026",
+      "family": "Advanced optics",
+      "name": "Distance-dependent absorption",
+      "benefit": "Color transmission by travelled distance",
+      "controls": [
+        "Absorption",
+        "reference length"
+      ],
+      "acceptance": [
+        "A thickness wedge follows the declared attenuation law."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-027",
+      "family": "Advanced optics",
+      "name": "Nested dielectrics and media",
+      "benefit": "Track interfaces inside containers",
+      "controls": [
+        "Medium priority",
+        "interface policy"
+      ],
+      "acceptance": [
+        "A liquid-filled vial handles air, glass and contents without a false air gap."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-028",
+      "family": "Advanced optics",
+      "name": "Subsurface scattering",
+      "benefit": "Represent translucent solids",
+      "controls": [
+        "Scattering length",
+        "phase behavior"
+      ],
+      "acceptance": [
+        "Thin and thick regions vary consistently under a fixed light."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-029",
+      "family": "Advanced optics",
+      "name": "Reflective and refractive caustics",
+      "benefit": "Resolve focused light paths",
+      "controls": [
+        "Integrator",
+        "budget"
+      ],
+      "acceptance": [
+        "A documented caustic target converges without arbitrary brightness boosts."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-030",
+      "family": "Advanced optics",
+      "name": "Spectral chromatic dispersion",
+      "benefit": "Separate wavelength-dependent paths",
+      "controls": [
+        "Wavelength model",
+        "dispersion data"
+      ],
+      "acceptance": [
+        "A prism reference has the correct ordering and declared spectral assumptions."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-031",
+      "family": "Advanced optics",
+      "name": "Thin-film interference",
+      "benefit": "Represent thickness-dependent color shifts",
+      "controls": [
+        "Film thickness",
+        "indices"
+      ],
+      "acceptance": [
+        "Angular and thickness variation follow the chosen model."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-032",
+      "family": "Advanced optics",
+      "name": "Polarization and specialized optical transport",
+      "benefit": "Support selected scientific optics cases",
+      "controls": [
+        "Polarization state",
+        "analyzer"
+      ],
+      "acceptance": [
+        "Only validated optical configurations advertise this capability."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-033",
+      "family": "Detail and geometry",
+      "name": "Physical texture scale",
+      "benefit": "Keep surface features at real dimensions",
+      "controls": [
+        "Scale in mm"
+      ],
+      "acceptance": [
+        "The same finish retains detail size on different bodies."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-034",
+      "family": "Detail and geometry",
+      "name": "Planar cylindrical and triplanar mapping",
+      "benefit": "Place patterns without fragile UV assumptions",
+      "controls": [
+        "Projection",
+        "axes",
+        "origin"
+      ],
+      "acceptance": [
+        "Seams and rotated instances are checked at multiple scales."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-035",
+      "family": "Detail and geometry",
+      "name": "Normal and bump detail",
+      "benefit": "Represent sub-silhouette surface relief",
+      "controls": [
+        "Strength",
+        "normal convention"
+      ],
+      "acceptance": [
+        "Data textures avoid color transforms and preserve orientation."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-036",
+      "family": "Detail and geometry",
+      "name": "Adaptive geometric displacement",
+      "benefit": "Represent relief affecting silhouette",
+      "controls": [
+        "Amplitude",
+        "subdivision budget"
+      ],
+      "acceptance": [
+        "Displaced boundaries retain continuity within a documented tolerance."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-037",
+      "family": "Detail and geometry",
+      "name": "Render-only edge microbevel",
+      "benefit": "Improve edge response without CAD edits",
+      "controls": [
+        "Radius",
+        "eligibility"
+      ],
+      "acceptance": [
+        "The design B-rep and dimensions remain unchanged."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-038",
+      "family": "Detail and geometry",
+      "name": "Decals labels and masks",
+      "benefit": "Apply product markings and layered selections",
+      "controls": [
+        "Projection",
+        "layer order"
+      ],
+      "acceptance": [
+        "Labels remain sharp, correctly oriented and reversible."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-039",
+      "family": "Detail and geometry",
+      "name": "Localized wear and contamination",
+      "benefit": "Place use-dependent surface changes",
+      "controls": [
+        "Coverage",
+        "scale",
+        "placement"
+      ],
+      "acceptance": [
+        "Wear reveals the intended substrate and avoids unrelated body regions."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-040",
+      "family": "Detail and geometry",
+      "name": "Texture filtering and continuity",
+      "benefit": "Avoid shimmer and seams",
+      "controls": [
+        "LOD",
+        "filtering"
+      ],
+      "acceptance": [
+        "Distant texture detail remains temporally stable."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-041",
+      "family": "Environment and atmosphere",
+      "name": "Importance-sampled HDR environments",
+      "benefit": "Use directional environmental radiance",
+      "controls": [
+        "Rotation",
+        "gain"
+      ],
+      "acceptance": [
+        "A rotated environment moves illumination and reflections coherently."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-042",
+      "family": "Environment and atmosphere",
+      "name": "Procedural sky and sun",
+      "benefit": "Author terrestrial outdoor illumination",
+      "controls": [
+        "Solar direction",
+        "sky parameters"
+      ],
+      "acceptance": [
+        "The sun has exactly one owned contribution."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-043",
+      "family": "Environment and atmosphere",
+      "name": "Ground shadows and reflections",
+      "benefit": "Anchor a product in its scene",
+      "controls": [
+        "Ground material",
+        "visibility"
+      ],
+      "acceptance": [
+        "Support, reflected contact and shadow agree geometrically."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-044",
+      "family": "Environment and atmosphere",
+      "name": "Three-dimensional environments with parallax",
+      "benefit": "Support moving cameras near scenery",
+      "controls": [
+        "Stage dimensions",
+        "detail level"
+      ],
+      "acceptance": [
+        "Camera translation produces correct foreground displacement."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-045",
+      "family": "Environment and atmosphere",
+      "name": "Background with explicit lighting links",
+      "benefit": "Separate visual composition when requested",
+      "controls": [
+        "Link state",
+        "background transform"
+      ],
+      "acceptance": [
+        "An artistic decoupling is recorded in the saved shot."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-046",
+      "family": "Environment and atmosphere",
+      "name": "Fog and aerial perspective",
+      "benefit": "Represent terrestrial atmosphere",
+      "controls": [
+        "Extinction",
+        "scattering"
+      ],
+      "acceptance": [
+        "Physical lunar scenes reject this atmospheric component."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-047",
+      "family": "Environment and atmosphere",
+      "name": "Volumetric light shafts",
+      "benefit": "Resolve light scattering through media",
+      "controls": [
+        "Medium",
+        "source",
+        "sampling"
+      ],
+      "acceptance": [
+        "A beam requires a declared participating medium."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-048",
+      "family": "Environment and atmosphere",
+      "name": "Coordinated weather and surface state",
+      "benefit": "Combine rain or wetness consistently",
+      "controls": [
+        "Weather state",
+        "wet layers"
+      ],
+      "acceptance": [
+        "Changing weather exposes which appearance layers it changes."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-049",
+      "family": "Camera",
+      "name": "Perspective and orthographic cameras",
+      "benefit": "Support product and technical views",
+      "controls": [
+        "FOV",
+        "projection",
+        "target"
+      ],
+      "acceptance": [
+        "Saved framing reopens identically within numeric tolerance."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-050",
+      "family": "Camera",
+      "name": "Physical depth of field",
+      "benefit": "Focus a finite depth region",
+      "controls": [
+        "Focus distance",
+        "aperture"
+      ],
+      "acceptance": [
+        "In-focus and out-of-focus reference planes behave consistently."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-051",
+      "family": "Camera",
+      "name": "Aperture shape and bokeh",
+      "benefit": "Represent optical defocus shape",
+      "controls": [
+        "Blade model",
+        "aperture shape"
+      ],
+      "acceptance": [
+        "Out-of-focus highlights retain the declared aperture behavior."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-052",
+      "family": "Camera",
+      "name": "Lens shift and vertical correction",
+      "benefit": "Control architectural perspective",
+      "controls": [
+        "Shift",
+        "projection"
+      ],
+      "acceptance": [
+        "Vertical correction does not silently change model coordinates."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-053",
+      "family": "Camera",
+      "name": "Motion blur",
+      "benefit": "Integrate moving geometry during exposure",
+      "controls": [
+        "Shutter interval",
+        "temporal sampling"
+      ],
+      "acceptance": [
+        "Blur follows the evaluated trajectory throughout the shutter."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-054",
+      "family": "Camera",
+      "name": "Panoramic and stereo output",
+      "benefit": "Support additional delivery projections",
+      "controls": [
+        "Projection",
+        "stereo baseline"
+      ],
+      "acceptance": [
+        "Projection seams and eye transforms pass a reference scene."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-055",
+      "family": "Camera",
+      "name": "Photographic backplate calibration",
+      "benefit": "Match a photographed perspective",
+      "controls": [
+        "Focal data",
+        "horizon",
+        "anchors"
+      ],
+      "acceptance": [
+        "Reprojection error and remaining ambiguity are reported."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-056",
+      "family": "Camera",
+      "name": "Turntables and saved camera poses",
+      "benefit": "Create repeatable presentation views",
+      "controls": [
+        "Axis",
+        "poses",
+        "orbit extent"
+      ],
+      "acceptance": [
+        "The orbit targets the selected subject without altering it."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-057",
+      "family": "Color and image",
+      "name": "Declared scene-linear color pipeline",
+      "benefit": "Keep radiometric operations consistent",
+      "controls": [
+        "Working space",
+        "texture roles"
+      ],
+      "acceptance": [
+        "Color textures and numeric maps follow different decode paths."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-058",
+      "family": "Color and image",
+      "name": "Display transform",
+      "benefit": "Map the rendered signal to a display",
+      "controls": [
+        "View transform",
+        "output space"
+      ],
+      "acceptance": [
+        "Preview and export use the same declared transform."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-059",
+      "family": "Color and image",
+      "name": "Exposure in EV",
+      "benefit": "Control image brightness explicitly",
+      "controls": [
+        "Exposure"
+      ],
+      "acceptance": [
+        "One EV multiplies the linear signal by two before display mapping."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-060",
+      "family": "Color and image",
+      "name": "White balance",
+      "benefit": "Control camera color interpretation",
+      "controls": [
+        "Temperature",
+        "tint"
+      ],
+      "acceptance": [
+        "Neutral reference patches respond consistently to a saved balance."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-061",
+      "family": "Color and image",
+      "name": "Histogram and clipping indicators",
+      "benefit": "Expose lost highlight or shadow information",
+      "controls": [
+        "Histogram domain",
+        "clipping display"
+      ],
+      "acceptance": [
+        "Indicators clearly distinguish scene-linear and display-referred values."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-062",
+      "family": "Color and image",
+      "name": "Contrast curves and saturation",
+      "benefit": "Provide reversible image finishing",
+      "controls": [
+        "Curves",
+        "contrast",
+        "saturation"
+      ],
+      "acceptance": [
+        "Reset restores the underlying rendered signal."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-063",
+      "family": "Color and image",
+      "name": "LUTs and image looks",
+      "benefit": "Save presentation treatments",
+      "controls": [
+        "Look",
+        "mix",
+        "color space"
+      ],
+      "acceptance": [
+        "The required input and output spaces travel with the look."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-064",
+      "family": "Color and image",
+      "name": "Proofing and gamut checks",
+      "benefit": "Review output limitations",
+      "controls": [
+        "Target space",
+        "warning mode"
+      ],
+      "acceptance": [
+        "Out-of-gamut warnings use a declared transform."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-065",
+      "family": "Finishing and compositing",
+      "name": "Denoising with auxiliary buffers",
+      "benefit": "Reduce stochastic noise",
+      "controls": [
+        "Denoiser",
+        "strength",
+        "auxiliaries"
+      ],
+      "acceptance": [
+        "Fine wires and labels survive comparison against an unfiltered reference."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-066",
+      "family": "Finishing and compositing",
+      "name": "Highlight bloom",
+      "benefit": "Provide a camera-like glow treatment",
+      "controls": [
+        "Threshold",
+        "radius",
+        "gain"
+      ],
+      "acceptance": [
+        "Bloom does not change the energy used to illuminate geometry."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-067",
+      "family": "Finishing and compositing",
+      "name": "Lens flare and aperture diffraction",
+      "benefit": "Add explicitly optical image effects",
+      "controls": [
+        "Lens model",
+        "intensity"
+      ],
+      "acceptance": [
+        "The effect is reproducible and separately disabled."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-068",
+      "family": "Finishing and compositing",
+      "name": "Vignette and lens distortion",
+      "benefit": "Represent selected lens characteristics",
+      "controls": [
+        "Distortion",
+        "falloff"
+      ],
+      "acceptance": [
+        "Geometric and brightness changes are recorded as image treatment."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-069",
+      "family": "Finishing and compositing",
+      "name": "Chromatic aberration",
+      "benefit": "Represent wavelength-dependent lens offsets",
+      "controls": [
+        "Lens parameters"
+      ],
+      "acceptance": [
+        "The effect remains distinct from material dispersion."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-070",
+      "family": "Finishing and compositing",
+      "name": "Output grain and sharpening",
+      "benefit": "Finish delivery images",
+      "controls": [
+        "Amount",
+        "radius",
+        "seed"
+      ],
+      "acceptance": [
+        "The untouched master remains available."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-071",
+      "family": "Finishing and compositing",
+      "name": "Object masks and compositing",
+      "benefit": "Select objects after rendering",
+      "controls": [
+        "Object and material IDs"
+      ],
+      "acceptance": [
+        "Transparent edges have a documented mask interpretation."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-072",
+      "family": "Finishing and compositing",
+      "name": "Inspection occlusion and outlines",
+      "benefit": "Support technical readability",
+      "controls": [
+        "Inspection style",
+        "strength"
+      ],
+      "acceptance": [
+        "The physical render avoids double-darkening its global illumination."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-073",
+      "family": "Output and production",
+      "name": "High-quality PNG and TIFF output",
+      "benefit": "Deliver presentation images",
+      "controls": [
+        "Size",
+        "encoding",
+        "alpha"
+      ],
+      "acceptance": [
+        "Decoded output agrees with the displayed image and alpha convention."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-074",
+      "family": "Output and production",
+      "name": "Scene-linear multilayer EXR",
+      "benefit": "Preserve high-range production data",
+      "controls": [
+        "Channels",
+        "precision",
+        "compression"
+      ],
+      "acceptance": [
+        "The file reopens with correct linear values and channel names."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-075",
+      "family": "Output and production",
+      "name": "Transport and diagnostic passes",
+      "benefit": "Support review and compositing",
+      "controls": [
+        "Pass selection"
+      ],
+      "acceptance": [
+        "Summed physical contributions reconstruct the intended beauty result."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-076",
+      "family": "Output and production",
+      "name": "Cryptomatte or interoperable equivalent",
+      "benefit": "Provide robust object selection",
+      "controls": [
+        "ID scope",
+        "output metadata"
+      ],
+      "acceptance": [
+        "Independent compatible readers recover the declared selections."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-077",
+      "family": "Output and production",
+      "name": "Product-variant render queue",
+      "benefit": "Render repeated combinations",
+      "controls": [
+        "Variants",
+        "order",
+        "output names"
+      ],
+      "acceptance": [
+        "Jobs capture immutable requests and never overwrite another result silently."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-078",
+      "family": "Output and production",
+      "name": "Animation image sequences",
+      "benefit": "Deliver time-sampled frames",
+      "controls": [
+        "Frame range",
+        "frame rate"
+      ],
+      "acceptance": [
+        "Each frame is labelled by scene time and retains shared settings."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-079",
+      "family": "Output and production",
+      "name": "Render regions and A/B comparison",
+      "benefit": "Inspect local quality and alternatives",
+      "controls": [
+        "Region",
+        "comparison locks"
+      ],
+      "acceptance": [
+        "A crop matches the equivalent full-frame region."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-080",
+      "family": "Output and production",
+      "name": "Job continuation and recovery",
+      "benefit": "Preserve completed work",
+      "controls": [
+        "Checkpoint",
+        "resume"
+      ],
+      "acceptance": [
+        "A resumed job validates scene and resource hashes before continuing."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-081",
+      "family": "Performance and execution",
+      "name": "Executor capability contracts",
+      "benefit": "Reject unsupported combinations early",
+      "controls": [
+        "Device and profile selection"
+      ],
+      "acceptance": [
+        "Preflight and start evaluate the same immutable request."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-082",
+      "family": "Performance and execution",
+      "name": "Intersection acceleration and instances",
+      "benefit": "Scale repeated geometry",
+      "controls": [
+        "Build strategy",
+        "instance policy"
+      ],
+      "acceptance": [
+        "Instanced and expanded references agree without double transforms."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-083",
+      "family": "Performance and execution",
+      "name": "Memory budgets",
+      "benefit": "Bound allocations before rendering",
+      "controls": [
+        "Budget",
+        "admission policy"
+      ],
+      "acceptance": [
+        "A refused job leaves the document and UI responsive."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-084",
+      "family": "Performance and execution",
+      "name": "On-demand textures and detail levels",
+      "benefit": "Manage large resource packs",
+      "controls": [
+        "Cache budget",
+        "LOD"
+      ],
+      "acceptance": [
+        "Missing tiles produce an explicit error or identified preview mode."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-085",
+      "family": "Performance and execution",
+      "name": "Responsive cancellation",
+      "benefit": "Keep long operations interruptible",
+      "controls": [
+        "Cancel",
+        "phase display"
+      ],
+      "acceptance": [
+        "Cancellation releases owned resources and preserves the design."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-086",
+      "family": "Performance and execution",
+      "name": "Shader and preparation caches",
+      "benefit": "Avoid repeated setup work",
+      "controls": [
+        "Cache policy"
+      ],
+      "acceptance": [
+        "Cache keys include all relevant code and resource versions."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-087",
+      "family": "Performance and execution",
+      "name": "Multiple devices and distribution",
+      "benefit": "Scale suitable production workloads",
+      "controls": [
+        "Device set",
+        "partition policy"
+      ],
+      "acceptance": [
+        "Merged output accounts for sample weights and failed work units."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-088",
+      "family": "Performance and execution",
+      "name": "Cross-executor regression",
+      "benefit": "Maintain consistent scene intent",
+      "controls": [
+        "Reference suite",
+        "tolerances"
+      ],
+      "acceptance": [
+        "CPU and GPU comparisons disclose unsupported features and numeric tolerances."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-089",
+      "family": "CAD and reproducibility",
+      "name": "Appearance separate from engineering",
+      "benefit": "Preserve design properties when styling",
+      "controls": [
+        "Appearance assignment"
+      ],
+      "acceptance": [
+        "Changing a finish does not change engineering density or mass."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-090",
+      "family": "CAD and reproducibility",
+      "name": "Face body and instance assignments",
+      "benefit": "Provide precise appearance targets",
+      "controls": [
+        "Target scope",
+        "shared or local"
+      ],
+      "acceptance": [
+        "An instance-only edit leaves its siblings unchanged."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-091",
+      "family": "CAD and reproducibility",
+      "name": "Non-destructive render scene",
+      "benefit": "Keep staging apart from CAD geometry",
+      "controls": [
+        "Render layers",
+        "visibility"
+      ],
+      "acceptance": [
+        "Staging props and visual detail do not alter the design BOM."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-092",
+      "family": "CAD and reproducibility",
+      "name": "Resource seed and version",
+      "benefit": "Make procedural results reproducible",
+      "controls": [
+        "Seed",
+        "resource version"
+      ],
+      "acceptance": [
+        "An offline reopen resolves the same declared dependencies."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-093",
+      "family": "CAD and reproducibility",
+      "name": "Undo and lossless variants",
+      "benefit": "Support confident exploration",
+      "controls": [
+        "Undo",
+        "duplicate",
+        "variant"
+      ],
+      "acceptance": [
+        "Applying a recipe is reversible as one logical action."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-094",
+      "family": "CAD and reproducibility",
+      "name": "Portable scene and resource packages",
+      "benefit": "Move projects between machines",
+      "controls": [
+        "Pack",
+        "dependency policy"
+      ],
+      "acceptance": [
+        "A package reports missing or restricted dependencies before export."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-095",
+      "family": "CAD and reproducibility",
+      "name": "Shared UI CLI and MCP commands",
+      "benefit": "Keep automation equivalent to interaction",
+      "controls": [
+        "Command parameters"
+      ],
+      "acceptance": [
+        "Programmatic commands never open interactive dialogs."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-096",
+      "family": "CAD and reproducibility",
+      "name": "Sections transparency and exploded views",
+      "benefit": "Support technical presentation",
+      "controls": [
+        "Section",
+        "explode",
+        "visibility"
+      ],
+      "acceptance": [
+        "Render state remains separate from authoritative assembly placement."
+      ],
+      "priority": "P1",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-097",
+      "family": "CAD and reproducibility",
+      "name": "CAD geometry precision for rendering",
+      "benefit": "Resolve small parts within large assemblies",
+      "controls": [
+        "Tessellation tolerance",
+        "local frames"
+      ],
+      "acceptance": [
+        "No cracks, self-shadow acne or lost small geometry at the test scales."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-098",
+      "family": "Specialized optics",
+      "name": "Multilayer interference coatings",
+      "benefit": "Represent layered optical coatings",
+      "controls": [
+        "Layer stack",
+        "thickness data"
+      ],
+      "acceptance": [
+        "Reference angular and spectral responses are identified and reproducible."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-099",
+      "family": "Specialized optics",
+      "name": "Surface diffraction",
+      "benefit": "Describe grating-like material behavior",
+      "controls": [
+        "Pitch",
+        "orientation",
+        "spectral model"
+      ],
+      "acceptance": [
+        "Diffraction is distinguished from thin-film interference and lens flare."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-100",
+      "family": "Specialized optics",
+      "name": "Retroreflection",
+      "benefit": "Describe return-biased scattering",
+      "controls": [
+        "Response model",
+        "angular width"
+      ],
+      "acceptance": [
+        "Source-camera separation changes brightness in the intended way."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-101",
+      "family": "Specialized optics",
+      "name": "Spectrally excited fluorescence",
+      "benefit": "Represent wavelength conversion",
+      "controls": [
+        "Excitation",
+        "emission",
+        "yield data"
+      ],
+      "acceptance": [
+        "The supported spectral model and energy accounting are explicit."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-102",
+      "family": "Specialized optics",
+      "name": "Phosphorescence with temporal state",
+      "benefit": "Represent delayed emission",
+      "controls": [
+        "Excitation history",
+        "decay model"
+      ],
+      "acceptance": [
+        "Decay follows scene time and survives a checkpoint."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-103",
+      "family": "Specialized optics",
+      "name": "Lenticular micro-optics",
+      "benefit": "Represent angle-selective lens arrays",
+      "controls": [
+        "Pitch",
+        "curvature",
+        "layer registration"
+      ],
+      "acceptance": [
+        "View transitions follow the selected geometric or validated effective model."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-104",
+      "family": "Detail and geometry",
+      "name": "Geometric curves and fibers",
+      "benefit": "Resolve silhouette-scale strands",
+      "controls": [
+        "Radius",
+        "density",
+        "representation"
+      ],
+      "acceptance": [
+        "Macro fibers remain geometric and distant fibers use a declared approximation."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-105",
+      "family": "Lunar and production extensions",
+      "name": "Tiled high-resolution output",
+      "benefit": "Admit 4K and larger masters within measured budgets",
+      "controls": [
+        "Tile size",
+        "output resolution"
+      ],
+      "acceptance": [
+        "A tiled result matches a full-frame reference without seams."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-106",
+      "family": "Lunar and production extensions",
+      "name": "Celestial placement and visibility",
+      "benefit": "Place Sun and Earth from a declared scene context",
+      "controls": [
+        "Site",
+        "epoch",
+        "body visibility"
+      ],
+      "acceptance": [
+        "Earth visibility and terrain occlusion are checked rather than assumed."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-107",
+      "family": "Lunar and production extensions",
+      "name": "Radiometric and photometric unit boundaries",
+      "benefit": "Keep LED and solar source units explicit",
+      "controls": [
+        "Source units",
+        "calibration record"
+      ],
+      "acceptance": [
+        "Lumens, radiant watts and relative authoring gains are never conflated.",
+        "Basic source quantity and ownership checks are foundational; advanced spectral calibration is a separately gated extension."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-108",
+      "family": "Lunar and production extensions",
+      "name": "Particulate surface phase response",
+      "benefit": "Represent powder scattering beyond a flat diffuse approximation",
+      "controls": [
+        "Phase model",
+        "roughness scale"
+      ],
+      "acceptance": [
+        "Multi-angle powder references distinguish authored from measured parameters."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-109",
+      "family": "Lunar and production extensions",
+      "name": "Terrain detail hierarchy",
+      "benefit": "Combine lunar horizon and sample-scale detail",
+      "controls": [
+        "World origin",
+        "LOD",
+        "terrain seed"
+      ],
+      "acceptance": [
+        "A close vial shot and wide rover view share a continuous terrain."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-110",
+      "family": "Lunar and production extensions",
+      "name": "Persistent contact and track marks",
+      "benefit": "Record sampling and wheel interaction visually",
+      "controls": [
+        "Mark source",
+        "layer",
+        "history"
+      ],
+      "acceptance": [
+        "Marks arise from recorded contact events and do not imply a soil solver."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-111",
+      "family": "Lunar and production extensions",
+      "name": "Time-varying geometry at shutter samples",
+      "benefit": "Render articulated motion consistently",
+      "controls": [
+        "Shutter samples",
+        "pose evaluation"
+      ],
+      "acceptance": [
+        "All parts and shadows use the same simulation time."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-112",
+      "family": "Lunar and production extensions",
+      "name": "Temporal image consistency",
+      "benefit": "Avoid animated material and denoiser shimmer",
+      "controls": [
+        "Temporal policy",
+        "seed strategy"
+      ],
+      "acceptance": [
+        "A static region stays stable through a moving-camera test."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-113",
+      "family": "Lunar and production extensions",
+      "name": "Spectral LED authoring",
+      "benefit": "Distinguish source spectra and phosphor behavior",
+      "controls": [
+        "SPD reference",
+        "drive state"
+      ],
+      "acceptance": [
+        "A declared RGB approximation does not claim spectral prediction."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-114",
+      "family": "Lunar and production extensions",
+      "name": "Separate render and collision representations",
+      "benefit": "Render detailed geometry while simulating bounded proxies",
+      "controls": [
+        "Proxy version",
+        "correspondence"
+      ],
+      "acceptance": [
+        "Visual contact is checked against collision tolerances."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-115",
+      "family": "Lunar and production extensions",
+      "name": "Time-indexed scene caches",
+      "benefit": "Keep frame generation reproducible",
+      "controls": [
+        "Cache hash",
+        "time range"
+      ],
+      "acceptance": [
+        "A frame identifies the physics and appearance state it consumed."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-116",
+      "family": "Lunar and production extensions",
+      "name": "Content pack admission and streaming",
+      "benefit": "Scale the expanded library",
+      "controls": [
+        "Pack limits",
+        "cache budget"
+      ],
+      "acceptance": [
+        "An oversized or incomplete pack fails before mutation."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-117",
+      "family": "Lunar and production extensions",
+      "name": "Atomic preset composition",
+      "benefit": "Apply quality studio and environment together",
+      "controls": [
+        "Locks",
+        "replace or add policy"
+      ],
+      "acceptance": [
+        "An unresolved preset leaves the scene unchanged."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-118",
+      "family": "Lunar and production extensions",
+      "name": "Visible fidelity and availability states",
+      "benefit": "Expose what a recipe can actually deliver",
+      "controls": [
+        "Capability details",
+        "approximation choice"
+      ],
+      "acceptance": [
+        "Concept, bound and validated states are distinguishable in UI and automation."
+      ],
+      "priority": "P0",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-119",
+      "family": "Lunar and production extensions",
+      "name": "Baked simulation rendering",
+      "benefit": "Render approved motion independently of live simulation",
+      "controls": [
+        "Bake selection",
+        "checksum"
+      ],
+      "acceptance": [
+        "Rendering never changes or re-solves the approved trajectory."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    },
+    {
+      "id": "CAP-120",
+      "family": "Lunar and production extensions",
+      "name": "Reproducible batch manifests",
+      "benefit": "Record the full production request",
+      "controls": [
+        "Scene",
+        "resources",
+        "execution version"
+      ],
+      "acceptance": [
+        "Every output can be traced to one immutable manifest."
+      ],
+      "priority": "P2",
+      "status": "proposed_support_unverified",
+      "provenance_id": "ORIGINAL-2026-10-CATALOG"
+    }
+  ]
+}

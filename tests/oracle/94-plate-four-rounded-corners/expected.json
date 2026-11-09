@@ -1,0 +1,25 @@
+{
+  "source": "analytic",
+  "method": "Plate L=100, W=80, T=20 mm; Bore1 at (20,20) Ø10; Bore2 at (60,50) Ø10. Box minus independently located through-cylinders: V=LWT-sum(pi*d²*T/4), area=2(LW+LT+WT)+sum(pi*d*T-pi*d²/2), mass moments from exact box minus cylinders. Shape: four exterior vertical R10 corner rounds; four corner spandrels subtract volume T*(4-pi)*R² at symmetric centroid (L/2,W/2,T/2); rounded perimeter P=2(L+W)-8R+2pi*R",
+  "body_count": 1,
+  "volume_mm3": 155141.5926535898,
+  "area_mm2": 23627.433388230813,
+  "center_of_mass": [
+    50.20249841450349,
+    40.10124920725174,
+    10
+  ],
+  "bbox": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      100,
+      80,
+      20
+    ]
+  },
+  "faces": 12
+}

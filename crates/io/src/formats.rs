@@ -24,6 +24,8 @@ pub enum ImportTarget {
     Brep,
     /// Mesh read as a MeshImport feature (`doc.open` / `file.insert_mesh`).
     Mesh,
+    /// A reference scan, separate from model bodies (`doc.open` / `pointcloud.insert`).
+    PointCloud,
     /// A 2D drawing read into the active sketch (`sketch.insert_dxf` / `sketch.insert_svg`).
     Sketch,
 }
@@ -45,7 +47,8 @@ pub struct ImportSpec {
     /// Options offered at import time; each `param` is a parameter of `doc.open` and of the
     /// matching `file.insert_*` command.
     pub options: &'static [OptionSpec],
-    /// Read through cadmpeg, which is not built for wasm (see `crate::native_cad`).
+    /// Read through cadmpeg (FreeCAD `.FCStd`, Rhino `.3dm`). Every current host builds it;
+    /// `native = false` leaves these rows out for a host that cannot.
     pub native_only: bool,
 }
 
@@ -177,7 +180,7 @@ pub static FORMATS: &[FormatSpec] = &[
     FormatSpec {
         id: "design",
         label: "SolidCraft design",
-        extensions: &[crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"],
+        extensions: &[crate::DESIGN_EXTS[0], crate::DESIGN_EXTS[1], crate::DESIGN_EXTS[2], "json"],
         role: Role::Design,
         import: Some(ImportSpec { target: ImportTarget::Design, options: &[], native_only: false }),
         export: None,
@@ -252,6 +255,30 @@ pub static FORMATS: &[FormatSpec] = &[
         extensions: &["glb", "gltf"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Mesh, options: &[UP_Y], native_only: false }),
+        export: None,
+    },
+    FormatSpec {
+        id: "ply",
+        label: "PLY point cloud",
+        extensions: &["ply"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    FormatSpec {
+        id: "xyz",
+        label: "XYZ point cloud",
+        extensions: &["xyz"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
+        export: None,
+    },
+    FormatSpec {
+        id: "pts",
+        label: "PTS point cloud",
+        extensions: &["pts"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::PointCloud, options: &[], native_only: false }),
         export: None,
     },
     FormatSpec {
@@ -373,6 +400,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
+            ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
         }
     }
@@ -418,6 +446,16 @@ mod tests {
         for e in ["3mf", "stl", "obj", "glb", "gltf"] {
             assert!(with_target(ImportTarget::Mesh).contains(&e), "registry misses mesh .{e}");
         }
+        for e in ["ply", "xyz", "pts"] {
+            assert!(with_target(ImportTarget::PointCloud).contains(&e), "registry misses point cloud .{e}");
+            assert!(crate::is_point_cloud_path(&format!("scan.{e}")));
+            assert!(open_extensions(true).contains(&e));
+            assert!(open_extensions(false).contains(&e));
+            assert_eq!(
+                import_for_path(&format!("scan.{}", e.to_uppercase())).and_then(|f| f.import.as_ref()).map(|i| i.target),
+                Some(ImportTarget::PointCloud)
+            );
+        }
         for e in with_target(ImportTarget::Design) {
             assert!(crate::is_design_path(&format!("part.{e}")), "is_design_path misses .{e}");
         }
@@ -452,9 +490,13 @@ mod tests {
         assert!(for_path("nodot").is_none());
     }
 
+    /// cadmpeg is pure Rust now, so the browser build offers its rows too; `native = false`
+    /// stays for a host that cannot build it.
     #[test]
-    fn wasm_filtering_hides_the_cadmpeg_rows() {
+    fn a_host_without_cadmpeg_leaves_its_rows_out() {
         assert!(importable(true).any(|f| f.id == "fcstd"));
+        assert!(open_extensions(true).contains(&"fcstd"));
+        assert!(open_extensions(true).contains(&"3dm"));
         assert!(importable(false).all(|f| f.id != "fcstd" && f.id != "3dm"));
         assert!(!open_extensions(false).contains(&"fcstd"));
         assert!(open_extensions(false).contains(&"igs"));
@@ -465,11 +507,12 @@ mod tests {
     fn import_filter_groups_hold_the_expected_extensions() {
         let native = import_filters(true);
         let find = |label: &str| native.iter().find(|(l, _)| *l == label).map(|(_, e)| e.clone()).unwrap_or_default();
-        assert_eq!(find("SolidCraft design (container or JSON)"), vec![crate::DESIGN_EXT, crate::LEGACY_DESIGN_EXT, "json"]);
+        assert_eq!(find("SolidCraft design (container or JSON)"), vec!["sc", "solidcraft", "solvecraft", "json"]);
         assert_eq!(find("STEP"), vec!["step", "stp"]);
         assert_eq!(find("IGES"), vec!["igs", "iges"]);
         assert_eq!(find("FreeCAD and Rhino"), vec!["fcstd", "3dm"]);
         assert_eq!(find("Mesh (3MF, STL, OBJ, glTF)"), vec!["stl", "3mf", "obj", "glb", "gltf"]);
+        assert_eq!(find("Point cloud (PLY, XYZ, PTS)"), vec!["ply", "xyz", "pts"]);
         assert_eq!(find("Sketch drawings (DXF, SVG)"), vec!["dxf", "svg"]);
         assert!(import_filters(false).iter().all(|(l, _)| *l != "FreeCAD and Rhino"));
     }

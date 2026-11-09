@@ -1,7 +1,7 @@
 //! Configuration graph remapping for independent component copies.
 use super::{Column, ConfigTable};
 use crate::{DocError, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default)]
 pub struct ConfigCloneMaps {
@@ -69,11 +69,7 @@ impl ConfigTable {
                     maps.bodies.get(&target.body).zip(maps.features.get(&target.origin_feature)).map(|(body, origin)| {
                         let mut target = target.clone();
                         target.body = body.clone();
-                        target.name = target
-                            .name
-                            .strip_prefix(&format!("F{}:", target.origin_feature))
-                            .map(|role| format!("F{origin}:{role}"))
-                            .unwrap_or_else(|| target.name.clone());
+                        target.name = crate::persistent_name::map_features(&target.name, &maps.features).unwrap_or_else(|| target.name.clone());
                         target.origin_feature = *origin;
                         if let Some(certificate) = &mut target.certificate {
                             certificate.remap_features(&maps.features);
@@ -106,6 +102,9 @@ impl ConfigTable {
                 }
             }
         }
+        // The ids taken so far, looked up rather than scanned: copies of rules whose ids share
+        // their first 40 characters try one id after another.
+        let mut taken: BTreeSet<String> = next.rules.iter().map(|rule| rule.id.clone()).collect();
         for rule in &self.rules {
             if let Some(mut copied) = rule.clone_for_targets(maps) {
                 if next.rules.len() >= super::MAX_RULES {
@@ -114,8 +113,9 @@ impl ConfigTable {
                 let stem: String = rule.id.chars().take(40).collect();
                 copied.id = (1..=super::MAX_RULES + 1)
                     .map(|i| format!("{stem}_copy{i}"))
-                    .find(|id| !next.rules.iter().any(|rule| rule.id == *id))
+                    .find(|id| !taken.contains(id))
                     .ok_or_else(|| DocError::Invalid("no configuration rule ID available".into()))?;
+                taken.insert(copied.id.clone());
                 copied.name = format!("{} (copy)", rule.name.chars().take(120).collect::<String>());
                 next.rules.push(copied);
             }
@@ -142,7 +142,7 @@ mod tests {
                     body: "Old".into(),
                     origin_feature: 3,
                     name: "F3:+z".into(),
-                    point: solidcraft_geom::Vec3::new(1., 1., 2.),
+                    point: solidcore_record::Vec3::new(1., 1., 2.),
                     certificate: None,
                 }),
             ],
@@ -199,7 +199,7 @@ mod tests {
                     body: "Foreign".into(),
                     origin_feature: 3,
                     name: "F3:+z".into(),
-                    point: solidcraft_geom::Vec3::ZERO,
+                    point: solidcore_record::Vec3::ZERO,
                     certificate: None,
                 }),
             ],

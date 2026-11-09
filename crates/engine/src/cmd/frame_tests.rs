@@ -595,7 +595,7 @@ fn bare_profile_numbers_are_in_the_design_units() {
 fn members_follow_a_frame_sketch_in_another_component() {
     let mut s = Session::default();
     rectangle_frame(&mut s);
-    let c = run(&mut s, "component.create", json!({"name": "Frame parts"}))["component"].as_u64().unwrap();
+    let c = run(&mut s, "component.create", json!({"name": "Frame parts", "grounded": false}))["component"].as_u64().unwrap();
     let o = s.doc.occurrence_of(c).unwrap().id;
     run(&mut s, "occurrence.move", json!({"occurrence": o, "translate": [0, 0, 100], "capture": true}));
     // Made in the moved component, the members still lie on the root's frame sketch.

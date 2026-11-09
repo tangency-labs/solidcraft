@@ -1,0 +1,1036 @@
+{
+  "metadata": {
+    "schema_version": "0.1.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "authorship": "Original SolidCraft prepared-demo authoring specifications. The separately pinned native source is documented in source-lock.json; these semantic resources remain unbound.",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "source_lock": "../source-lock.json",
+    "source_state": "pinned_native",
+    "expected_native_label": "SELENE-showcase.solidcraft",
+    "source_requirement": "Require ../source-lock.json active_source.status='pinned_native', matching accepted bytes/format/units/+Z, confirmed admission review and reviewed semantic selectors. An expected filename is not proof of identity.",
+    "catalog_root": "../../../../docs/render-materials",
+    "catalog_inputs": [
+      {
+        "path": "materials.json",
+        "sha256": "e2b590cf79501a8c4c1cad1dbf143a215a00fd8ceafcd5b038cc60364b60f5f3"
+      },
+      {
+        "path": "environment-presets.json",
+        "sha256": "4e01efeb3abce5b5c85a2c43cfa913d0c6740775b4d068184d879846cdd81a5c"
+      },
+      {
+        "path": "studio-presets.json",
+        "sha256": "175e117fe286da592b982a69472aec7a001d10a707d002b189a745dd2f77cd53"
+      },
+      {
+        "path": "quality-presets.json",
+        "sha256": "d57107708a673286fea1fe23611e0a7d97fe8694be80fd320143f97cafb9738d"
+      },
+      {
+        "path": "scene-presets.json",
+        "sha256": "63f0da0476dd3c09f7c125d3f525582196525bd74289e2b18fc2c3f8ddad6466"
+      }
+    ],
+    "coordinate_frame": {
+      "length_units": "mm",
+      "angle_units": "radians",
+      "up_axis": "+Z",
+      "front_axis": "-Y",
+      "right_axis": "+X",
+      "horizontal_axes_basis": "Authored presentation-stage convention; not an observed native vehicle heading.",
+      "source_alignment_policy": "Review and record the improved source-to-stage instance alignment before use; do not rewrite native component transforms."
+    },
+    "numeric_policy": "Values are authored initial settings or inherited catalog parameters. No value is a measured model transform, source photometry, optical constant or mechanical property.",
+    "native_target_policy": "No legacy source IDs are targets. Resolve semantic roles against the accepted native file and save the source hash with the reviewed selectors.",
+    "runtime_policy": "This JSON is an authoring specification. It is not an engine command and does not claim resource loading, rendering, simulation or application integration.",
+    "role_policy": "Role IDs are semantic bindings, not source component IDs. Appearance roles refer to existing MAT concepts; geometry/source roles can carry no material.",
+    "native_opaque_compiler_policy": "prepare.py compile is restricted to reviewed native BODY selections for roles with kind=appearance, owner=subject and opaque_proxy_allowed=true. Stage geometry, framing, interaction regions, layered dust, optics and emitters are not compiled by that tool.",
+    "source_snapshot_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677"
+  },
+  "items": [
+    {
+      "id": "rover_assembly",
+      "name": "Whole accepted rover",
+      "kind": "framing_geometry",
+      "owner": "subject",
+      "description": "The complete selected rover instance used for framing, clearance and a render-only presentation transform.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the accepted root occurrence and all included visible children.",
+        "Exclude terrain and external light emitters from the framing bounds."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "sample_container",
+      "name": "Selected independent sample container",
+      "kind": "framing_geometry",
+      "owner": "subject",
+      "description": "The reviewed vial assembly including its lid and contents; the rack retention grommet stays with the rack.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Identify one container and its own rigid or assembly identity.",
+        "For flight planning require an independently addressable container, explicit closure state and source lineage."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "sampling_contact_region",
+      "name": "Tool and terrain contact region",
+      "kind": "interaction_region",
+      "owner": "interaction",
+      "description": "A reviewed region containing the tool tip and the local terrain contact patch.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve sample_scoop or a reviewed sampling-tool derivative.",
+        "Derive the region from the validated pose and terrain contact; no native coordinates are supplied here."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "led_work_patch",
+      "name": "Task-light receiver region",
+      "kind": "stage_region",
+      "owner": "stage",
+      "description": "The region that must be geometrically shadowed from the Sun and illuminated only by a resolved subject task light plus reflected light.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the generated work patch and terrain occluder.",
+        "Ray-test the finite solar disk across the required receiver footprint before accepting the intended shadow state."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "transfer_workspace",
+      "name": "Container transfer workspace",
+      "kind": "interaction_region",
+      "owner": "interaction",
+      "description": "The union of the selected arm, container, storage target and reviewed transfer station.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the container, gripper and station in one declared frame.",
+        "Use validated poses for static coverage; do not infer a reachable trajectory from the camera recipe."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "capture_workspace",
+      "name": "Planned flight and capture coverage",
+      "kind": "interaction_region",
+      "owner": "interaction",
+      "description": "Framing bounds for reviewed release, flight, possible miss and capture events.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Before a bake exists, use only explicitly reviewed planning poses and label the shot as planning.",
+        "For animation, derive bounds from the approved bake over the complete shutter interval and include miss outcomes."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "selene_container_transfer_station",
+      "name": "Reviewed transfer station",
+      "kind": "subject_geometry",
+      "owner": "subject",
+      "description": "The actual storage/transfer geometry selected in the improved model, or a separately reviewed derivative.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Match real source geometry or record a named derivative with its own hash.",
+        "Do not create an invisible station or move the original laboratory to satisfy a camera composition."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "rover_structure",
+      "name": "Chassis and structure",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Coated or anodized chassis regions, with engineering material unchanged.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-567",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "wheel_rim",
+      "name": "Wheel metal regions",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Reviewed wheel rims and exposed metal regions; preserve the actual wheel construction.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-561",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "arm_tube",
+      "name": "Arm structural tubes",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Directional structural finish on reviewed arm links.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-021",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-571",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "arm_wrist",
+      "name": "Arm wrist and joint housing",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Separate wrist and joint-housing regions.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-572",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "gripper_contact",
+      "name": "Gripper contact surfaces",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Reviewed gripping surfaces; render appearance does not assign contact friction.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-573",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "sample_scoop",
+      "name": "Sampling scoop surface",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "A scoop only if one exists in the accepted source or a reviewed derivative.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Verify that the source contains a scoop or reviewed sampling tool; a gripper name alone is insufficient.",
+        "Block sampling-contact shots if the necessary tool geometry is absent; other shots record an explicit absent-role decision."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-575",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "solar_cell",
+      "name": "Solar-cell optical region",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Cell appearance distinct from coverglass and interconnects.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-021",
+        "CAP-025",
+        "CAP-026",
+        "CAP-033",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-098"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-511",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "solar_coverglass",
+      "name": "Solar coverglass",
+      "kind": "optical_appearance",
+      "owner": "subject",
+      "description": "Separate optical cover layer with reviewed thickness and interfaces.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-021",
+        "CAP-025",
+        "CAP-026",
+        "CAP-033",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-098"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-513",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "vial_glass",
+      "name": "Vial wall and bottom",
+      "kind": "optical_appearance",
+      "owner": "subject",
+      "description": "Reviewed hollow container walls and bottom, without double surfaces.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-033",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-582",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "vial_cap",
+      "name": "Vial cap and grip",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Cap regions and grip geometry belonging to the selected container.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-038",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-596",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "sample_contents",
+      "name": "Container sample contents",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "A declared visual sample representation; no sample mass or grain mechanics is inferred.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-044",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-550",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "sample_cassette",
+      "name": "Sample cassette and rack",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "The storage structure, retaining features and nonmoving grommets.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-020",
+        "CAP-033",
+        "CAP-036",
+        "CAP-038",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-595",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "pcb_solder_mask",
+      "name": "PCB solder mask",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Board coating separated from traces, pads and components.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-021",
+        "CAP-033",
+        "CAP-038",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-161",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "circuit_contact",
+      "name": "Circuit metal contacts",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Reviewed pads and conductive regions, excluding board coating.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-021",
+        "CAP-033",
+        "CAP-038",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-090",
+        "CAP-092"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-163",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "cable_jacket",
+      "name": "Cable insulation",
+      "kind": "appearance",
+      "owner": "subject",
+      "description": "Cable jacket geometry without changing electrical or mechanical properties.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-033",
+        "CAP-036",
+        "CAP-038",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-104"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-331",
+      "opaque_proxy_allowed": true,
+      "opaque_proxy_limit": "Reviewed BODY-only diagnostic color proxy. No shader layering, measured optical response, physical-material change, geometry edit or final-render fidelity is implied."
+    },
+    {
+      "id": "rover_dust_overlay",
+      "name": "Spatially bounded rover dust",
+      "kind": "appearance_layer",
+      "owner": "subject",
+      "description": "A sparse surface layer over selected exposed rover regions, preserving the underlying appearance.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-033",
+        "CAP-036",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Select host faces or bodies explicitly and store a bounded surface mask.",
+        "Exclude protected interiors and intentional clean optical/contact regions unless the shot explicitly includes contamination.",
+        "Do not replace the whole rover material with gray paint and do not infer friction or electrostatic behavior."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-551",
+      "layer_policy": {
+        "base_appearance_preserved": true,
+        "coverage_space": "host_surface",
+        "airborne_medium": false,
+        "coverage_binding": "authored_mask_requires_review"
+      },
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "task_led_emitter",
+      "name": "Task LED emitting region",
+      "kind": "emissive_appearance",
+      "owner": "subject",
+      "description": "The actual emitting face, tied to one physical or calibrated authored source.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-013",
+        "CAP-017",
+        "CAP-018",
+        "CAP-025",
+        "CAP-028",
+        "CAP-033",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-101"
+      ],
+      "binding_requirements": [
+        "Identify the emitting surface separately from its lens, housing and any sampling proxy.",
+        "Resolve one energy owner named rover_task_led; an analytic sampler and visible emitter cannot add duplicate power.",
+        "Bind a declared source quantity and calibration before rendering; no lumens or irradiance are invented here."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-442",
+      "energy_source_role_id": "rover_task_led",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "task_led_optic",
+      "name": "Task LED optic or diffuser",
+      "kind": "optical_appearance",
+      "owner": "subject",
+      "description": "The reviewed optical body associated with the task LED.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-025",
+        "CAP-026",
+        "CAP-027",
+        "CAP-028",
+        "CAP-033",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-103"
+      ],
+      "binding_requirements": [
+        "MAT-456 specifically denotes a scattering silicone light tube; confirm that this matches the accepted geometry and intended optical construction.",
+        "If the native optic is different, record a reviewed shot-level appearance override to a matching catalog concept; do not reinterpret MAT-456 as generic clear glass.",
+        "Resolve thickness, interfaces and emitter-to-optic alignment; the optic is not a second emitter."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-456",
+      "energy_source_role_id": "rover_task_led",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "rover_task_led",
+      "name": "Single task-light energy owner",
+      "kind": "light_source",
+      "owner": "subject",
+      "description": "One resolved subject-owned source whose visible face is task_led_emitter and whose optical geometry is task_led_optic.",
+      "binding_status": "unbound",
+      "selector_policy": "reviewed_semantic_selection_after_source_lock",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the actual hardware source and any analytic sampling representation as one contribution.",
+        "Leave disabled or block an LED-required shot until its source quantity, orientation and optics are bound."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "lunar_mare_regolith",
+      "name": "Mare-style stage ground",
+      "kind": "appearance",
+      "owner": "stage",
+      "description": "The generated ground surface; original conceptual terrain, not a named landing site.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-044",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-531",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "lunar_highland_regolith",
+      "name": "Highland-style stage ground",
+      "kind": "appearance",
+      "owner": "stage",
+      "description": "The generated highland-style ground surface; no local mineral or albedo measurement is claimed.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-044",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-546",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "lunar_rocks",
+      "name": "Generated lunar rock set",
+      "kind": "stage_geometry",
+      "owner": "stage",
+      "description": "The named collection emitted by the procedural terrain generator; every generated rock receives an explicit appearance.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve rock count, size distribution and seed from the stage geometry source.",
+        "Keep rocks outside required wheel/contact clearances or validate deliberate contacts."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "lunar_highland_rock",
+      "name": "Generated lunar rock appearance",
+      "kind": "appearance",
+      "owner": "stage",
+      "description": "The existing scene material concept for fractured rubble, assigned to the generated lunar_rocks set.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-044",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-545",
+      "geometry_role_id": "lunar_rocks",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "neutral_gray_matte",
+      "name": "Neutral diagnostic floor",
+      "kind": "appearance",
+      "owner": "stage",
+      "description": "A neutral authored floor appearance for studio comparisons.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-021",
+        "CAP-033",
+        "CAP-038",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-031",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "neutral_satin_floor",
+      "name": "Turntable floor finish",
+      "kind": "appearance",
+      "owner": "stage",
+      "description": "A neutral authored painted floor/turntable finish, kept distinct from rover appearances.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-017",
+        "CAP-018",
+        "CAP-021",
+        "CAP-033",
+        "CAP-038",
+        "CAP-039",
+        "CAP-040",
+        "CAP-057",
+        "CAP-089",
+        "CAP-092"
+      ],
+      "binding_requirements": [
+        "Resolve the role to explicit geometry or a declared absent decision; never use a fuzzy whole-component material assignment."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "candidate_material_id": "MAT-031",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    },
+    {
+      "id": "turntable_platform",
+      "name": "Render-stage turntable platform",
+      "kind": "stage_geometry",
+      "owner": "stage",
+      "description": "The procedural platform used for presentation staging; no rotary mechanism or physical dynamics is implied.",
+      "binding_status": "unbound",
+      "selector_policy": "named_output_of_resolved_stage_generator",
+      "required_capabilities": [
+        "CAP-091",
+        "CAP-097"
+      ],
+      "binding_requirements": [
+        "Resolve platform dimensions and check the complete swept subject envelope plus clearance.",
+        "Use a render-instance presentation transform; preserve native geometry and internal joint state."
+      ],
+      "acceptance": [
+        "Preserve native dimensions and engineering properties; record the reviewed target scope and source or generator version."
+      ],
+      "status": "specified_unbound",
+      "opaque_proxy_allowed": false,
+      "opaque_proxy_limit": "Outside the native opaque BODY compiler; preserve as a semantic authoring role until its dedicated resource/geometry/source adapter is available."
+    }
+  ]
+}

@@ -33,10 +33,10 @@ pub(crate) fn click(h: &mut Harness, handle: &str) {
     h.frames(3);
 }
 
-/// One component named Block, with its original occurrence and the root active.
+/// One component named Block, with its original occurrence free and the root active.
 pub(crate) fn component_box() -> (Harness, u64, u64) {
     let mut h = Harness::new();
-    let part = h.app.run("component.create", json!({"name":"Block"})).unwrap();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
     let component = part["component"].as_u64().unwrap();
     let occurrence = part["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
@@ -63,7 +63,7 @@ pub(crate) fn selected_text(text: &str, at: [i32; 2]) -> (Harness, String, Strin
     let result = h.app.run("sketch.text", json!({"text":text,"at":at,"height":10})).unwrap();
     let link = result["link"].as_str().unwrap().to_owned();
     let curve = result["curves"][0].as_str().unwrap().to_owned();
-    h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone() }];
+    h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone(), sketch: None }];
     (h, link, curve)
 }
 

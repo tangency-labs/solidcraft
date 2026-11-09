@@ -47,6 +47,9 @@
 //! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`. Chrome comes from
 //! `CHROME` or the usual install locations; `cargo xtask ci` skips this test when there is none.
 //!
+//! A real build's copies each get a file of their own, as successive deployments have files
+//! named differently.
+//!
 //! The stand-in app has a content-named script, a `shared.js` whose name is the same in every
 //! build (a page must get its own build's), more files under `icons/` than the browser asks for
 //! at once, and an on-demand file under `fonts/` (not kept).
@@ -90,12 +93,30 @@ pub fn run_api(site: &str) -> Result<(), String> {
     server.set(Mode::Serve(site));
     let browser = Chrome::launch(&chrome, &work.0.join("profile"))?;
     let mut cdp = browser.connect()?;
+    let downloads = work.0.join("downloads");
+    std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+    cdp.call("Browser.setDownloadBehavior", json!({"behavior": "allow", "downloadPath": downloads}))?;
     cdp.call("Emulation.setDeviceMetricsOverride", json!({"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": false}))?;
     // The page has the keyboard, as a tab the user is looking at does (for KEYS_TEST).
     cdp.call("Emulation.setFocusEmulationEnabled", json!({"enabled": true}))?;
-    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}?webgl", server.port)}))?;
+    // Use the app's normal backend selection, including WebGPU where available.
+    cdp.call("Page.navigate", json!({"url": format!("http://127.0.0.1:{}{PREFIX}", server.port)}))?;
     wait_for(&mut cdp, "!!window.solidcraft && !document.getElementById('solidcraft_loading')", "the browser API is ready", |v| v == true)?;
     let result = cdp.eval(API_TEST)?;
+    let path = downloads.join("Untitled-view.dxf");
+    let started = Instant::now();
+    loop {
+        if let Ok(dxf) = std::fs::read_to_string(&path) {
+            if !(dxf.contains("ENTITIES") && dxf.contains("VISIBLE") && dxf.contains("EOF")) {
+                return Err("web-api-test: the view download is not a complete DXF drawing".into());
+            }
+            break;
+        }
+        if started.elapsed() > LAUNCH_TIMEOUT {
+            return Err("web-api-test: Export Current View did not download its DXF".into());
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
     println!("web-api-test: {result}");
     let keys = cdp.eval(KEYS_TEST)?;
     println!("web-api-test: {keys}");
@@ -156,9 +177,66 @@ const API_TEST: &str = r#"(async () => {
     check(settled.filter(r => r.status === 'rejected' && r.reason instanceof Error && r.reason.message.includes('pending')).length === 1,
         'queue limit rejects excess work');
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
+    // A host page keeps the design itself (#8517): out, changed, and back in its place.
+    const kept = await app.request('document.export');
+    check(kept.format === 'json' && kept.dirty === true && kept.text.includes('Browser API box'), 'export gives the design as its file holds it');
+    check((await app.request('document.saved', {revision: kept.revision})).dirty === false, 'the host saved that revision');
+    await app.execute('solid.box', {length: 10, width: 10, height: 10, body_name: 'Second box'});
+    await rejects(() => app.request('document.saved', {revision: kept.revision}), 'changed since');
+    await rejects(() => app.request('document.import', {text: 'not a design'}), '');
+    check((await app.inspect()).bodies.length === 2, 'a refused import leaves the design as it was');
+    check((await app.request('document.import', {text: kept.text})).errors === 0, 'import evaluates the kept design');
+    check((await app.inspect()).bodies.length === 1, 'import puts the kept design back');
+    check((await app.request('document.export')).dirty === false, 'an imported design opens saved');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
-    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected'};
+    // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
+    // Exercise both the command timer and the projection/occlusion timers on the real target.
+    // A wasm abort stops the frame loop before it can settle the command's reply.
+    const crashed = new Promise((_, reject) => {
+        window.addEventListener('error', event => reject(event.error || new Error(event.message)), {once: true});
+    });
+    for (const hidden of ['omit', 'dashed']) {
+        const drawing = await Promise.race([app.execute('file.export_view_dxf', {camera: ui.camera, hidden}), crashed]);
+        check(drawing.units === 'mm' && drawing.visible > 0, 'view export contains visible edges in mm');
+        check(drawing.dxf.includes('ENTITIES') && drawing.dxf.includes('VISIBLE'), 'view export returns a DXF drawing');
+        check(drawing.dxf.includes('HIDDEN') === (hidden === 'dashed'), 'view export respects the hidden-edge option');
+        for (const stage of ['prepare_ms', 'projection_ms', 'occlusion_ms']) {
+            check(Number.isFinite(drawing.stats[stage]) && drawing.stats[stage] >= 0, stage + ' is a valid browser timing');
+        }
+    }
+    check((await app.inspect()).bodies.length === 1, 'view export preserves the document');
+    await app.request('ui.start', {command: 'file.export_view_dxf'});
+    // Let the new dialog finish its initial layout before taking the button's position.
+    await app.request('ui.inspect');
+    await app.request('ui.inspect');
+    const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
+    await app.request('ui.click', {x, y});
+    // Browser files exist only in the VFS: native filesystem metadata cannot find them.
+    await app.execute('file.save', {path: '/upload/linked-part.sc'});
+    await app.execute('file.new');
+    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
+    const links = await app.execute('component.links');
+    check(links.links[0].found === true, 'linked part is found in browser storage');
+    check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
+    check(links.links[0].file === '/upload/linked-part.sc', 'relative link resolves to a browser storage key');
+    await app.request('ui.menu', {x: 200, y: 300, target: {type: 'occurrence', path: [linked.occurrence]}});
+    let menu;
+    for (let frame = 0; frame < 120; frame++) {
+        menu = await app.request('ui.menu');
+        if (menu.items?.some(item => item.id === 'ui.openLinkedDesign')) break;
+    }
+    check(menu.items?.some(item => item.id === 'ui.openLinkedDesign'), 'occurrence menu offers the source design');
+    await app.request('ui.menuPick', {item: 'ui.openLinkedDesign'});
+    const tabs = await app.request('ui.documents');
+    check(tabs.documents.length === 2 && tabs.active === 1, 'linked source opens in another tab');
+    check((await app.inspect()).bodies[0].name === 'Browser API box', 'source design is active');
+    await app.request('ui.documents', {action: 'switch', index: 0});
+    check((await app.execute('component.links')).links[0].component === linked.component, 'assembly remains in its tab');
+    return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected',
+        dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage',
+        host: 'exported, saved and imported back'};
 })()"#;
 
 /// Run the test; `required: false` (from `cargo xtask ci`) skips it when Chrome is missing.
@@ -177,6 +255,10 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             check_site(root, Path::new(dir), &work.0.join("check"))?;
             for (to, build) in &builds {
                 copy_dir(Path::new(dir), to)?;
+                // Trunk names files after their contents, so two real deployments differ in more
+                // than `index.html`; copies of one build don't. A file of its own per copy lets
+                // a step hold back what one build has and the next lacks (step 13).
+                std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
@@ -380,7 +462,7 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     // Chrome sends a server at most six requests at once: a build with more files has the rest
     // wait for the first ones. v6 is deployed once all of v5's are asked for (any asked later
     // would get v6's file, which rightly ends v5's download, but that isn't this step).
-    server.wait_asked_slowly(asked + only_in(&v5, &v6)?)?;
+    server.wait_asked_slowly(asked + file_count(&v5)?)?;
     server.set(Mode::Serve(v6));
     // v5's files are still held while v6 launches; they come once v6 has started.
     let t = launch(&mut cdp, "v6")?;
@@ -453,20 +535,22 @@ const STATE_JS: &str = "(async () => {
   }
   const filling = (await navigator.locks.query()).held.map((l) => l.name).filter((n) => n.startsWith(prefix));
   return { search: location.search, ready: document.readyState, build: document.documentElement.dataset.build ?? null,
+    scriptStartedBuild: document.documentElement.dataset.started ?? null,
+    scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
     registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
 })()";
 
-/// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
-/// How many files `build` keeps that `other` doesn't have.
-fn only_in(build: &Path, other: &Path) -> Result<usize, String> {
+/// Every file this build downloads, including names shared with the next build.
+fn file_count(build: &Path) -> Result<usize, String> {
     let path = build.join("build.json");
     let json: Value =
         std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or_else(|| format!("{}: not readable", path.display()))?;
     let files = json["files"].as_array().into_iter().flatten().filter_map(|f| f["file"].as_str());
-    Ok(files.filter(|f| !other.join(f).exists()).count())
+    Ok(files.count())
 }
 
+/// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
 fn cache_name(path: &str, version: &str) -> String {
     format!("solidcraft-app {path} {version}")
 }
@@ -747,9 +831,13 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, seen: &Counters, elsewher
         Mode::Flaky(dir) => (dir, true, false),
         Mode::SlowCheck(dir) => (dir, false, true),
         Mode::SlowFiles(dir, next) => {
-            if !small && file.is_some_and(|f| !next.join(f).exists()) {
+            if !small && file.is_some() {
+                // Count shared names too: switching builds before their requests arrive would
+                // serve the next build's bytes and correctly cancel this download's hash check.
                 seen.slow.fetch_add(1, Ordering::SeqCst);
-                seen.gate.pass();
+                if file.is_some_and(|f| !next.join(f).exists()) {
+                    seen.gate.pass();
+                }
             }
             (dir, false, false)
         }

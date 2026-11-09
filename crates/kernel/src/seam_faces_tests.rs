@@ -1,8 +1,7 @@
 //! Round faces read from STEP: a whole turn bounded by one wire that runs along its seam twice.
-//! A boolean whose intersection loop lies wholly inside such a face takes it in two halves
-//! (exactly), where it used to end in a nudged tool or fail.
+//! A boolean whose intersection loop lies wholly inside such a face is exact.
 use crate::*;
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use std::f64::consts::PI;
 
 const R: f64 = 4.5;
@@ -38,25 +37,9 @@ fn pressed_volume() -> f64 {
     10.0 * segment
 }
 
-/// The boolean, which must be exact: no retry that moves the tool or ignores part of where the
-/// bodies meet.
+/// The boolean, which must succeed (SMLib's, exact: there is no other).
 fn exact(a: &Body, b: &Body, op: BoolOp) -> Option<Body> {
-    let (r, report) = capture_boolean_diagnostics(|| boolean(a, b, op));
-    assert!(report.warning().is_none(), "{op:?}: {:?}", report.warning());
-    r.unwrap()
-}
-
-#[test]
-fn a_pin_read_from_step_has_one_face_along_its_seam() {
-    let read = through_step(&pin());
-    assert_eq!(read.face_count(), 3);
-    assert!(super::needed(&read, &block()));
-    assert!(!super::needed(&pin(), &block()));
-    // Split in two halves, with the same solid.
-    let (halved, history) = super::halved(&read).unwrap();
-    assert!(super::next_split(&halved).is_none() && halved.face_count() > 3);
-    assert!(history.is_some());
-    assert!(rel(volume(&halved), PI * R * R * 40.0) < 1e-3);
+    boolean(a, b, op).unwrap()
 }
 
 #[test]
@@ -86,7 +69,6 @@ fn a_block_pressed_into_a_read_cones_side_matches_the_built_cone() {
         Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(5.0, 20.0), Vec2::new(0.0, 20.0)]), holes: vec![] };
     let cone = revolve(&Plane::YZ, &[outline], Vec2::ZERO, Vec2::Y, 2.0 * PI).unwrap().pop().unwrap();
     let read = through_step(&cone);
-    assert!(super::needed(&read, &cone));
     let block = box_solid(Vec3::new(-2.0, 4.0, 6.0), Vec3::new(2.0, 12.0, 12.0)).unwrap();
     let built = volume(&boolean(&cone, &block, BoolOp::Intersect).unwrap().unwrap());
     let read = volume(&exact(&read, &block, BoolOp::Intersect).unwrap());

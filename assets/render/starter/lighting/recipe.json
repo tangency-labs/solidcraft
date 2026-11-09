@@ -1,0 +1,37 @@
+{
+  "schema": "solidcraft-light-author-recipe/1",
+  "version": "1.0.0",
+  "provenance": {
+    "id": "ORIGINAL-2026-10-STARTER-LIGHTING",
+    "date": "2026-10-21",
+    "license": "MIT OR Apache-2.0",
+    "authoring": "Original numeric integration of original SolidCraft rig specifications; no external asset or implementation copied.",
+    "references": [
+      {
+        "url": "https://pbr-book.org/4ed/Radiometry,_Spectra,_and_Color/Working_with_Radiometric_Integrals",
+        "purpose": "Public radiometric equations: projected solid angle and area-domain irradiance. No implementation or artwork copied."
+      },
+      {
+        "url": "https://pbr-book.org/4ed/Radiometry,_Spectra,_and_Color/Radiometry",
+        "purpose": "Public definitions of radiance, intensity and irradiance. No implementation or artwork copied."
+      }
+    ]
+  },
+  "source": {
+    "path": "docs/render-materials/studio-presets.json",
+    "sha256": "175e117fe286da592b982a69472aec7a001d10a707d002b189a745dd2f77cd53",
+    "count": 24
+  },
+  "calibration": {
+    "id": "CAL-LIGHT-001",
+    "extent_mm": 1000.0,
+    "sphere_radius_b": 0.25,
+    "reflectance": 0.18,
+    "sphere_order": 48,
+    "area_order": 12,
+    "check_sphere_order": 72,
+    "check_area_order": 20,
+    "max_relative_error": 0.0015
+  },
+  "runtime_binding": "unbound"
+}

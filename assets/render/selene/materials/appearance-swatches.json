@@ -1,0 +1,1496 @@
+{
+  "about": {
+    "title": "SELENE original opaque appearance swatches",
+    "language": "en",
+    "status": "prepared_input_not_runtime_executed",
+    "source": "appearance-pack.json",
+    "license": "MIT OR Apache-2.0",
+    "layout": "48 box swatches in 8 columns and 6 rows, ordered by recipe ID; one support base.",
+    "units": "mm; Z-up",
+    "labels": "Body names only; no font or text geometry assets.",
+    "renderer_intent": "Current opaque preview only. No glass transmission, illumination from LEDs, procedural textures or advanced material features are implied.",
+    "recommended_png_size": [
+      768,
+      576
+    ],
+    "camera": "Use the render CLI automatic fit; no unverified camera or environment parameters are supplied."
+  },
+  "commands": [
+    {
+      "command": "file.new",
+      "params": {
+        "name": "SELENE original opaque appearance swatches"
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "Swatch support base",
+        "corner": [
+          -72.0,
+          -54.0,
+          0.0
+        ],
+        "length": 144.0,
+        "width": 108.0,
+        "height": 1.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "Swatch support base"
+        ],
+        "appearance": "Original neutral swatch support",
+        "color": "#8a9098",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.85,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-001 Neutral matte enclosure",
+        "corner": [
+          -69.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-001 Neutral matte enclosure"
+        ],
+        "appearance": "SELENE-AP-001 Neutral matte enclosure",
+        "color": "#717882",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.68,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-002 White thermal-coating preview",
+        "corner": [
+          -51.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-002 White thermal-coating preview"
+        ],
+        "appearance": "SELENE-AP-002 White thermal-coating preview",
+        "color": "#d9dde0",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.58,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-003 Matte optical baffle",
+        "corner": [
+          -33.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-003 Matte optical baffle"
+        ],
+        "appearance": "SELENE-AP-003 Matte optical baffle",
+        "color": "#141619",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.94,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-004 Ceramic gripper contact pad",
+        "corner": [
+          -15.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-004 Ceramic gripper contact pad"
+        ],
+        "appearance": "SELENE-AP-004 Ceramic gripper contact pad",
+        "color": "#d9d7cf",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.32,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-005 Machined aluminium wheel rim",
+        "corner": [
+          3.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-005 Machined aluminium wheel rim"
+        ],
+        "appearance": "SELENE-AP-005 Machined aluminium wheel rim",
+        "color": "#b9c0c7",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.29,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-006 Serrated metal gripper jaw",
+        "corner": [
+          21.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-006 Serrated metal gripper jaw"
+        ],
+        "appearance": "SELENE-AP-006 Serrated metal gripper jaw",
+        "color": "#a6adb5",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.4,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-007 Linear-brushed stainless housing",
+        "corner": [
+          39.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-007 Linear-brushed stainless housing"
+        ],
+        "appearance": "SELENE-AP-007 Linear-brushed stainless housing",
+        "color": "#b8bdc2",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.34,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-008 Polished stainless sample cup",
+        "corner": [
+          57.0,
+          -51.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-008 Polished stainless sample cup"
+        ],
+        "appearance": "SELENE-AP-008 Polished stainless sample cup",
+        "color": "#c9ced3",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.16,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-009 Titanium wrist finish",
+        "corner": [
+          -69.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-009 Titanium wrist finish"
+        ],
+        "appearance": "SELENE-AP-009 Titanium wrist finish",
+        "color": "#8b9098",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.43,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-010 Exposed copper conductor",
+        "corner": [
+          -51.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-010 Exposed copper conductor"
+        ],
+        "appearance": "SELENE-AP-010 Exposed copper conductor",
+        "color": "#b97850",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.27,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-011 Machined brass printer nozzle",
+        "corner": [
+          -33.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-011 Machined brass printer nozzle"
+        ],
+        "appearance": "SELENE-AP-011 Machined brass printer nozzle",
+        "color": "#b4a06b",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.3,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-012 Solidified solder joint",
+        "corner": [
+          -15.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-012 Solidified solder joint"
+        ],
+        "appearance": "SELENE-AP-012 Solidified solder joint",
+        "color": "#bec3c6",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.25,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-013 Metal sampling scoop",
+        "corner": [
+          3.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-013 Metal sampling scoop"
+        ],
+        "appearance": "SELENE-AP-013 Metal sampling scoop",
+        "color": "#9ba4ad",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.44,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-014 Gold-finished contact pad",
+        "corner": [
+          21.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-014 Gold-finished contact pad"
+        ],
+        "appearance": "SELENE-AP-014 Gold-finished contact pad",
+        "color": "#bf9c49",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.21,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-015 Black anodized chassis surrogate",
+        "corner": [
+          39.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-015 Black anodized chassis surrogate"
+        ],
+        "appearance": "SELENE-AP-015 Black anodized chassis surrogate",
+        "color": "#252a30",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.56,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-016 Silver anodized cover surrogate",
+        "corner": [
+          57.0,
+          -33.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-016 Silver anodized cover surrogate"
+        ],
+        "appearance": "SELENE-AP-016 Silver anodized cover surrogate",
+        "color": "#abb3ba",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.39,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-017 Composite arm tube surrogate",
+        "corner": [
+          -69.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-017 Composite arm tube surrogate"
+        ],
+        "appearance": "SELENE-AP-017 Composite arm tube surrogate",
+        "color": "#252a2e",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.42,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-018 Aluminized blanket metal face",
+        "corner": [
+          -51.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-018 Aluminized blanket metal face"
+        ],
+        "appearance": "SELENE-AP-018 Aluminized blanket metal face",
+        "color": "#c3c8cd",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.18,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-019 Polyimide-facing blanket surrogate",
+        "corner": [
+          -33.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-019 Polyimide-facing blanket surrogate"
+        ],
+        "appearance": "SELENE-AP-019 Polyimide-facing blanket surrogate",
+        "color": "#80602e",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.3,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-020 Solar-cell opaque preview",
+        "corner": [
+          -15.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-020 Solar-cell opaque preview"
+        ],
+        "appearance": "SELENE-AP-020 Solar-cell opaque preview",
+        "color": "#172b43",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.24,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-021 Silicone cable jacket",
+        "corner": [
+          3.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-021 Silicone cable jacket"
+        ],
+        "appearance": "SELENE-AP-021 Silicone cable jacket",
+        "color": "#484d56",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.77,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-022 Polyimide harness wrap",
+        "corner": [
+          21.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-022 Polyimide harness wrap"
+        ],
+        "appearance": "SELENE-AP-022 Polyimide harness wrap",
+        "color": "#9d713d",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.46,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-023 Fluoropolymer sealing ring",
+        "corner": [
+          39.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-023 Fluoropolymer sealing ring"
+        ],
+        "appearance": "SELENE-AP-023 Fluoropolymer sealing ring",
+        "color": "#dbddd7",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.49,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-024 Elastomer seal candidate",
+        "corner": [
+          57.0,
+          -15.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-024 Elastomer seal candidate"
+        ],
+        "appearance": "SELENE-AP-024 Elastomer seal candidate",
+        "color": "#26292b",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.86,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-025 Opaque sample cassette body",
+        "corner": [
+          -69.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-025 Opaque sample cassette body"
+        ],
+        "appearance": "SELENE-AP-025 Opaque sample cassette body",
+        "color": "#424a54",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.54,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-026 Textured ABS instrument shell",
+        "corner": [
+          -51.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-026 Textured ABS instrument shell"
+        ],
+        "appearance": "SELENE-AP-026 Textured ABS instrument shell",
+        "color": "#59616b",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.64,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-027 Powder-printed polyamide preview",
+        "corner": [
+          -33.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-027 Powder-printed polyamide preview"
+        ],
+        "appearance": "SELENE-AP-027 Powder-printed polyamide preview",
+        "color": "#abb0b1",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.87,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-028 FDM top-skin preview",
+        "corner": [
+          -15.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-028 FDM top-skin preview"
+        ],
+        "appearance": "SELENE-AP-028 FDM top-skin preview",
+        "color": "#aab5bd",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.46,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-029 Sample vial opaque inspection surrogate",
+        "corner": [
+          3.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-029 Sample vial opaque inspection surrogate"
+        ],
+        "appearance": "SELENE-AP-029 Sample vial opaque inspection surrogate",
+        "color": "#91a2ae",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.35,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-030 Window opaque inspection surrogate",
+        "corner": [
+          21.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-030 Window opaque inspection surrogate"
+        ],
+        "appearance": "SELENE-AP-030 Window opaque inspection surrogate",
+        "color": "#537286",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.24,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-031 Matte ceramic sample insert",
+        "corner": [
+          39.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-031 Matte ceramic sample insert"
+        ],
+        "appearance": "SELENE-AP-031 Matte ceramic sample insert",
+        "color": "#c9c5bb",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.59,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-032 Threaded metal closure cap",
+        "corner": [
+          57.0,
+          3.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-032 Threaded metal closure cap"
+        ],
+        "appearance": "SELENE-AP-032 Threaded metal closure cap",
+        "color": "#b6bcc3",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.31,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-033 Graphite thermal-sheet preview",
+        "corner": [
+          -69.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-033 Graphite thermal-sheet preview"
+        ],
+        "appearance": "SELENE-AP-033 Graphite thermal-sheet preview",
+        "color": "#35383d",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.91,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-034 Solder-mask board face",
+        "corner": [
+          -51.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-034 Solder-mask board face"
+        ],
+        "appearance": "SELENE-AP-034 Solder-mask board face",
+        "color": "#32624b",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.42,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-035 Exposed glass-epoxy board edge",
+        "corner": [
+          -33.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-035 Exposed glass-epoxy board edge"
+        ],
+        "appearance": "SELENE-AP-035 Exposed glass-epoxy board edge",
+        "color": "#9b9270",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.77,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-036 Molded epoxy component body",
+        "corner": [
+          -15.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-036 Molded epoxy component body"
+        ],
+        "appearance": "SELENE-AP-036 Molded epoxy component body",
+        "color": "#252727",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.8,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-037 Battery-can metal preview",
+        "corner": [
+          3.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-037 Battery-can metal preview"
+        ],
+        "appearance": "SELENE-AP-037 Battery-can metal preview",
+        "color": "#b3bbc3",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.35,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-038 Unpowered LED phosphor face",
+        "corner": [
+          21.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-038 Unpowered LED phosphor face"
+        ],
+        "appearance": "SELENE-AP-038 Unpowered LED phosphor face",
+        "color": "#d6bd64",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.65,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-039 Diffuser opaque inspection surrogate",
+        "corner": [
+          39.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-039 Diffuser opaque inspection surrogate"
+        ],
+        "appearance": "SELENE-AP-039 Diffuser opaque inspection surrogate",
+        "color": "#dadcdb",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.72,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-040 Aluminium honeycomb cut edge",
+        "corner": [
+          57.0,
+          21.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-040 Aluminium honeycomb cut edge"
+        ],
+        "appearance": "SELENE-AP-040 Aluminium honeycomb cut edge",
+        "color": "#a5adb6",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.4,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-041 Mare-style regolith surface",
+        "corner": [
+          -69.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-041 Mare-style regolith surface"
+        ],
+        "appearance": "SELENE-AP-041 Mare-style regolith surface",
+        "color": "#5e5c58",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.96,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-042 Highland-style regolith surface",
+        "corner": [
+          -51.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-042 Highland-style regolith surface"
+        ],
+        "appearance": "SELENE-AP-042 Highland-style regolith surface",
+        "color": "#8b8881",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.96,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-043 Tool-transferred dust patch",
+        "corner": [
+          -33.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-043 Tool-transferred dust patch"
+        ],
+        "appearance": "SELENE-AP-043 Tool-transferred dust patch",
+        "color": "#7b766d",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.98,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-044 Woven-metal wheel mesh",
+        "corner": [
+          -15.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-044 Woven-metal wheel mesh"
+        ],
+        "appearance": "SELENE-AP-044 Woven-metal wheel mesh",
+        "color": "#999fa7",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 1.0,
+          "roughness": 0.38,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-045 Oiled oak workshop surface",
+        "corner": [
+          3.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-045 Oiled oak workshop surface"
+        ],
+        "appearance": "SELENE-AP-045 Oiled oak workshop surface",
+        "color": "#a17a51",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.56,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-046 Varnished walnut joinery",
+        "corner": [
+          21.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-046 Varnished walnut joinery"
+        ],
+        "appearance": "SELENE-AP-046 Varnished walnut joinery",
+        "color": "#6d4d37",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.3,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-047 Automotive smooth clearcoat surrogate",
+        "corner": [
+          39.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-047 Automotive smooth clearcoat surrogate"
+        ],
+        "appearance": "SELENE-AP-047 Automotive smooth clearcoat surrogate",
+        "color": "#4e697e",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.21,
+          "dielectric_ior": 1.5
+        }
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "body_name": "SELENE-AP-048 Embossed tyre-sidewall preview",
+        "corner": [
+          57.0,
+          39.0,
+          1.0
+        ],
+        "length": 12.0,
+        "width": 12.0,
+        "height": 8.0
+      }
+    },
+    {
+      "command": "appearance.assign",
+      "params": {
+        "bodies": [
+          "SELENE-AP-048 Embossed tyre-sidewall preview"
+        ],
+        "appearance": "SELENE-AP-048 Embossed tyre-sidewall preview",
+        "color": "#282a2c",
+        "opacity": 1.0,
+        "pbr": {
+          "metallic": 0.0,
+          "roughness": 0.83,
+          "dielectric_ior": 1.5
+        }
+      }
+    }
+  ]
+}

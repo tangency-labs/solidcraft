@@ -1,5 +1,6 @@
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{
     Sel,
     doc::{FaceAttachmentStatus, FeatureKind, PlaneRef},
@@ -7,7 +8,7 @@ use solidcraft_engine::{
 
 fn shell() -> Harness {
     let mut h = Harness::new();
-    h.app.ui.show_origin = false;
+    h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Case"})).unwrap();
     h.app.run("solid.shell", json!({"faces":[[20,15,20]],"thickness":2})).unwrap();
     h.call("ui.view", json!({"view":"front"}));
@@ -24,7 +25,7 @@ fn assert_attached(h: &Harness) {
     assert_eq!(anchor.target.body, "Case");
     assert_eq!(serde_json::to_value(&anchor.target.certificate).unwrap()["kind"], "shell_planar");
     assert!(matches!(h.app.session.doc.sketch_face_attachment(id, &h.app.session.model), FaceAttachmentStatus::Healthy { .. }));
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let solved = world.sketch(id).unwrap();
     assert!(solved.plane.origin.y.abs() < 1e-8);
     assert!(solved.plane.normal().y.abs() > 0.999);
@@ -79,14 +80,14 @@ fn pending_create_sketch_accepts_an_actual_shell_wall_patch_click() {
 #[test]
 fn rounded_shell_corner_is_one_physical_face_above_and_below_the_floor() {
     let mut h = Harness::new();
-    h.app.ui.show_origin = false;
+    h.app.set_origin_shown(false);
     h.app.run("solid.box", json!({"length":80,"width":60,"height":30,"corner":[-40,-30,0],"body_name":"Case"})).unwrap();
     h.app.run("solid.fillet", json!({"edges":[[40,30,15],[-40,30,15],[-40,-30,15],[40,-30,15]],"radius":6})).unwrap();
     h.app.run("solid.shell", json!({"faces":[[0,0,30]],"thickness":2})).unwrap();
     h.call("ui.view", json!({"view":"iso"}));
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     assert_eq!(state.body("Case").unwrap().body.face_count(), 19, "no artificial lower corner faces remain in the BRep");
     let document = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();

@@ -1,0 +1,526 @@
+{
+  "metadata": {
+    "schema_version": "0.1.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "source_lock": "../source-lock.json",
+    "integration_contract": "../../../../docs/render-materials/ui-integration.json",
+    "integration_status": "proposed_ui_not_runtime_registration"
+  },
+  "id": "SELENE-DEMO-FLOW-001",
+  "kind": "ui_integration_specification_not_runtime_registration",
+  "entry_point": "Existing Render workspace, single RENDER ribbon tab. SCENE and IMAGE remain ribbon groups; browse SELENE using the local Scenes collection in the shared resource browser.",
+  "simple_flow": [
+    {
+      "step": 1,
+      "label": "Choose a scene",
+      "content": "Browse the twelve prepared SELENE shots in the local Scenes category; inspect the selected subject, source requirements and appearance fidelity.",
+      "behavior": "Keep selection and hover as reversible presentation previews. Resolve the scene draft, capabilities and lock conflicts before an explicit future atomic Apply. No complete-scene apply is registered by this specification."
+    },
+    {
+      "step": 2,
+      "label": "Choose quality",
+      "content": "Show three exact catalog profile recommendations for the selected shot, with All quality profiles available in the same selector.",
+      "behavior": "Keep camera and appearance locks. Show dimensions, work budget and actual availability. Every referenced Q profile is currently specified_unbound; a lower quality choice never removes shot optical or source requirements."
+    },
+    {
+      "step": 3,
+      "label": "Render",
+      "content": "Resolve pending edits, run the current preflight/start workflow when the applied request is supported, then show actual status, Cancel and Export actions.",
+      "behavior": "Render start captures the applied request. Cancel or job failure preserves the applied scene and source; it does not undo an earlier Apply. Raw/finished comparison appears only when the executor supplies both results."
+    }
+  ],
+  "controls": {
+    "selectors": [
+      "scene",
+      "quality"
+    ],
+    "quick": [
+      "Sun azimuth when supported",
+      "Sun elevation when supported",
+      "exposure when supported",
+      "camera fit when unlocked",
+      "terrain seed when supported",
+      "dust coverage when supported"
+    ],
+    "maximum_primary_adjustments": 6,
+    "primary_adjustment_count_policy": "Scene and quality selectors are excluded. Show only controls meaningful to the current selection and actual executor; move additional adjustments to sections.",
+    "disclosure": {
+      "default": "Quick",
+      "quick_behavior": "Default collapsed inspector sections for the current selection.",
+      "detailed_behavior": "Expand relevant resource, layer, mapping, camera and lighting sections in the same inspector.",
+      "expert_behavior": "Expand numerical transport, resource, provenance and output sections in the same inspector.",
+      "global_mode_switch": false,
+      "extra_ribbon_tabs": false,
+      "state_policy": "Disclosures never change quality, reset values or apply a scene; remember expansion and focus per document and context."
+    },
+    "advanced_groups": [
+      "appearance target and engineering-property link",
+      "surface layers, mapping and physical detail scale",
+      "emitters, source ownership and lighting normalization",
+      "terrain detail, seed and memory budget",
+      "camera projection, clipping, focus and depth of field",
+      "sampling, convergence, denoising and color output",
+      "source versions, validation evidence and reproduction manifest"
+    ],
+    "selection_policy": "Contextual controls identify the exact body, face or supported instance scope. Shared body or component edits state every affected occurrence; current native overlays do not support independent occurrence styling.",
+    "unsupported_policy": "Show the missing capability and relevant next action; expanding Detailed or Expert never enables unsupported fields.",
+    "quick_context_policy": "The quick list is the default lunar-scene context. Selecting an appearance, studio or camera replaces that list with the relevant contextual adjustments; these lists are never combined.",
+    "quick_by_context": {
+      "opaque_appearance": [
+        "appearance variant",
+        "color",
+        "roughness",
+        "metallic",
+        "assignment scope"
+      ],
+      "layered_appearance_target": [
+        "appearance variant",
+        "color",
+        "roughness",
+        "texture size when supported",
+        "texture direction when supported",
+        "coat roughness when supported"
+      ],
+      "lunar_scene": [
+        "Sun azimuth when supported",
+        "Sun elevation when supported",
+        "exposure when supported",
+        "camera fit when unlocked",
+        "terrain seed when supported",
+        "dust coverage when supported"
+      ],
+      "studio_scene": [
+        "key azimuth when supported",
+        "key elevation when supported",
+        "key size when supported",
+        "fill contribution when supported",
+        "exposure when supported",
+        "camera fit when unlocked"
+      ],
+      "camera": [
+        "view azimuth",
+        "view elevation",
+        "camera distance",
+        "field of view",
+        "focus distance when supported",
+        "exposure when supported"
+      ]
+    }
+  },
+  "availability_states": [
+    {
+      "id": "concept",
+      "action": "Read requirements",
+      "prepared_input_available": false,
+      "runtime_ui_available": false,
+      "render_available_after_preflight": false,
+      "meaning": "A conceptual requirement only; an attractive card is not a rendered asset."
+    },
+    {
+      "id": "authored_opaque_preview",
+      "action": "Open prepared material swatches in a new isolated document",
+      "prepared_input_available": true,
+      "runtime_ui_available": false,
+      "render_available_after_preflight": false,
+      "meaning": "The existing-command script is prepared and statically checked but unexecuted here. Actual execution and preflight are required; this specification does not register an in-app action."
+    },
+    {
+      "id": "awaiting_native_source",
+      "action": "Inspect the required improved model and source record",
+      "prepared_input_available": false,
+      "runtime_ui_available": false,
+      "render_available_after_preflight": false,
+      "meaning": "Model-specific targets remain unresolved until the improved native file is pinned and reviewed."
+    },
+    {
+      "id": "awaiting_optical_support",
+      "action": "Show every missing capability",
+      "prepared_input_available": false,
+      "runtime_ui_available": false,
+      "render_available_after_preflight": false,
+      "meaning": "The requested optical scene cannot be silently replaced by its opaque projection."
+    },
+    {
+      "id": "bound_and_validated",
+      "action": "Apply the resolved scene and render when implemented",
+      "prepared_input_available": false,
+      "runtime_ui_available": false,
+      "render_available_after_preflight": false,
+      "meaning": "A future state requiring source binding, actual executor support, successful preflight and recorded validation evidence. No committed shot currently claims this state."
+    }
+  ],
+  "defaults": {
+    "default_view": "Quick",
+    "detail_policy": "Detailed and Expert are inspector section disclosures, not global modes.",
+    "physical_mode": "lunar_physical",
+    "physical_mode_policy": "This is the initial lunar shot policy. Selecting a declared studio or editorial shot uses that shot policy explicitly rather than changing a global interface mode.",
+    "editorial_fill": false,
+    "earth_and_stars": "Off until a separately reviewed site/time/orientation/exposure binding enables them.",
+    "engineering_properties": "Preserve",
+    "source_native": "Read-only; save a named derivative.",
+    "unsupported_feature": "Block the affected shot and list all missing source or executor requirements.",
+    "preview_fallback": "Explicit appearance or shot variant with an approximation label retained in the saved request.",
+    "automatic_scene_apply": false,
+    "automatic_swatch_replay_in_current_document": false
+  },
+  "accessibility": [
+    "Complete search, filtering, card selection, parameter edit, Apply, Discard, preflight, Render, Cancel and Export by keyboard without dragging.",
+    "Use the existing UI kit focus treatment, text scaling and accessibility bridge; keep focused controls visible in narrow panels.",
+    "Provide readable labels and semantic names in addition to thumbnails, status colors and approved icons.",
+    "Virtualized resources expose stable selection, focused item position and filtered result count; loading more items never steals focus.",
+    "Blocked controls explain missing requirements through text available to assistive technology.",
+    "Numeric fields include units, direct entry, reset and meaningful bounds without changing engineering values.",
+    "Return focus to the initiating control after a dialog or diagnostic; progress updates never seize focus.",
+    "Throttle screen-reader progress announcements by meaningful phase or result changes.",
+    "Reduced motion disables automatic turntables, camera transitions and decorative preview animation while preserving readable progress.",
+    "An explicit Preview and Apply path complements temporary hover or drag previews."
+  ],
+  "integration_rules": [
+    "Follow the authoritative integration_contract for current source/layout/component mappings.",
+    "Keep the existing Render workspace and single RENDER ribbon tab; SCENE and IMAGE are groups, with future capability-gated extensions inside that structure.",
+    "Use the shared segmented selector, section and Panel components, theme::Tokens and approved icon assignments.",
+    "Scenes, Materials, Lighting and Environments are local library categories rather than additional workspaces or ribbon tabs.",
+    "Use navigation::handle and existing selection behavior; do not add an independent camera controller.",
+    "Keep resource resolution and validation in the engine and use the registered command authorities for supported state changes.",
+    "Preserve native/source locks and engineering or motion state; keep render drafts local to their document.",
+    "Catalog JSON and this flow describe intent; no new production UI, quality profile adapter or scene-apply command is claimed."
+  ],
+  "acceptance": [
+    "A first-time user can find a prepared shot, identify every current blocker and inspect three exact quality recommendations without opening Expert.",
+    "Quick, Detailed and Expert disclosures preserve one scene, one quality choice and pending edits; they introduce no new ribbon tabs or global modes.",
+    "At most six primary adjustment controls are visible at once, excluding scene and quality selectors.",
+    "Opening material swatches creates a fresh isolated document and leaves the current and source designs unchanged; the prepared script remains labelled unexecuted until runtime evidence exists.",
+    "Search across the full catalog preserves filters, focus and scroll, reports counts honestly and does not count projections as additional material concepts.",
+    "Locked camera, appearance, source and motion fields survive compatible preset changes; conflicts are visible before mutation.",
+    "All scene recommendations retain specified_unbound status until actual resource, executor and source checks resolve them.",
+    "An expert can trace every applied value, source hash and capability decision through the same command path.",
+    "Cancel, failed jobs and unsupported requests preserve the native source and do not discard pending drafts or silently undo applied scene edits.",
+    "Appearance edits never change density, inertia, friction, joint limits or approved motion.",
+    "The complete workflow is usable by keyboard, at increased text scale and with reduced motion, with meaningful assistive-technology labels."
+  ],
+  "quality_selection": {
+    "source": "../../../../docs/render-materials/quality-presets.json",
+    "shot_source": "../scenes/shots.json",
+    "profile_identity_policy": "Resolve labels, dimensions and budgets from the referenced Q record; no independent Preview/Portfolio/Lunar Master labels or competing Preview/Final mode switch.",
+    "availability_policy": "All listed profiles are specified_unbound authoring targets. The current opaque swatch renderer is a separate prepared-input path and does not implement these path-tracing profiles.",
+    "compatibility_policy": "Union the selected profile requirements with the shot, stage and material requirements before admission; recommendations are not silent feature reductions.",
+    "other_profiles_action": "All quality profiles",
+    "profiles": [
+      {
+        "quality_preset_id": "Q-001",
+        "name": "Interactive Draft",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-002",
+        "name": "Balanced Product",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-003",
+        "name": "Product Portfolio",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-004",
+        "name": "Glass and Layers",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-005",
+        "name": "LED Optical Study",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-006",
+        "name": "Lunar Hero Master",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-007",
+        "name": "Lunar Sample Macro",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-008",
+        "name": "Animation Preview",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-009",
+        "name": "Animation Final",
+        "status": "specified_unbound"
+      },
+      {
+        "quality_preset_id": "Q-010",
+        "name": "Reference Convergence",
+        "status": "specified_unbound"
+      }
+    ],
+    "recommendations": [
+      {
+        "shot_id": "SELENE-SHOT-001",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-006"
+        ],
+        "default_quality_preset_id": "Q-006"
+      },
+      {
+        "shot_id": "SELENE-SHOT-002",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-006"
+        ],
+        "default_quality_preset_id": "Q-006"
+      },
+      {
+        "shot_id": "SELENE-SHOT-003",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-004",
+          "Q-007"
+        ],
+        "default_quality_preset_id": "Q-007"
+      },
+      {
+        "shot_id": "SELENE-SHOT-004",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-002",
+          "Q-005"
+        ],
+        "default_quality_preset_id": "Q-005"
+      },
+      {
+        "shot_id": "SELENE-SHOT-005",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-006"
+        ],
+        "default_quality_preset_id": "Q-006"
+      },
+      {
+        "shot_id": "SELENE-SHOT-006",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-007"
+        ],
+        "default_quality_preset_id": "Q-007"
+      },
+      {
+        "shot_id": "SELENE-SHOT-007",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-007"
+        ],
+        "default_quality_preset_id": "Q-007"
+      },
+      {
+        "shot_id": "SELENE-SHOT-008",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-006"
+        ],
+        "default_quality_preset_id": "Q-006"
+      },
+      {
+        "shot_id": "SELENE-SHOT-009",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-002",
+          "Q-010"
+        ],
+        "default_quality_preset_id": "Q-010"
+      },
+      {
+        "shot_id": "SELENE-SHOT-010",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-002",
+          "Q-003"
+        ],
+        "default_quality_preset_id": "Q-003"
+      },
+      {
+        "shot_id": "SELENE-SHOT-011",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-003",
+          "Q-006"
+        ],
+        "default_quality_preset_id": "Q-006"
+      },
+      {
+        "shot_id": "SELENE-SHOT-012",
+        "quality_preset_ids": [
+          "Q-001",
+          "Q-004",
+          "Q-007"
+        ],
+        "default_quality_preset_id": "Q-007"
+      }
+    ],
+    "blocked_choice_behavior": "Keep a blocked profile inspectable with its concrete missing requirements; do not enable Render or relabel it as a supported preset."
+  },
+  "library": {
+    "local_categories": [
+      "Scenes",
+      "Materials",
+      "Lighting",
+      "Environments"
+    ],
+    "category_policy": "One local selector inside the existing Render layout; these are not workspaces or ribbon tabs.",
+    "entry_collections": [
+      "Recommended for selection",
+      "Recent",
+      "Favorites",
+      "SELENE"
+    ],
+    "search_fields": [
+      "name",
+      "stable ID",
+      "intended use",
+      "manufacturing process",
+      "finish"
+    ],
+    "primary_filters": [
+      "family",
+      "domain",
+      "compatibility with selected executor"
+    ],
+    "additional_filters": [
+      "authoring state",
+      "validation evidence",
+      "physical detail scale",
+      "memory cost",
+      "provenance",
+      "offline availability"
+    ],
+    "count_policy": "Show the selected resource-type total and filtered result count. Link the 48 prepared opaque projections to their material concepts without presenting them as 48 additional concepts.",
+    "state_policy": "Preserve query, filters, focused result, selection and scroll per document and category when opening an inspector or switching contexts.",
+    "large_list_policy": "Virtualize rows and thumbnail work, keep stable item identity and accessible positions, and load content on demand without freezing geometry input.",
+    "empty_result_policy": "Retain the query, identify active filters and offer Clear filters.",
+    "preview_policy": "Use declared comparable reference lighting and label concept images, actual renders and missing previews distinctly; current-scene preview is a separate explicit action."
+  },
+  "availability_evaluation": {
+    "axes": [
+      "authoring state",
+      "native source readiness",
+      "executor compatibility",
+      "validation evidence"
+    ],
+    "multiple_blockers": "Show all relevant blockers together; the display states above are not a mutually exclusive runtime state machine.",
+    "runtime_readiness": "Data-validation success and authored status do not establish runtime UI registration, replay success or visual validation.",
+    "current_executable_input": "The standalone swatch JSON can be replayed by a compatible built CLI in a new design after actual runtime checks; no SELENE native model is needed for that separate action.",
+    "enablement_rule": "A future in-app Render action is enabled only from actual resolved runtime state, not the illustrative availability table."
+  },
+  "swatch_opening": {
+    "script": "../materials/appearance-swatches.json",
+    "script_first_command": "file.new",
+    "action_label": "Open swatches in new document",
+    "execution_scope": "Fresh isolated document session using the existing new-document workflow; never the source or current working document session.",
+    "preserve_existing_documents": true,
+    "runtime_executed": false,
+    "visual_reviewed": false,
+    "applied_scene_effect": "None in existing documents. The script creates its own swatch geometry and appearances.",
+    "fidelity": "Uniform opaque previews only; no transmission, LED emission, procedural textures or advanced optical support is implied."
+  },
+  "draft_and_lock_policy": {
+    "document_scope": "Pending values, inspector expansion and library navigation belong to their originating document and shot.",
+    "navigation_behavior": "Switching library categories, sections, ribbon tabs or documents preserves drafts without applying or discarding them.",
+    "pending_edits": "Show pending versus applied values and explicit Apply/Discard actions. Resolve the draft before Render, or explicitly render the identified applied shot; never mix them silently.",
+    "close_behavior": "Use the existing unsaved-work flow when closing a document; do not invent another global save mode.",
+    "field_owners": [
+      "resource default",
+      "scene composition",
+      "shot override",
+      "explicit user lock"
+    ],
+    "lock_scopes": [
+      "camera pose",
+      "projection and framing",
+      "focus",
+      "exposure",
+      "appearance assignment",
+      "surface layer",
+      "lighting source",
+      "environment and terrain",
+      "source identity",
+      "approved motion"
+    ],
+    "conflict_policy": "Resolve conflicts before mutation. Keep locked values only if the complete request remains compatible; otherwise offer explicit Unlock and apply, Create a shot copy or Cancel.",
+    "fit_policy": "Fit once on explicit request, only when applicable framing locks permit it; output-aspect changes disclose their framing consequence.",
+    "source_policy": "Never modify the accepted native source, engineering materials, native geometry, joint limits or approved motion through render controls.",
+    "lunar_policy": "Physical lunar shots keep atmosphere, automatic sky fill and undeclared editorial sources disabled, with one owned Sun contribution.",
+    "comparison_policy": "A/B locks are local comparison conditions and do not silently alter persistent user locks.",
+    "job_policy": "Render start captures applied state. Cancel, failure and export act on the owned job; they do not undo a prior scene apply or redirect to another document.",
+    "current_settings_boundary": "Current settings/camera drafts retain their existing save-optional render-request behavior. Future resource drafts must resolve explicitly; Save Setup is not a mandatory extra click before every image."
+  },
+  "command_bindings": {
+    "registered_authorities": [
+      {
+        "command": "appearance.assign",
+        "purpose": "Apply a validated supported appearance to an explicit scope."
+      },
+      {
+        "command": "render.settings.get",
+        "purpose": "Read existing saved render setup values."
+      },
+      {
+        "command": "render.settings.set",
+        "purpose": "Validate and save supported render setup intent."
+      },
+      {
+        "command": "render.settings.apply",
+        "purpose": "Apply an existing saved camera setup through its current contract."
+      },
+      {
+        "command": "render.scene",
+        "purpose": "Inspect read-only evaluated product-scene metadata; this neither applies a scene preset nor captures a render job."
+      },
+      {
+        "command": "render.preflight",
+        "purpose": "Read current capability and resource admission diagnostics; not a queue reservation or whole-scene apply."
+      },
+      {
+        "command": "render.start",
+        "purpose": "Capture applied scene state and start a supported owned job."
+      },
+      {
+        "command": "render.status",
+        "purpose": "Read actual job phases and results without waiting or rendering."
+      },
+      {
+        "command": "render.cancel",
+        "purpose": "Cancel the identified owned job."
+      },
+      {
+        "command": "render.export",
+        "purpose": "Export the explicitly identified retained result with current path and overwrite rules."
+      }
+    ],
+    "future_proposals": [
+      {
+        "command": "render.preset.resolve",
+        "registered": false,
+        "purpose": "Future read-only dependency, ownership, lock and capability resolution."
+      },
+      {
+        "command": "render.preset.apply",
+        "registered": false,
+        "purpose": "Future atomic resolved scene application with one undo record."
+      }
+    ],
+    "alias_policy": "Do not create parallel render.appearance.assign, render.job.start or render.job.cancel aliases for existing commands.",
+    "registration_policy": "This JSON is an integration specification, not runtime command or UI registration."
+  }
+}

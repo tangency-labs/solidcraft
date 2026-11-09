@@ -1,0 +1,28 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -2,
+     -2,
+     5
+    ],
+    "length": 4,
+    "width": 4,
+    "height": 6,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ]
+   }
+  }
+ ]
+}

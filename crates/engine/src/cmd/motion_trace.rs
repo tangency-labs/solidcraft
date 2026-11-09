@@ -1,14 +1,15 @@
 //! Associative trace definitions and dependency checks. Sampling uses the existing motion
 //! driver on a scratch session; only a changed generated wire is handed to the evaluator.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, JointOrigin, Snap};
 use solidcraft_doc::motion::{MotionTrace, TraceMotion};
 use solidcraft_doc::{IDENTITY, apply_point};
-use solidcraft_geom::Vec3;
 
 use crate::params::{bad, bool_};
 use crate::{Result, Session};
@@ -58,11 +59,15 @@ pub(super) fn source(s: &Session, p: &Value, cmd: &str) -> Result<MotionTrace> {
             let placed = placed_world(s, &occurrence)?;
             let inverse = solidcraft_doc::mat_inverse(&placed).ok_or_else(|| bad(cmd, "invalid occurrence placement"))?;
             let canonical = joints::occurrence_world(&s.doc, id);
-            for key in ["face", "circle", "edge", "point"] {
+            for key in ["face", "circle", "edge", "point", "corner"] {
                 if let Some(at) = reference.get(key).and_then(crate::params::vec3) {
                     let at = apply_point(&canonical, apply_point(&inverse, at));
                     reference[key] = json!([at.x, at.y, at.z]);
                 }
+            }
+            if let Some(z) = reference.get("z").and_then(crate::params::vec3) {
+                let z = solidcraft_doc::apply_vector(&canonical, solidcraft_doc::apply_vector(&inverse, z));
+                reference["z"] = json!([z.x, z.y, z.z]);
             }
             let o = super::super::joints::origin_param(s, Some(&reference), cmd)?;
             if o.occurrence != occurrence.last().copied().unwrap_or(0) {
@@ -169,12 +174,13 @@ fn inputs(s: &Session, t: &MotionTrace) -> Result<Value> {
     let (occurrences, ids) = graph(s, t);
     let st = s.model.state();
     let seeds: BTreeMap<u64, &Vec<f64>> = t.seeds.iter().map(|(id, q)| (*id, q)).collect();
+    let params = joints::Params::new(&s.doc);
     let mut joints = Vec::new();
     for j in s.doc.assembly.joints.iter().filter(|j| ids.contains(&j.id)) {
         let mut definition = j.clone();
         definition.name.clear();
         definition.values = seeds.get(&j.id).map(|q| (*q).clone()).unwrap_or_default();
-        let (offset, angle, q) = joints::expressed(&s.doc, &definition)?;
+        let (offset, angle, q) = joints::expressed(&params, &definition)?;
         definition.offset = offset;
         definition.angle = angle;
         definition.values = q;
@@ -249,6 +255,7 @@ fn seeded(s: &Session, t: &MotionTrace) -> Session {
 pub(super) fn remember(s: &mut Session, t: &MotionTrace) {
     let key = inputs(s, t).map_err(|e| e.to_string());
     if let Ok(key) = &key
+        // design-only: a motion trace's wire is in one of the design's sketches.
         && let Some(points) = s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)).map(|w| w.fit.clone())
     {
         remember_points(s, t.sketch, key.clone(), points);
@@ -325,6 +332,7 @@ pub(crate) fn refresh(s: &mut Session) {
         let unchanged = s.motion_traces.entries.get(&t.sketch).is_some_and(|old| old.inputs == key);
         if unchanged
             && cached.as_ref().is_none_or(|points| {
+                // design-only: a motion trace's wire is in one of the design's sketches.
                 s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)).is_some_and(|w| same_points(&w.fit, points))
             })
         {
@@ -347,9 +355,11 @@ pub(crate) fn refresh(s: &mut Session) {
             remember_points(s, t.sketch, key.clone(), points.clone());
         }
         let error = match result {
+            // design-only: a motion trace's wire is in one of the design's sketches.
             Ok(points) => match s.doc.sketch(t.sketch).ok().and_then(|sk| sk.wires.iter().find(|w| w.id == t.wire)) {
                 Some(wire) if same_points(&wire.fit, &points) => None,
                 Some(_) => {
+                    // design-only: a motion trace's wire is in one of the design's sketches.
                     if let Ok(sk) = s.doc_mut().sketch_mut(t.sketch)
                         && let Some(wire) = sk.wires.iter_mut().find(|w| w.id == t.wire)
                     {
@@ -367,6 +377,7 @@ pub(crate) fn refresh(s: &mut Session) {
     }
     if changed {
         s.model.evaluate(&s.doc);
+        s.evaluations = s.evaluations.saturating_add(1);
         s.revision += 1;
     }
     for t in &traces {

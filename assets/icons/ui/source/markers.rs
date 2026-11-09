@@ -1,7 +1,7 @@
-//! Constraint, assembly snap and dimension marker artwork.
+//! Constraint, assembly snap, hole placement and dimension marker artwork.
 use crate::dialogs_assembly::SnapKind;
-use crate::theme::Tokens;
 use egui::{Color32, Pos2, Stroke, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn snap(painter: &egui::Painter, c: Pos2, tip: Option<Pos2>, kind: SnapKind, col: Color32, tag: Option<&str>) {
     // A dark halo under every stroke keeps the glyph readable on light and dark faces alike.
@@ -49,7 +49,7 @@ pub(crate) fn snap(painter: &egui::Painter, c: Pos2, tip: Option<Pos2>, kind: Sn
     // What it snaps to (hovered), or which component it is (picked): a small label.
     if let Some(tag) = tag {
         let t = Tokens::get();
-        let font = egui::FontId::proportional(crate::theme::Tokens::get().font_caption);
+        let font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_caption);
         let g = painter.layout_no_wrap(tag.to_string(), font, t.text);
         let at = c + vec2(12.0, 10.0);
         let r = egui::Rect::from_min_size(at, g.size()).expand2(vec2(5.0, 2.0));
@@ -57,6 +57,28 @@ pub(crate) fn snap(painter: &egui::Painter, c: Pos2, tip: Option<Pos2>, kind: Sn
         painter.galley(at, g, t.text);
     }
 }
+/// A place a hole can snap to, before the cursor reaches it: a small hollow mark of its kind
+/// (a square for a face's centre, a ring for a round edge's centre).
+pub(crate) fn snap_hint(painter: &egui::Painter, c: Pos2, kind: SnapKind, col: Color32) {
+    let ic = Tokens::get().icons;
+    for stroke in [Stroke::new(3.5, ic.marker_halo), Stroke::new(1.4, col)] {
+        match kind {
+            SnapKind::FaceCenter => {
+                painter.rect_stroke(egui::Rect::from_center_size(c, vec2(8.0, 8.0)), 1.0, stroke, egui::StrokeKind::Middle);
+            }
+            SnapKind::CircleCenter => {
+                painter.circle_stroke(c, 4.5, stroke);
+            }
+            SnapKind::EdgeMid | SnapKind::Vertex => {
+                let r = 5.0;
+                let diamond = vec![c + vec2(0.0, -r), c + vec2(r, 0.0), c + vec2(0.0, r), c + vec2(-r, 0.0)];
+                painter.add(egui::Shape::convex_polygon(diamond, Color32::TRANSPARENT, stroke));
+            }
+        }
+    }
+    painter.circle_filled(c, 1.3, col);
+}
+
 pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
     Some(match name {
         "Coincident" => "c_coincident",
@@ -67,7 +89,7 @@ pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
         "Smooth" => "c_smooth",
         "Equal" => "c_equal",
         "Concentric" => "c_concentric",
-        "MidPoint" => "c_midpoint",
+        "MidPoint" | "PointAlong" => "c_midpoint",
         "Symmetry" => "c_symmetry",
         "Fix" => "c_fix",
         _ => return None,
@@ -75,8 +97,8 @@ pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
 }
 pub(crate) fn glyph_letter(name: &str) -> &'static str {
     match name {
-        "Horizontal" => "H",
-        "Vertical" => "V",
+        "Horizontal" => "-",
+        "Vertical" => "|",
         _ => "?",
     }
 }

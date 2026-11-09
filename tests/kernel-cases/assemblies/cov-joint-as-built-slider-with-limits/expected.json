@@ -1,0 +1,44 @@
+{
+ "sources": [],
+ "what": "an as-built slider along +x with limits -5..5, driven to 20",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); joint.as_built keeps Arm at (20,0,5); 20 is clamped to 5: centre (25,0,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "values": [
+     {
+      "value": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      25.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

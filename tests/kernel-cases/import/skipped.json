@@ -1,0 +1,210 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#11",
+  "why": "export-only: STEP export merging user-split faces; no import geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#14",
+  "why": "needs Fusion-written IGES files (commercial CAD output) that can't be rebuilt; the IGES reader's synthetic cases are 3359, 3806, 3845, 3886, 3912, 3913, 3972"
+ },
+ {
+  "source": "tangency-labs/solidcraft#200",
+  "why": "feature request (.f3z history import), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#688",
+  "why": "feature request (FreeCAD .FCStd import), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1033",
+  "why": "performance only (large PCB STEP loads slowly), no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1161",
+  "why": "feature request (external I/O library), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1397",
+  "why": "CI corpus of real-world files, tolerance-based; not a hand-writable geometry case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1468",
+  "why": "needs the reporter's STEP file (seam artefact in display); looks like tessellation, other area: tessellation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1609",
+  "why": "metadata/assembly naming of IGES parts, no geometry consequence"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1706",
+  "why": "needs the Fusion-written threaded part (wrong coordinates and negative volume); cause unknown, cannot be rebuilt synthetically"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1708",
+  "why": "F3D import (editable history), not STEP/IGES geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1709",
+  "why": "F3D import (editable history), not STEP/IGES geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1784",
+  "why": "memory use of a 38 MB STEP import; crash/performance, no hand-writable geometry; other area: crashes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1928",
+  "why": "export-only: revolved faces scaled across their axis written as NURBS"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1934",
+  "why": "hang on a user's STEP file (gehaeuse82.stp), performance; no synthetic repro"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2052",
+  "why": "DXF import, not STEP/IGES"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2127",
+  "why": "3MF import, not STEP/IGES"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2579",
+  "why": "other area: booleans (divide_face loses a small hole in a large tilted plate)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2605",
+  "why": "SVG import UI, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2748",
+  "why": "parameter import, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2776",
+  "why": "parameter import performance, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2809",
+  "why": "performance only (orientation meshing of periodic faces, minutes per part), no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2814",
+  "why": "performance only (opening a large assembly takes an hour), no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2872",
+  "why": "placement after 'stand it up' makes a sketch/extrude land elsewhere: UI/placement, not import geometry; no file to rebuild"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2875",
+  "why": "performance only (orient each instanced part once)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2918",
+  "why": "performance/contract tests for repeated instances, no wrong geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3046",
+  "why": "performance only (parallel read of distinct parts)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3047",
+  "why": "performance only (mesh an instanced part once)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3108",
+  "why": "performance only (STEP load time), no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3209",
+  "why": "FreeCAD/Rhino import decode caps, not STEP/IGES"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3216",
+  "why": "CSV parameter import, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3221",
+  "why": "design file size limit when saving a large STEP import, not geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3223",
+  "why": "UI/placement after 'stand it up' (extrude lands at 90 degrees); no file to rebuild; same class as #2872"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3237",
+  "why": "MCP feature request (reverse engineering STEP files), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3289",
+  "why": "assembly cap/refusal policy for huge assemblies (50,000 instances), needs a huge synthetic assembly and is not a geometry answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3394",
+  "why": "export-only: STEP export drops cone faces for other readers (fixed by #3557)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3537",
+  "why": "tolerance persistence across saving a design, not import geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3557",
+  "why": "export-only: loop order of merged cone and cylinder faces on STEP export"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3595",
+  "why": "performance only (orbit stutter with ~100 bodies)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3720",
+  "why": "performance only (viewport lag with a 1,163-body assembly)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3784",
+  "why": "CI goldens differing on Windows, not an import geometry case"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3847",
+  "why": "other area: tessellation (display plans for threads and pointed ends of STEP parts)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3849",
+  "why": "other area: tessellation (display plans for STEP threads and pointed ends)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3858",
+  "why": "3MF import naming, not STEP/IGES geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3859",
+  "why": "3MF import naming, not STEP/IGES geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3924",
+  "why": "AP242 tessellated parts as mesh bodies: a feature with no graded geometry, and the TRIANGULATED_SURFACE_SET entity layout could not be written reliably from the specification here; needs the tangency-labs/models file"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3925",
+  "why": "AP242 tessellated parts as mesh bodies: same as #3924"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3974",
+  "why": "refactor PR (STEP geometry as plain data), no behaviour change to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4007",
+  "why": "export-only: writer nondeterminism for a revolved horn torus; the reading side would need the collapsed-pole spline of the written file"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4021",
+  "why": "performance only (display plans and model cache for large assemblies)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4086",
+  "why": "STEP-import file too large: size limit, no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4100",
+  "why": "component/joint bookkeeping after deleting an inserted STEP, not geometry"
+ }
+]

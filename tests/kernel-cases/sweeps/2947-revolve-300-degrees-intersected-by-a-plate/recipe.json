@@ -1,0 +1,77 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Sec"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     20,
+     0
+    ],
+    "p1": [
+     30,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "Z",
+    "angle": "300 deg",
+    "operation": "new",
+    "body_name": "Ring"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100,
+    "width": 10,
+    "height": 12,
+    "corner": [
+     -50,
+     -5,
+     -1
+    ],
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Ring",
+    "tools": [
+     "Plate"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

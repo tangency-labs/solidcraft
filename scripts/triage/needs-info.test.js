@@ -48,10 +48,13 @@ test('missing: short reports without steps are asked, with the version when it i
 test('missing: empty app reports are asked to paste the copied report', () => {
   assert.deepEqual(info.missing('EXTRUDE: operation failed', ''), ['paste']);
   assert.deepEqual(info.missing('Modeling: unexpected result', '  '), ['paste']);
+  assert.deepEqual(info.missing('Sketch: line vanishes after trimming', ''), ['paste']);
+  assert.deepEqual(info.missing('Sheet Metal: operation failed', ''), ['paste']);
 });
 
 test('missing: reproducible, long, app-filed and non-bug issues are left alone', () => {
   assert.deepEqual(info.missing('Loft fails', '## Reproduction\n1. sketch two circles\n2. loft them'), []);
+  assert.deepEqual(info.missing('Loft fails', 'see design.sc attached'), []);
   assert.deepEqual(info.missing('Loft fails', 'see design.solidcraft attached'), []);
   assert.deepEqual(info.missing('Loft fails', 'runs `solid.loft` and fails'), []);
   assert.deepEqual(info.missing('Loft fails', long), []);

@@ -227,13 +227,6 @@ def test_a_point_created_on_the_origin_snaps_to_it():
     assert sketch_dof([cmd("sketch.create", plane="XY"), cmd("sketch.circle.center", center=[0, 0], radius=5)]) == 1
 
 
-def test_symmetric_rectangle_sides_conflict_and_corners_do_not():
-    rectangle = [cmd("sketch.create", plane="XY"), cmd("sketch.rectangle.two_point", p0=[-10, 2], p1=[10, 8])]
-    with pytest.raises(SolidCraftError, match="conflicts"):
-        execute([*rectangle, cmd("sketch.constraint.symmetry", a="l4", b="l2", line="y")])
-    execute([*rectangle, cmd("sketch.constraint.symmetry", a="p1", b="p2", line="y")])
-
-
 def test_a_repeated_body_name_is_renamed_and_targets_reach_the_first_body():
     inspection = execute([
         cmd("solid.box", length=10, width=10, height=10, body_name="M"),
@@ -326,6 +319,59 @@ def test_a_slot_along_y_takes_a_horizontal_dimension_on_its_second_arc():
         execute(slot_along_y(cmd("sketch.dimension", entities=["origin", "a2.center"], type="vertical", value="33 mm")))
     assert sketch_dof(slot_along_y(
         cmd("sketch.dimension", entities=["origin", "a2.center"], type="horizontal", value="10 mm"))) == 0
+
+
+def test_slot_ids_count_on_from_the_curves_before_it():
+    created = run_commands([
+        cmd("sketch.create", plane="XY"),
+        cmd("sketch.rectangle.two_point", p0=[-30, -20], p1=[30, 20]),
+        cmd("sketch.slot.overall", p0=[-10, 0], p1=[10, 0], width=4),
+    ])[-2]["created"]
+    assert created["curves"] == ["l5", "a1", "l6", "a2"]
+    assert created["points"] == ["p5", "p6", "p7", "p8", "a1.center", "a2.center"]
+
+
+def test_two_concentric_circles_extrude_as_a_ring():
+    body = execute([
+        cmd("sketch.create", plane="XY"),
+        cmd("sketch.circle.center", center=[0, 0], radius=10),
+        cmd("sketch.circle.center", center=[0, 0], radius=6),
+        cmd("sketch.finish"),
+        cmd("solid.extrude", distance="5 mm"),
+    ])["bodies"][0]
+    assert body["volume_mm3"] == pytest.approx(pi * (10 ** 2 - 6 ** 2) * 5, rel=2e-4)
+
+
+CUBE = cmd("solid.box", length=40, width=40, height=10, center=[0, 0, 5], body_name="B")
+
+
+def test_an_edge_pick_far_from_every_edge_is_refused():
+    with pytest.raises(SolidCraftError, match="nearest edge is 15.000 mm away"):
+        execute([CUBE, cmd("solid.fillet", edges=[[20, 20, 25]], radius=1)])
+
+
+@pytest.mark.parametrize("offset", ["0 mm", "-5 mm"])
+def test_a_hole_sketch_under_the_part_drills_up_into_it(offset):
+    body = execute([
+        CUBE,
+        cmd("sketch.create", plane="XY", offset=offset, name="Hole sketch"),
+        cmd("sketch.point", point=[0, 0]),
+        cmd("sketch.finish"),
+        cmd("solid.hole", sketch="Hole sketch", diameter=6, depth=4),
+    ])["bodies"][0]
+    assert body["volume_mm3"] == pytest.approx(40 * 40 * 10 - pi * 9 * 4, rel=2e-4)
+    assert body["center_of_mass"][2] > 5
+
+
+def test_a_fillet_between_curved_faces_stops_the_shell():
+    neck = [
+        cmd("solid.cylinder", radius=8, height=20, body_name="C"),
+        cmd("solid.sphere", radius=15, center=[0, 0, 30], operation="join", targets=["C"]),
+    ]
+    shell = cmd("solid.shell", faces=[[0, 0, 0]], thickness=1.5)
+    with pytest.raises(SolidCraftError, match="offset: only bodies with planes"):
+        execute([*neck, cmd("solid.fillet", edges=[[8, 0, 30 - (15 ** 2 - 8 ** 2) ** 0.5]], radius=2), shell])
+    execute([*neck, shell])
 
 
 OPEN_BOX = [

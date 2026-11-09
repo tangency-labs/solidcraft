@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "an offset asked to fit within 20 mm: refused, the tolerance is 0.000001 to 10 mm",
+ "source": "invariants",
+ "method": "the fitting tolerance has a range; outside it the command refuses with that range rather than building",
+ "outcome": "refused",
+ "refusal": "the offset tolerance must be 0.000001…10 mm"
+}

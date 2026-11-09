@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4328"
+ ],
+ "what": "an L section 2 mm thick with its bend modelled round (inner r2, outer r4), converted to sheet metal with the bend picked: refused ('the face across the bend can't be a face of the sheet: curved faces in a converted sheet')",
+ "source": "analytic",
+ "method": "the section is a plate of even thickness 2 with a cylindrical bend between its legs, so it converts unchanged: V = (36*2 + 2*26 + (pi/4)(4^2-2^2))*20 = 2668.4956",
+ "body_count": 1,
+ "volume_mm3": 2668.4956
+}

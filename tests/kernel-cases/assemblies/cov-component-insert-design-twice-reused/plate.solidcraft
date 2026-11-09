@@ -1,0 +1,11 @@
+{
+  "format": "solidcraft/40",
+  "name": "plate",
+  "units": "mm",
+  "params": [],
+  "next_id": 2,
+  "features": [
+    {"id": 1, "name": "Box1", "type": "box", "suppressed": false, "operation": "new_body", "body_names": ["Plate"],
+     "corner": [0.0, 0.0, 0.0], "length": "30", "width": "20", "height": "10"}
+  ]
+}

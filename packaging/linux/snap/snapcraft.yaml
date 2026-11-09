@@ -28,7 +28,7 @@ contact: https://github.com/bherbruck/solidcraft/issues
 website: https://docs.solidcraft.io/
 source-code: https://github.com/bherbruck/solidcraft
 issues: https://github.com/bherbruck/solidcraft/issues
-icon: stage/share/icons/hicolor/512x512/apps/ai.storyteller.solidcraft.png
+icon: stage/share/icons/hicolor/512x512/apps/io.tangencylabs.solidcraft.png
 base: core24
 grade: stable
 confinement: strict
@@ -41,10 +41,10 @@ platforms:
 apps:
   solidcraft:
     command: usr/bin/solidcraft
-    desktop: usr/share/applications/ai.storyteller.solidcraft.desktop
-    # Ties the snap to the AppStream id (ai.storyteller.solidcraft, the same in every package) so
+    desktop: usr/share/applications/io.tangencylabs.solidcraft.desktop
+    # Ties the snap to the AppStream id (io.tangencylabs.solidcraft, the same in every package) so
     # software centres treat it as the same app.
-    common-id: ai.storyteller.solidcraft
+    common-id: io.tangencylabs.solidcraft
     extensions: [gnome]
     plugs:
       - desktop
@@ -77,5 +77,5 @@ parts:
     override-prime: |
       craftctl default
       # Point the menu entry at the packaged icon (the hicolor name isn't on the host's path).
-      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/256x256/apps/ai.storyteller.solidcraft.png|' \
-        usr/share/applications/ai.storyteller.solidcraft.desktop
+      sed -i 's|^Icon=.*|Icon=${SNAP}/usr/share/icons/hicolor/256x256/apps/io.tangencylabs.solidcraft.png|' \
+        usr/share/applications/io.tangencylabs.solidcraft.desktop

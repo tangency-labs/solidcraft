@@ -5,31 +5,43 @@
 #![forbid(unsafe_code)]
 
 mod analysis;
+pub mod anisotropic_surface;
 mod backend;
 mod camera;
+pub mod clear_coat;
 mod curve_display;
+pub mod film;
 mod gif;
+pub mod glass_model;
+pub mod hatch;
 pub mod job;
 pub mod lighting;
+pub mod mapping;
+pub mod optical_boundary;
 mod product;
 mod raster;
+#[cfg(feature = "raytrace-cpu")]
+pub mod raytrace;
 mod scene;
+pub mod stage;
 pub mod studio;
 pub mod surface;
+pub mod surface_patterns;
 pub mod texture_input;
 pub mod texture_interpolation;
 pub mod texture_lod;
 pub mod texture_sampling;
+pub mod transmission;
 
-pub use analysis::{AnalysisColors, AnalysisMode, SceneAnalysis};
+pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use backend::{
     Availability, BackendDescriptor, BackendId, ExecutorDescriptor, ExecutorId, MAX_RENDER_ID_BYTES, RenderFeature, RenderFormat, RenderLimits,
     RenderMode, RenderOperation, RenderPolicy, RenderProfile, RenderRequest, ResolveError, ResolvedRequest, ScratchLayout, builtin_backend,
     resolve_request,
 };
-pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ease_in_out};
+pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
 pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
 pub use gif::gif;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
 pub use raster::{Canvas, render, render_png, render_transparent};
-pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};
+pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};

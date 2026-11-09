@@ -1,6 +1,7 @@
 //! A box in the plane, the 2D [`crate::Aabb3`].
 
-use crate::Vec2;
+use crate::prelude::*;
+use solidcore_record::Vec2;
 
 /// Axis-aligned box in the plane; [`Aabb2::EMPTY`] (low +∞, high −∞) holds nothing.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +57,10 @@ impl Aabb2 {
     /// Whether `p` lies in the box, its sides included (never in an empty box, never for NaN).
     pub fn contains(&self, p: Vec2) -> bool {
         p.x >= self.min.x && p.y >= self.min.y && p.x <= self.max.x && p.y <= self.max.y
+    }
+    /// The box both hold: empty when they do not meet.
+    pub fn intersection(&self, o: &Aabb2) -> Aabb2 {
+        Aabb2 { min: Vec2::new(self.min.x.max(o.min.x), self.min.y.max(o.min.y)), max: Vec2::new(self.max.x.min(o.max.x), self.max.y.min(o.max.y)) }
     }
     /// Whether the two boxes share a point (never when either is empty).
     pub fn meets(&self, o: &Aabb2) -> bool {

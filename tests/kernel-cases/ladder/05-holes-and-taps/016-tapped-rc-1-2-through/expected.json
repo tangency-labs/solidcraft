@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an Rc 1/2 tapped hole through the stock (ISO 7-1 internal taper): a straight hole at the tap maker's 17.6 mm, cosmetic thread",
+ "source": "analytic",
+ "method": "ISO 7-1 Rc 1/2: gauge diameter d = 20.955 at the face, 14 threads per inch, h = 0.640327 P, minor d1 = d - 2h = 18.631 there and 1/16 smaller per mm deeper (18.631 - 13.2/16 = 17.806 at the end of the 13.2 mm useful thread); a straight (not reamed) hole takes the tap maker's 17.6 (Yamawa YEU23 p.709, the largest for non-full threads): removed pi 8.8^2 20; + one cylinder face",
+ "body_count": 1,
+ "volume_mm3": 43134.30129812,
+ "faces": 7
+}

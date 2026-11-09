@@ -1,0 +1,28 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3311",
+  "tangency-labs/solidcraft#2115",
+  "tangency-labs/solidcraft#2367",
+  "tangency-labs/solidcraft#2440",
+  "tangency-labs/solidcraft#2441"
+ ],
+ "what": "tapped holes (Hole with a thread size, no diameter) are drilled at the tap drill, not at the major diameter",
+ "source": "analytic",
+ "method": "Tapped hole rule: the drill is the tap maker's for the size (Yamawa YEU23 p.704: M3 0.5 -> 2.5, M5 0.8 -> 4.2, M8 1.25 -> 6.8, M12 1.75 -> 10.3), the major diameter minus the pitch for a custom size (M8.5x1 -> 7.5). Plate 100x40x12 with five holes in one row, each a cylinder pi r^2 h: M3: drill 2.5 x 12; M5: drill 4.2 x 12; M8: drill 6.8 x 12; M8.5x1: drill 7.5 x 12; M12: drill 10.3 x 8. V = 48000 - sum = 46142.3134 mm3. Faces: the plate's 6, one wall per through hole (four), a wall and a flat floor for the blind M12: 6 + 4 + 2 = 12.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 46142.3134,
+ "faces": 12,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100,
+   40,
+   12
+  ]
+ }
+}

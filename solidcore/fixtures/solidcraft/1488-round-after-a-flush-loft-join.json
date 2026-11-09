@@ -1,0 +1,500 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1488",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "On SolidCraft's truck kernel a join that only succeeded after its coplanar retry nudged the tool left 1e-4 mm sliver faces, and every later fillet on the body failed (#1488; the fillet failure is gone there, the slivers remain). A 120 x 3.5 x 95 slab with a 48 mm window cut through it; a ruled loft from an 18-point pleated outline at z = 0 to a flat 18-point strip 3 deep at z = 90.5 is joined into it, flush with the slab's inner face (y = 0..3 against 0..3.5); then the slab's top end edge at x = -60 is rounded r 1. A clean join leaves that edge's faces as they were, so the round removes exactly (1 - pi/4) * 3.5. The issue's 3 mm slab, flush on both faces, is the control.",
+ "cases": [
+  {
+   "name": "slab_3_5",
+   "note": "3.5 mm slab: the loft is flush with its inner face only.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      -60,
+      0,
+      0
+     ],
+     "size": [
+      120,
+      3.5,
+      95
+     ]
+    },
+    {
+     "op": "box",
+     "id": "window",
+     "origin": [
+      -24,
+      -0.5,
+      -1
+     ],
+     "size": [
+      48,
+      4.5,
+      91
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "wall",
+     "b": "window"
+    },
+    {
+     "op": "loft",
+     "id": "pleat",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           -26,
+           3
+          ],
+          [
+           -24.76384,
+           3
+          ],
+          [
+           -16.0568,
+           14.97217
+          ],
+          [
+           -8,
+           4.90117
+          ],
+          [
+           0,
+           14.90117
+          ],
+          [
+           8,
+           4.90117
+          ],
+          [
+           16.0568,
+           14.97217
+          ],
+          [
+           24.76384,
+           3
+          ],
+          [
+           26,
+           3
+          ],
+          [
+           26,
+           0
+          ],
+          [
+           23.23616,
+           0
+          ],
+          [
+           15.9432,
+           10.02783
+          ],
+          [
+           8,
+           0.09883
+          ],
+          [
+           0,
+           10.09883
+          ],
+          [
+           -8,
+           0.09883
+          ],
+          [
+           -15.9432,
+           10.02783
+          ],
+          [
+           -23.23616,
+           0
+          ],
+          [
+           -26,
+           0
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        0
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           -26,
+           3
+          ],
+          [
+           -24,
+           3
+          ],
+          [
+           -16,
+           3
+          ],
+          [
+           -8,
+           3
+          ],
+          [
+           0,
+           3
+          ],
+          [
+           8,
+           3
+          ],
+          [
+           16,
+           3
+          ],
+          [
+           24,
+           3
+          ],
+          [
+           26,
+           3
+          ],
+          [
+           26,
+           0
+          ],
+          [
+           24,
+           0
+          ],
+          [
+           16,
+           0
+          ],
+          [
+           8,
+           0
+          ],
+          [
+           0,
+           0
+          ],
+          [
+           -8,
+           0
+          ],
+          [
+           -16,
+           0
+          ],
+          [
+           -24,
+           0
+          ],
+          [
+           -26,
+           0
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.5
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "slab",
+     "b": "pleat"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       -60,
+       1.75,
+       95
+      ]
+     ],
+     "radius": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "joined",
+     "value": 0.751106428108931,
+     "tol": 1e-06,
+     "formula": "(1 - pi/4)*1^2*3.5: the r 1 round of the 3.5 mm end edge at x = -60, 34 mm from the join"
+    }
+   }
+  },
+  {
+   "name": "slab_3_control",
+   "note": "Control: 3 mm slab, the loft flush with both faces.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      -60,
+      0,
+      0
+     ],
+     "size": [
+      120,
+      3.0,
+      95
+     ]
+    },
+    {
+     "op": "box",
+     "id": "window",
+     "origin": [
+      -24,
+      -0.5,
+      -1
+     ],
+     "size": [
+      48,
+      4.0,
+      91
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "slab",
+     "a": "wall",
+     "b": "window"
+    },
+    {
+     "op": "loft",
+     "id": "pleat",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           -26,
+           3
+          ],
+          [
+           -24.76384,
+           3
+          ],
+          [
+           -16.0568,
+           14.97217
+          ],
+          [
+           -8,
+           4.90117
+          ],
+          [
+           0,
+           14.90117
+          ],
+          [
+           8,
+           4.90117
+          ],
+          [
+           16.0568,
+           14.97217
+          ],
+          [
+           24.76384,
+           3
+          ],
+          [
+           26,
+           3
+          ],
+          [
+           26,
+           0
+          ],
+          [
+           23.23616,
+           0
+          ],
+          [
+           15.9432,
+           10.02783
+          ],
+          [
+           8,
+           0.09883
+          ],
+          [
+           0,
+           10.09883
+          ],
+          [
+           -8,
+           0.09883
+          ],
+          [
+           -15.9432,
+           10.02783
+          ],
+          [
+           -23.23616,
+           0
+          ],
+          [
+           -26,
+           0
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        0
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "polygon",
+         "points": [
+          [
+           -26,
+           3
+          ],
+          [
+           -24,
+           3
+          ],
+          [
+           -16,
+           3
+          ],
+          [
+           -8,
+           3
+          ],
+          [
+           0,
+           3
+          ],
+          [
+           8,
+           3
+          ],
+          [
+           16,
+           3
+          ],
+          [
+           24,
+           3
+          ],
+          [
+           26,
+           3
+          ],
+          [
+           26,
+           0
+          ],
+          [
+           24,
+           0
+          ],
+          [
+           16,
+           0
+          ],
+          [
+           8,
+           0
+          ],
+          [
+           0,
+           0
+          ],
+          [
+           -8,
+           0
+          ],
+          [
+           -16,
+           0
+          ],
+          [
+           -24,
+           0
+          ],
+          [
+           -26,
+           0
+          ]
+         ]
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.5
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "joined",
+     "a": "slab",
+     "b": "pleat"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "joined",
+     "edges": [
+      [
+       -60,
+       1.5,
+       95
+      ]
+     ],
+     "radius": 1
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "joined",
+     "value": 0.6438055098076552,
+     "tol": 1e-06,
+     "formula": "(1 - pi/4)*1^2*3: the r 1 round of the 3 mm end edge at x = -60, 34 mm from the join"
+    }
+   }
+  }
+ ]
+}

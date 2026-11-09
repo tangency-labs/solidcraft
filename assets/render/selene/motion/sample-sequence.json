@@ -1,0 +1,261 @@
+{
+  "metadata": {
+    "schema_version": "0.1.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "source_lock": "../source-lock.json"
+  },
+  "id": "SELENE-SEQUENCE-001",
+  "name": "Lunar collection, sealed-vial throw, catch and storage",
+  "kind": "future_dynamics_contract_not_executable_motion_study",
+  "existing_motion_policy": "Preserve and reuse the improved model motion studies, IK, links, traces and loop constraints. They provide kinematic authoring; they do not supply dynamic mass, contact impulses or granular physics.",
+  "units": {
+    "document_distance": "mm",
+    "document_angle": "rad",
+    "joint_command_angle": "deg",
+    "solver_distance": "m",
+    "solver_time": "s",
+    "solver_mass": "kg",
+    "solver_up_axis": "+Z",
+    "conversion_boundary": "Convert lengths, rates, forces, torques and inertia exactly once between the native document and the SI solver."
+  },
+  "local_physics": {
+    "gravity_m_s2": [
+      0,
+      0,
+      -1.62
+    ],
+    "gravity_source_id": "SRC-MOON-FACTSHEET",
+    "atmospheric_drag": false,
+    "wind": false,
+    "candidate_fixed_step_hz": 240,
+    "step_status": "Initial convergence-test candidate, not established adequate accuracy.",
+    "required_refinement_factors": [
+      1,
+      2,
+      4
+    ],
+    "contact_parameters_status": "Unbound; mass, inertia, friction, restitution and actuator limits need provenance.",
+    "grain_model": "Begin with aggregate sealed contents; a separate validated granular level is required for collection, spill or visible rearrangement."
+  },
+  "analytic_fixture_ids": [
+    "PHY-001",
+    "PHY-002",
+    "PHY-003",
+    "PHY-004",
+    "PHY-005",
+    "PHY-006"
+  ],
+  "trajectory_candidate": {
+    "fixture_id": "PHY-002",
+    "status": "synthetic_planning_candidate_not_reachable_motion",
+    "apex_rise_m": 0.15,
+    "equal_height_range_m": 0.04,
+    "must_resolve": [
+      "release and catch height",
+      "arm reachable workspace",
+      "collision clearances",
+      "joint velocities and motor effort",
+      "vial inertia and spin",
+      "gripper aperture and capture tolerance"
+    ]
+  },
+  "states": [
+    {
+      "id": "approach",
+      "action": "Move the validated tool toward the sample patch.",
+      "gates": [
+        "Admitted source and derivative; no unresolved closed loops.",
+        "Joint-limited collision-aware path with actuator rates and torque requirements checked."
+      ],
+      "exit_event": "tool_ready"
+    },
+    {
+      "id": "collect",
+      "action": "Collect a declared regolith mass with the reviewed tool.",
+      "gates": [
+        "Collection geometry exists and reaches the patch.",
+        "Ground removal and container mass gain balance, including spill."
+      ],
+      "exit_event": "sample_loaded"
+    },
+    {
+      "id": "seal",
+      "action": "Close and verify the vial before the acrobatic sequence.",
+      "gates": [
+        "Separate lid/seal state and a mechanically feasible closure action.",
+        "Contents mass and inertia updated; seal confirmed."
+      ],
+      "exit_event": "vial_sealed"
+    },
+    {
+      "id": "withdraw",
+      "action": "Move the sealed vial to a reachable launch pose.",
+      "gates": [
+        "Grasp contact is stable.",
+        "No penetration of wings, rover, terrain or sample rack."
+      ],
+      "exit_event": "launch_ready"
+    },
+    {
+      "id": "release",
+      "action": "Remove grasp constraint and inherit actual rigid-body velocities.",
+      "gates": [
+        "v_COM = v_grip + omega_grip cross r in a single SI frame.",
+        "Record source pose, release time, linear/angular velocity and sample mass."
+      ],
+      "exit_event": "free_flight"
+    },
+    {
+      "id": "free_flight",
+      "action": "Integrate translation and rotation in local lunar gravity.",
+      "gates": [
+        "No hidden parenting or attractor force.",
+        "Continuous collision detection and solver-step convergence; vacuum baseline has no drag."
+      ],
+      "exit_event": "capture_or_miss"
+    },
+    {
+      "id": "capture",
+      "action": "Establish contact with a reachable moving gripper.",
+      "gates": [
+        "Relative velocity, impulses and motor effort remain within reviewed bounds.",
+        "The contact solution determines success; no snap to a desired pose."
+      ],
+      "exit_event": "settling"
+    },
+    {
+      "id": "settle",
+      "action": "Resolve residual motion before rack insertion.",
+      "gates": [
+        "Stable grasp and contents retention.",
+        "Momentum/energy accounting includes actuation and dissipated contact energy."
+      ],
+      "exit_event": "storage_ready"
+    },
+    {
+      "id": "store",
+      "action": "Insert and retain the vial in the sample box.",
+      "gates": [
+        "Rack/grommets remain on rover; vial and lid remain correctly assembled.",
+        "Retention contact verified before the gripper releases."
+      ],
+      "exit_event": "stored"
+    },
+    {
+      "id": "miss",
+      "action": "Preserve a failed catch and its physical outcome.",
+      "gates": [
+        "No time rewind, teleport or success flag without contact.",
+        "Keep the miss in diagnostics; recovery is a new planned action."
+      ],
+      "exit_event": "recovery_required"
+    },
+    {
+      "id": "complete",
+      "action": "Approve an immutable simulation bake for rendering.",
+      "gates": [
+        "Events, transforms, particles and source/solver hashes are recorded.",
+        "Frame-rate and render-quality changes do not alter the approved physics."
+      ],
+      "exit_event": "approved_bake"
+    }
+  ],
+  "transitions": [
+    {
+      "from": "approach",
+      "to": "collect",
+      "condition": "tool_ready"
+    },
+    {
+      "from": "collect",
+      "to": "seal",
+      "condition": "sample_loaded"
+    },
+    {
+      "from": "seal",
+      "to": "withdraw",
+      "condition": "vial_sealed"
+    },
+    {
+      "from": "withdraw",
+      "to": "release",
+      "condition": "launch_ready"
+    },
+    {
+      "from": "release",
+      "to": "free_flight",
+      "condition": "grasp_removed"
+    },
+    {
+      "from": "free_flight",
+      "to": "capture",
+      "condition": "valid_contact"
+    },
+    {
+      "from": "free_flight",
+      "to": "miss",
+      "condition": "catch_window_ended_without_valid_contact"
+    },
+    {
+      "from": "capture",
+      "to": "settle",
+      "condition": "grasp_stable"
+    },
+    {
+      "from": "settle",
+      "to": "store",
+      "condition": "storage_ready"
+    },
+    {
+      "from": "store",
+      "to": "complete",
+      "condition": "retention_verified"
+    },
+    {
+      "from": "capture",
+      "to": "miss",
+      "condition": "capture_failed"
+    }
+  ],
+  "bake_contract": {
+    "status": "specified_unbound",
+    "requires": [
+      "source_native_sha256",
+      "derivative_native_sha256",
+      "binding_revision",
+      "simulation_parameter_sha256",
+      "solver_name_and_revision",
+      "time_step_and_convergence_report",
+      "deterministic_seed",
+      "sample_mass_history",
+      "contact_and_grasp_events",
+      "position_orientation_velocity_samples",
+      "particle_state_when_enabled",
+      "collision_proxy_revision",
+      "approved_time_interval",
+      "review_record"
+    ],
+    "render_sampling": "Interpolate validated states at actual shutter times; never extrapolate past the approved interval.",
+    "invalidated_by": [
+      "native geometry or hierarchy change",
+      "binding or contact-proxy change",
+      "physics parameter or solver change",
+      "initial-state or event change"
+    ],
+    "not_invalidated_by": [
+      "resolution",
+      "render samples",
+      "denoising",
+      "exposure",
+      "output color transform"
+    ]
+  },
+  "preservation_rules": [
+    "Do not overwrite the source showcase study.",
+    "Use independent named derivative studies and simulation outputs.",
+    "Do not infer friction, density or strength from an appearance recipe.",
+    "Do not treat sampled kinematic interference checks as continuous dynamic collision detection."
+  ]
+}

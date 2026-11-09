@@ -1,0 +1,24 @@
+{
+  "commands": [
+    {
+      "command": "joint.list",
+      "params": {}
+    },
+    {
+      "command": "motion.list",
+      "params": {}
+    },
+    {
+      "command": "appearance.list",
+      "params": {}
+    },
+    {
+      "command": "material.list",
+      "params": {}
+    },
+    {
+      "command": "render.scene",
+      "params": {}
+    }
+  ]
+}

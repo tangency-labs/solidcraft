@@ -682,7 +682,7 @@ def run_pi(d, release="0.8"):
     d.tool("sketch.create")
     d.click(d.at(world=[-5, 18, 2]), settle=0.9)
     d.settle_camera()
-    loop = rectangle(d, [-8, -14, 2], [14, 1.5, 0])
+    loop = rectangle(d, [-8, -14, 2], [-14, 2.5, 0])
     d.tool("sketch.finish")
     d.view("home", 0.4)
     extrude(d, [loop], "-wall")
@@ -717,6 +717,9 @@ def run_pi(d, release="0.8"):
     d.orbit(-260, 10, steps=110, around=[0, 0, 10])
     d.glide(away, 0.3)
     d.settle_camera()
+    # Frame the finished 32 mm case whole, in the same three-quarter direction.
+    d.ui("ui.view", {"view": "fit", "animate": True})
+    d.settle_camera()
     d.wait(1.0)
 
 
@@ -733,7 +736,11 @@ def main():
     a = ap.parse_args()
     if not math.isfinite(a.speed) or a.speed <= 0 or not math.isfinite(a.minimum_caption) or a.minimum_caption < 0:
         ap.error("pause scale must be positive and caption duration nonnegative")
-    mcp = Mcp([a.cli, "mcp", "--connect", f"127.0.0.1:{a.port}"])
+    argv = [a.cli, "mcp", "--connect", f"127.0.0.1:{a.port}"]
+    if a.save:
+        # MCP file access is limited to the open design's folder and the recovery folder.
+        argv += ["--allow-path", os.path.dirname(os.path.abspath(a.save))]
+    mcp = Mcp(argv)
     mcp.send("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "enclosure-demo-v2", "version": "2"}})
     mcp.send("notifications/initialized", notify=True)
     d = Demo(a.port, mcp, open(a.log, "w") if a.log else None, a.speed, a.minimum_caption)

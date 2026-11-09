@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1927"
+ ],
+ "what": "Delete Face on the 0.5 mm deep O15 recess of a plate: the face around the gap must keep its surface",
+ "source": "analytic",
+ "method": "100x100x10 plate with a O15x0.5 recess; deleting the recess floor (and, with heal, its wall) restores the plain plate: V = 100000, six faces",
+ "body_count": 1,
+ "volume_mm3": 100000.0,
+ "faces": 6
+}

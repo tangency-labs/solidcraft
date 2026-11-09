@@ -24,7 +24,7 @@ const DIR: &str = "assets/locales";
 
 /// Catalogs delivered complete: a missing message here fails `--check`. English is the source
 /// catalog and is checked implicitly; keep this in step with `COMPLETE` in `ui-egui::i18n`.
-const COMPLETE: &[&str] = &["ja", "zh"];
+const COMPLETE: &[&str] = &["ar", "he", "ja", "vi", "zh"];
 
 /// What `run` found.
 #[derive(Default)]
@@ -122,8 +122,15 @@ fn locales(root: &Path) -> Result<Vec<String>, String> {
 fn read(root: &Path, locale: &str) -> Result<Map<String, Value>, String> {
     let path = root.join(DIR).join(format!("{locale}.json"));
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // Messages still in assets/locales/pending/ count: they are folded on main.
+    let pending = crate::pending::locale_messages(root, locale)?;
     match serde_json::from_str(&text) {
-        Ok(Value::Object(map)) => Ok(map),
+        Ok(Value::Object(mut map)) => {
+            for (id, text) in pending {
+                map.entry(id).or_insert(Value::String(text));
+            }
+            Ok(map)
+        }
         Ok(_) => Err(format!("{}: a catalog must be a JSON object", path.display())),
         Err(e) => Err(format!("{}: {e}", path.display())),
     }

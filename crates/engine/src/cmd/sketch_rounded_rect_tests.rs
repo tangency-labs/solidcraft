@@ -1,6 +1,8 @@
 //! Rounded Rectangle (#891): a 2-point rectangle whose corners are filleted alike, in one step.
 
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
+use solidcraft_sketch::ConstraintKind;
 
 use crate::Session;
 
@@ -100,6 +102,34 @@ fn a_radius_too_large_or_not_positive_is_refused_and_draws_nothing() {
     assert!(s.execute("sketch.rectangle.rounded", &json!({"p0": [0, 0], "p1": [40, 20]})).is_err(), "radius is required");
 }
 
+/// #7878: a rounded rectangle whose corner lands on an existing point (the far end of a line)
+/// completes, as the plain rectangle does, and the vertex stays tied to the corner.
+#[test]
+fn a_rounded_rectangle_completes_from_an_existing_vertex() {
+    let mut s = sketch();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}))["curves"])[0].clone();
+    let r = match s.execute("sketch.rectangle.rounded", &json!({"p0": [40, 0], "p1": [60, 20], "radius": 2})) {
+        Ok(v) => v,
+        Err(e) => panic!("the rounded rectangle refused the vertex: {e}"),
+    };
+    assert_eq!(ids(&r["arcs"]).len(), 4, "{r}");
+    assert_eq!(ids(&r["curves"]).len(), 8, "{r}");
+    let sk = solved(&s);
+    // The vertex stays where it was, and the line's end stays tied to the corner.
+    let at_vertex = |i: usize| sk.point(i).is_some_and(|p| (p.x - 40.0).abs() < 1e-6 && p.y.abs() < 1e-6);
+    let end = sk.resolve_point(&format!("{line}.end")).expect("the line's end");
+    assert!(at_vertex(end), "the line's end stays at the vertex");
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if at_vertex(p) && at_vertex(q))),
+        "the vertex stays tied to the corner"
+    );
+    // The shape is whole: a 20 × 20 rectangle with 2 mm corners.
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let area = si["profiles"][0]["area_mm2"].as_f64().unwrap();
+    let want = 20.0 * 20.0 - (4.0 - std::f64::consts::PI) * 4.0;
+    assert!((area - want).abs() < 1e-6, "area {area}, want {want}: {si}");
+}
+
 /// Typed width and height (the drawing tool's boxes) dimension the overall size, between
 /// opposite sides, not the straight part of a side.
 #[test]
@@ -116,4 +146,28 @@ fn typed_width_and_height_measure_the_whole_rounded_rectangle() {
     let want = 50.0 * 25.0 - (4.0 - std::f64::consts::PI) * 16.0;
     assert!((area - want).abs() < 1e-6, "area {area}, want {want}: {si}");
     assert_eq!(si["dof"], 2, "only the position is free: {si}");
+}
+
+/// The corners take expressions over the design's parameters, as a 2-point rectangle's do: the
+/// rounded rectangle follows them, and the radius is checked against the sides they work out to.
+#[test]
+fn corners_typed_as_expressions_follow_their_parameters() {
+    let mut s = sketch();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "20 mm"}));
+    let r = run(&mut s, "sketch.rectangle.rounded", json!({"p0": ["-W / 2", "-H / 2"], "p1": ["W / 2", "H / 2"], "radius": 3}));
+    assert_eq!(ids(&r["arcs"]).len(), 4, "{r}");
+    let area = |s: &mut Session| {
+        let si = run(s, "sketch.inspect", json!({}));
+        si["profiles"][0]["area_mm2"].as_f64().unwrap_or(f64::NAN)
+    };
+    let corners = (4.0 - std::f64::consts::PI) * 9.0;
+    let a = area(&mut s);
+    assert!((a - (40.0 * 20.0 - corners)).abs() < 1e-6, "area {a}");
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "70 mm"}));
+    let a = area(&mut s);
+    assert!((a - (70.0 * 20.0 - corners)).abs() < 1e-6, "area after W = 70 mm: {a}");
+    // A radius the worked-out sides cannot take is refused, as for numbers.
+    let too_big = s.execute("sketch.rectangle.rounded", &json!({"p0": [0, 0], "p1": ["W", "H / 4"], "radius": 3}));
+    assert!(too_big.is_err(), "radius 3 mm on a 5 mm side: {too_big:?}");
 }

@@ -14,10 +14,11 @@
 //! triangle count, with its error measured: how far its vertices and the centres of its triangles
 //! lie from the original surface, at most.
 
+use crate::prelude::*;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::Vec3;
+use solidcore_record::Vec3;
 
 /// Most triangles [`levels`] simplifies (more: no levels).
 pub const MAX_TRIANGLES: usize = 50_000_000;

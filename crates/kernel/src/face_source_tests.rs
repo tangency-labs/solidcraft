@@ -1,8 +1,9 @@
 use crate::{FaceSource, extrude, transform_matrix};
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 fn assert_exact_planes(body: &crate::Body) {
-    let mesh = body.tessellate(0.001).unwrap();
+    let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
     for (index, _) in body.face_sources().unwrap().iter().enumerate() {
         let Some(plane) = body.face_plane(index) else { continue };
         let mut count = 0;
@@ -27,6 +28,12 @@ fn box_certificates_are_six_construction_roles_with_dimension_stable_axes() {
         (Vec3::new(2., 3., 4.), Vec3::new(12., 23., 34.)),
         (Vec3::new(12., 23., 34.), Vec3::new(2., 3., 4.)),
         (Vec3::new(2., -8., 4.), Vec3::new(22., 43., 54.)),
+        // A side far shorter than the body (a 0.3 mm label of a metre): its walls' edges lie
+        // closer together than the sweep's body-sized nearness, and each keeps its own role.
+        (Vec3::new(500., -0.3, 1400.), Vec3::new(1500., 0., 1800.)),
+        // Far thinner than the body's flatness tolerance (0.1 µm in 14 mm): each cap is in its
+        // own plane only.
+        (Vec3::ZERO, Vec3::new(10., 10., 1e-4)),
     ] {
         let body = crate::box_solid(a, b).unwrap().with_box_certificate(42).unwrap();
         let mut roles = std::collections::HashSet::new();
@@ -81,7 +88,7 @@ fn cap_roles_follow_exact_offset_planes_and_canonical_profile_memberships() {
             assert_eq!(caps.len(), 2);
             assert_exact_planes(&body);
             let expected = (400. - 5. * std::f64::consts::PI) * (end - start).abs();
-            assert!((body.tessellate(1e-4).unwrap().measure().volume - expected).abs() < 0.03);
+            assert!((body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - expected).abs() < 0.03);
         }
     }
 }
@@ -94,7 +101,14 @@ fn construction_planes_follow_reflected_and_sheared_affine_images() {
         [[-1., 0., 0., 0.], [0.4, 2., 0., 0.], [0., 0.3, 1., 0.], [8., 9., 10., 1.]],
     ] {
         let placed = transform_matrix(&body, m).unwrap();
-        for (original, transformed) in body.face_sources().unwrap().iter().zip(placed.face_sources().unwrap()) {
+        // SMLib numbers the placed faces afresh: each is matched with the face its history names.
+        let history = placed.history().unwrap();
+        let originals = body.face_sources().unwrap();
+        for (f, transformed) in placed.face_sources().unwrap().iter().enumerate() {
+            let [crate::history::FaceOrigin::Face { operand: 0, face }] = history.faces[f].origins.as_slice() else {
+                panic!("face {f} has no one origin")
+            };
+            let original = &originals[*face];
             let (
                 Some(FaceSource::Box { producer: a, axis: aa, high: ah, plane: ap }),
                 Some(FaceSource::Box { producer: b, axis: ba, high: bh, plane: bp }),
@@ -120,7 +134,7 @@ fn material_changes_preserve_only_unchanged_planar_support_certificates() {
     let base = crate::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap().with_box_certificate(42).unwrap();
     let tool = crate::box_solid(Vec3::new(5., -1., -1.), Vec3::new(11., 11., 11.)).unwrap();
     let cut = crate::boolean(&base, &tool, crate::BoolOp::Cut).unwrap().unwrap();
-    assert!((cut.tessellate(1e-4).unwrap().measure().volume - 500.).abs() < 1e-8);
+    assert!((cut.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - 500.).abs() < 1e-8);
     // Unchanged uniquely certified supports retain their role; a newly cut
     // support must never inherit the removed opposite wall's source identity.
     let mut retained = 0;
@@ -236,7 +250,7 @@ fn constructed_annulus_sides_follow_exact_source_edges() {
         let body = &bodies[0];
         let sources = body.face_sources().unwrap();
         assert_eq!(sources.len(), body.face_count());
-        let mesh = body.tessellate(0.001).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
         let mut inner = 0;
         let mut outer = 0;
         for (index, source) in sources.iter().enumerate() {
@@ -259,7 +273,7 @@ fn constructed_annulus_sides_follow_exact_source_edges() {
             }
             assert!(vertices > 0);
         }
-        assert_eq!((outer, inner), (2, 2), "full circles split into two actual edges each");
+        assert_eq!((outer, inner), (1, 1), "each full circle sweeps one side face");
         assert_eq!(sources.iter().filter(|source| matches!(source, Some(FaceSource::ExtrudeCap { .. }))).count(), 2);
     }
 }
@@ -298,14 +312,47 @@ fn constructed_large_arc_split_and_reversal_preserve_one_source_segment() {
                 _ => None,
             })
             .collect();
-        assert_eq!(arcs.len(), 2, "large input arc explicitly creates two actual boundary edges");
+        assert_eq!(arcs.len(), 1, "the large input arc sweeps one side face");
         assert!(arcs.iter().all(|(radius, sweep)| (**radius - 10.).abs() < 1e-12 && (sweep.abs() - std::f64::consts::PI * 5. / 3.).abs() < 1e-12));
         assert_eq!(sources.iter().filter(|source| matches!(source, Some(FaceSource::ExtrudeSide { segment: Seg2::Line { .. }, .. }))).count(), 1);
-        let mesh = body.tessellate(0.001).unwrap();
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();
         for (triangle, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
             if matches!(sources[*face as usize], Some(FaceSource::ExtrudeSide { segment: Seg2::Arc { .. }, .. })) {
                 assert!(mesh.tri(triangle).unwrap().iter().all(|point| (point.x.hypot(point.y) - 10.).abs() < 1e-7));
             }
         }
+    }
+}
+
+/// A certified block cut by, or joined with, a spherical shell (r 18.5 to 40) through both its
+/// spheres: booleans with a tool that has a void (#451) keep the sources of the block's ends,
+/// which they leave as they were.
+#[test]
+fn hollow_tool_booleans_keep_planar_support_certificates() {
+    use std::f64::consts::{PI, TAU};
+    let ring = Region2 {
+        outer: Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(18.5, 0.), b: Vec2::new(40., 0.) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 40., start: 0., sweep: PI },
+                Seg2::Line { a: Vec2::new(-40., 0.), b: Vec2::new(-18.5, 0.) },
+                Seg2::Arc { center: Vec2::ZERO, radius: 18.5, start: PI, sweep: -PI },
+            ],
+        },
+        holes: vec![],
+    };
+    let shell = crate::revolve(&Plane::XY, &[ring], Vec2::ZERO, Vec2::X, TAU).unwrap().remove(0);
+    assert_eq!(shell.shell_count(), 2, "a solid with a void");
+    let block = crate::box_solid(Vec3::new(8., -4., -4.), Vec3::new(50., 4., 4.)).unwrap().with_box_certificate(42).unwrap();
+    for op in [crate::BoolOp::Cut, crate::BoolOp::Union] {
+        let r = crate::boolean(&block, &shell, op).unwrap().unwrap();
+        let ends: Vec<f64> = (0..r.face_count())
+            .filter(|i| {
+                matches!(r.face_sources().and_then(|s| s.get(*i)).and_then(Option::as_ref), Some(FaceSource::Box { producer: Some(42), axis: 0, .. }))
+            })
+            .map(|i| r.planar_face(i).unwrap().origin.x)
+            .collect();
+        assert!([8., 50.].iter().all(|x| ends.iter().any(|e| (e - x).abs() < 1e-9)), "{op:?}: {ends:?}");
+        assert_exact_planes(&r);
     }
 }

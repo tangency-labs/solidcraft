@@ -1,0 +1,34 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "T"
+   }
+  },
+  {
+   "command": "sketch.text",
+   "params": {
+    "text": "S",
+    "at": [
+     0,
+     0
+    ],
+    "height": 10
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "T",
+    "distance": "1 mm",
+    "taper": "-10 deg"
+   }
+  }
+ ]
+}

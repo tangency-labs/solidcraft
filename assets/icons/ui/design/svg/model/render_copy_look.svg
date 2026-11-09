@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Copy Look — the look in front of a copy outline</title>
+  <path d="M8 40L8 12.5A4.5 4.5 0 0 1 12.5 8L40 8" fill="none" stroke="currentColor" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 19L51 19A5 5 0 0 1 56 24L56 51A5 5 0 0 1 51 56L24 56A5 5 0 0 1 19 51L19 24A5 5 0 0 1 24 19Z" fill="none" stroke="currentColor" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="37.5" cy="37.5" r="12" fill="#328bd3"/>
+  <path d="M48.78 33.4A12 12 0 0 1 33.4 48.78A15.69 15.69 0 0 0 48.78 33.4Z" fill="#236ead"/>
+  <circle cx="33.42" cy="33.42" r="3.24" fill="#b9ddf8"/>
+  <circle cx="37.5" cy="37.5" r="12" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

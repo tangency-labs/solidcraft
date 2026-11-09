@@ -1,0 +1,6 @@
+# Recipe and generator receipts hash canonical bytes on every platform.
+*.json text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.png binary
+*.hdr binary

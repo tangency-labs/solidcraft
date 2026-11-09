@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Sun — source disc with short radial rays</title>
+  <circle cx="32" cy="32" r="15" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 5.5L32 10.5M32 53.5L32 58.5M5.5 32L10.5 32M53.5 32L58.5 32M13.26 13.26L16.8 16.8M47.2 47.2L50.74 50.74M13.26 50.74L16.8 47.2M47.2 16.8L50.74 13.26" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

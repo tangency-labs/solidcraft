@@ -3,17 +3,18 @@
 //! that turns the text about its centre (Shift: steps of 15°). Each frame of a drag runs
 //! `sketch.edit_text` live; the whole gesture is one undo step and Esc cancels it (the drag
 //! shares [`crate::viewport::Viewport::text_drag`] with moving a text, so it ends and cancels
-//! the same way).
+//! the same way). A drag from anywhere else inside the frame moves the text ([`grab_inside`]).
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 
-use egui::{Align2, CursorIcon, FontId, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, vec2};
+use egui::{Align2, CursorIcon, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, vec2};
 use serde_json::json;
-use solidcraft_engine::geom::Vec2;
-use solidcraft_engine::sketch::{LinkKind, LinkSource};
+use solidcore_record::Vec2;
+use solidcraft_engine::sketch::{CurveKind, LinkKind, LinkSource};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
-use crate::viewport::Proj;
+use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// Pixels from a handle's centre that still grab it.
 const GRAB_PX: f32 = 8.0;
@@ -102,7 +103,7 @@ fn target(app: &SolveApp) -> Option<String> {
 /// The frame of text `link` in the active sketch, as shown (solved).
 fn frame(app: &SolveApp, link: &str) -> Option<Frame> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sk = &state.sketch(sid)?.sketch;
     let source = sk.link(link).filter(|l| l.kind == LinkKind::Text)?;
     let LinkSource::Text { at, height, angle, style, .. } = &source.source else { return None };
@@ -147,7 +148,7 @@ struct Screen {
 
 fn screen(app: &SolveApp, proj: &Proj, f: &Frame) -> Option<Screen> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let plane = state.sketch(sid)?.plane;
     let to_screen = |local: Vec2| proj.to_screen(plane.to_world(f.to_sketch(local)));
     let [a, b, c, d] = f.corners();
@@ -176,9 +177,27 @@ pub(crate) fn over(app: &SolveApp, proj: &Proj, pos: Pos2) -> bool {
     hit(app, proj, pos).is_some()
 }
 
+/// The selected text's curve, as a drag from `pos` grabs it, when `pos` is inside the text's
+/// frame: a drag from anywhere in the frame moves the text, not only one from a letter (#8835).
+pub(crate) fn grab_inside(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Hit> {
+    let sketch = app.session.active_sketch?;
+    let f = frame(app, &target(app)?)?;
+    let at = on_plane(app, proj, pos)?;
+    let q = f.to_local(at);
+    if !((f.min.x..=f.max.x).contains(&q.x) && (f.min.y..=f.max.y).contains(&q.y)) {
+        return None;
+    }
+    let id = crate::sketch_text::selected_entity(app)?;
+    let state = crate::open_meshing::session_world(&app.session);
+    let ss = state.sketch(sketch)?;
+    let curve = ss.sketch.curves.iter().find(|c| c.id == id)?;
+    let straight = matches!(curve.kind, CurveKind::Line { .. });
+    Some(Hit::SketchCurve { sketch, id, straight, point: ss.plane.to_world(at) })
+}
+
 /// Where the pointer is on the active sketch's plane.
 fn on_plane(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec2> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(app.session.active_sketch?)?;
     let (o, d) = proj.ray(pos);
     ss.plane.intersect_ray(o, d).map(|w| ss.plane.to_local(w))
@@ -275,7 +294,7 @@ pub(crate) fn show(app: &SolveApp, ui: &egui::Ui, painter: &Painter, proj: &Proj
     let line = Stroke::new(1.0, tk.accent);
     let mut outline = s.corners.to_vec();
     outline.push(s.corners[0]);
-    painter.add(Shape::dashed_line(&outline, line, 5.0, 4.0));
+    painter.extend(crate::ui_kit::dashed_line(&outline, painter.clip_rect(), line, 5.0, 4.0));
     painter.line_segment([s.knob_base, s.knob], line);
     let drag = DRAG.with(|d| d.borrow().as_ref().map(|d| d.grab));
     let under = hover.and_then(|p| hit(app, proj, p)).map(|(_, g)| g);
@@ -308,7 +327,7 @@ pub(crate) fn show(app: &SolveApp, ui: &egui::Ui, painter: &Painter, proj: &Proj
             }
             Grab::Rotate => format!("{:.1}°", f.angle.to_degrees()),
         };
-        painter.text(p + vec2(14.0, -14.0), Align2::LEFT_BOTTOM, label, FontId::proportional(crate::theme::Tokens::get().font_body), tk.accent);
+        painter.text(p + vec2(14.0, -14.0), Align2::LEFT_BOTTOM, label, FontId::proportional(solidcraft_theme::Tokens::get().font_body), tk.accent);
     }
 }
 
@@ -392,7 +411,7 @@ mod tests {
         let result = h.app.run("sketch.text", json!({"text":"II","at":[0,0],"height":10})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 60.0;
-        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into(), sketch: None }];
         h.frames(3);
         (h, result["link"].as_str().unwrap().into())
     }
@@ -409,7 +428,7 @@ mod tests {
         h.app.session.selection.clear();
         h.frames(2);
         let sid = h.app.session.active_sketch.unwrap();
-        let inside = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let inside = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         h.step(&json!({"click":{"sketch":[inside.x,inside.y]},"double":true})).unwrap();
         h.frames(2);
         match h.app.dialog.as_ref().map(|d| &d.kind) {
@@ -466,7 +485,7 @@ mod tests {
         h.call("ui.view", json!({"view":"top"}));
         // Keep the rotated resize target clear of the floating ribbon too.
         h.app.cam.distance = 90.0;
-        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: result["curves"][0].as_str().unwrap().into(), sketch: None }];
         h.frames(3);
         let height_expr = |h: &Harness| {
             let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();

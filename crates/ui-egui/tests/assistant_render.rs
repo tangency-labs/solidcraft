@@ -12,12 +12,11 @@ use solidcraft_ui_egui::{
         backend::{PermissionOption, ToolStatus},
     },
     scenario::{self, Harness},
-    theme,
 };
 
 #[test]
 fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
-    let previous = theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for width in [280.0, 440.0, 760.0] {
             let mut h = Harness::new();
@@ -30,6 +29,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
                     text: "Make the plate 80 mm wide, soften its edges, and export a STEP file.".into(),
                     image: false,
                     pictures: vec![],
+                    context: Default::default(),
                     files: vec!["plate-notes.txt".into()],
                 },
                 Item::Agent { thought: false, text: "I’ll update the width and check the selected edges before exporting.".into() },
@@ -38,6 +38,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
                     title: "parameters.set".into(),
                     kind: "other".into(),
                     status: Some(ToolStatus::Completed),
+                    input: None,
                     output: Some("plate_width = 80 mm".into()),
                 },
                 Item::Tool {
@@ -45,6 +46,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
                     title: "solid.fillet".into(),
                     kind: "other".into(),
                     status: Some(ToolStatus::Failed),
+                    input: None,
                     output: Some("The requested radius is too large. Try a smaller radius.".into()),
                 },
                 Item::Agent {
@@ -65,7 +67,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
             h.ctx = egui::Context::default();
             h.ctx.enable_accesskit();
             solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
-            theme::apply(&h.ctx);
+            solidcraft_theme::apply(&h.ctx);
             let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
             for _ in 0..8 {
                 raster::paint(&mut h, &mut textures, vec![]);
@@ -106,5 +108,5 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
             }
         }
     }
-    theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }

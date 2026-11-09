@@ -9,7 +9,16 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
+solidcraft-control-egui = { workspace = true }
+# The widget registry (handles, rects, counts) the UI kit publishes into.
+solidcraft-ui-registry = { workspace = true }
+solidcraft-color = { workspace = true }
+solidcraft-ui-text = { workspace = true }
+# The token contract every component draws with; the theme system here resolves and sets it.
+solidcraft-theme = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
@@ -22,6 +31,10 @@ web-time = { workspace = true }
 # BMP and TIFF as PNG).
 image = { workspace = true, features = ["jpeg", "ico", "gif", "webp", "bmp", "tiff"] }
 ttf-parser = { workspace = true }
+# Right-to-left interface text (Hebrew): the Unicode Bidirectional Algorithm puts translated
+# strings in display order, which egui does not do itself (MIT OR Apache-2.0).
+# The system's preferred languages on a first start (MIT OR Apache-2.0, maintained by
+# 1Password): the OS locale on desktop and, with `js`, `navigator.languages` in the browser (#10138).
 semver = { workspace = true }
 # Updates: the downloaded package's SHA-256 (against the release's SHA256SUMS.txt), its optional
 # minisign signature (MIT), and the portable .zip's executables.
@@ -31,12 +44,22 @@ zip = { workspace = true }
 # Rasterises the icon SVGs (assets/icons/ui/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+# Ends an agent's process group with the system call (MIT; already in the tree through zip).
+nix = { workspace = true }
+
 [target.'cfg(windows)'.dependencies]
 # Updates: the folder the Windows installer recorded, so an install outside Program Files is still
 # updated by its installer (MIT; already in the tree as a build dependency).
 winreg = "0.56"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS menu bar (window_chrome::native_menu; MIT OR Apache-2.0, already in the tree through
+# the desktop app).
+muda = { version = "0.21.2", default-features = false }
+
 [dev-dependencies]
+solidcraft-engine = { workspace = true, features = ["bundled-render-library", "profile"] }
 # Parse the source guard structurally, including code after inline test modules.
 syn = { workspace = true, features = ["visit"] }
 # The catalog guard reads every UI source file as Rust tokens; already in the tree through
@@ -47,6 +70,7 @@ proc-macro2 = { workspace = true }
 # egui-winit's clipboard.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+lopdf = { version = "0.45", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # The offscreen viewport render test opens a device without a window.

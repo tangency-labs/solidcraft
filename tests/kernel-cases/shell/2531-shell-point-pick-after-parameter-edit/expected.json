@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2531"
+ ],
+ "what": "a shell opened by a point pick keeps opening only that face after a parameter edit moves the body under the stored point",
+ "source": "analytic",
+ "method": "after L=150, Y0=15 the bar is 150x20x20 at y 15..35, shelled 2 mm with only the right end (x=150) open: V=60000-148*16*16=22112; faces 5 outer + right-end ring + 5 inner = 11; the stored point (100,15,10) now lies in the bottom (y=15) face, which must stay closed",
+ "body_count": 1,
+ "volume_mm3": 22112,
+ "faces": 11
+}

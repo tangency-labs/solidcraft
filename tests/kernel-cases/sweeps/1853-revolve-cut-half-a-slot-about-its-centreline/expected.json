@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1853",
+  "tangency-labs/solidcraft#1866"
+ ],
+ "what": "half a slot (r 3, centres 14 apart) revolved a full turn about its own centreline, which lies in the top face of a plate, as a cut (no result after about 10 s of retries)",
+ "source": "analytic",
+ "method": "the half slot revolved 360 degrees is a capsule: cylinder r 3, length 14 plus two hemispheres: V = pi 9 14 + 4/3 pi 27 = 508.94. Its axis lies in the plate top face z = 10, so exactly half of it is inside the 40 x 20 x 10 plate: V = 8000 - 508.94 / 2 = 7745.53. Faces: 5 plate faces + top face with the slot outline + half cylinder + 2 quarter spheres = 9.",
+ "body_count": 1,
+ "volume_mm3": 7745.530995059226,
+ "faces": 9
+}

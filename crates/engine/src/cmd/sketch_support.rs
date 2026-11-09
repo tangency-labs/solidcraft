@@ -1,6 +1,7 @@
 //! Bounded roots on exact curve pieces against an infinite line or complete circle.
 //! Rational pieces are intersected in homogeneous coordinates, without sampled chords.
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Shape, intersections};
 
 use crate::{Result, params::bad};
@@ -88,7 +89,9 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
         if let Shape::Line { a: pa, b: pb } = *support
             && (pb - pa).normalized().is_some_and(|d| d.cross(a - pa).abs() < 1e-9 && d.cross(b - pa).abs() < 1e-9)
         {
-            return Err(bad("sketch.extend", "the continuation overlaps another curve"));
+            // A collinear line is passed over (no hits) so extend can find the next target on
+            // its way instead of failing.
+            return Ok(Vec::new());
         }
         return Ok(intersections(support, &other)
             .into_iter()
@@ -105,7 +108,8 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
             && c.dist(center) < 1e-9
             && (r - radius).abs() < 1e-9
         {
-            return Err(bad("sketch.extend", "the continuation overlaps another curve"));
+            // The same circle is passed over, so extend can find the next target.
+            return Ok(Vec::new());
         }
         return Ok(intersections(support, &other)
             .into_iter()
@@ -144,7 +148,9 @@ pub(super) fn hits(support: &Shape, seg: &Seg2, budget: &mut usize) -> Result<Ve
         }
     };
     if c.iter().all(|v| v.abs() < 1e-28) {
-        return Err(bad("sketch.extend", "the continuation overlaps another curve"));
+        // A zero polynomial: the curve lies on the support (infinite line or circle). Pass it
+        // over, so extend can find the next target.
+        return Ok(Vec::new());
     }
     let mut out = Vec::new();
     for t in roots(&c, budget)? {
@@ -200,7 +206,7 @@ mod tests {
             elevated.push(y[n - 1]);
             y = elevated;
         }
-        let mut points = [Vec2::ZERO; solidcraft_geom::MAX_BEZIER_CTRL];
+        let mut points = [Vec2::ZERO; solidcore_record::MAX_BEZIER_CTRL];
         for (i, p) in points.iter_mut().take(8).enumerate() {
             *p = Vec2::new(10.0 + i as f64 * 20.0 / 7.0, y[i]);
         }

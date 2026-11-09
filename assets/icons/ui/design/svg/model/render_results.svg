@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render results — open the finished renders</title>
+  <path d="M21 6L55 6A5 5 0 0 1 60 11L60 35A5 5 0 0 1 55 40L21 40A5 5 0 0 1 16 35L16 11A5 5 0 0 1 21 6Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9 17.5L43 17.5A7.5 7.5 0 0 1 50.5 25L50.5 51A7.5 7.5 0 0 1 43 58.5L9 58.5A7.5 7.5 0 0 1 1.5 51L1.5 25A7.5 7.5 0 0 1 9 17.5Z" fill="#ffffff"/>
+  <path d="M9 20L43 20A5 5 0 0 1 48 25L48 51A5 5 0 0 1 43 56L9 56A5 5 0 0 1 4 51L4 25A5 5 0 0 1 9 20Z" fill="#e2e8ef"/>
+  <defs><clipPath id="res"><path d="M9 20L43 20A5 5 0 0 1 48 25L48 51A5 5 0 0 1 43 56L9 56A5 5 0 0 1 4 51L4 25A5 5 0 0 1 9 20Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#res)">
+  <path d="M4 48.8L17.2 35.12L29.52 46.64L36.56 40.88L48 50.96L48 56L4 56Z" fill="#328bd3"/>
+  </g>
+  <path d="M9 20L43 20A5 5 0 0 1 48 25L48 51A5 5 0 0 1 43 56L9 56A5 5 0 0 1 4 51L4 25A5 5 0 0 1 9 20Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

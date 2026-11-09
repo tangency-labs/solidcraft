@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Components</title>
+  <path d="M22.91 5.75 L41.09 16.25 L22.91 26.75 L4.72 16.25ZM4.72 16.25 L22.91 26.75 L22.91 47.75 L4.72 37.25ZM41.09 16.25 L59.28 26.75 L41.09 37.25 L22.91 26.75ZM22.91 26.75 L41.09 37.25 L41.09 58.25 L22.91 47.75ZM59.28 26.75 L41.09 37.25 L41.09 58.25 L59.28 47.75Z" fill="currentColor" stroke="currentColor" stroke-width="4.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.46 18.35L22.91 26.75L22.91 43.55" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

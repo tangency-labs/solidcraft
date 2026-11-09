@@ -542,6 +542,22 @@ mod tests {
     }
 
     #[test]
+    fn a_four_byte_usage_item_takes_its_page_from_its_own_bytes() {
+        // The current usage page is Button (9), but the four-byte usage item declares Generic
+        // Desktop (1), usage X (0x30): the axis must come from the four bytes, not from the
+        // page that was in force when the item was read.
+        let layout = layout(&controller(&[
+            0x85, 0x01, // report id 1
+            0x05, 0x09, // usage page: button
+            0x16, 0xA2, 0xFE, 0x26, 0x5E, 0x01, // logical minimum -350, maximum 350
+            0x75, 0x10, 0x95, 0x01, // report size 16, report count 1
+            0x0B, 0x30, 0x00, 0x01, 0x00, // usage (4 bytes): page 1, usage 0x30 (X)
+            0x81, 0x02, // input: data, variable, absolute
+        ]));
+        assert_eq!(layout.axes[0], field(1, 0, 16, (-350, 350), false));
+    }
+
+    #[test]
     fn six_axes_in_report_one_follow_each_other() {
         for (bytes, relative) in [(COMBINED, false), (COMBINED_RANGE, true)] {
             assert!(Descriptor::parse(bytes).is_multi_axis_controller());

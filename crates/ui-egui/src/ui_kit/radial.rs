@@ -1,12 +1,12 @@
 //! Analytic rounded annular sectors, following the board's offset-and-round construction.
-use crate::{context_menu::Item, theme::Tokens};
+use super::Item;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use solidcraft_theme::Tokens;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 pub(crate) const RADIAL_RADIUS: f32 = 150.0;
 const INNER: f32 = 56.0;
 const GAP: f32 = 4.0;
-const CORNER: f32 = 9.0;
 const STEPS: usize = 16;
 
 fn unit(a: f32) -> Vec2 {
@@ -14,14 +14,17 @@ fn unit(a: f32) -> Vec2 {
 }
 
 /// Two equally sampled boundaries; their ends are joined by parallel straight sides.
-/// The four joins are circular arcs of radius CORNER, tangent to both adjacent edges.
+/// The four joins are circular arcs of the theme radius, tangent to both adjacent edges.
 fn boundaries(k: usize) -> (Vec<Pos2>, Vec<Pos2>) {
+    // The outer and inner circles are functional geometry; only the corner joins vary.
+    // Bound the radius so the inner arc remains ordered, even for hostile theme data.
+    let corner = f32::from(Tokens::get().radius_xl.saturating_sub(1)).min(12.0);
     let am = -FRAC_PI_2 + (k % 8) as f32 * FRAC_PI_4;
     let a0 = am - FRAC_PI_4 / 2.0;
     let a1 = am + FRAC_PI_4 / 2.0;
-    let d = GAP / 2.0 + CORNER;
-    let ro = RADIAL_RADIUS - CORNER;
-    let ri = INNER + CORNER;
+    let d = GAP / 2.0 + corner;
+    let ro = RADIAL_RADIUS - corner;
+    let ri = INNER + corner;
     let outer0 = a0 + (d / ro).asin();
     let outer1 = a1 - (d / ro).asin();
     let inner0 = a0 + (d / ri).asin();
@@ -36,13 +39,13 @@ fn boundaries(k: usize) -> (Vec<Pos2>, Vec<Pos2>) {
         }
     };
     let mut outer = Vec::new();
-    arc(&mut outer, po0, CORNER, a0 - FRAC_PI_2, outer0);
+    arc(&mut outer, po0, corner, a0 - FRAC_PI_2, outer0);
     arc(&mut outer, Pos2::ZERO, RADIAL_RADIUS, outer0, outer1);
-    arc(&mut outer, po1, CORNER, outer1, a1 + FRAC_PI_2);
+    arc(&mut outer, po1, corner, outer1, a1 + FRAC_PI_2);
     let mut inner = Vec::new();
-    arc(&mut inner, pi0, CORNER, a0 - FRAC_PI_2, inner0 - PI);
+    arc(&mut inner, pi0, corner, a0 - FRAC_PI_2, inner0 - PI);
     arc(&mut inner, Pos2::ZERO, INNER, inner0, inner1);
-    arc(&mut inner, pi1, CORNER, inner1 - PI, a1 + FRAC_PI_2 - TAU);
+    arc(&mut inner, pi1, corner, inner1 - PI, a1 + FRAC_PI_2 - TAU);
     (outer, inner)
 }
 
@@ -88,7 +91,7 @@ fn paint_sector(p: &egui::Painter, center: Pos2, k: usize, fill: Color32, stroke
 
 pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option<usize>) -> Option<Item> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let mut picked = None;
     for (k, item) in items.iter().take(8).enumerate() {
         let enabled = item.enabled && ui.is_enabled();
@@ -107,23 +110,23 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         let a = -FRAC_PI_2 + k as f32 * FRAC_PI_4;
         let at = center + unit(a) * 104.0;
         let target = Rect::from_center_size(at, vec2(t.space_24 * 2.0 + t.space_12, t.space_24 + t.space_16 + t.space_2));
-        let response = ui.interact(target, ui.id().with(("radial", k)), Sense::hover());
-        crate::scenario::publish_target(&format!("radial:{}", item.id), target);
+        let response = ui.interact(target, ui.scope_id().with(("radial", k)), Sense::hover());
+        solidcraft_ui_registry::publish_target(&format!("radial:{}", item.id), target);
         let ink = if lit { accent.ink } else { t.form_ink };
         crate::icons::paint_accented(
             &painter,
             Rect::from_center_size(at - vec2(0.0, t.space_6), vec2(t.space_24, t.space_24)),
             &item.icon,
-            crate::theme::TabAccent::current_icon_accent(ui.ctx()),
+            solidcraft_theme::TabAccent::current_icon_accent(ui.ctx()),
             1.0,
         );
-        let label = crate::i18n::tr_label(&item.label);
+        let label = solidcraft_ui_text::tr_label(&item.label);
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), FontId::proportional(t.font_small), ink);
         job.wrap.max_width = 74.0;
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
         painter.galley(at + vec2(-galley.size().x / 2.0, t.space_10), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         if lit && ui.input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| contains(k, p - center))) {
             picked = Some(item.clone());
         }
@@ -134,14 +137,14 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         p.text(
             center - vec2(0.0, t.space_6),
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.label),
+            solidcraft_ui_text::tr_label(&item.label),
             FontId::proportional(t.font_label),
             t.form_ink,
         );
         p.text(
             center + vec2(0.0, t.space_14),
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.shortcut),
+            solidcraft_ui_text::tr_label(&item.shortcut),
             FontId::monospace(t.font_small),
             t.form_dim,
         );
@@ -189,6 +192,21 @@ mod tests {
                     }
                     assert!(turning > 1.0, "corner must be a curved arc");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn theme_corner_extremes_keep_radial_geometry_finite_and_clicks_in_their_sectors() {
+        for radius in [0, 1, 2, 16, 32] {
+            let _theme = solidcraft_theme::scoped_tokens(Tokens { radius_xl: radius, ..Tokens::dark() });
+            for k in 0..8 {
+                let (outer, inner) = boundaries(k);
+                assert_eq!(outer.len(), inner.len());
+                assert!(outer.iter().chain(&inner).all(|p| p.is_finite()));
+                let a = -FRAC_PI_2 + k as f32 * FRAC_PI_4;
+                assert!(contains(k, unit(a) * 104.0));
+                assert!(!contains(k, unit(a + FRAC_PI_4 / 2.0) * 104.0));
             }
         }
     }

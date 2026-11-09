@@ -1,0 +1,1625 @@
+{
+  "schema": "solidcraft.render-environment-recipes/1",
+  "version": "1.0.0",
+  "resolution": [
+    1024,
+    512
+  ],
+  "authoring": {
+    "method": "original_analytic_procedural",
+    "license": "MIT OR Apache-2.0",
+    "author": "SolidCraft contributors, authored for Judith’s personal rendering fork",
+    "date": "2026-10-21",
+    "randomness": "none; seed 0 records a deterministic analytic construction",
+    "radiance_units": "authored_relative_units",
+    "measurement_status": "not_measured",
+    "runtime_status": "authored_unbound",
+    "sources": [
+      "https://radsite.lbl.gov/radiance/refer/filefmts.pdf",
+      "https://radsite.lbl.gov/radiance/refer/Notes/picture_format.html"
+    ],
+    "reference_use": "Public picture-format documentation only; no external image or code is bundled."
+  },
+  "projection": {
+    "type": "equirectangular",
+    "sample_location": "pixel_centers",
+    "up_axis": "+Z",
+    "u_axis": "+azimuth from +X toward +Y",
+    "equations": "phi = 2*pi*(u-0.5); theta = pi*v; direction = (sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta))",
+    "cardinal_directions": {
+      "u=0.0,v=0.5": "-X; repeat seam",
+      "u=0.25,v=0.5": "-Y",
+      "u=0.5,v=0.5": "+X",
+      "u=0.75,v=0.5": "+Y",
+      "v=0.0": "+Z",
+      "v=1.0": "-Z"
+    },
+    "wrapping": "repeat U, clamp V",
+    "engine_binding": "pending; importer must explicitly map this convention and may not assume orientation from the file extension"
+  },
+  "items": [
+    {
+      "id": "HDR-001",
+      "slug": "neutral-side-softbox",
+      "name": "Neutral side softbox",
+      "catalog_id": "ENV-001",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "product",
+        "industrial"
+      ],
+      "purpose": "One broad key with a subdued floor hemisphere for basic PBR review.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.025,
+          0.025,
+          0.025
+        ],
+        "lower_linear_srgb": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 35,
+          "width_deg": 48,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            16,
+            16,
+            16
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-002",
+      "slug": "white-enveloping-studio",
+      "name": "White enveloping studio",
+      "catalog_id": "ENV-002",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "product",
+        "plastics"
+      ],
+      "purpose": "Large broad reflection sources around a white product.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.4,
+          0.4,
+          0.4
+        ],
+        "lower_linear_srgb": [
+          0.15,
+          0.15,
+          0.15
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 35,
+          "width_deg": 65,
+          "height_deg": 80,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": -45,
+          "elevation_deg": 25,
+          "width_deg": 70,
+          "height_deg": 80,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            6,
+            6,
+            6
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 70,
+          "width_deg": 110,
+          "height_deg": 60,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            4,
+            4,
+            4
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-003",
+      "slug": "black-metal-strips",
+      "name": "Black metal strips",
+      "catalog_id": "ENV-003",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "metal",
+        "automotive"
+      ],
+      "purpose": "Two slender high-energy strips reveal polished metal curvature.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.001,
+          0.001,
+          0.001
+        ],
+        "lower_linear_srgb": [
+          0,
+          0,
+          0
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -130,
+          "elevation_deg": 25,
+          "width_deg": 9,
+          "height_deg": 105,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            48,
+            48,
+            48
+          ]
+        },
+        {
+          "azimuth_deg": -35,
+          "elevation_deg": 20,
+          "width_deg": 7,
+          "height_deg": 110,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            24,
+            24,
+            24
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-004",
+      "slug": "hangar-skylight",
+      "name": "Hangar skylight pattern",
+      "catalog_id": "ENV-007",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "aerospace",
+        "industrial"
+      ],
+      "purpose": "Broad zenith light and restrained side fill for large assemblies.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.05,
+          0.055,
+          0.065
+        ],
+        "lower_linear_srgb": [
+          0.012,
+          0.012,
+          0.012
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": 0,
+          "elevation_deg": 80,
+          "width_deg": 105,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            9.0,
+            10.44,
+            12
+          ]
+        },
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 25,
+          "width_deg": 75,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            4,
+            4,
+            4
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-005",
+      "slug": "neutral-comparison",
+      "name": "Neutral comparison field",
+      "catalog_id": "ENV-008",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "validation",
+        "materials"
+      ],
+      "purpose": "An exactly uniform unit-radiance field for energy and orientation checks.",
+      "ambient": {
+        "upper_linear_srgb": [
+          1,
+          1,
+          1
+        ],
+        "lower_linear_srgb": [
+          1,
+          1,
+          1
+        ],
+        "transition": 0.3
+      },
+      "panels": [],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Uniform reference field has no directional highlights."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-006",
+      "slug": "warm-table-window",
+      "name": "Warm table window",
+      "catalog_id": "ENV-021",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "purpose": "A wide warm side source gives directional grain contrast.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.035,
+          0.03,
+          0.025
+        ],
+        "lower_linear_srgb": [
+          0.018,
+          0.015,
+          0.012
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 25,
+          "width_deg": 55,
+          "height_deg": 75,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            12,
+            9.96,
+            7.68
+          ]
+        },
+        {
+          "azimuth_deg": 45,
+          "elevation_deg": 45,
+          "width_deg": 65,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            2,
+            2,
+            2
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-007",
+      "slug": "showroom-ribbons",
+      "name": "Showroom ribbons",
+      "catalog_id": "ENV-034",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "automotive"
+      ],
+      "purpose": "Broad elevated reflection bands for painted body panels.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.075,
+          0.075,
+          0.075
+        ],
+        "lower_linear_srgb": [
+          0.025,
+          0.025,
+          0.025
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 65,
+          "width_deg": 130,
+          "height_deg": 15,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            16,
+            16,
+            16
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 60,
+          "width_deg": 130,
+          "height_deg": 15,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": 180,
+          "elevation_deg": 15,
+          "width_deg": 55,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            4,
+            4,
+            4
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-008",
+      "slug": "mechanical-bay",
+      "name": "Mechanical bay windows",
+      "catalog_id": "ENV-071",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "industrial",
+        "metal"
+      ],
+      "purpose": "High side windows and neutral overhead wash for machined assemblies.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.055,
+          0.055,
+          0.055
+        ],
+        "lower_linear_srgb": [
+          0.018,
+          0.018,
+          0.018
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 40,
+          "width_deg": 40,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            9.0,
+            10.44,
+            12
+          ]
+        },
+        {
+          "azimuth_deg": -30,
+          "elevation_deg": 40,
+          "width_deg": 40,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            6.0,
+            6.96,
+            8
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 75,
+          "width_deg": 80,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            5,
+            5,
+            5
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-009",
+      "slug": "cnc-overhead",
+      "name": "CNC overhead lanes",
+      "catalog_id": "ENV-072",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "industrial",
+        "machining"
+      ],
+      "purpose": "Symmetric ceiling lanes support inspection of tool marks.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.04,
+          0.04,
+          0.04
+        ],
+        "lower_linear_srgb": [
+          0.008,
+          0.008,
+          0.008
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 60,
+          "width_deg": 100,
+          "height_deg": 10,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            18,
+            18,
+            18
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 60,
+          "width_deg": 100,
+          "height_deg": 10,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            18,
+            18,
+            18
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-010",
+      "slug": "woodshop-window",
+      "name": "Woodshop broad window",
+      "catalog_id": "ENV-073",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "wood",
+        "DIY"
+      ],
+      "purpose": "One large side source with warm low-energy room return.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.04,
+          0.035,
+          0.025
+        ],
+        "lower_linear_srgb": [
+          0.015,
+          0.012,
+          0.009
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 30,
+          "width_deg": 70,
+          "height_deg": 80,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            8.3,
+            6.4
+          ]
+        },
+        {
+          "azimuth_deg": 45,
+          "elevation_deg": 45,
+          "width_deg": 65,
+          "height_deg": 60,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            1.6,
+            1.6,
+            1.6
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-011",
+      "slug": "garage-door",
+      "name": "Garage doorway field",
+      "catalog_id": "ENV-075",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "automotive",
+        "industrial"
+      ],
+      "purpose": "A broad frontal opening gives long reflections on curved parts.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.03,
+          0.03,
+          0.03
+        ],
+        "lower_linear_srgb": [
+          0.008,
+          0.008,
+          0.008
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 15,
+          "width_deg": 90,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            7.5,
+            8.7,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 65,
+          "width_deg": 95,
+          "height_deg": 20,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            6,
+            6,
+            6
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-012",
+      "slug": "makerspace-worklights",
+      "name": "Makerspace worklights",
+      "catalog_id": "ENV-079",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "DIY",
+        "additive",
+        "electronics"
+      ],
+      "purpose": "Balanced tabletop workshop sources for mixed material projects.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.05,
+          0.05,
+          0.05
+        ],
+        "lower_linear_srgb": [
+          0.02,
+          0.02,
+          0.02
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -140,
+          "elevation_deg": 45,
+          "width_deg": 50,
+          "height_deg": 60,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            12,
+            12,
+            12
+          ]
+        },
+        {
+          "azimuth_deg": -40,
+          "elevation_deg": 45,
+          "width_deg": 50,
+          "height_deg": 60,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            8,
+            8,
+            8
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 65,
+          "width_deg": 70,
+          "height_deg": 35,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            4,
+            4,
+            4
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-013",
+      "slug": "home-workbench",
+      "name": "Home workbench window",
+      "catalog_id": "ENV-080",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "DIY",
+        "wood",
+        "electronics"
+      ],
+      "purpose": "A modest side window and a soft frontal task source.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.025,
+          0.025,
+          0.025
+        ],
+        "lower_linear_srgb": [
+          0.01,
+          0.01,
+          0.01
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 25,
+          "width_deg": 45,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            7.5,
+            8.7,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": -60,
+          "elevation_deg": 50,
+          "width_deg": 35,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            5,
+            4.15,
+            3.2
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-014",
+      "slug": "esd-bench-neutral",
+      "name": "Electronics bench neutral",
+      "catalog_id": "ENV-082",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "electronics"
+      ],
+      "purpose": "Wide neutral sources avoid colored illumination on solder mask.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.02,
+          0.02,
+          0.02
+        ],
+        "lower_linear_srgb": [
+          0.005,
+          0.005,
+          0.005
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 55,
+          "width_deg": 50,
+          "height_deg": 75,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            14,
+            14,
+            14
+          ]
+        },
+        {
+          "azimuth_deg": -45,
+          "elevation_deg": 55,
+          "width_deg": 50,
+          "height_deg": 75,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            10,
+            10
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-015",
+      "slug": "sun-free-overcast",
+      "name": "Sun-free diffuse overcast",
+      "catalog_id": "ENV-182",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "outdoor",
+        "validation"
+      ],
+      "purpose": "An authored diffuse upper hemisphere without a solar disk.",
+      "ambient": {
+        "upper_linear_srgb": [
+          1.5,
+          1.6,
+          1.8
+        ],
+        "lower_linear_srgb": [
+          0.05,
+          0.055,
+          0.06
+        ],
+        "transition": 0.3
+      },
+      "panels": [],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Generic smooth sky-like field, not a weather observation or physical sky model."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-016",
+      "slug": "automotive-turntable",
+      "name": "Automotive turntable ribbons",
+      "catalog_id": "ENV-201",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "automotive"
+      ],
+      "purpose": "Long sources at three azimuths support a rotation sequence.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.006,
+          0.006,
+          0.006
+        ],
+        "lower_linear_srgb": [
+          0.003,
+          0.003,
+          0.003
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 30,
+          "width_deg": 12,
+          "height_deg": 110,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            36,
+            36,
+            36
+          ]
+        },
+        {
+          "azimuth_deg": -45,
+          "elevation_deg": 30,
+          "width_deg": 12,
+          "height_deg": 110,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            24,
+            24,
+            24
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 65,
+          "width_deg": 120,
+          "height_deg": 15,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            18,
+            18,
+            18
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-017",
+      "slug": "paint-inspection-bands",
+      "name": "Paint inspection bands",
+      "catalog_id": "ENV-206",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "automotive",
+        "coatings"
+      ],
+      "purpose": "Alternating reflection bands for orange peel and finish continuity.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.002,
+          0.002,
+          0.002
+        ],
+        "lower_linear_srgb": [
+          0,
+          0,
+          0
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "azimuth_deg": -130,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "azimuth_deg": -110,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "azimuth_deg": -70,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "azimuth_deg": -50,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "azimuth_deg": -30,
+          "elevation_deg": 30,
+          "width_deg": 5,
+          "height_deg": 120,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            40,
+            40,
+            40
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Bands are HDR-owned sources in this standalone variant; disable equivalent inspection-rig emitters."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-018",
+      "slug": "assembly-bench-soft",
+      "name": "Assembly bench soft",
+      "catalog_id": "ENV-211",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "electronics",
+        "industrial"
+      ],
+      "purpose": "Broad overhead and side sources for component assembly close-ups.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.04,
+          0.04,
+          0.04
+        ],
+        "lower_linear_srgb": [
+          0.008,
+          0.008,
+          0.008
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 75,
+          "width_deg": 100,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 20,
+          "width_deg": 45,
+          "height_deg": 55,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            6,
+            6,
+            6
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-019",
+      "slug": "rework-offset-strips",
+      "name": "Rework offset strips",
+      "catalog_id": "ENV-212",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "electronics"
+      ],
+      "purpose": "Off-axis strips make solder-joint shape readable in close inspection.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.012,
+          0.012,
+          0.012
+        ],
+        "lower_linear_srgb": [
+          0.003,
+          0.003,
+          0.003
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 35,
+          "width_deg": 10,
+          "height_deg": 90,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            32,
+            32,
+            32
+          ]
+        },
+        {
+          "azimuth_deg": -30,
+          "elevation_deg": 55,
+          "width_deg": 10,
+          "height_deg": 70,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            18,
+            18,
+            18
+          ]
+        },
+        {
+          "azimuth_deg": 90,
+          "elevation_deg": 65,
+          "width_deg": 80,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            2,
+            2,
+            2
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-020",
+      "slug": "fdm-neutral-inspection",
+      "name": "FDM neutral inspection",
+      "catalog_id": "ENV-214",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "additive",
+        "DIY"
+      ],
+      "purpose": "Neutral oblique bands emphasize layer and seam relief.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.025,
+          0.025,
+          0.025
+        ],
+        "lower_linear_srgb": [
+          0.006,
+          0.006,
+          0.006
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 15,
+          "width_deg": 14,
+          "height_deg": 90,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            24,
+            24,
+            24
+          ]
+        },
+        {
+          "azimuth_deg": -45,
+          "elevation_deg": 65,
+          "width_deg": 75,
+          "height_deg": 45,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            6,
+            6,
+            6
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Printer LEDs and enclosure geometry are not represented."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-021",
+      "slug": "printed-part-photo",
+      "name": "Printed-part photography",
+      "catalog_id": "ENV-217",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "additive",
+        "product"
+      ],
+      "purpose": "Soft key and narrow rim separate polymer forms.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.02,
+          0.02,
+          0.02
+        ],
+        "lower_linear_srgb": [
+          0.008,
+          0.008,
+          0.008
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -135,
+          "elevation_deg": 35,
+          "width_deg": 60,
+          "height_deg": 70,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            12,
+            12,
+            12
+          ]
+        },
+        {
+          "azimuth_deg": 45,
+          "elevation_deg": 20,
+          "width_deg": 8,
+          "height_deg": 90,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            28,
+            28,
+            28
+          ]
+        },
+        {
+          "azimuth_deg": -30,
+          "elevation_deg": 20,
+          "width_deg": 65,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            2,
+            2,
+            2
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-022",
+      "slug": "robot-led-editorial",
+      "name": "Robot LED editorial",
+      "catalog_id": "ENV-218",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "DIY",
+        "robotics",
+        "LED"
+      ],
+      "purpose": "Neutral key with explicitly artistic cool and warm accents.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.008,
+          0.008,
+          0.008
+        ],
+        "lower_linear_srgb": [
+          0.002,
+          0.002,
+          0.002
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 55,
+          "width_deg": 65,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": 170,
+          "elevation_deg": 20,
+          "width_deg": 10,
+          "height_deg": 90,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            2.88,
+            9.6,
+            24
+          ]
+        },
+        {
+          "azimuth_deg": 10,
+          "elevation_deg": 20,
+          "width_deg": 10,
+          "height_deg": 90,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            16,
+            3.52,
+            0.96
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Colored accents are editorial light sources, not spectral LEDs or product emissions."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-023",
+      "slug": "spacecraft-clean-bay",
+      "name": "Spacecraft clean-bay field",
+      "catalog_id": "ENV-231",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "aerospace",
+        "space"
+      ],
+      "purpose": "Neutral terrestrial integration-room illumination for hardware.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0.12,
+          0.12,
+          0.12
+        ],
+        "lower_linear_srgb": [
+          0.04,
+          0.04,
+          0.04
+        ],
+        "transition": 0.3
+      },
+      "panels": [
+        {
+          "azimuth_deg": -90,
+          "elevation_deg": 75,
+          "width_deg": 120,
+          "height_deg": 65,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            10,
+            10,
+            10
+          ]
+        },
+        {
+          "azimuth_deg": -150,
+          "elevation_deg": 25,
+          "width_deg": 35,
+          "height_deg": 80,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            8,
+            8,
+            8
+          ]
+        },
+        {
+          "azimuth_deg": -30,
+          "elevation_deg": 25,
+          "width_deg": 35,
+          "height_deg": 80,
+          "roll_deg": 0,
+          "edge_fraction": 0.16,
+          "radiance_linear_srgb": [
+            8,
+            8,
+            8
+          ]
+        }
+      ],
+      "solar_disk": false,
+      "energy_policy": "This map owns its authored ambient and all bright patches. A matching analytic rig must replace those patches, never add a second copy of their energy. The ENV link identifies context only; no environment geometry is realized.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "This is terrestrial inspection lighting, not a vacuum scene or qualified cleanroom."
+      ],
+      "seed": 0
+    },
+    {
+      "id": "HDR-024",
+      "slug": "vacuum-black",
+      "name": "Vacuum zero-ambient field",
+      "catalog_id": "ENV-244",
+      "concept_relation": "illumination_variant_only",
+      "domains": [
+        "space",
+        "validation"
+      ],
+      "purpose": "An exact-black environment for separately owned Sun, local lamps and geometry reflections.",
+      "ambient": {
+        "upper_linear_srgb": [
+          0,
+          0,
+          0
+        ],
+        "lower_linear_srgb": [
+          0,
+          0,
+          0
+        ],
+        "transition": 0.3
+      },
+      "panels": [],
+      "solar_disk": false,
+      "energy_policy": "This map contributes exactly zero radiance. The scene owns any finite-angular Sun and local emitters. The environment may not inject ambient fill or a duplicate solar disk.",
+      "limitations": [
+        "Synthetic directional radiance at infinity; no measured probe, real facility or physically simulated room.",
+        "Authored relative units; no spectral distribution, Kelvin, lux or absolute photometry claim.",
+        "No floor, contact shadows, parallax, finite-distance falloff or scene geometry is included.",
+        "Application resource binding and rendered reference validation are pending.",
+        "Contains no Sun, stars, Earth, atmosphere, ambient fill or lunar terrain.",
+        "A scene without another explicit source must render dark; no automatic exposure compensation is authorized."
+      ],
+      "seed": 0
+    }
+  ]
+}

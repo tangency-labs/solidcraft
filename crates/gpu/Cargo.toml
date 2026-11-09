@@ -9,6 +9,9 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcore-record = { workspace = true }
+robust = "1.2"
+solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-render = { workspace = true }
 wgpu = { workspace = true }
@@ -17,14 +20,18 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+robust = { workspace = true }
 pollster = { workspace = true }
 # Native backends, so tests and the CLI can open a device without a window.
 wgpu = { workspace = true, features = ["metal", "vulkan", "dx12", "gles"] }
 
 [dev-dependencies]
+image = { workspace = true }
 solidcraft-kernel = { workspace = true }
-# Headless pictures of real designs (capture tests).
-solidcraft-engine = { workspace = true }
+# Headless pictures of real designs (capture tests), built by the real kernel, solidcore, as in the
+# apps.
+solidcraft-engine = { workspace = true, features = ["bundled-render-library"] }
+solidcraft-io = { workspace = true }
 serde_json = { workspace = true }
 # The HLSL the D3D12 backend compiles (tests check it suits FXC).
 naga = { workspace = true, features = ["wgsl-in", "hlsl-out"] }

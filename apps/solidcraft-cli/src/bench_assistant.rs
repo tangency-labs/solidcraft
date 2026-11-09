@@ -68,7 +68,9 @@ impl Control {
         if !addr.ip().is_loopback() || addr.port() == 0 {
             return Err("--connect requires a loopback address and a nonzero port (the app listens on 127.0.0.1)".into());
         }
-        let token = solidcraft_engine::control_auth::client_token(addr.port(), token)
+        let token = solidcraft_engine::control_auth::APP
+            .client_token(addr.port(), token)
+            .map(|t| t.token)
             .ok_or("no control token: pass --token, set SOLIDCRAFT_CONTROL_TOKEN, or run on the app's computer (its token file)")?;
         if token.len() > 4096 {
             return Err("the control token is longer than 4096 bytes".into());
@@ -418,7 +420,7 @@ fn wait_for_turn(control: &mut Control, mut chat: Value, began: Instant, end: In
         let idle = !matches!(state, "busy" | "starting") && !turn && !queued;
         // A turn can start and end between two polls: then the conversation has its answer.
         let answered = chat["items"].as_array().into_iter().flatten().any(|i| i.get("user").is_none());
-        if idle && (seen_busy || answered || matches!(state, "exited" | "auth" | "off") || began.elapsed() >= START_GRACE) {
+        if idle && (seen_busy || answered || matches!(state, "exited" | "failed" | "auth" | "off") || began.elapsed() >= START_GRACE) {
             return Ok((chat, false));
         }
         let Some(left) = end.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) else { return Ok((chat, true)) };

@@ -1,7 +1,7 @@
 //! Metrics elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::layout::FORM;
-use crate::theme::Tokens;
 use egui::Ui;
+use solidcraft_theme::Tokens;
 
 /// Row height for controls. Tokens: `control_height`.
 pub(crate) fn row_height() -> f32 {
@@ -33,7 +33,7 @@ const LABEL_COLUMN_MAX: f32 = 1.6;
 /// once and the label column and the captions line up on the same text.
 pub(super) fn indented_label(text: &str) -> String {
     let indent = text.len() - text.trim_start().len();
-    format!("{}{}", &text[..indent], crate::i18n::tr_label(text.trim_start()))
+    format!("{}{}", &text[..indent], solidcraft_ui_text::tr_label(text.trim_start()))
 }
 
 /// Measured width of a label in the form label font. Tokens: `font_label, dialog_label`.
@@ -53,7 +53,7 @@ impl ContentWidth {
     /// Width of a strong configuration name, using the same font as its table cell.
     pub(crate) fn name(ui: &Ui, text: &str) -> f32 {
         let t = Tokens::get();
-        ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.form_ink).size().x.ceil()
+        ui.painter().layout_no_wrap(text.to_owned(), crate::ui_kit::type_face::semibold(t.font_label), t.form_ink).size().x.ceil()
     }
 
     pub(crate) fn button(ui: &Ui, label: &str) -> f32 {
@@ -89,7 +89,7 @@ pub(super) fn label_column(ui: &Ui, text: &str, row_width: f32) -> f32 {
     // for their existing controls. Both sizes derive from the same form/spacing tokens.
     let base = if row_width >= t.form_card_width + t.space_24 * 2.0 { t.form_label_width + t.space_24 + t.space_10 } else { t.form_label_width };
     let natural = label_width(ui, text);
-    let widest = match ui.stack().iter().find(|node| node.tags().contains(FORM)).map(|node| node.id) {
+    let widest = match ui.stack().iter().find(|node| node.tags().contains(FORM)).map(|node| node.unique_id) {
         Some(form) => {
             let key = form.with("label_column");
             let pass = ui.ctx().cumulative_pass_nr();
@@ -107,7 +107,21 @@ pub(super) fn label_column(ui: &Ui, text: &str, row_width: f32) -> f32 {
         }
         None => natural,
     };
-    (widest + t.space_4).clamp(base, base * LABEL_COLUMN_MAX).min(row_width * 0.5)
+    let needed = widest + t.space_4;
+    if let Some(&key) = ui.stack().iter().find_map(|node| node.tags().get_downcast::<egui::Id>(super::layout::GROW_LABEL)) {
+        // A growing card (#10620): labels up to the ordinary 1.6x cap keep the design's card
+        // width; a longer label grows the column past the cap, and the extra the card must
+        // gain is published under `key` so the card widens by the same amount and the
+        // control column keeps its design width.
+        let extra = (needed - base * LABEL_COLUMN_MAX).max(0.0);
+        let previous = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
+        if (extra - previous).abs() > 0.5 {
+            ui.ctx().request_discard("dialog label column width");
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(key, extra));
+        return needed.max(base).min(row_width * 0.7);
+    }
+    needed.clamp(base, base * LABEL_COLUMN_MAX).min(row_width * 0.5)
 }
 
 #[cfg(test)]
@@ -140,7 +154,8 @@ mod label_tests {
     /// `Profil`; the row must show `Profile`, not the second translation.
     #[test]
     fn a_label_is_translated_once() {
-        let _de = crate::i18n::scope("de");
+        crate::i18n::install();
+        let _de = solidcraft_ui_text::scope("de");
         assert_eq!(indented_label("Profiles"), "Profile");
         assert_eq!(indented_label("  Profiles"), "  Profile");
         assert_eq!(indented_label("Profile"), "Profil");

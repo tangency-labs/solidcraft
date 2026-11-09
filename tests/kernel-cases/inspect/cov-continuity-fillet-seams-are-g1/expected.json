@@ -1,0 +1,43 @@
+{
+ "sources": [],
+ "what": "the order where a round meets the faces either side",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin, its top-front edge (y 0, z 20) rounded r 3: the round meets the top (at y 3) and the front (at z 17) tangent, curvature jumping 0 to 1/3: g1, jump 1/3 per mm",
+ "results": [
+  {
+   "step": 3,
+   "pointer": "/summary/edges",
+   "json": 2
+  },
+  {
+   "step": 3,
+   "pointer": "/bodies/0/edges/0/order",
+   "json": "g1"
+  },
+  {
+   "step": 3,
+   "pointer": "/bodies/0/edges/1/order",
+   "json": "g1"
+  },
+  {
+   "step": 3,
+   "pointer": "/bodies/0/edges/0/curvature_jump_per_mm/value",
+   "json": 0.3333333333333333
+  },
+  {
+   "step": 3,
+   "pointer": "/bodies/0/edges/1/curvature_jump_per_mm/value",
+   "json": 0.3333333333333333
+  },
+  {
+   "step": 3,
+   "pointer": "/bodies/0/edges/0/verdict",
+   "json": "curvature_jump"
+  },
+  {
+   "step": 3,
+   "pointer": "/bodies/0/edges/1/verdict",
+   "json": "curvature_jump"
+  }
+ ]
+}

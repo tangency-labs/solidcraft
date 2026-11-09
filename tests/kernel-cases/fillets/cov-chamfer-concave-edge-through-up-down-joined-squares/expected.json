@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "four squares drawn edge to edge, three extruded 10 up and three 10 down and joined: the concave vertical edge at the centre of the down part chamfered 1, with its tangent chain, the up part's concave edge on the same line (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/up-down-join, Body1 F3:side:l12|F3:side:l5 edge.chamfer)",
+ "source": "analytic",
+ "method": "six 10 x 10 x 10 cubes: 6000. The down part lacks the square x, y < 0 and the up part the square x, y > 0, so the line x = y = 0 is a concave edge of each, z -10..0 and 0..10, one tangent chain. Each chamfer fills its corner with the triangle 1 x 1 / 2 along 10 (on opposite sides of the line): V = 6000 + 10 = 6010",
+ "body_count": 1,
+ "volume_mm3": 6010.0
+}

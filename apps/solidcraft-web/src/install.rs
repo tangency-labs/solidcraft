@@ -23,9 +23,9 @@ fn prompt() {
         let _ = js_sys::Reflect::set(&window, &OFFER.into(), &JsValue::NULL);
     }
     let shown = js_sys::Reflect::get(&offer, &"prompt".into())
-        .and_then(|f| f.dyn_into::<js_sys::Function>().map_err(JsValue::from))
+        .and_then(|f| f.dyn_into::<js_sys::Function>())
         .and_then(|f| f.call0(&offer))
-        .and_then(|p| p.dyn_into::<js_sys::Promise>().map_err(JsValue::from));
+        .and_then(|p| p.dyn_into::<js_sys::Promise>());
     match shown {
         // Accepted or dismissed, the browser handles it; a refusal is only logged.
         Ok(p) => wasm_bindgen_futures::spawn_local(async move {

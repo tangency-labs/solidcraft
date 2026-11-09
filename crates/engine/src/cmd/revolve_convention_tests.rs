@@ -2,8 +2,9 @@
 
 use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, RevolveConvention};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
 
 fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
@@ -31,11 +32,16 @@ fn check_centered(s: &Session, opposed: bool) {
     let volume: f64 = state.bodies.iter().map(|mb| solidcraft_kernel::measure(&mb.body).unwrap().volume).sum();
     assert!((volume - expected).abs() < 0.03, "{volume} vs {expected}");
     for sign in if opposed { vec![1.0, -1.0] } else { vec![1.0] } {
-        let body = &state.bodies.iter().find(|mb| mb.body.contains(Vec3::new(sign * 3.0, 5.0, 0.0))).unwrap().body;
-        assert!(!body.contains(Vec3::new(0.0, 5.0, 3.0)));
-        assert!(body.contains(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, 1.5)));
-        assert!(body.contains(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, -1.5)));
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let body = &state
+            .bodies
+            .iter()
+            .find(|mb| mb.body.classify_point(Vec3::new(sign * 3.0, 5.0, 0.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            .unwrap()
+            .body;
+        assert_eq!(body.classify_point(Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        assert_eq!(body.classify_point(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, 1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(sign * 3.0 * (PI / 6.0).cos(), 5.0, -1.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.z + 2.0 * SQRT_2).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.max.z - 2.0 * SQRT_2).abs() < 1e-6, "{bounds:?}");
         let inner_x = if sign > 0.0 { bounds.min.x } else { -bounds.max.x };
@@ -80,13 +86,13 @@ fn two_sided_revolves_use_the_canonical_negative_and_positive_limits() {
         turn(&mut s, sign, json!({"direction":"positive","angle":"60 deg","angle2":"30 deg"}));
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.x - 1.0).abs() < 1e-6, "{bounds:?}");
         assert!((bounds.max.x - 4.0).abs() < 1e-4);
         assert!((bounds.min.z + 2.0).abs() < 1e-6);
         assert!((bounds.max.z - 2.0 * 3.0f64.sqrt()).abs() < 1e-6);
-        assert!(body.contains(Vec3::new(3.0, 5.0, 0.0)));
-        assert!(!body.contains(Vec3::new(0.0, 5.0, 3.0)));
+        assert_eq!(body.classify_point(Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
         assert!((solidcraft_kernel::measure(body).unwrap().volume - 30.0 * PI).abs() < 0.03);
     }
 }
@@ -107,9 +113,9 @@ fn legacy_missing_convention_keeps_geometry_through_edit_redefine_undo_and_reope
         assert_eq!(s.doc.find_feature("Turn").unwrap().kind, original);
         let state = s.model.state();
         let body = &state.bodies[0].body;
-        assert!(body.contains(Vec3::new(0.0, 5.0, 3.0)));
-        assert!(!body.contains(Vec3::new(3.0, 5.0, 0.0)));
-        let bounds = body.tessellate(1e-4).unwrap().bounds();
+        assert_eq!(body.classify_point(Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
+        let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
         assert!((bounds.min.x + 2.0 * SQRT_2).abs() < 1e-6);
         assert!((bounds.max.x - 2.0 * SQRT_2).abs() < 1e-6);
         assert!((bounds.min.z - SQRT_2).abs() < 1e-6);
@@ -118,8 +124,8 @@ fn legacy_missing_convention_keeps_geometry_through_edit_redefine_undo_and_reope
     let angle_input = s.doc.find_feature("Turn").unwrap().param_names[0].clone();
     run(&mut s, "parameters.change", json!({"name":angle_input,"expression":"60 deg"}));
     let changed = s.model.state();
-    assert!(changed.bodies[0].body.contains(Vec3::new(1.5, 5.0, 3.0 * 3.0f64.sqrt() / 2.0)));
-    assert!(!changed.bodies[0].body.contains(Vec3::new(3.0, 5.0, 0.0)));
+    assert_eq!(changed.bodies[0].body.classify_point(Vec3::new(1.5, 5.0, 3.0 * 3.0f64.sqrt() / 2.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    assert_eq!(changed.bodies[0].body.classify_point(Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
     run(&mut s, "edit.undo", json!({}));
     check(&s);
     run(&mut s, "timeline.edit", json!({"feature":"Turn","set":{"angle":"90 deg"}}));
@@ -175,11 +181,11 @@ fn symmetric_revolve_preserves_a_translated_rotated_sketch_frame() {
     run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":{"origin":[10,20,30],"dir":[-1,0,0]},"angle":"90 deg","direction":"symmetric"}));
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let bounds = body.tessellate(1e-4).unwrap().bounds();
+    let bounds = body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().bounds();
     assert!(bounds.min.dist(Vec3::new(10.0, 20.0 - 2.0 * SQRT_2, 30.0 + SQRT_2)) < 1e-6, "{bounds:?}");
     assert!(bounds.max.dist(Vec3::new(20.0, 20.0 + 2.0 * SQRT_2, 34.0)) < 1e-4, "{bounds:?}");
-    assert!(body.contains(Vec3::new(15.0, 20.0, 33.0)));
-    assert!(!body.contains(Vec3::new(15.0, 23.0, 30.0)));
+    assert_eq!(body.classify_point(Vec3::new(15.0, 20.0, 33.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
+    assert_eq!(body.classify_point(Vec3::new(15.0, 23.0, 30.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
     assert!((solidcraft_kernel::measure(body).unwrap().volume - 30.0 * PI).abs() < 0.03);
 }
 
@@ -193,7 +199,7 @@ fn copied_revolves_keep_their_convention_and_angular_material() {
         run(&mut s, "timeline.paste", json!({"translate":[0,20,0]}));
         let state = s.model.state();
         let probe = if convention == "sketch_normal" { Vec3::new(3.0, 25.0, 0.0) } else { Vec3::new(0.0, 25.0, 3.0) };
-        assert!(state.bodies.iter().any(|mb| mb.body.contains(probe)));
+        assert!(state.bodies.iter().any(|mb| mb.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside));
         let modes: Vec<_> = s
             .doc
             .features
@@ -203,7 +209,7 @@ fn copied_revolves_keep_their_convention_and_angular_material() {
         assert_eq!(modes.len(), 2);
         assert_eq!(modes[0], modes[1]);
         let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-        assert!(reopened.model.state().bodies.iter().any(|mb| mb.body.contains(probe)));
+        assert!(reopened.model.state().bodies.iter().any(|mb| mb.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside));
     }
 }
 
@@ -222,7 +228,7 @@ fn centered_coplanar_cut_uses_the_actual_angular_interval() {
     assert!((total - expected).abs() < 0.05, "{volumes:?}: total{total}, expected{expected}");
     assert_eq!(state.bodies.len(), 2);
     assert!(volumes.iter().all(|v| (*v - expected / 2.0).abs() < 0.025));
-    let contains = |p| state.bodies.iter().any(|mb| mb.body.contains(p));
+    let contains = |p| state.bodies.iter().any(|mb| mb.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside);
     assert!(!contains(Vec3::new(3.0, 5.0, 0.0)));
     assert!(contains(Vec3::new(3.0, 5.0, 3.5)));
     assert!(contains(Vec3::new(3.0, 5.0, -3.5)));
@@ -238,8 +244,11 @@ fn one_sided_and_full_revolves_keep_the_existing_material() {
                 turn(&mut s, sign, json!({"angle":angle,"direction":"positive","convention":convention}));
                 let state = s.model.state();
                 let body = &state.bodies[0].body;
-                assert!(body.contains(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)));
-                assert_eq!(body.contains(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)), angle == "360 deg");
+                assert_eq!(body.classify_point(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)).unwrap(), solidcraft_kernel::PointClass::Inside);
+                assert_eq!(
+                    body.classify_point(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside,
+                    angle == "360 deg"
+                );
                 let expected = if angle == "360 deg" { 120.0 * PI } else { 30.0 * PI };
                 assert!((solidcraft_kernel::measure(body).unwrap().volume - expected).abs() < 0.08);
             }
@@ -258,10 +267,31 @@ fn point_targets_use_each_profiles_canonical_axis_for_both_axis_signs() {
             let expected = 30.0 * PI * if opposed { 2.0 } else { 1.0 };
             let volume: f64 = state.bodies.iter().map(|mb| solidcraft_kernel::measure(&mb.body).unwrap().volume).sum();
             assert!((volume - expected).abs() < 0.05, "{volume}");
-            assert!(state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2))));
-            assert!(!state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(3.0 / SQRT_2, 5.0, -3.0 / SQRT_2))));
-            assert_eq!(state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(-3.0 / SQRT_2, 5.0, 3.0 / SQRT_2))), opposed);
-            assert!(!state.bodies.iter().any(|mb| mb.body.contains(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2))));
+            assert!(
+                state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
+            assert!(
+                !state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
+            assert_eq!(
+                state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(-3.0 / SQRT_2, 5.0, 3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside),
+                opposed
+            );
+            assert!(
+                !state
+                    .bodies
+                    .iter()
+                    .any(|mb| mb.body.classify_point(Vec3::new(-3.0 / SQRT_2, 5.0, -3.0 / SQRT_2)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
         }
     }
 }
@@ -295,9 +325,15 @@ fn curved_targets_keep_only_the_material_before_the_post_for_both_axis_signs() {
             assert_eq!(arcs.len(), if opposed { 2 } else { 1 });
             for side in if opposed { vec![1.0, -1.0] } else { vec![1.0] } {
                 let probe = Vec3::new(side * 12.0 * (PI / 6.0).cos(), 6.0, -2.5);
-                let arc = &arcs.iter().find(|mb| mb.body.contains(probe)).unwrap().body;
-                assert!(!arc.contains(Vec3::new(-side * 12.0 * (PI / 6.0).cos(), 6.0, -2.5)));
-                assert!(!arc.contains(Vec3::new(side * 12.0 * (PI / 6.0).cos(), -6.0, -2.5)));
+                let arc = &arcs.iter().find(|mb| mb.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside).unwrap().body;
+                assert_eq!(
+                    arc.classify_point(Vec3::new(-side * 12.0 * (PI / 6.0).cos(), 6.0, -2.5)).unwrap(),
+                    solidcraft_kernel::PointClass::Outside
+                );
+                assert_eq!(
+                    arc.classify_point(Vec3::new(side * 12.0 * (PI / 6.0).cos(), -6.0, -2.5)).unwrap(),
+                    solidcraft_kernel::PointClass::Outside
+                );
                 let full = PI * (225.0 - 100.0) * 5.0;
                 let angle = solidcraft_kernel::measure(arc).unwrap().volume / full * 360.0;
                 assert!(angle > 60.0 && angle < 90.0, "{angle}");
@@ -342,6 +378,71 @@ fn construction_axis_revolve_follows_the_axis() {
     assert!((volume(&s) - 80.0 * PI).abs() < 0.05, "{}", volume(&s));
 }
 
+/// A revolve finds its construction axis among the features before it, so moving the axis
+/// behind the revolve breaks it, and moving it back mends it, at once (#9544).
+#[test]
+fn construction_axis_moved_behind_its_revolve_and_back() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,30,0]},"name":"Axis1"}));
+    profile(&mut s, false);
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"Axis1","angle":"180 deg","operation":"new","profiles":[0],"name":"Turn"}));
+    let error = s.execute("timeline.reorder", &json!({"feature":"Axis1","position":2})).unwrap_err().to_string();
+    assert!(error.contains("moving Axis1 there breaks Turn"), "{error}");
+    assert_eq!(s.doc.features[0].name, "Axis1");
+    let moved = run(&mut s, "timeline.reorder", json!({"feature":"Axis1","position":2,"allow_errors":true}));
+    assert_eq!(moved["broken"][0]["feature"], "Turn", "{moved}");
+    let turn = s.doc.find_feature("Turn").unwrap().id;
+    let error = |s: &Session| s.model.result(turn).and_then(|r| r.error.clone());
+    assert!(error(&s).is_some_and(|e| e.contains("Axis1")), "{:?}", error(&s));
+    assert!(s.model.state().bodies.is_empty());
+    // Moved back, the revolve finds its axis again.
+    run(&mut s, "timeline.reorder", json!({"feature":"Axis1","position":0}));
+    assert_eq!(error(&s), None);
+    assert!((solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap().volume - 60.0 * PI).abs() < 0.05);
+}
+
+/// The two vertical sides of one rectangle are different axes. A two-point rectangle numbers
+/// the max-x side and the min-x side separately; a 120° revolve about each must contain a point
+/// swept about that side and not the point swept about the other (#7452).
+#[test]
+fn rectangle_revolve_about_its_right_edge_differs_from_its_left() {
+    for (axis_x, sample_x) in [(30.0, 10.5), (10.0, 29.5)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [30, 10]}));
+        let id = vertical_line(&s, axis_x);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": id, "angle": "120 deg", "operation": "new"}));
+        let body = &s.model.state().bodies[0].body;
+        let on_edge = lift_xy(axis_x, sample_x);
+        let on_other = lift_xy(if axis_x > 20.0 { 10.0 } else { 30.0 }, if sample_x < 20.0 { 29.5 } else { 10.5 });
+        assert!(body.classify_point(on_edge).unwrap() == solidcraft_kernel::PointClass::Inside, "axis x={axis_x} ({id}) should contain {on_edge:?}");
+        assert!(
+            body.classify_point(on_other).unwrap() != solidcraft_kernel::PointClass::Inside,
+            "axis x={axis_x} ({id}) should not contain the other edge's probe {on_other:?}"
+        );
+    }
+}
+
+fn vertical_line(s: &Session, x: f64) -> String {
+    let sk = s.doc.sketch(s.active_sketch.expect("sketch")).expect("sketch");
+    sk.curves
+        .iter()
+        .find_map(|c| {
+            let solidcraft_sketch::CurveKind::Line { a, b } = c.kind else { return None };
+            let (pa, pb) = (sk.point(a)?, sk.point(b)?);
+            ((pa.x - x).abs() < 1e-9 && (pb.x - x).abs() < 1e-9).then(|| c.id.clone())
+        })
+        .unwrap_or_else(|| panic!("no vertical line at x={x}"))
+}
+
+/// `(point_x, 5, 0)` rotated 80° about `x = axis_x` toward +Z, the sketch-normal sense on XY.
+fn lift_xy(axis_x: f64, point_x: f64) -> Vec3 {
+    let dx = point_x - axis_x;
+    let t = 80.0_f64.to_radians();
+    Vec3::new(axis_x + dx * t.cos(), 5.0, dx.abs() * t.sin())
+}
+
 #[test]
 fn construction_axis_revolve_rejects_invalid_axes_atomically() {
     for (a, b, message) in [
@@ -359,4 +460,129 @@ fn construction_axis_revolve_rejects_invalid_axes_atomically() {
         assert_eq!(s.doc.to_json(), before);
         assert!(s.model.state().bodies.is_empty());
     }
+}
+
+#[test]
+fn world_axis_from_timeline_inspect_round_trips() {
+    for (axis, radial, axial) in [("X", Vec3::Y, Vec3::X), ("Y", Vec3::X, Vec3::Y), ("Z", Vec3::X, Vec3::Z)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"name":"Profile","plane":{"origin":[0,0,0],"x_dir":radial,"y_dir":axial}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[2,0],"p1":[4,10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":axis,"angle":"90 deg","operation":"new","name":"Turn"}));
+        let inspected = run(&mut s, "timeline.inspect", json!({"feature":"Turn"}));
+        let stored_axis = inspected["definition"]["axis"].clone();
+        assert_eq!(stored_axis, json!({"type":"world","axis":axis}));
+        let original = s.doc.find_feature("Turn").unwrap().kind.clone();
+        let original_measure = solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap();
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.model.state().bodies.is_empty());
+
+        run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":stored_axis,"angle":"90 deg","operation":"new","name":"Turn"}));
+        assert_eq!(s.doc.find_feature("Turn").unwrap().kind, original);
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let measure = solidcraft_kernel::measure(&state.bodies[0].body).unwrap();
+        // A quarter of an annular cylinder: pi * (4^2 - 2^2) * 10 / 4.
+        assert!((measure.volume - 30.0 * PI).abs() < 0.03, "{axis}: {}", measure.volume);
+        assert!((measure.volume - original_measure.volume).abs() < 1e-6);
+        assert!(measure.centroid.dist(original_measure.centroid) < 1e-6);
+    }
+}
+
+#[test]
+fn invalid_world_axis_objects_are_rejected_atomically() {
+    let mut s = Session::default();
+    profile(&mut s, false);
+    let before = s.doc.to_json();
+    for axis in [
+        json!({"type":"world"}),
+        json!({"type":"world","axis":null}),
+        json!({"type":"world","axis":1}),
+        json!({"type":"world","axis":[0,1,0]}),
+        json!({"type":"world","axis":{}}),
+        json!({"type":"world","axis":""}),
+        json!({"type":"world","axis":"x"}),
+        json!({"type":"world","axis":"y"}),
+        json!({"type":"world","axis":"z"}),
+        json!({"type":"world","axis":"W","dir":[0,1,0]}),
+    ] {
+        let error = s.execute("solid.revolve", &json!({"sketch":"Profile","axis":axis,"angle":"90 deg","operation":"new"})).unwrap_err();
+        let message = error.to_string();
+        assert!(matches!(error, crate::EngineError::BadParams { .. }), "{axis}: {message}");
+        assert!(message.contains("world axis") && message.contains("X, Y or Z"), "{axis}: {message}");
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.model.state().bodies.is_empty());
+    }
+}
+
+#[test]
+fn explicit_axis_origin_takes_expressions_and_follows_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    profile(&mut s, false);
+    let volume = |s: &Session| solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap().volume;
+    let axis = json!({"origin": ["W / 2 - 20", 0, 0], "dir": [0, 1, 0]});
+    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": axis, "name": "Turn", "operation": "new"}));
+    // W / 2 - 20 is 0 mm: radii 2 to 4 about x = 0.
+    assert!((volume(&s) - 120.0 * PI).abs() < 0.2, "{}", volume(&s));
+    let FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, .. }, .. } = &s.doc.find_feature("Turn").unwrap().kind else {
+        panic!("not a line axis");
+    };
+    assert_eq!(origin[0].as_str(), "W / 2 - 20");
+    let reopened = Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.find_feature("Turn").unwrap().kind, s.doc.find_feature("Turn").unwrap().kind);
+    // Moving the axis follows W: the origin is at x = 1, so the radii are 1 to 3.
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "42 mm"}));
+    assert!((volume(&s) - 80.0 * PI).abs() < 0.2, "{}", volume(&s));
+}
+
+#[test]
+fn explicit_axis_refuses_an_origin_or_dir_it_cannot_read() {
+    let mut s = Session::default();
+    profile(&mut s, false);
+    let before = s.doc.to_json();
+    for axis in [
+        json!({"origin": ["no_such_parameter", 0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": ["1 +", 0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": [0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": [null, 0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": [0, 0, 0], "dir": ["W", 1, 0]}),
+    ] {
+        let error = s.execute("solid.revolve", &json!({"sketch": "Profile", "axis": axis, "operation": "new"})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::BadParams { .. }), "{axis}: {error}");
+        assert!(!error.to_string().contains("sketch plane"), "{axis}: {error}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn surface_revolve_axis_origin_follows_a_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    profile(&mut s, false);
+    let axis = json!({"origin": ["W / 2 - 20", 0, 0], "dir": [0, 1, 0]});
+    run(&mut s, "surface.revolve", json!({"sketch": "Profile", "axis": axis, "name": "Wall"}));
+    let min_x = |s: &Session| s.model.state().bodies[0].body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().bounds().min.x;
+    // W / 2 - 20 is 0 mm: the profile (x from 2 to 4) sweeps out to x = -4.
+    assert!((min_x(&s) + 4.0).abs() < 0.05, "{}", min_x(&s));
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "42 mm"}));
+    // The axis is at x = 1: the farthest point is 3 from it.
+    assert!((min_x(&s) + 2.0).abs() < 0.05, "{}", min_x(&s));
+    let reopened = Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.find_feature("Wall").unwrap().kind, s.doc.find_feature("Wall").unwrap().kind);
+}
+
+#[test]
+fn a_parameter_driven_axis_origin_names_revolve_faces_as_the_numeric_origin_does() {
+    let names = |origin: Value| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+        profile(&mut s, false);
+        run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"origin": origin, "dir": [0, 1, 0]}, "operation": "new"}));
+        solidcraft_doc::naming::face_names(&s.model.state().bodies[0]).to_vec()
+    };
+    let numeric = names(json!([20, 0, 0]));
+    assert!(numeric.iter().all(|n| !n.contains(":face:")), "index names: {numeric:?}");
+    assert_eq!(names(json!(["W / 2", 0, 0])), numeric);
 }

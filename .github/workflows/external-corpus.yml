@@ -1,0 +1,42 @@
+# Nightly import checks on real-world STEP files (#1397): the external corpus in
+# tests/external-corpus.toml is downloaded (hash-verified), imported headless, and checked
+# against tolerance-based expectations — body counts, total volume and area, time and memory
+# budgets. It is not part of `cargo xtask ci`: it downloads from the internet.
+#
+# Import results should improve over time (healing, edge merging, meshing). When a check fails
+# because the numbers moved for the better (or the source changed upstream), re-record with
+# `cargo xtask external-corpus --bless "why"` in a pull request, never by editing numbers.
+name: External corpus
+
+on:
+  schedule:
+    - cron: '40 3 * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Run only this corpus entry name (empty = every entry)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Import the external STEP corpus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the CLI
+        run: cargo build --profile ci -p solidcraft-cli
+      - name: Import and check every entry
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          if [ -z "$ONLY" ]; then
+            cargo run -q -p xtask -- external-corpus --cli target/ci/solidcraft-cli
+          else
+            cargo run -q -p xtask -- external-corpus --cli target/ci/solidcraft-cli --only "$ONLY"
+          fi

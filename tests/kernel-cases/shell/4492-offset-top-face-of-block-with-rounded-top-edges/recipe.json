@@ -1,0 +1,59 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      10
+     ],
+     [
+      20,
+      30,
+      10
+     ],
+     [
+      0,
+      15,
+      10
+     ],
+     [
+      40,
+      15,
+      10
+     ]
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "solid.offset_face",
+   "params": {
+    "faces": [
+     [
+      20,
+      15,
+      10
+     ]
+    ],
+    "distance": 19
+   }
+  }
+ ]
+}

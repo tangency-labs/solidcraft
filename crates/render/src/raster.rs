@@ -1,7 +1,8 @@
 //! CPU rasterizer for headless snapshots: z-buffered, smooth-shaded triangles and depth-tested
 //! lines, rendered at 2× and downsampled for anti-aliasing.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Camera;
 use crate::scene::{Rgb, SECTION_CAP, Scene, png};
@@ -118,6 +119,11 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let alpha = sm.alpha();
             let m = &sm.mesh;
             let body = sm.color.f();
+            // The hatch of its cut face: its own by part, else the cap's at 45 degrees.
+            let (tint, turned) = match scene.part_hatch {
+                Some(colours) => (colours.get(sm.hatch.colour()).map_or(cap_tint, |c| c.f()), sm.hatch.turned()),
+                None => (cap_tint, false),
+            };
             let pts: Vec<Option<[f64; 3]>> = m.positions.iter().map(|p| project(*p)).collect();
             // 1 / clip w per vertex, for perspective-correct interpolation of world positions (so
             // the section cuts along the plane, not a curve, in perspective views).
@@ -170,7 +176,14 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         {
                             continue;
                         }
-                        let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
+                        let mut z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
+                        // The cut wins a tie: where a body stands on another, its bottom seen
+                        // through the cut and the other's top are the same plane, a rounding
+                        // apart (the viewport settles it without depth, by counting the faces
+                        // behind the cut in the stencil: `Cut::count`).
+                        if inside && scene.clip.is_some() && !pass.glass() {
+                            z -= z.abs() * DEPTH_EPS as f32;
+                        }
                         let i = y * sw + x;
                         if c.depth.get(i).is_some_and(|d| z < *d) {
                             // A see-through body is blended over what is already drawn and
@@ -194,15 +207,16 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 };
                             }
                             if cut {
-                                // The cut: the body's colour tinted toward the cap colour, hatched
-                                // at 45 degrees (as the viewport draws it); a plain cap is the
-                                // body's own colour.
+                                // The cut: the body's colour tinted toward its hatch colour, hatched
+                                // at 45 or 135 degrees (as the viewport draws it); a plain cap is
+                                // the body's own colour.
                                 if scene.plain_cap {
                                     c.put(x, y, base, 1.0);
                                     continue;
                                 }
-                                let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (cap_tint[k] - base[k]) * 0.35);
-                                let k = if ((x + y) / SS) % 9 < 2 { 0.6 } else { 1.0 };
+                                let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (tint[k] - base[k]) * 0.35);
+                                let along = if turned { x as i64 - y as i64 } else { (x + y) as i64 };
+                                let k = if along.div_euclid(SS as i64).rem_euclid(9) < 2 { 0.6 } else { 1.0 };
                                 c.put(x, y, tinted.map(|v| v * k), 1.0);
                                 continue;
                             }
@@ -230,6 +244,8 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     }
     for l in scene.grid.iter().chain(&scene.lines) {
         let col = l.color.f();
+        // A line that is not opaque is blended with what is under it (the grid fading out).
+        let alpha = f64::from(l.alpha).clamp(0.0, 1.0);
         let half = (l.width * SS as f64 * 0.5).max(0.5);
         for seg in l.points.windows(2) {
             let (Some(&p), Some(&q)) = (seg.first(), seg.get(1)) else { continue };
@@ -264,7 +280,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         let visible = l.on_top
                             || c.depth.get(i).zip(slope.get(i)).is_some_and(|(dd, s)| z <= f64::from(*dd) + f64::from(*s) * d + z.abs() * DEPTH_EPS);
                         if visible {
-                            c.put(ix as usize, iy as usize, col, cov);
+                            c.put(ix as usize, iy as usize, col, cov * alpha);
                         }
                     }
                 }
@@ -382,6 +398,7 @@ mod tests {
             triangles: vec![[0, 1, 2]],
             tri_face: vec![0],
             edges: vec![],
+            display_only_edges: false,
             seams: vec![],
             smooth_edges: vec![],
             sharp_edges: vec![],
@@ -421,12 +438,20 @@ mod tests {
 
     /// A front panel over a back one, with a line between them, seen from the front.
     fn two_panels(front_opacity: f32) -> (Scene, Camera) {
-        let glass = SceneMesh { mesh: Arc::new(panel(-5.0)), color: Rgb(255, 0, 0), face_colors: Vec::new(), opacity: front_opacity };
+        let glass = SceneMesh {
+            mesh: Arc::new(panel(-5.0)),
+            color: Rgb(255, 0, 0),
+            face_colors: Vec::new(),
+            opacity: front_opacity,
+            closed: true,
+            hatch: Default::default(),
+        };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],
             lines: vec![SceneLine {
                 points: vec![Vec3::new(-8.0, 2.0, 0.0), Vec3::new(8.0, 2.0, 0.0)],
                 color: Rgb(0, 0, 255),
+                alpha: 1.0,
                 width: 1.4,
                 on_top: false,
             }],
@@ -498,6 +523,30 @@ mod tests {
         render(scene, cam, 64, 64).rgba.chunks(4).filter(|p| p[0] > 150 && p[1] < 100 && p[2] < 100).count()
     }
 
+    /// #4214: a line that is not opaque is blended with what is under it: the grid fades out
+    /// with the distance, and the fade reaches the picture.
+    #[test]
+    fn a_line_that_is_not_opaque_is_blended_with_what_is_under_it() {
+        let line = |alpha: f32| SceneLine {
+            points: vec![Vec3::new(-8.0, 2.0, 0.0), Vec3::new(8.0, 2.0, 0.0)],
+            color: Rgb(0, 0, 255),
+            alpha,
+            width: 1.4,
+            on_top: false,
+        };
+        let cam = Camera { distance: 50.0, fov: 0.0, ..Default::default() };
+        // The blue of the line over the white background, at full strength and at half.
+        let blue = |alpha: f32| {
+            let scene = Scene { lines: vec![line(alpha)], radius: 30.0, ..Default::default() };
+            let img = render(&scene, &cam, 64, 64);
+            img.rgba.chunks(4).map(|p| p[2] as i32).max().unwrap_or(0)
+        };
+        let solid = blue(1.0);
+        let half = blue(0.5);
+        assert!(solid > 200, "the opaque line is blue: {solid}");
+        assert!(half < solid && half > 100, "the half-opaque line is between the background and the line: {half} against {solid}");
+    }
+
     /// An edge 1 mm behind a sheet is hidden in a close view of a large design. The old test
     /// allowed 2e-4 of the depth range, 2e-4 · (8 · 1200 + 2) = 1.92 mm here (orthographic; far
     /// more in perspective), so it was drawn on the sheet. Now the allowance is what the sheet's
@@ -514,6 +563,7 @@ mod tests {
                 let edge = SceneLine {
                     points: vec![Vec3::new(-10.0, 0.0, 0.0) + back, Vec3::new(10.0, 0.0, 0.0) + back],
                     color: Rgb(255, 0, 0),
+                    alpha: 1.0,
                     width: 1.2,
                     on_top: false,
                 };
@@ -533,7 +583,7 @@ mod tests {
     fn edges_on_a_steep_face_draw_whole() {
         let tilt = 70f64.to_radians();
         let on = |x: f64, z: f64| Vec3::new(x, z * tilt.tan(), z);
-        let line = |points: Vec<Vec3>| SceneLine { points, color: Rgb(255, 0, 0), width: 1.2, on_top: false };
+        let line = |points: Vec<Vec3>| SceneLine { points, color: Rgb(255, 0, 0), alpha: 1.0, width: 1.2, on_top: false };
         for fov in [0.0, 0.6] {
             for radius in [30.0, 1200.0] {
                 let lines = vec![

@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+description = "Repository chores run as `cargo xtask <command>` (not published)."
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true

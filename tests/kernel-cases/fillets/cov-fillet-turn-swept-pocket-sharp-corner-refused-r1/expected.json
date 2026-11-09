@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the same pocket's floor rounds asked to turn Swept at sharp concave corners: the ball cannot pass a concave corner rounded less than its radius, so it is refused, naming the corner radius that works",
+ "source": "analytic",
+ "method": "a swept turn sweeps the round's section along the corner's own rounding; a sharp concave corner (R 0 < r 1) has none the ball can follow: refused, naming R >= 1",
+ "outcome": "refused",
+ "refusal": "at least 1"
+}

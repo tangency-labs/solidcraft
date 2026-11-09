@@ -1,0 +1,50 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 10,
+    "name": "Ring"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     20,
+     15
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Ring"
+   }
+  },
+  {
+   "command": "solid.split_face",
+   "params": {
+    "faces": [
+     [
+      5,
+      5,
+      10
+     ]
+    ],
+    "sketch": "Ring"
+   }
+  }
+ ]
+}

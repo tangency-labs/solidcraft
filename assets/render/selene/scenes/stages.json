@@ -1,0 +1,1517 @@
+{
+  "metadata": {
+    "schema_version": "0.1.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "authorship": "Original SolidCraft prepared-demo authoring specifications. The separately pinned native source is documented in source-lock.json; these semantic resources remain unbound.",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "source_lock": "../source-lock.json",
+    "source_state": "pinned_native",
+    "expected_native_label": "SELENE-showcase.solidcraft",
+    "source_requirement": "Require ../source-lock.json active_source.status='pinned_native', matching accepted bytes/format/units/+Z, confirmed admission review and reviewed semantic selectors. An expected filename is not proof of identity.",
+    "catalog_root": "../../../../docs/render-materials",
+    "catalog_inputs": [
+      {
+        "path": "materials.json",
+        "sha256": "e2b590cf79501a8c4c1cad1dbf143a215a00fd8ceafcd5b038cc60364b60f5f3"
+      },
+      {
+        "path": "environment-presets.json",
+        "sha256": "4e01efeb3abce5b5c85a2c43cfa913d0c6740775b4d068184d879846cdd81a5c"
+      },
+      {
+        "path": "studio-presets.json",
+        "sha256": "175e117fe286da592b982a69472aec7a001d10a707d002b189a745dd2f77cd53"
+      },
+      {
+        "path": "quality-presets.json",
+        "sha256": "d57107708a673286fea1fe23611e0a7d97fe8694be80fd320143f97cafb9738d"
+      },
+      {
+        "path": "scene-presets.json",
+        "sha256": "63f0da0476dd3c09f7c125d3f525582196525bd74289e2b18fc2c3f8ddad6466"
+      }
+    ],
+    "coordinate_frame": {
+      "length_units": "mm",
+      "angle_units": "radians",
+      "up_axis": "+Z",
+      "front_axis": "-Y",
+      "right_axis": "+X",
+      "horizontal_axes_basis": "Authored presentation-stage convention; not an observed native vehicle heading.",
+      "source_alignment_policy": "Review and record the improved source-to-stage instance alignment before use; do not rewrite native component transforms."
+    },
+    "numeric_policy": "Values are authored initial settings or inherited catalog parameters. No value is a measured model transform, source photometry, optical constant or mechanical property.",
+    "native_target_policy": "No legacy source IDs are targets. Resolve semantic roles against the accepted native file and save the source hash with the reviewed selectors.",
+    "runtime_policy": "This JSON is an authoring specification. It is not an engine command and does not claim resource loading, rendering, simulation or application integration.",
+    "geometry_authority": "Existing environment-presets.json remains the parameter authority; these assets add explicit references, overrides and generated-role bindings.",
+    "solar_reference": {
+      "url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+      "accessed": "2026-10-21",
+      "use": "Apparent solar diameter context; inherited 0.53-degree value remains an approximate authoring default, not a calibrated lunar ephemeris."
+    },
+    "native_opaque_compiler_policy": "prepare.py compile is restricted to reviewed native BODY selections for roles with kind=appearance, owner=subject and opaque_proxy_allowed=true. Stage geometry, framing, interaction regions, layered dust, optics and emitters are not compiled by that tool.",
+    "source_snapshot_sha256": "1b0df486f30da157db27a33e0b5ed67f13d527d4dfdc6c334717a1df4e5b8677"
+  },
+  "items": [
+    {
+      "id": "SELENE-STAGE-001",
+      "name": "Mare low-Sun hero",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-012",
+      "environment_preset_id": "ENVSET-014",
+      "geometry": {
+        "environment_preset_id": "ENVSET-014",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620014,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_mare_regolith"
+          },
+          {
+            "geometry_output": "rocks",
+            "geometry_role_id": "lunar_rocks",
+            "appearance_role_id": "lunar_highland_rock",
+            "count_policy": "inherit_geometry_source_rock_count"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 0.610865238198,
+        "elevation_rad": 0.13962634016,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-084",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-002",
+      "name": "Mare high-Sun material comparison",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-013",
+      "environment_preset_id": "ENVSET-015",
+      "geometry": {
+        "environment_preset_id": "ENVSET-014",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620014,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_mare_regolith"
+          },
+          {
+            "geometry_output": "rocks",
+            "geometry_role_id": "lunar_rocks",
+            "appearance_role_id": "lunar_highland_rock",
+            "count_policy": "inherit_geometry_source_rock_count"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage.",
+        "inheritance_note": "Use exactly the low-Sun hero geometry and seed for a lighting A/B study; only the solar orientation comes from ENVSET-015."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 2.356194490192,
+        "elevation_rad": 1.134464013796,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-084",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-003",
+      "name": "Sampling contact macro",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-014",
+      "environment_preset_id": "ENVSET-016",
+      "geometry": {
+        "environment_preset_id": "ENVSET-016",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620016,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "sampling_contact_region",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_mare_regolith"
+          },
+          {
+            "geometry_output": "rocks",
+            "geometry_role_id": "lunar_rocks",
+            "appearance_role_id": "lunar_highland_rock",
+            "count_policy": "inherit_geometry_source_rock_count"
+          },
+          {
+            "geometry_output": "contact_region",
+            "geometry_role_id": "sampling_contact_region"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage.",
+        "context_geometry_policy": "Retain the rest of the rover for shadows and reflections; fit only the selected macro region, not the full rover into the small terrain patch."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 1.047197551197,
+        "elevation_rad": 0.349065850399,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-084",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-004",
+      "name": "Task-light work patch in solar shadow",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-015",
+      "environment_preset_id": "ENVSET-018",
+      "geometry": {
+        "environment_preset_id": "ENVSET-018",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620018,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_highland_regolith"
+          },
+          {
+            "geometry_output": "work_patch",
+            "geometry_role_id": "led_work_patch"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.05235987756,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "one_reviewed_task_light_required",
+        "allowed_source_role_ids": [
+          "rover_task_led"
+        ],
+        "calibration_required": true,
+        "emitter_appearance_role_id": "task_led_emitter",
+        "optic_appearance_role_id": "task_led_optic",
+        "proxy_policy": "one_energy_owner_shared_by_visible_emitter_and_sampling_representation"
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-013",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged.",
+        "With the LED disabled, verify finite-disk solar occlusion at the receiver. Enabling one subject emitter must not change the environment Sun or introduce ambient fill."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-005",
+      "name": "Generic polar ridge",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-016",
+      "environment_preset_id": "ENVSET-022",
+      "geometry": {
+        "environment_preset_id": "ENVSET-022",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620022,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_highland_regolith"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 1.570796326795,
+        "elevation_rad": 0.03490658504,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-084",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-006",
+      "name": "Container transfer and capture workspace",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-018",
+      "environment_preset_id": "ENVSET-023",
+      "geometry": {
+        "environment_preset_id": "ENVSET-023",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620023,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_mare_regolith"
+          },
+          {
+            "geometry_output": "transfer_region",
+            "geometry_role_id": "transfer_workspace"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage.",
+        "external_geometry_role_ids": [
+          "selene_container_transfer_station"
+        ]
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 2.617993877991,
+        "elevation_rad": 0.174532925199,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-007",
+      "name": "Geometric full-shadow audit",
+      "mode": "lunar_physical",
+      "reference_scene_id": "SCENE-024",
+      "environment_preset_id": "ENVSET-019",
+      "geometry": {
+        "environment_preset_id": "ENVSET-019",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620019,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_highland_regolith"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 0.0,
+        "elevation_rad": -0.0872664626,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "lunar_physical"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged.",
+        "Retain the enabled Sun behind horizon geometry, disable every hardware source, and accept a nearly black image without automatic exposure or fill."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-008",
+      "name": "Neutral studio diagnosis",
+      "mode": "terrestrial",
+      "reference_scene_id": "SCENE-001",
+      "environment_preset_id": "ENVSET-001",
+      "geometry": {
+        "environment_preset_id": "ENVSET-001",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620001,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "original_generic_geometry_not_a_facility_scan",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "neutral_gray_matte"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": false,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 0.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "scene_geometry",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "terrestrial"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-021",
+        "CAP-033",
+        "CAP-038",
+        "CAP-039",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-009",
+      "name": "Rover presentation turntable",
+      "mode": "terrestrial",
+      "reference_scene_id": "SCENE-001",
+      "environment_preset_id": "ENVSET-010",
+      "geometry": {
+        "environment_preset_id": "ENVSET-010",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {
+          "room_width": 6000.0,
+          "room_depth": 7000.0,
+          "room_height": 4000.0,
+          "turntable_radius": 1500.0,
+          "turntable_thickness": 80.0
+        },
+        "seed_override": 620010,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "original_generic_geometry_not_a_facility_scan",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "neutral_satin_floor"
+          },
+          {
+            "geometry_output": "turntable",
+            "geometry_role_id": "turntable_platform",
+            "appearance_role_id": "neutral_satin_floor"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage.",
+        "maximum_subject_extent_mm_override": 2500.0,
+        "sizing_note": "Original fixed demo-stage dimensions; they are not measurements of SELENE. Check the complete swept envelope and radial clearance before use."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": false,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 0.0,
+        "elevation_rad": 0.610865238198,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 0.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "scene_geometry",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": false,
+        "owner": "studio",
+        "studio_preset_id": "none",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "terrestrial"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-021",
+        "CAP-033",
+        "CAP-038",
+        "CAP-039",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "SELENE-STAGE-010",
+      "name": "Lunar editorial presentation",
+      "mode": "editorial",
+      "reference_scene_id": "SCENE-019",
+      "environment_preset_id": "ENVSET-024",
+      "geometry": {
+        "environment_preset_id": "ENVSET-024",
+        "source_fields": [
+          "geometry",
+          "ground"
+        ],
+        "inheritance": "resolve_by_reference_then_apply_only_declared_overrides",
+        "parameter_overrides_mm": {},
+        "seed_override": 620024,
+        "units": "mm",
+        "up_axis": "+Z",
+        "subject_scale": 1.0,
+        "fit_policy": "explicit_support_placement_once_preserve_subject_dimensions",
+        "fit_subject_role_id": "rover_assembly",
+        "topography_status": "conceptual_procedural_not_a_site_DEM",
+        "role_outputs": [
+          {
+            "geometry_output": "ground",
+            "appearance_role_id": "lunar_mare_regolith"
+          },
+          {
+            "geometry_output": "rocks",
+            "geometry_role_id": "lunar_rocks",
+            "appearance_role_id": "lunar_highland_rock",
+            "count_policy": "inherit_geometry_source_rock_count"
+          }
+        ],
+        "clearance_policy": "Block if the resolved subject or planned swept volume exceeds the authored stage limits; do not rescale the rover or automatically stretch the stage."
+      },
+      "solar_source": {
+        "id": "selene_environment_sun",
+        "enabled": true,
+        "owner": "environment",
+        "distance_model": "directional_at_infinity_for_local_stage",
+        "position_mm": "not_applicable_directional_source",
+        "angular_model": "uniform_finite_angular_disk",
+        "angular_diameter_rad": 0.009250245036,
+        "angular_size_origin": "inherited_authored_approximate_0_53_degree_setting_not_a_site_ephemeris",
+        "angular_size_reference_url": "https://nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html",
+        "azimuth_rad": 0.610865238198,
+        "elevation_rad": 0.12217304764,
+        "angle_convention": "azimuth_from_positive_X_toward_positive_Y_elevation_above_XY",
+        "photon_travel_direction": "negative_of_unit_vector_from_stage_toward_solar_disk_center",
+        "relative_irradiance": 1.0,
+        "irradiance_quantity": "dimensionless_authored_reference_calibration_pending",
+        "distance_attenuation": "none_across_local_stage_in_directional_approximation",
+        "occlusion": "trace_all_stage_and_subject_geometry",
+        "environment_map_contains_sun": false,
+        "background_disk_policy": "display_the_same_solar_source_if_visible_never_add_a_second_emitter"
+      },
+      "ambient": {
+        "enabled": false,
+        "source_type": "none",
+        "radiance_scale": 0.0,
+        "reason": "Physical vacuum has no sky fill; studio and editorial compositions use explicit rig sources."
+      },
+      "atmosphere": {
+        "enabled": false,
+        "model": "none",
+        "density_scale": 0.0,
+        "fog_enabled": false,
+        "clouds_enabled": false,
+        "wind_enabled": false,
+        "rain_enabled": false
+      },
+      "background": {
+        "kind": "black",
+        "background_is_light_source": false,
+        "earth": {
+          "enabled": false,
+          "owner": "celestial_environment",
+          "enablement_requires": [
+            "reviewed_location_or_trajectory",
+            "site_orientation",
+            "ephemeris",
+            "line_of_sight",
+            "angular_size_from_geometry",
+            "phase_and_exposure_consistency"
+          ],
+          "arbitrary_disk_scaling_allowed": false
+        },
+        "stars": {
+          "enabled": false,
+          "owner": "astronomical_background",
+          "radiance_scale": 0.0,
+          "automatic_overlay": false,
+          "enablement_requires": [
+            "reviewed_astronomical_background",
+            "declared_scene_radiance",
+            "exposure_compatibility"
+          ]
+        }
+      },
+      "subject_emitters": {
+        "policy": "disabled_unless_explicitly_required",
+        "allowed_source_role_ids": [],
+        "calibration_required": true
+      },
+      "editorial_fill": {
+        "enabled": true,
+        "owner": "studio",
+        "studio_preset_id": "STU-024",
+        "environment_fill_scale": 0.0,
+        "saved_fidelity_label": "editorial"
+      },
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-017",
+        "CAP-018",
+        "CAP-019",
+        "CAP-033",
+        "CAP-036",
+        "CAP-040",
+        "CAP-043",
+        "CAP-044",
+        "CAP-057",
+        "CAP-059",
+        "CAP-089",
+        "CAP-091",
+        "CAP-092",
+        "CAP-097",
+        "CAP-117",
+        "CAP-118",
+        "CAP-120"
+      ],
+      "blocking_requirements": [
+        "Verify the pinned improved source against source-lock.json and review selectors for this stage.",
+        "Resolve a versioned stage generator and all appearance roles.",
+        "Verify subject physical scale, placement, stage clearance and one owner per light contribution.",
+        "Bind an executor with every required capability; retain an explicit unsupported result otherwise."
+      ],
+      "acceptance": [
+        "Round-trip all mm/radian parameters and the fixed procedural seed.",
+        "Record the effective geometry reference, explicit overrides, light owners and background policy.",
+        "Keep source identity, model geometry and engineering properties unchanged.",
+        "Apply STU-024 as the only editorial fill. Explicitly override the ENVSET-024 ambient fill to zero, retain one environmental Sun, and label every output editorial."
+      ],
+      "status": "specified_unbound"
+    }
+  ]
+}

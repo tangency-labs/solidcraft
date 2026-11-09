@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1140"
+ ],
+ "what": "a spiral round tube (radius growing 76 to 210 mm over one turn, 12 mm wall) built as 8 lofted bands, each minus a lofted bore, cut in half through the axis plane z=0 and the halves joined: must give one body",
+ "source": "invariants",
+ "method": "the script is the report's own generator (stdlib only, defaults 8 bands x 7 sections, inspect.measure dropped). Every band is a hollow tube cut at z=0 and the bands abut end to end, so the join is one connected solid. No exact volume (the loft of 7 sections only approximates the spiral's ~8.15 L half wall), so only the outcome, validity and body_count are graded",
+ "body_count": 1
+}

@@ -181,3 +181,56 @@ fn extrude_to_a_cylinder_beside_another_body() {
     assert!((end + (2.75f64 * 2.75 - 1.5 * 1.5).sqrt()).abs() < 1e-3, "{b}");
     assert!((b["bbox"]["min"][0].as_f64().unwrap_or(0.0) + 98.0).abs() < 1e-6, "{b}");
 }
+
+/// A window cut To Object through the side of a tube (r 20 outside, 18 inside), up to the inside
+/// face: it takes the wall under the profile and nothing else. Before, the tool ended in the
+/// curved inner face: the tool less the tube kept only the air before the wall and cut nothing,
+/// or the boolean failed on the coincident curved faces. Picking the outside face from inside
+/// the wall cuts back to it.
+#[test]
+fn cut_to_the_far_side_of_a_curved_wall() {
+    let tube = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 20, "body_name": "Tube"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bore"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 18}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Bore", "distance": 20, "operation": "cut"}));
+        s
+    };
+    let volume = |s: &mut Session| body(s, "Tube")["volume_mm3"].as_f64().unwrap_or(0.0);
+    let wall = |x: f64, r: f64| (r * r - x * x).sqrt();
+    let n = 2000;
+    let between = |r0: f64, r1: f64| -> f64 {
+        (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (wall(x, r1) - wall(x, r0)) * 4.0 * 6.0 / n as f64).sum()
+    };
+    // From outside the tube, through the wall, to its inside face.
+    let mut s = tube();
+    let whole = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": [0, -18, 10], "operation": "cut"}));
+    let removed = whole - volume(&mut s);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    // The same window cut 20 mm, ending in the bore: the tube's own facets set its volume.
+    let mut plain = tube();
+    run(&mut plain, "sketch.create", json!({"plane": {"origin": [0, -30, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(&mut plain, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut plain, "sketch.finish", json!({}));
+    run(&mut plain, "solid.extrude", json!({"sketch": "Window", "distance": -20, "operation": "cut"}));
+    let reference = whole - volume(&mut plain);
+    assert!((removed - reference).abs() < reference * 1e-6, "removed {removed}, a 20 mm cut {reference}");
+    let want = between(18.0, 20.0);
+    assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
+    // From inside the wall (y = -19) back out to the outside face.
+    let mut s = tube();
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -19, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Window"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-3, 8], "p1": [3, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Window", "to": [0, -20, 10], "operation": "cut"}));
+    let removed = whole - volume(&mut s);
+    let want: f64 = (0..n).map(|i| -3.0 + 6.0 * (i as f64 + 0.5) / n as f64).map(|x| (wall(x, 20.0) - 19.0) * 4.0 * 6.0 / n as f64).sum();
+    assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}

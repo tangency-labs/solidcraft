@@ -1,9 +1,10 @@
 //! Tessellation of trimmed loft faces after a boolean: no triangle may leave the face.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::FRAC_PI_2;
 
-use solidcraft_geom::{Loop2, Plane, Seg2, Vec2, Vec3};
-use truck_modeling::{self as mt, SearchNearestParameter};
+use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
+use solidcraft_geom::brep::eval::SurfaceEval;
 
 use crate::*;
 
@@ -43,16 +44,14 @@ fn tube() -> Body {
 
 /// Each face's mesh area, and how far its triangles' centroids lie off its surface at most.
 fn per_face(body: &Body, mesh: &solidcraft_geom::Mesh) -> Vec<(f64, f64)> {
-    use mt::ParametricSurface;
-    let faces: Vec<&mt::Face> = body.solid.face_iter().collect();
+    let faces: Vec<SurfaceEval> = body.record().faces.iter().map(|f| SurfaceEval::new(&f.surface).unwrap()).collect();
     let mut out = vec![(0.0, 0.0f64); faces.len()];
     for (t, &f) in mesh.triangles.iter().zip(&mesh.tri_face) {
-        let ([a, b, c], Some(face), Some(slot)) = (mesh.tri(t).unwrap(), faces.get(f as usize), out.get_mut(f as usize)) else { continue };
+        let ([a, b, c], Some(surface), Some(slot)) = (mesh.tri(t).unwrap(), faces.get(f as usize), out.get_mut(f as usize)) else { continue };
         slot.0 += (b - a).cross(c - a).len() / 2.0;
         let g = (a + b + c) / 3.0;
-        let surface = face.oriented_surface();
-        let (u, v) = surface.search_nearest_parameter(mt::Point3::new(g.x, g.y, g.z), None, 50).unwrap();
-        slot.1 = slot.1.max(crate::body::from_p3(surface.subs(u, v)).dist(g));
+        let uv = surface.project(g, None, f64::INFINITY).unwrap();
+        slot.1 = slot.1.max(surface.point(uv).unwrap().dist(g));
     }
     out
 }
@@ -67,8 +66,8 @@ fn trimmed_ruled_loft_faces_mesh_on_their_surfaces() {
     let shell = cylinder(Vec3::new(0.0, -36.5, 0.0), Vec3::Y, 23.0, 73.0).unwrap();
     let joined = boolean(&tube, &shell, BoolOp::Union).unwrap().unwrap();
     let tol = (joined.size() * 1e-3).max(1e-3);
-    let display = per_face(&joined, &joined.reference_display_mesh_angular(tol, DISPLAY_ANGLE).unwrap());
-    let fine = per_face(&joined, &joined.tessellate(tol / 8.0).unwrap());
+    let display = per_face(&joined, &joined.mesh(&crate::MeshTolerance { chord: tol, angle: Some(DISPLAY_ANGLE) }).unwrap());
+    let fine = per_face(&joined, &joined.mesh(&crate::MeshTolerance::chord(tol / 8.0)).unwrap());
     for (fi, ((area, off), (fine_area, _))) in display.iter().zip(&fine).enumerate() {
         // A centroid sags at most about the chord tolerance (the bad sheet was 7 mm off at 0.6).
         assert!(*off < 2.0 * tol, "face {fi}: a triangle lies {off:.2} mm off the surface (tolerance {tol:.2})");

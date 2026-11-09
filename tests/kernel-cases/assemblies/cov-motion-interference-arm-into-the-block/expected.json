@@ -1,0 +1,43 @@
+{
+ "sources": [],
+ "what": "motion.interference of the arm turning 0 to 90 in 9 steps into a grounded block",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Stop: box 50x10x10 from (-10,30,0), grounded; the arm's corner (40,5) turned \u03b8 reaches y = 40 sin \u03b8 + 5 cos \u03b8, which is 30 at \u03b8 = asin(30/\u221a1625) - atan(5/40) = 40.9676; samples every 10 degrees: clear at 40, overlapping from step 5 (50) to 9 (90); at 90 the arm (x -5..5, y 0..40) and block (x -10..40, y 30..40) share 10x10x10 = 1000 mm3",
+ "body_count": 3,
+ "volume_mm3": 13000.0,
+ "results": [
+  {
+   "step": 14,
+   "json": {
+    "clear": false,
+    "samples": 10,
+    "collisions": [
+     {
+      "first_step": 5.0,
+      "last_step": 9.0,
+      "steps": [
+       [
+        5.0,
+        9.0
+       ]
+      ],
+      "deepest_step": 9.0,
+      "volume_mm3": 1000.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

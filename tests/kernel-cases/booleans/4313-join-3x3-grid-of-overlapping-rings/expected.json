@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4313"
+ ],
+ "what": "nine identical rings (r 10..20, 5 thick) in a 3x3 grid 38 apart, each overlapping its edge neighbours, joined in one combine: ~90 s then 'boolean Union: no result' (one pair already failed)",
+ "source": "analytic",
+ "method": "each ring pi (20^2-10^2) 5; the 12 edge-neighbour pairs overlap in a lens of two r20 circles 38 apart, 2 R^2 acos(d/2R) - (d/2) sqrt(4R^2-d^2), all of it in both rings' material (its points are at least 19 from both centres); diagonal pairs are 53.7 apart and don't meet. V = 9 * 1500 pi - 12 * 5 * lens. One shell",
+ "body_count": 1,
+ "shells": 1,
+ "volume_mm3": 41407.1957
+}

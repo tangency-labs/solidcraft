@@ -1,5 +1,7 @@
 # Product-image jobs (R4a)
 
+Native progressive opaque PNG rendering is described in [Progressive product images](render-path.md). It registers alongside the CPU executor.
+
 R4a adds bounded CPU preview images to the Render workspace. The installed `builtin` /
 `cpu-product` executor supports Preview, Image and PNG. It does not promise refraction,
 HDRI, exposure, final mode or EXR; those requests fail explicitly. The subsequent
@@ -48,7 +50,31 @@ image releases the previous image; old terminal metadata can still report comple
 but it does not promise that its bytes remain exportable. Export requires an explicit
 retained completed job ID; it never silently exports a different/newer job.
 
+Native CPU raytracing can separately enable
+[progressive camera sampling](render-cpu-progressive.md). A status may then include
+`preview: {frame_sequence, samples_per_pixel, frame}`. Its complete-pass PNG is
+available through the in-process `JobHandle::preview()` consumer; the JSON status
+contains metadata only. The preview keeps the same job and capture identity,
+but remains separate from the retained final image and `render.export`.
+Cancellation, failure and final publication clear the provisional slot while
+preserving the previous successful result when no newer final exists. Each
+externally retained preview keeps its own admitted memory reservation.
+
+`ui.inspect.render.displayed_receipt` identifies the cached image submitted by the
+last completed, non-discarded UI pass. It contains the job, scene generation, pixel
+size, final/preview kind, optional checkpoint count/sequence and adaptive phase,
+and the egui frame/pass numbers. A live image uses its own captured source identity.
+Merely decoding or retaining an image does not produce a receipt. A completed UI pass
+without an image, or with a hidden, fully clipped, zero-opacity or comparison view,
+publishes no receipt. Logic-only updates retain the old completed pass numbers, so
+receipt presence alone does not establish a fresh paint. This is an image-shape submission receipt,
+not acknowledgement of GPU execution, compositor presentation or every visible paint.
+
 ## Native and browser execution
+
+Native Single, All and live CAD preparation workers use `kernel::kernel_thread`
+with an 8 MiB stack for Solidcore rc1. The admitted image executors consume the
+captured triangles; this worker policy adds no kernel calls to image execution.
 
 Each application installs one CPU host, shared by its documents. Native execution uses
 one worker and at most two queued inputs across documents; it runs without UI polling.
@@ -59,12 +85,17 @@ additionally yields after four rows. The UI pumps 1024 units per frame. These ar
 bounds, not hard real-time guarantees: allocation, codec compression and OS scheduling
 still have platform-dependent latency.
 
-Admission caps output at 4096 per dimension and 4 million pixels; pixel scratch is
+CPU raster admission caps output at 4096 per dimension and 4 million pixels; pixel scratch is
 estimated at 48 bytes per output pixel (2x supersampling). Other limits: 262144
 triangles/face overrides/edge polylines, 128 MiB retained source geometry, 384 MiB total
 estimated memory per job, 512 MiB shared host admission including retained PNGs, and
-128 million projected pixel tests. The projected-work limit is checked during bounded
-preparation and may fail an admitted job. Encoded PNG bytes have an additional
+128 million projected pixel tests. Preflight and Start check projected work using the
+same clipped, supersampled triangle bounds as the rasterizer, including face opacity
+overrides. Raster admission reports `projected_pixel_tests`; CPU raytracing and registered
+GPU executors omit this field and use their own work and memory budgets. Over-budget
+raster requests are rejected before a job is queued, with advice to reduce image
+dimensions or visible geometry.
+The worker retains its bounded preparation check. Encoded PNG bytes have an additional
 `8 * output_pixels + 65536` cap. Allocator and codec internals are estimates, not an
 operating-system memory quota. Limits fail with errors rather than allocating unbounded
 buffers. Completed frames keep their memory reservation while bytes are retained.
@@ -88,7 +119,8 @@ with an atomic hard link; an existing destination wins even in a race. Filesyste
 without that operation return an error. Explicit overwrite uses the existing atomic
 writer without reading or backing up the previous target. Failed writes preserve the completed
 image and CAD state. Browser export uses the existing virtual file/download service;
-no filesystem paths or base64 payloads are persisted in the design.
+image-export paths or frame payloads are not persisted in the design. Saved HDR
+input resources use their separate [document contract](render-hdr-resources.md).
 
 The Render panel provides Check Render Request, Start Render, phase progress,
 Cancel Render and Export PNG. Replace existing file is an explicit opt-in. A failed or
@@ -105,7 +137,7 @@ German and Korean; command IDs and scenario handles remain unchanged.
 
 ```sh
 solidcraft-cli render examples/render-studio.json --out product.png --width 800 --height 600
-solidcraft-cli render design.solidcraft --setup Studio --out product.png --transparent
+solidcraft-cli render design.sc --setup Studio --out product.png --transparent
 ```
 
 The CLI follows preflight/start/native wait/export, with a default 120-second wait

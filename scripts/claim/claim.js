@@ -8,6 +8,7 @@ const LABEL_DESCRIPTION = 'Someone is working on this';
 const CLAIM_HOURS = 72;
 const PR_IDLE_DAYS = 14;
 const HOUR = 3600 * 1000;
+const BOT = 'github-actions[bot]';
 
 function parseCommand(body) {
   const text = String(body || '').trimStart();
@@ -79,14 +80,34 @@ function getTimeline(github, context, number) {
   });
 }
 
-// Open pull requests that mention the issue, from the timeline's cross-references.
-function linkedPulls(timeline) {
+// Cross-references discover candidates, not claims: even a comment or a "Not in this PR"
+// mention creates one. Count only open PRs in this repo whose title/body actually claim the
+// issue, using the same rule as handlePull. Timeline order is not PR-number order.
+function linkedPulls(timeline, context, number) {
+  const repo = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
   const seen = new Map();
   for (const ev of timeline) {
     const src = ev.event === 'cross-referenced' && ev.source && ev.source.issue;
-    if (src && src.pull_request && src.state === 'open') seen.set(src.number, src);
+    if (src && src.pull_request && src.state === 'open' &&
+        src.repository?.full_name?.toLowerCase() === repo &&
+        referencedIssues(src.title, src.body).includes(number)) {
+      seen.set(src.number, src);
+    }
   }
-  return [...seen.values()];
+  return [...seen.values()].sort((a, b) => a.number - b.number);
+}
+
+// Who the bot's latest "Claimed by @user" reply names, unless the label came off after it.
+// GitHub doesn't assign people who aren't collaborators, so for them this reply is the only record.
+function recordedClaimant(timeline) {
+  let who = null;
+  for (const ev of timeline) {
+    if (ev.event === 'unlabeled' && ev.label && ev.label.name === LABEL) who = null;
+    const mine = ev.event === 'commented' && ev.user && ev.user.login === BOT;
+    const m = mine && /^Claimed by @([A-Za-z0-9-]+)/.exec(ev.body || '');
+    if (m) who = m[1];
+  }
+  return who;
 }
 
 async function lastPush(github, context, pr) {
@@ -102,7 +123,7 @@ async function lastPush(github, context, pr) {
 async function claimStatus(github, context, issue, now) {
   const timeline = await getTimeline(github, context, issue.number);
   const since = await labeledAt(github, context, issue, timeline);
-  const pulls = linkedPulls(timeline);
+  const pulls = linkedPulls(timeline, context, issue.number);
   if (pulls.length === 0) {
     const expires = since + CLAIM_HOURS * HOUR;
     return { pulls, since, expires, release: now >= expires, reason: 'no PR' };
@@ -184,7 +205,7 @@ async function claim(github, context, now) {
   } else {
     // Not claimed, but a draft PR may already be the claim (CONTRIBUTING.md, "Claim = a draft PR").
     const timeline = await getTimeline(github, context, n);
-    const other = linkedPulls(timeline).find((p) => p.user && p.user.login !== user);
+    const other = linkedPulls(timeline, context, n).find((p) => p.user && p.user.login !== user);
     if (other) {
       await react(github, context, 'eyes');
       await reply(github, context, `#${other.number} already covers this one.`);
@@ -227,7 +248,10 @@ async function unclaim(github, context) {
     await react(github, context, 'eyes'); // only the owner releases their own issues
     return;
   }
-  const allowed = assignees.includes(user) || (await isMaintainer(github, context, user));
+  let allowed = assignees.includes(user) || (await isMaintainer(github, context, user));
+  if (!allowed && assignees.length === 0) {
+    allowed = recordedClaimant(await getTimeline(github, context, issue.number)) === user;
+  }
   if (!allowed) {
     await react(github, context, 'eyes');
     await reply(github, context, `Only the person who claimed this, or a maintainer, can release it, @${user}.`);
@@ -298,7 +322,7 @@ async function handlePull({ github, context }) {
     }
     // An older open PR for the issue wins (lowest number), even if it never recorded its claim.
     const timeline = await getTimeline(github, context, n);
-    const older = linkedPulls(timeline).find((p) => p.number < pull.number && p.user && p.user.login !== author);
+    const older = linkedPulls(timeline, context, n).find((p) => p.number < pull.number && p.user && p.user.login !== author);
     if (older) {
       await github.rest.issues.createComment({
         ...repoArgs(context),

@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "inspect.clearance of the arm lifted 5 mm off the base",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Arm moved by (0,0,5): its bottom (z 5) is 5 mm above Base's top (z 0) over x 0..10: distance 5",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "overlaps": [],
+    "near": [
+     {
+      "distance_mm": 5.0
+     }
+    ]
+   }
+  }
+ ]
+}

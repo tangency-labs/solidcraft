@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>From Material — custom look crossed off, material shows</title>
+  <path d="M6 38L32 53.01L32 57.01L6 42Z" fill="#b8c3cf"/>
+  <path d="M58 38L32 53.01L32 57.01L58 42Z" fill="#8e9faf"/>
+  <path d="M32 22.99L58 38L32 53.01L6 38Z" fill="#e2e8ef"/>
+  <path d="M32 22.99L58 38L58 42L32 57.01L6 42L6 38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 38L32 53.01L58 38" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 53.01L32 57.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="22" r="15" fill="#328bd3"/>
+  <path d="M46.1 16.87A15 15 0 0 1 26.87 36.1A19.62 19.62 0 0 0 46.1 16.87Z" fill="#236ead"/>
+  <circle cx="26.9" cy="16.9" r="4.05" fill="#b9ddf8"/>
+  <circle cx="32" cy="22" r="15" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21 11L43 33M43 11L21 33" fill="none" stroke="#ffffff" stroke-width="6.65" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21 11L43 33M43 11L21 33" fill="none" stroke="currentColor" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

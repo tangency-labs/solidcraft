@@ -1,11 +1,12 @@
-//! Candidate review through the existing validator, independent of assigned-card persistence.
+//! Candidate and saved-card review through the shared physical-material validator.
 use serde_json::{Value, json};
 use solidcraft_engine::doc::physical_material::{Family, MaterialCard, PropertyData, admit_card};
 
-use crate::{SolveApp, i18n::tr, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr;
 
 const MAX_BYTES: usize = 256 * 1024;
-const KINDS: [&str; 9] = [
+const KINDS: &[&str] = &[
     "density",
     "elasticity",
     "tensile_strength",
@@ -65,7 +66,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_material_card_review"),
+        egui::Id::unique("sc_material_card_review"),
         anchor,
         drag_bounds,
         side,
@@ -73,8 +74,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .wide();
     let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
+        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - solidcraft_theme::Tokens::get().space_8).max(0.0));
+        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
     };
@@ -95,8 +96,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| {
                 ui_kit::text(ui, tr("ui.material_review.scope"), ui_kit::Text::Hint("manage"));
                 ui_kit::text(ui, tr("ui.material_review.input"), ui_kit::Text::Report("material_input_label", false));
-                let response =
-                    ui_kit::text_area(ui, tr("ui.material_review.input"), egui::Id::new("sc_material_card_input"), &mut window.input, 5, MAX_BYTES);
+                let response = ui_kit::text_area(
+                    ui,
+                    tr("ui.material_review.input"),
+                    egui::Id::unique("sc_material_card_input"),
+                    &mut window.input,
+                    5,
+                    MAX_BYTES,
+                );
                 crate::scenario::publish_handle("review:input", response.rect.center());
                 if response.changed() {
                     window.reviewed = None;
@@ -130,6 +137,30 @@ fn numbers(ui: &mut egui::Ui, field: &str, values: &[f64], unit: &str) {
     value(ui, field, Some(values.iter().map(|v| format!("{v:e}")).collect::<Vec<_>>().join(", ")), unit);
 }
 
+/// Review a saved card inside the existing physical-material assignment panel.
+/// Reading properties never changes the assigned density or the candidate reviewer.
+pub(crate) fn show_saved_material(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, name: &str) {
+    value(ui, tr("Density"), doc.material_density(name).map(|density| density.to_string()), "g/cm³");
+    let Some(record) = doc.user_material(name).and_then(|material| material.physical_card.as_ref()) else {
+        value(ui, tr("ui.material_review.properties"), None, "");
+        return;
+    };
+    show_record(ui, record);
+}
+
+/// Read-only card preview shared by the saved-material panel and library picker.
+pub(crate) fn show_record(ui: &mut egui::Ui, record: &solidcraft_engine::doc::physical_material::ValidatedCard) {
+    ui_kit::section(ui, "saved_physical_card", tr("ui.material_review.properties"), false, |ui| {
+        let card = record.card();
+        match card.validate() {
+            Ok(report) => show_card(ui, card, &json!({"validation":report})),
+            Err(error) => {
+                ui_kit::text(ui, &error.to_string(), ui_kit::Text::Report("material_error", true));
+            }
+        }
+    });
+}
+
 fn show_card(ui: &mut egui::Ui, card: &MaterialCard, report: &Value) {
     ui_kit::divider(ui, "material_card");
     ui_kit::text(ui, &card.designation, ui_kit::Text::Report("designation", false));
@@ -137,7 +168,7 @@ fn show_card(ui: &mut egui::Ui, card: &MaterialCard, report: &Value) {
     let family = serde_json::to_value(card.family).unwrap_or(Value::Null);
     value(ui, "family", family.as_str().map(str::to_string), "");
     ui_kit::text(ui, tr("ui.material_review.properties"), ui_kit::Text::Report("properties", false));
-    for kind in KINDS {
+    for &kind in KINDS {
         let label = format!("ui.material_review.{kind}");
         let Some(property) = card.properties.iter().find(|p| p.data.kind() == kind) else {
             ui_kit::text(ui, &format!("{}: {}", tr(&label), tr("ui.material_review.unknown")), ui_kit::Text::Report(kind, false));
@@ -248,7 +279,7 @@ mod tests {
         assert!(h.widget("Original synthetic candidate").is_some());
         assert!(h.widget("Density: Unknown").is_some());
         assert!(h.widget("E: 1.2e10 Pa").is_some());
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_material_card_input")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_material_card_input")));
         h.step(&json!({"text":" "})).unwrap();
         assert!(h.app.material_card_review.as_ref().unwrap().reviewed.is_none(), "editing invalidates the old report");
         h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();
@@ -348,9 +379,9 @@ mod tests {
             "moisture_unit",
         ];
         for catalog in crate::i18n::LOCALES.iter().filter(|c| c.id != "en-GB") {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/locales").join(format!("{}.json", catalog.id));
+            let path = std::path::Path::new(env!("OUT_DIR")).join("locales").join(format!("{}.json", catalog.id));
             let messages: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-            for key in keys.into_iter().chain(KINDS) {
+            for key in keys.into_iter().chain(KINDS.iter().copied()) {
                 let key = format!("ui.material_review.{key}");
                 assert!(messages.get(&key).and_then(Value::as_str).is_some_and(|s| !s.is_empty()), "{}: {key}", catalog.id);
             }

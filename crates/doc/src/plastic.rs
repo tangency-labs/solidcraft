@@ -88,6 +88,22 @@ impl PlasticRule {
             _ => return None,
         })
     }
+
+    /// The expressions to change, by field name, in the order of [`PlasticRule::fields`].
+    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 10] {
+        [
+            ("thickness", &mut self.thickness),
+            ("nominal_radius", &mut self.nominal_radius),
+            ("clearance", &mut self.clearance),
+            ("knife_edge", &mut self.knife_edge),
+            ("reveal_height", &mut self.reveal_height),
+            ("thickness_variation", &mut self.thickness_variation),
+            ("draft", &mut self.draft),
+            ("max_thickness", &mut self.max_thickness),
+            ("min_thickness", &mut self.min_thickness),
+            ("min_draft", &mut self.min_draft),
+        ]
+    }
 }
 
 /// The design's own plastic rules, the active one and the rules assigned to bodies.
@@ -151,7 +167,7 @@ impl Document {
             return Err(DocError::Invalid("the plastic thickness must be positive".into()));
         }
         let with_t = |e: &str, k: Kind| -> Result<f64> {
-            let f = |n: &str| if n == "Thickness" && !vals.contains_key("Thickness") { Ok(Value::length(t)) } else { look(n) };
+            let f = |n: &str| if n == "Thickness" { Ok(Value::length(t)) } else { look(n) };
             let v = expr::eval_with(e, &f)?.to_kind(k)?;
             if !v.is_finite() || v < 0.0 {
                 return Err(DocError::Invalid(format!("plastic rule `{}`: `{e}` must not be negative", r.name)));

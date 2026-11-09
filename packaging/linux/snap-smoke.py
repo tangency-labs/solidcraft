@@ -10,6 +10,7 @@ Reuses the frame checks of flatpak-smoke.py.
 import argparse
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -51,9 +52,41 @@ def drive(app, port, frame):
                 raise RuntimeError("the control port never opened") from None
             time.sleep(.2)
     with conn, conn.makefile("rw") as io:
-        replies = []
-        for request in REQUESTS + [{"id": 4, "method": "ui.screenshot", "params": {"path": str(frame)}},
-                                   {"id": 5, "method": "app.quit", "params": {"force": True}}]:
+        # Listening precedes the first frame, whose ui.inspect still has viewport:null.
+        deadline = time.monotonic() + 60
+        while True:
+            if app.poll() is not None:
+                raise RuntimeError(f"the app exited with {app.returncode} before creating a viewport")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("the viewport never appeared")
+            conn.settimeout(remaining)
+            io.write(json.dumps(REQUESTS[0]) + "\n")
+            io.flush()
+            try:
+                line = io.readline()
+            except TimeoutError as error:
+                raise RuntimeError("the viewport never appeared before control timed out") from error
+            if not line:
+                raise RuntimeError("the control connection closed before creating a viewport")
+            reply = json.loads(line)
+            if not isinstance(reply, dict) or reply.get("id") != 1 or reply.get("ok") is not True:
+                raise ValueError(f"ui.inspect failed: {reply}")
+            ui = reply["result"]
+            if ui["renderer"] not in {"gpu", "cpu"}:
+                raise ValueError("ui.inspect returned an invalid renderer")
+            viewport = ui["viewport"]
+            if viewport is not None:
+                if (not isinstance(viewport, list) or len(viewport) != 4
+                        or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in viewport)
+                        or viewport[2] <= 0 or viewport[3] <= 0):
+                    raise ValueError("ui.inspect returned an unusable viewport")
+                break
+            time.sleep(.25)
+        conn.settimeout(60)
+        replies = [line]
+        for request in REQUESTS[1:] + [{"id": 4, "method": "ui.screenshot", "params": {"path": str(frame)}},
+                                      {"id": 5, "method": "app.quit", "params": {"force": True}}]:
             io.write(json.dumps(request) + "\n")
             io.flush()
             replies.append(io.readline())

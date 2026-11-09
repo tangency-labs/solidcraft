@@ -1,0 +1,9 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "Section"}},
+  {"command": "sketch.line", "params": {"closed": true, "infer": false, "connect": false, "points": [[20, 0], [30, 0], [30, 6], [26, 10], [20, 10]]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"sketch": "Section", "axis": "Z", "angle": "210 deg", "direction": "symmetric", "operation": "new", "body_name": "Ring"}},
+  {"command": "solid.box", "params": {"corner": [24, -2, 5], "length": 8, "width": 4, "height": 6, "body_name": "Notch"}},
+  {"command": "solid.combine", "params": {"target": "Ring", "tools": ["Notch"], "operation": "cut"}},
+  {"command": "solid.move", "params": {"bodies": ["Ring"], "translate": [1000, 0, 0]}}
+]}

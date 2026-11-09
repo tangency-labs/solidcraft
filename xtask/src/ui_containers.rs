@@ -325,7 +325,8 @@ pub fn run(root: &Path) -> Result<(), String> {
                 let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 let found = violations(&source).map_err(|e| format!("{}: {e}", path.display()))?;
                 if !found.is_empty() {
-                    failures.push(format!("{}: {}", path.strip_prefix(root).unwrap_or(&path).display(), found.join(", ")));
+                    let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                    failures.push(format!("{relative}: {}", found.join(", ")));
                 }
             }
         }
@@ -467,7 +468,7 @@ mod tests {
         std::fs::write(&source, "fn show() { egui::Area::new(id); }").unwrap();
         std::fs::write(&example, "fn main() { egui::Window::new(title); }").unwrap();
         std::fs::write(&implementation, "fn factory() { egui::Window::new(title); }").unwrap();
-        let rejected = run(&root).unwrap_err();
+        let rejected = run(&root).unwrap_err().replace('\\', "/");
         assert!(rejected.contains("future-ui/src/nested/panel.rs"));
         assert!(rejected.contains("future-platform/examples/viewer.rs"));
         assert!(!rejected.contains("ui_kit/container.rs"), "only the implementation is exempt");

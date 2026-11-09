@@ -1,10 +1,11 @@
 //! Display-only sampling. CAD curves, profiles and constraints are never changed here.
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_engine::doc::ModelState;
-use solidcraft_engine::geom::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_engine::render::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
 use solidcraft_engine::sketch::Sketch;
 
@@ -29,8 +30,8 @@ pub fn pixel_view(proj: &Proj, ppp: f32) -> PixelCurveView {
 /// The pieces a curve is drawn and picked from. An infinite line (#1359) reaches across the whole
 /// view: through the point of its line nearest the view's centre, far past the view each way
 /// (the sampler clips it to the view). Only the display changes: the line keeps its two points.
-fn display_segs(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj) -> Vec<solidcraft_engine::geom::Seg2> {
-    use solidcraft_engine::geom::Seg2;
+fn display_segs(sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj) -> Vec<solidcore_record::Seg2> {
+    use solidcore_record::Seg2;
     let segs = sketch.exact_segs(index).unwrap_or_else(|| sketch.segs(index));
     if !sketch.curves.get(index).is_some_and(|c| c.infinite) {
         return segs;
@@ -173,18 +174,91 @@ pub fn boundary_parts(loop_: &Loop2, plane: &Plane, proj: &Proj, ppp: f32) -> Ve
     loop_.segs.iter().flat_map(|segment| sample_segment(segment, plane, &pixel_view(proj, ppp), &mut budget).parts).collect()
 }
 
+/// What one sketch may sample per model state and view: its curves and profiles cached, and the
+/// vertices and nodes they take. Each sketch has its own (#6524): one shared by every sketch
+/// let a large one drawn first (an imported drawing) use it all, so a later sketch's curves came
+/// back empty, neither drawn nor pickable, while their points still showed.
+struct SketchBudget {
+    sampling: SamplingBudget,
+    curves: usize,
+    profiles: usize,
+}
+
+impl Default for SketchBudget {
+    fn default() -> Self {
+        Self { sampling: SamplingBudget::new(131_072, 1_048_576), curves: 0, profiles: 0 }
+    }
+}
+
+impl SketchBudget {
+    fn sampling_left(&self) -> bool {
+        self.sampling.remaining_vertices > 0 && self.sampling.remaining_nodes > 0
+    }
+
+    fn room_for_curve(&self) -> bool {
+        self.curves < SKETCH_CURVES && self.sampling_left()
+    }
+
+    fn room_for_profile(&self) -> bool {
+        self.profiles < SKETCH_PROFILES && self.sampling_left()
+    }
+}
+
+/// One sketch sampled past the cache (the open sketch at a dimension's typed value), within the
+/// limits the cache gives one sketch: past them a curve or profile is not drawn, as there.
+pub(crate) struct Uncached(SketchBudget);
+
+#[cfg(test)]
+thread_local! {
+    /// A smaller sampling budget for [`Uncached`] (vertices), so a test can run out of it.
+    pub(crate) static UNCACHED_VERTICES: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+impl Default for Uncached {
+    fn default() -> Self {
+        #[allow(unused_mut)]
+        let mut budget = SketchBudget::default();
+        #[cfg(test)]
+        if let Some(vertices) = UNCACHED_VERTICES.with(std::cell::Cell::get) {
+            budget.sampling = SamplingBudget::new(vertices, 1_048_576);
+        }
+        Self(budget)
+    }
+}
+
+impl Uncached {
+    pub(crate) fn curve(&mut self, sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<Vec<Vec3>> {
+        if !self.0.room_for_curve() {
+            return Vec::new();
+        }
+        self.0.curves += 1;
+        curve_with_budget(sketch, index, plane, proj, ppp, &mut self.0.sampling).parts
+    }
+
+    pub(crate) fn profile(&mut self, region: &Region2, plane: &Plane, proj: &Proj, ppp: f32) -> Option<Region2> {
+        if !self.0.room_for_profile() {
+            return None;
+        }
+        self.0.profiles += 1;
+        display_region_with_budget(region, plane, proj, ppp, &mut self.0.sampling)
+    }
+}
+
+/// The most curves and profiles one sketch caches per model state and view.
+const SKETCH_CURVES: usize = 4096;
+const SKETCH_PROFILES: usize = 1024;
+/// The most curves (and profiles) cached for every sketch together: a bound on memory however
+/// many sketches are shown.
+const CACHED_CURVES: usize = 65_536;
+const CACHED_PROFILES: usize = 16_384;
+
+#[derive(Default)]
 pub struct DisplayCache {
     state: Option<Arc<ModelState>>,
     view: u64,
     curves: HashMap<(u64, usize, [u64; 9]), Arc<SampledPath>>,
     profiles: HashMap<(u64, usize, [u64; 9]), Arc<Option<Region2>>>,
-    budget: SamplingBudget,
-}
-
-impl Default for DisplayCache {
-    fn default() -> Self {
-        Self { state: None, view: 0, curves: HashMap::new(), profiles: HashMap::new(), budget: SamplingBudget::new(131_072, 1_048_576) }
-    }
+    budgets: HashMap<u64, SketchBudget>,
 }
 
 impl DisplayCache {
@@ -202,7 +276,7 @@ impl DisplayCache {
         if view != self.view || self.state.as_ref().is_none_or(|old| !Arc::ptr_eq(old, state)) {
             self.curves.clear();
             self.profiles.clear();
-            self.budget = SamplingBudget::new(131_072, 1_048_576);
+            self.budgets.clear();
             self.view = view;
             self.state = Some(Arc::clone(state));
         }
@@ -213,18 +287,20 @@ impl DisplayCache {
         let plane_key =
             [plane.origin.x, plane.origin.y, plane.origin.z, plane.x.x, plane.x.y, plane.x.z, plane.y.x, plane.y.y, plane.y.z].map(f64::to_bits);
         let key = (sketch, index, plane_key);
-        if !self.curves.contains_key(&key) && (self.curves.len() >= 4096 || self.budget.remaining_vertices == 0 || self.budget.remaining_nodes == 0) {
+        if let Some(path) = self.curves.get(&key) {
+            return path.clone();
+        }
+        let budget = self.budgets.entry(sketch).or_default();
+        if !budget.room_for_curve() || self.curves.len() >= CACHED_CURVES {
             return Arc::new(SampledPath { parts: Vec::new(), quality: SamplingQuality::BudgetLimited, vertex_count: 0 });
         }
-        self.curves
-            .entry(key)
-            .or_insert_with(|| {
-                Arc::new(state.sketch(sketch).map_or_else(
-                    || SampledPath { parts: Vec::new(), quality: SamplingQuality::Invalid, vertex_count: 0 },
-                    |ss| curve_with_budget(&ss.sketch, index, plane, proj, ppp, &mut self.budget),
-                ))
-            })
-            .clone()
+        let path = Arc::new(state.sketch(sketch).map_or_else(
+            || SampledPath { parts: Vec::new(), quality: SamplingQuality::Invalid, vertex_count: 0 },
+            |ss| curve_with_budget(&ss.sketch, index, plane, proj, ppp, &mut budget.sampling),
+        ));
+        budget.curves += 1;
+        self.curves.insert(key, path.clone());
+        path
     }
 
     fn profile(&mut self, state: Arc<ModelState>, sketch: u64, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> Arc<Option<Region2>> {
@@ -232,27 +308,27 @@ impl DisplayCache {
         let plane_key =
             [plane.origin.x, plane.origin.y, plane.origin.z, plane.x.x, plane.x.y, plane.x.z, plane.y.x, plane.y.y, plane.y.z].map(f64::to_bits);
         let key = (sketch, index, plane_key);
-        if !self.profiles.contains_key(&key)
-            && (self.profiles.len() >= 1024 || self.budget.remaining_vertices == 0 || self.budget.remaining_nodes == 0)
-        {
+        if let Some(region) = self.profiles.get(&key) {
+            return region.clone();
+        }
+        let budget = self.budgets.entry(sketch).or_default();
+        if !budget.room_for_profile() || self.profiles.len() >= CACHED_PROFILES {
             return Arc::new(None);
         }
-        self.profiles
-            .entry(key)
-            .or_insert_with(|| {
-                Arc::new(
-                    state
-                        .sketch(sketch)
-                        .and_then(|ss| ss.profiles.get(index))
-                        .and_then(|profile| display_region_with_budget(&profile.region, plane, proj, ppp, &mut self.budget)),
-                )
-            })
-            .clone()
+        let region = Arc::new(
+            state
+                .sketch(sketch)
+                .and_then(|ss| ss.profiles.get(index))
+                .and_then(|profile| display_region_with_budget(&profile.region, plane, proj, ppp, &mut budget.sampling)),
+        );
+        budget.profiles += 1;
+        self.profiles.insert(key, region.clone());
+        region
     }
 }
 
 pub fn profile_region(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, proj: &Proj) -> Arc<Option<Region2>> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ppp = app.viewport.pixels_per_point();
     match app.viewport.display.lock() {
         Ok(mut cache) => cache.profile(state, sketch, index, plane, proj, ppp),
@@ -261,7 +337,7 @@ pub fn profile_region(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, 
 }
 
 pub fn curve_sample(app: &SolveApp, sketch: u64, index: usize, plane: &Plane, proj: &Proj) -> Arc<SampledPath> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ppp = app.viewport.pixels_per_point();
     match app.viewport.display.lock() {
         Ok(mut cache) => cache.curve(state, sketch, index, plane, proj, ppp),

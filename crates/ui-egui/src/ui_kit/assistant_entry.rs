@@ -1,6 +1,7 @@
 //! Assistant entry point and its status mark, shared by application chrome and previews.
-use crate::{icons, theme::Tokens};
+use crate::icons;
 use egui::{FontId, Rect, Response, Stroke, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AssistantEntryState {
@@ -59,8 +60,8 @@ pub(crate) fn assistant_entry(ui: &egui::Ui, response: &Response, state: Assista
             let font = FontId::proportional(t.font_badge);
             let galley = ui.painter().layout_no_wrap(text, font, t.app_bar);
             let badge = Rect::from_center_size(c, vec2((galley.size().x + t.space_6).max(t.space_14), t.space_14));
-            ui.painter().rect_filled(badge.expand(1.5), 8.5, ring);
-            ui.painter().rect_filled(badge, 7.0, t.warning);
+            ui.painter().rect_filled(badge.expand(1.5), Tokens::outset_radius(f32::from(t.sketch_mode_radius), 1.5), ring);
+            ui.painter().rect_filled(badge, t.sketch_mode_radius, t.warning);
             ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.app_bar);
         }
     }

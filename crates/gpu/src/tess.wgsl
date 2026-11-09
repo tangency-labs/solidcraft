@@ -7,8 +7,8 @@
 const PLANE: u32 = 0u;
 const NURBS: u32 = 1u;
 const REVOLVED: u32 = 2u;
-// Basis slots for the highest degree (MAX_SPLINE_DEGREE = 7).
-const W: u32 = 8u;
+// Basis slots for the highest degree (MAX_SPLINE_DEGREE = 16).
+const W: u32 = 17u;
 
 struct Surface {
     kind: u32,

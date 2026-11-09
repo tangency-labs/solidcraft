@@ -1,6 +1,6 @@
 {"commands": [
  {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Base"}},
- {"command": "component.create", "params": {"name": "Arm"}},
+ {"command": "component.create", "params": {"name": "Arm", "grounded": false}},
  {"command": "solid.box", "params": {"corner": [20, 0, 0], "length": 10, "width": 4, "height": 4, "body_name": "ArmBody"}},
  {"command": "solid.fillet", "params": {"edges": [[25, 4, 4]], "radius": 1}},
  {"command": "component.activate", "params": {"component": 0}},

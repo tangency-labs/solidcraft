@@ -3,7 +3,7 @@
 //! falls between two rows, so such lines came and went as the view zoomed. Skipped, with the
 //! reason printed, without a GPU adapter (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
 
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine, StandardView};
 use solidcraft_gpu::GpuError;
 use solidcraft_gpu::capture::Capturer;
@@ -35,7 +35,8 @@ fn missing(c: &Capturer, width: f64) -> Vec<usize> {
     (0..N)
         .filter(|&i| {
             let z = -4.0 + i as f64 * 0.23;
-            let line = SceneLine { points: vec![Vec3::new(-8.0, 0.0, z), Vec3::new(8.0, 0.0, z)], color: Rgb(255, 0, 0), width, on_top: true };
+            let line =
+                SceneLine { points: vec![Vec3::new(-8.0, 0.0, z), Vec3::new(8.0, 0.0, z)], color: Rgb(255, 0, 0), alpha: 1.0, width, on_top: true };
             let scene = Scene { lines: vec![line], radius: 30.0, ..Default::default() };
             let img = c.rgba(&scene, &cam, 200, 200).unwrap();
             !img.as_chunks::<4>().0.iter().any(|p| p[0] > 60 && p[0] > p[1].saturating_add(40) && p[0] > p[2].saturating_add(40))

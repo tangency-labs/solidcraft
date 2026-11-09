@@ -1,0 +1,1817 @@
+{
+ "cases": [
+  {
+   "name": "my_test_extent3d_e1_from_points",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "from_points",
+    "a": [
+     1,
+     1,
+     1
+    ],
+    "b": [
+     2,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_e3_from_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "from_point",
+    "p": [
+     2,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_e4_init",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "new"
+   }
+  },
+  {
+   "name": "my_test_extent3d_e4_add_points",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "add_points",
+    "e": [
+     1e+20,
+     1e+20,
+     1e+20,
+     -1e+20,
+     -1e+20,
+     -1e+20
+    ],
+    "pts": [
+     [
+      6,
+      6,
+      6
+     ],
+     [
+      5,
+      5,
+      5
+     ],
+     [
+      7,
+      7,
+      7
+     ]
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_e5_set_min_max",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "set_min_max",
+    "e": [
+     1e+20,
+     1e+20,
+     1e+20,
+     -1e+20,
+     -1e+20,
+     -1e+20
+    ],
+    "min": [
+     5,
+     5,
+     5
+    ],
+    "max": [
+     7,
+     7,
+     7
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_e5_queries",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "my_test_extent3d_e6_from_neg_points",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "from_points",
+    "a": [
+     -7,
+     -7,
+     -7
+    ],
+    "b": [
+     -5,
+     -5,
+     -5
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_e5_e6_disjoint",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "disjoint_contained",
+    "e": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ],
+    "f": [
+     -7,
+     -7,
+     -7,
+     -5,
+     -5,
+     -5
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "my_test_extent3d_e4_e5_min_distance",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "distances",
+    "e": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ],
+    "f": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_union",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "union",
+    "e": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ],
+    "f": [
+     -7,
+     -7,
+     -7,
+     -5,
+     -5,
+     -5
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "intersect",
+    "e": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ],
+    "f": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ]
+   }
+  },
+  {
+   "name": "my_test_extent3d_union_corners",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:3115",
+   "inputs": {
+    "op": "corners_edges_planes",
+    "e": [
+     -7,
+     -7,
+     -7,
+     7,
+     7,
+     7
+    ]
+   }
+  },
+  {
+   "name": "edge_intersect_disjoint",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect",
+    "e": [
+     5,
+     5,
+     5,
+     7,
+     7,
+     7
+    ],
+    "f": [
+     -7,
+     -7,
+     -7,
+     -5,
+     -5,
+     -5
+    ]
+   }
+  },
+  {
+   "name": "edge_intersect_touching_face",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "f": [
+     1,
+     0,
+     0,
+     2,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_set_min_max_inverted",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_min_max",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "min": [
+     1,
+     0,
+     0
+    ],
+    "max": [
+     0,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_set_min_max_coords_inverted_z",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_min_max_coords",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "c": [
+     0,
+     0,
+     2,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_set_bound_0_1.5",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "which": 0,
+    "v": 1.5
+   }
+  },
+  {
+   "name": "edge_set_bound_1_-0.5",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "which": 1,
+    "v": -0.5
+   }
+  },
+  {
+   "name": "edge_set_bound_2_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "which": 2,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "edge_set_bound_3_0.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "which": 3,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "edge_set_bound_0_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "which": 0,
+    "v": 1.0
+   }
+  },
+  {
+   "name": "edge_set_bound_1_0.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "which": 1,
+    "v": 0.0
+   }
+  },
+  {
+   "name": "edge_queries_init",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     1e+20,
+     1e+20,
+     1e+20,
+     -1e+20,
+     -1e+20,
+     -1e+20
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_queries_unbounded",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0,
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "edge_queries_half_unbounded",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     -1234567.0,
+     0,
+     -1111.111,
+     1,
+     1234567.0,
+     1111.111
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "edge_queries_point_sized",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     1,
+     2,
+     3,
+     1,
+     2,
+     3.0000000000001
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_queries_undef",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "queries",
+    "e": [
+     1.23456e-61,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "edge_evaluate_ends",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "evaluate",
+    "e": [
+     0.1,
+     0.2,
+     0.3,
+     0.7,
+     1.9,
+     2.3
+    ],
+    "n": [
+     0,
+     1,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "edge_evaluate_extrapolate",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "evaluate",
+    "e": [
+     0.1,
+     0.2,
+     0.3,
+     0.7,
+     1.9,
+     2.3
+    ],
+    "n": [
+     -0.5,
+     1.5,
+     0.3333333333333333
+    ]
+   }
+  },
+  {
+   "name": "edge_expand_relative_unbounded",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "expand_relative",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     1234567.0,
+     1,
+     2
+    ],
+    "factor": 0.5
+   }
+  },
+  {
+   "name": "edge_expand_absolute_negative",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "expand_absolute",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "amount": -0.25
+   }
+  },
+  {
+   "name": "edge_sphere_bound",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "sphere_bound",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_same_box",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "cone_bound_to",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "f": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_overlap",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "cone_bound_to",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "f": [
+     0.5,
+     0.5,
+     0.5,
+     3,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_far",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "cone_bound_to",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "f": [
+     10,
+     0,
+     0,
+     11,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_cone_point_boxes",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "cone_bound_to",
+    "e": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "f": [
+     0,
+     0,
+     1e-13,
+     0,
+     0,
+     1e-13
+    ]
+   }
+  },
+  {
+   "name": "edge_disjoint_tol",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "disjoint_contained",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "f": [
+     1.1,
+     0,
+     0,
+     2,
+     1,
+     1
+    ],
+    "tol": 0.1
+   }
+  },
+  {
+   "name": "edge_contained_tol",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "disjoint_contained",
+    "e": [
+     -1e-07,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "f": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "edge_point_on_corner",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point_predicates",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     1,
+     1
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_point_off_face",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point_predicates",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0.5,
+     0.5,
+     1.000000000002
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_point_degenerate_box",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "point_predicates",
+    "e": [
+     1,
+     1,
+     1,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     1,
+     1,
+     1
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_line_seg_one_end_inside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "contains_line_seg",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "q": [
+     9,
+     9,
+     9
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "edge_line_seg_both_outside",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "contains_line_seg",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     -1,
+     0.5,
+     0.5
+    ],
+    "q": [
+     2,
+     0.5,
+     0.5
+    ],
+    "tol": 0
+   }
+  },
+  {
+   "name": "edge_line_through",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     -1,
+     0.5,
+     0.5
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_reverse",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     2,
+     0.5,
+     0.5
+    ],
+    "v": [
+     -2,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_diagonal",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     -1,
+     -1,
+     -1
+    ],
+    "v": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_line_graze_corner",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_graze_edge",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     1,
+     1,
+     0.5
+    ],
+    "v": [
+     1,
+     -1,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_miss",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     -1,
+     2,
+     0.5
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_parallel_tiny",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0.5,
+     0.5,
+     -1
+    ],
+    "v": [
+     1e-13,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_line_zero_dir",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_unbounded_box",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     1234567.0,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0.5,
+     0.5
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_line_unbounded_parallel",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0,
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_line_undef_extent",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "intersect_line",
+    "e": [
+     1.23456e-61,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "v": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "edge_set_unbounded",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "set_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "edge_approx_full_nocenter_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0,
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "center": null,
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_full_nocenter_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0,
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "center": null,
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_full_center_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0,
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_full_center_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     -1234567.0,
+     1234567.0,
+     1234567.0,
+     1234567.0
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_min_x_nocenter_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     2,
+     1,
+     1
+    ],
+    "center": null,
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_min_x_nocenter_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     2,
+     1,
+     1
+    ],
+    "center": null,
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_min_x_center_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     2,
+     1,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_min_x_center_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     2,
+     1,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_max_y_nocenter_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1234567.0,
+     1
+    ],
+    "center": null,
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_max_y_nocenter_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1234567.0,
+     1
+    ],
+    "center": null,
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_max_y_center_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1234567.0,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_max_y_center_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1234567.0,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_mixed_nocenter_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     0,
+     2,
+     1234567.0,
+     1
+    ],
+    "center": null,
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_mixed_nocenter_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     0,
+     2,
+     1234567.0,
+     1
+    ],
+    "center": null,
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_mixed_center_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     0,
+     2,
+     1234567.0,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_mixed_center_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     -1234567.0,
+     0,
+     2,
+     1234567.0,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_bounded_nocenter_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "center": null,
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_bounded_nocenter_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "center": null,
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_bounded_center_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_bounded_center_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_sqrt_marker_nocenter_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1111.111,
+     0,
+     0,
+     1,
+     1,
+     1111.111
+    ],
+    "center": null,
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_sqrt_marker_nocenter_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1111.111,
+     0,
+     0,
+     1,
+     1,
+     1111.111
+    ],
+    "center": null,
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_sqrt_marker_center_33.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1111.111,
+     0,
+     0,
+     1,
+     1,
+     1111.111
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 33.0
+   }
+  },
+  {
+   "name": "edge_approx_sqrt_marker_center_1.0",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1111.111,
+     0,
+     0,
+     1,
+     1,
+     1111.111
+    ],
+    "center": [
+     0.5,
+     100,
+     -3
+    ],
+    "half_size": 1.0
+   }
+  },
+  {
+   "name": "edge_approx_inverted_expanded",
+   "upstream_ref": "edge case",
+   "inputs": {
+    "op": "approximate_unbounded",
+    "e": [
+     -1234567.0,
+     0,
+     0,
+     -1000000000.0,
+     1,
+     1
+    ],
+    "center": null,
+    "half_size": -5.0
+   }
+  },
+  {
+   "name": "circumscribe_axis_aligned",
+   "upstream_ref": "SmExtent3d(const SmPseudoBox&)",
+   "inputs": {
+    "op": "circumscribe",
+    "basis": [
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      0,
+      1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "intervals": [
+     [
+      0,
+      1
+     ],
+     [
+      2,
+      3
+     ],
+     [
+      4,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "circumscribe_permuted_negated",
+   "upstream_ref": "SmExtent3d(const SmPseudoBox&)",
+   "inputs": {
+    "op": "circumscribe",
+    "basis": [
+     [
+      0,
+      -1,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "intervals": [
+     [
+      0,
+      1
+     ],
+     [
+      2,
+      3
+     ],
+     [
+      4,
+      5
+     ]
+    ]
+   }
+  },
+  {
+   "name": "circumscribe_rotated",
+   "upstream_ref": "SmExtent3d(const SmPseudoBox&)",
+   "inputs": {
+    "op": "circumscribe",
+    "basis": [
+     [
+      0.6,
+      0.8,
+      0
+     ],
+     [
+      -0.8,
+      0.6,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "intervals": [
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      2
+     ],
+     [
+      -1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "circumscribe_rotated_unbounded",
+   "upstream_ref": "SmExtent3d(const SmPseudoBox&)",
+   "inputs": {
+    "op": "circumscribe",
+    "basis": [
+     [
+      0.6,
+      0.8,
+      0
+     ],
+     [
+      -0.8,
+      0.6,
+      0
+     ],
+     [
+      0,
+      0,
+      1
+     ]
+    ],
+    "intervals": [
+     [
+      -1234567.0,
+      1234567.0
+     ],
+     [
+      0,
+      2
+     ],
+     [
+      -1,
+      1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "intervals_get_set",
+   "upstream_ref": "SmExtent3d::GetUInterval/SetUInterval",
+   "inputs": {
+    "op": "intervals",
+    "e": [
+     0,
+     0,
+     0,
+     1,
+     1,
+     1
+    ],
+    "u": [
+     2,
+     3
+    ],
+    "v": [
+     5,
+     4
+    ]
+   }
+  },
+  {
+   "name": "intervals_init",
+   "upstream_ref": "SmExtent3d::GetUInterval/SetUInterval",
+   "inputs": {
+    "op": "intervals",
+    "e": [
+     1e+20,
+     1e+20,
+     1e+20,
+     -1e+20,
+     -1e+20,
+     -1e+20
+    ],
+    "u": [
+     0,
+     0
+    ],
+    "v": [
+     -1,
+     1
+    ]
+   }
+  }
+ ]
+}

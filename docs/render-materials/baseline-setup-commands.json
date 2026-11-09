@@ -1,0 +1,130 @@
+{
+  "commands": [
+    {
+      "command": "render.settings.set",
+      "params": {
+        "name": "Catalog v0.2 - Draft 720p",
+        "set": {
+          "backend": "builtin",
+          "mode": "preview",
+          "width": 1280,
+          "height": 720,
+          "format": "png",
+          "exposure_ev": 0.0,
+          "environment_rotation": 0.0,
+          "environment_intensity": 1.0,
+          "background": [
+            32,
+            37,
+            44
+          ]
+        }
+      }
+    },
+    {
+      "command": "render.settings.set",
+      "params": {
+        "name": "Catalog v0.2 - Presentation 1080p",
+        "set": {
+          "backend": "builtin",
+          "mode": "preview",
+          "width": 1920,
+          "height": 1080,
+          "format": "png",
+          "exposure_ev": 0.0,
+          "environment_rotation": 0.0,
+          "environment_intensity": 1.0,
+          "background": [
+            236,
+            240,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "command": "render.settings.set",
+      "params": {
+        "name": "Catalog v0.2 - Square Detail",
+        "set": {
+          "backend": "builtin",
+          "mode": "preview",
+          "width": 2048,
+          "height": 2048,
+          "format": "png",
+          "exposure_ev": 0.0,
+          "environment_rotation": 0.0,
+          "environment_intensity": 1.0,
+          "background": [
+            180,
+            184,
+            190
+          ]
+        }
+      }
+    },
+    {
+      "command": "render.settings.set",
+      "params": {
+        "name": "Catalog v0.2 - Portrait Product",
+        "set": {
+          "backend": "builtin",
+          "mode": "preview",
+          "width": 1536,
+          "height": 2048,
+          "format": "png",
+          "exposure_ev": 0.0,
+          "environment_rotation": 0.0,
+          "environment_intensity": 1.0,
+          "background": [
+            245,
+            245,
+            245
+          ]
+        }
+      }
+    },
+    {
+      "command": "render.settings.set",
+      "params": {
+        "name": "Catalog v0.2 - Technical Review",
+        "set": {
+          "backend": "builtin",
+          "mode": "preview",
+          "width": 1600,
+          "height": 1200,
+          "format": "png",
+          "exposure_ev": 0.0,
+          "environment_rotation": 0.0,
+          "environment_intensity": 1.0,
+          "background": [
+            210,
+            215,
+            220
+          ]
+        }
+      }
+    },
+    {
+      "command": "render.settings.set",
+      "params": {
+        "name": "Catalog v0.2 - Dark Detail",
+        "set": {
+          "backend": "builtin",
+          "mode": "preview",
+          "width": 1920,
+          "height": 1920,
+          "format": "png",
+          "exposure_ev": 0.0,
+          "environment_rotation": 0.0,
+          "environment_intensity": 1.0,
+          "background": [
+            10,
+            12,
+            16
+          ]
+        }
+      }
+    }
+  ]
+}

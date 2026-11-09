@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Transparent background — render with an alpha background</title>
+  <path d="M11 6L53 6A5 5 0 0 1 58 11L58 53A5 5 0 0 1 53 58L11 58A5 5 0 0 1 6 53L6 11A5 5 0 0 1 11 6Z" fill="#e2e8ef"/>
+  <defs><clipPath id="chk"><path d="M11 6L53 6A5 5 0 0 1 58 11L58 53A5 5 0 0 1 53 58L11 58A5 5 0 0 1 6 53L6 11A5 5 0 0 1 11 6Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#chk)">
+  <path d="M6 19L19 19L19 32L6 32ZM6 45L19 45L19 58L6 58ZM19 6L32 6L32 19L19 19ZM19 32L32 32L32 45L19 45ZM32 19L45 19L45 32L32 32ZM32 45L45 45L45 58L32 58ZM45 6L58 6L58 19L45 19ZM45 32L58 32L58 45L45 45Z" fill="#b9ddf8"/>
+  </g>
+  <path d="M11 6L53 6A5 5 0 0 1 58 11L58 53A5 5 0 0 1 53 58L11 58A5 5 0 0 1 6 53L6 11A5 5 0 0 1 11 6Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 18L44.12 25L44.12 39L32 46L19.88 39L19.88 25Z" fill="#ffffff" stroke="#ffffff" stroke-width="7.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.88 25L32 32L32 46L19.88 39Z" fill="#b8c3cf"/>
+  <path d="M44.12 25L32 32L32 46L44.12 39Z" fill="#8e9faf"/>
+  <path d="M32 18L44.12 25L32 32L19.88 25Z" fill="#e2e8ef"/>
+  <path d="M32 18L44.12 25L44.12 39L32 46L19.88 39L19.88 25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M19.88 25L32 32L44.12 25" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L32 46" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

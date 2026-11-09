@@ -14,14 +14,20 @@
 //! linkage, a slider-crank) are met by moving the values of the other joints around the loop;
 //! those that still disagree are reported.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 
 use solidcraft_sketch::linalg;
 
 use crate::{DocError, Document, IDENTITY, Mat, ModelState, Result, apply_point, apply_vector, mat_inverse, mat_mul};
+
+#[path = "joints_handles.rs"]
+mod handles;
+pub use handles::{MotionAxis, motion_axes};
 
 /// Joints the solver (and the URDF export) reads at most.
 pub const MAX_JOINTS: usize = 10_000;
@@ -75,6 +81,10 @@ pub enum Snap {
         face: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         corner: Option<String>,
+        /// The frame's z when it isn't the face's normal (an edge or a corner picked as it is,
+        /// not on a face): the point still follows the edge, found by name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axis: Option<EdgeAxis>,
     },
     /// A point, z along `z` (default +Z) and x toward `x` laid square to z (default: one chosen
     /// from z alone).
@@ -85,6 +95,25 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<Vec3>,
     },
+}
+
+/// The z of an edge origin that isn't its face's normal (component coordinates); its x follows
+/// from z alone, as a point origin's does.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EdgeAxis {
+    /// Along a straight edge, the way this points: a hinge on the edge turns about it as it moves.
+    Along(Vec3),
+    /// This direction.
+    Fixed(Vec3),
+}
+
+impl EdgeAxis {
+    pub fn dir(self) -> Vec3 {
+        match self {
+            EdgeAxis::Along(d) | EdgeAxis::Fixed(d) => d,
+        }
+    }
 }
 
 /// What sets a joint origin's x axis (its turn about z): a direction, or a face found by its
@@ -179,7 +208,7 @@ impl Snap {
             Snap::Frame { origin, z, x } => origin.is_finite() && z.is_finite() && x.is_none_or(|x| x.is_finite()),
             Snap::FaceCenter { pick, x, .. } | Snap::CircleCenter { pick, x, .. } => pick.is_finite() && x_ok(x),
             Snap::Point { point, z, x } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
-            Snap::Edge { pick, .. } => pick.is_finite(),
+            Snap::Edge { pick, axis, .. } => pick.is_finite() && axis.is_none_or(|a| a.dir().is_finite()),
         }
     }
 }
@@ -351,11 +380,33 @@ impl JointExprs {
 /// Largest offset or value an expression may give a joint (mm, or radians for an angle).
 const MAX_EXPR_VALUE: f64 = 1e9;
 
+/// A design's parameter values, worked out the first time an expression names one and kept for
+/// the next: a pass over the joints works out every joint's expressions again, and each would
+/// otherwise evaluate every parameter of the design anew.
+pub struct Params<'a> {
+    doc: &'a Document,
+    vals: std::cell::OnceCell<BTreeMap<String, crate::expr::Value>>,
+}
+
+impl<'a> Params<'a> {
+    pub fn new(doc: &'a Document) -> Params<'a> {
+        Params { doc, vals: std::cell::OnceCell::new() }
+    }
+
+    /// What [`Document::eval`] gives for `e`.
+    pub fn eval(&self, e: &str, kind: crate::expr::Kind) -> Result<f64> {
+        crate::expr::eval_with(e, &|n| {
+            self.vals.get_or_init(|| self.doc.param_values().0).get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")))
+        })?
+        .to_kind(kind)
+    }
+}
+
 /// A joint's offset, angle and values worked out from its expressions (those without one keep
 /// their numbers), or why one can't be: an unknown name, a wrong unit, or a number too large.
-pub fn expressed(doc: &Document, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
+pub fn expressed(params: &Params, j: &Joint) -> Result<(f64, f64, Vec<f64>)> {
     let eval = |e: &str, kind: crate::expr::Kind, what: &str| -> Result<f64> {
-        let v = doc.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {what} `{e}`: {err}", j.name)))?;
+        let v = params.eval(e, kind).map_err(|err| DocError::Invalid(format!("joint {}: {what} `{e}`: {err}", j.name)))?;
         if v.is_finite() && v.abs() < MAX_EXPR_VALUE { Ok(v) } else { Err(DocError::Invalid(format!("joint {}: {what} `{e}` gives {v}", j.name))) }
     };
     let x = &j.exprs;
@@ -736,35 +787,42 @@ fn component_of(doc: &Document, occ: u64) -> Result<u64> {
     doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).ok_or_else(|| DocError::Unknown(format!("occurrence {occ}")))
 }
 
-/// A snap's pick point moved onto its named face (an error when the face is gone: a joint must
-/// not quietly attach elsewhere).
-fn named_pick(doc: &Document, st: &ModelState, pick: Vec3, face: Option<&str>) -> Result<Vec3> {
+/// A snap's pick point moved onto its named face of `component` (an error when the face is gone:
+/// a joint must not quietly attach elsewhere).
+fn named_pick(doc: &Document, st: &ModelState, component: u64, pick: Vec3, face: Option<&str>) -> Result<Vec3> {
     match face {
-        Some(n) => face::named_face(doc, st, pick, n).map(|f| f.point),
+        Some(n) => face::named_face(doc, st, component, pick, n).map(|f| f.point),
         None => Ok(pick),
     }
 }
 
-/// The centre and outward normal of the planar face nearest `pick` (component coordinates; a
-/// body moved in from another component placed by its offset, as a named face is).
+/// The centre (the middle of its outline, `face::outline_centre`) and outward normal of the
+/// planar face nearest `pick` (component coordinates; a body moved in from another component
+/// placed by its offset, as a named face is).
 fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -> Result<(Vec3, Vec3)> {
     let comp = component_of(doc, o.occurrence)?;
-    let mut best: Option<(f64, Vec3, Vec3)> = None;
+    let mut best: Option<(f64, &crate::ModelBody, solidcraft_kernel::FaceInfo, Vec3)> = None;
     for b in component_bodies(doc, st, comp) {
         let offset = doc.model_body_offset(b);
         for f in b.joint_faces()?.iter() {
-            let Some(n) = f.plane_normal else { continue };
+            let Some(own) = f.plane_normal else { continue };
             let (c, n) = match offset {
-                Some(m) => (apply_point(m, f.centroid), apply_vector(m, n)),
-                None => (f.centroid, n),
+                Some(m) => (apply_point(m, f.centroid), apply_vector(m, own)),
+                None => (f.centroid, own),
             };
             let d = (pick - c).dot(n).abs() + 1e-3 * (pick - c).len();
-            if best.as_ref().is_none_or(|(bd, _, _)| d < *bd) {
-                best = Some((d, c, n));
+            if best.as_ref().is_none_or(|(bd, ..)| d < *bd) {
+                best = Some((d, b, f.clone(), own));
             }
         }
     }
-    best.map(|(_, c, n)| (c, n)).ok_or_else(|| DocError::Invalid("joint origin: no planar face there".into()))
+    let (_, b, f, n) = best.ok_or_else(|| DocError::Invalid("joint origin: no planar face there".into()))?;
+    // The face's middle: its outline's on a face with holes.
+    let c = face::outline_centre(&b.mesh(), f.index, f.centroid, n).unwrap_or(f.centroid);
+    Ok(match doc.model_body_offset(b) {
+        Some(m) => (apply_point(m, c), apply_vector(m, n)),
+        None => (c, n),
+    })
 }
 
 /// Resolve a joint origin to a frame in its component's coordinates.
@@ -776,20 +834,21 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         Snap::FaceCenter { pick, face, x } => {
             // A named planar face gives its own centre and normal; another face (or none) the
             // planar face nearest the point.
+            let comp = component_of(doc, o.occurrence)?;
             let named = match face.as_deref() {
-                Some(n) => Some(face::named_face(doc, st, *pick, n)?),
+                Some(n) => Some(face::named_face(doc, st, comp, *pick, n)?),
                 None => None,
             };
             let (c, n) = match named.as_ref().map(face::NamedFace::plane).transpose()?.flatten() {
                 Some(cn) => cn,
                 None => nearest_plane(doc, st, o, named.as_ref().map_or(*pick, |f| f.point))?,
             };
-            frame(c, n, face::x_axis(doc, st, x.as_ref(), c)?).ok_or_else(bad)
+            frame(c, n, face::x_axis(doc, st, comp, x.as_ref(), c)?).ok_or_else(bad)
         }
         Snap::Edge { .. } => edge::edge_frame(doc, st, component_of(doc, o.occurrence)?, &o.snap),
         Snap::CircleCenter { x, .. } => {
             let r = round_of(doc, st, o)?;
-            frame(r.centre, r.z, face::x_axis(doc, st, x.as_ref(), r.centre)?).ok_or_else(bad)
+            frame(r.centre, r.z, face::x_axis(doc, st, component_of(doc, o.occurrence)?, x.as_ref(), r.centre)?).ok_or_else(bad)
         }
     }
 }
@@ -799,13 +858,13 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
 /// it, as older builds found them. Any other snap is refused.
 fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Round> {
     let Snap::CircleCenter { pick, face, end, .. } = &o.snap else { return Err(DocError::Invalid("pick a round face".into())) };
+    let comp = component_of(doc, o.occurrence)?;
     if let Some(n) = face.as_deref()
-        && let Some(r) = face::named_round(doc, st, *pick, n, end.as_deref())?
+        && let Some(r) = face::named_round(doc, st, comp, *pick, n, end.as_deref())?
     {
         return Ok(r);
     }
-    let pick = named_pick(doc, st, *pick, face.as_deref())?;
-    let comp = component_of(doc, o.occurrence)?;
+    let pick = named_pick(doc, st, comp, *pick, face.as_deref())?;
     // A body moved in from another component: looked at in its own coordinates, its cylinder
     // placed by its offset (as a named face is).
     let cyl = component_bodies(doc, st, comp)
@@ -1123,7 +1182,8 @@ impl Placements<'_, '_, '_> {
 }
 
 /// Values the loop solver moves at most in one group of loops, and loop-closing joints it takes
-/// on at most: larger ones are only checked.
+/// on at most: larger ones are only checked (a group with more values moves only those of its
+/// loops that need to move, `moving_loops_values`).
 const MAX_LOOP_VALUES: usize = 64;
 const MAX_LOOPS: usize = 100;
 /// Loop-closing joints one solve takes on at most, over all its groups: a part placed by several
@@ -1267,19 +1327,7 @@ type Group = (Vec<u64>, BTreeSet<u64>, BTreeSet<(u64, usize)>);
 fn loop_groups(tree: &Tree, closing: &[u64], asm: &Assembly, linked: &BTreeSet<(u64, usize)>) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
     for id in closing {
-        let Some(j) = tree.joints.get(id) else { continue };
-        // A joint between an occurrence and itself (only a hand-edited file has one) is only checked.
-        if j.a.occurrence == j.b.occurrence {
-            continue;
-        }
-        let side = |occ: u64| -> BTreeSet<u64> { tree.path(occ).1.iter().map(|(k, _)| *k).collect() };
-        let mut around: BTreeSet<u64> = side(j.a.occurrence).symmetric_difference(&side(j.b.occurrence)).copied().collect();
-        around.insert(*id);
-        // The values the loop depends on: its joints' and those its links read. Loops tie together
-        // through a shared value only (a rigid joint on both paths has none; two values of one
-        // joint can feed two independent loops).
-        let mut touches = link_chains(asm, tree, &around, linked).0;
-        touches.extend(around.iter().filter_map(|id| tree.joints.get(id)).flat_map(|j| (0..j.kind.dofs().len()).map(|i| (j.id, i))));
+        let Some((mut around, mut touches)) = one_loop(tree, *id, asm, linked) else { continue };
         let mut members = vec![*id];
         groups.retain(|(c, a, t)| {
             if t.is_disjoint(&touches) {
@@ -1293,6 +1341,79 @@ fn loop_groups(tree: &Tree, closing: &[u64], asm: &Assembly, linked: &BTreeSet<(
         groups.push((members, around, touches));
     }
     groups
+}
+
+/// One loop: the closing joint `id` and the joints on the tree paths between its sides, and the
+/// values it depends on (its joints' and those its links read). Loops tie together through a
+/// shared value only (a rigid joint on both paths has none; two values of one joint can feed two
+/// independent loops). None for a joint between an occurrence and itself (only a hand-edited file
+/// has one), which is only checked.
+fn one_loop(tree: &Tree, id: u64, asm: &Assembly, linked: &BTreeSet<(u64, usize)>) -> Option<(BTreeSet<u64>, BTreeSet<(u64, usize)>)> {
+    let j = tree.joints.get(&id)?;
+    if j.a.occurrence == j.b.occurrence {
+        return None;
+    }
+    let side = |occ: u64| -> BTreeSet<u64> { tree.path(occ).1.iter().map(|(k, _)| *k).collect() };
+    let mut around: BTreeSet<u64> = side(j.a.occurrence).symmetric_difference(&side(j.b.occurrence)).copied().collect();
+    around.insert(id);
+    let mut touches = link_chains(asm, tree, &around, linked).0;
+    touches.extend(around.iter().filter_map(|id| tree.joints.get(id)).flat_map(|j| (0..j.kind.dofs().len()).map(|i| (j.id, i))));
+    Some((around, touches))
+}
+
+/// The values to move in a group of loops with more than the solver moves at once (a frame of
+/// profiles held by many planar joints, #9687): those of the loops that need to move, open at the
+/// start (beyond what the conflict check lets pass) or reading a held value that moves, and the
+/// closing joints' of the closed loops those values move, when they are few enough. Every loop of
+/// the group is still kept closed. None when no loop needs to move, or those that do have too
+/// many values themselves. A solve that needs other values of a closed loop (one whose closing
+/// joint is rigid) is not found: that group stays a conflict, as a group this size was before.
+fn moving_loops_values(
+    tree: &Tree,
+    closing: &[u64],
+    moves: &[(u64, usize, f64, f64)],
+    asm: &Assembly,
+    held: &Held,
+    linked: &BTreeSet<(u64, usize)>,
+    vals: &Values,
+    scale: f64,
+) -> Option<Vec<(u64, usize)>> {
+    let moved: BTreeSet<(u64, usize)> = moves.iter().map(|(id, i, ..)| (*id, *i)).collect();
+    let mut gaps = Vec::with_capacity(closing.len() * 9);
+    closure_gaps(&mut PlacementWorkspace::new(tree), closing, vals, scale, &mut gaps)?;
+    let loose = loose_gap(scale);
+    let (mut around, mut others) = (BTreeSet::new(), Vec::new());
+    for (id, gap) in closing.iter().zip(gaps.chunks(9)) {
+        let Some((joints, touches)) = one_loop(tree, *id, asm, linked) else { continue };
+        if largest(gap) > loose || !touches.is_disjoint(&moved) {
+            around.extend(joints);
+        } else {
+            others.push((*id, touches));
+        }
+    }
+    let mut vars = unknowns(tree, &around, asm, linked, held);
+    if vars.is_empty() {
+        return None;
+    }
+    // A closed loop through a value that moves stays closed by its own closing joint's values
+    // (a part slid on one planar joint slides on its second): they are on no tree path, so no other
+    // loop runs through them, but a motion link setting one moves the value its chain starts from,
+    // and the loops through that follow the same way.
+    while vars.len() <= MAX_LOOP_VALUES {
+        let moving: BTreeSet<(u64, usize)> = vars.iter().copied().collect();
+        let follow: BTreeSet<u64> = others.iter().filter(|(_, touches)| !touches.is_disjoint(&moving)).map(|(id, _)| *id).collect();
+        others.retain(|(id, _)| !follow.contains(id));
+        let before = vars.len();
+        for v in unknowns(tree, &follow, asm, linked, held) {
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        if vars.len() == before {
+            break;
+        }
+    }
+    (vars.len() <= MAX_LOOP_VALUES).then_some(vars)
 }
 
 /// The values a solve of the loops `around` moves: every value of their joints but the `held`
@@ -1340,9 +1461,11 @@ fn closure_gaps(workspace: &mut PlacementWorkspace, closing: &[u64], vals: &Valu
 }
 
 /// How far a closing joint may be off before it is a conflict: its frames apart by more than
-/// this many millimetres or turned by more than this many radians.
-const CONFLICT_MM: f64 = 1e-6;
-const CONFLICT_RAD: f64 = 1e-8;
+/// this many millimetres or turned by more than this many radians (a micrometre over a metre).
+/// Holes picked on parts are rarely exactly in line: axes a few hundredths of a microradian
+/// apart (#6211) are not a conflict, and the loop through them still moves.
+const CONFLICT_MM: f64 = 1e-4;
+const CONFLICT_RAD: f64 = 1e-6;
 
 /// The largest gap (`closure_gaps`, for loops of size `scale`) that still passes the conflict
 /// check, with room to spare.
@@ -1352,8 +1475,9 @@ fn loose_gap(scale: f64) -> f64 {
 
 /// Close loops whose gaps `f` gives from `x`, and the tolerance to keep them closed to from here
 /// on: `tol`, or, where they come no closer than that but within `loose`, a little more than they
-/// do come. Faces modelled a few nanometres apart along parallel axes leave a gap no value of a
-/// planar loop takes out; the loop still moves, as closed as it is. `None` when they can't close.
+/// do come. Faces modelled a few nanometres apart along parallel axes, or axes a hair out of
+/// parallel, leave a gap no value of a planar loop takes out (the second one that grows as the
+/// loop turns); the loop still moves, as closed as it comes. `None` when they can't close.
 fn close_within(f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>, bounds: &[(f64, f64)], tol: f64, loose: f64) -> Option<f64> {
     if least_squares(f, x, bounds, tol) {
         return Some(tol);
@@ -1591,12 +1715,16 @@ fn close_group(
     spent: &std::cell::Cell<usize>,
     vals: &mut Values,
 ) -> Option<BTreeMap<(u64, usize), f64>> {
-    let vars = unknowns(tree, around, asm, linked, held);
+    let scale = loop_scale(tree, around, vals);
+    let mut vars = unknowns(tree, around, asm, linked, held);
     if vars.len() > MAX_LOOP_VALUES {
-        return Some(BTreeMap::new());
+        // Too many to move at once: only the loops that need to move, or none.
+        match moving_loops_values(tree, closing, moves, asm, held, linked, vals, scale) {
+            Some(few) => vars = few,
+            None => return Some(BTreeMap::new()),
+        }
     }
     let bounds = limit_bounds(tree, &vars);
-    let scale = loop_scale(tree, around, vals);
     // Closer than the conflict check needs: 1e-7 mm, and turns of 1e-10 rad across the loop.
     let tol = (1e-10 * scale).min(1e-7);
     // The values with the held ones `t` of the way along (and the unknowns at `x`).
@@ -1661,7 +1789,8 @@ fn close_group(
     // that close is left as it is.
     let mut x = x0;
     let start = largest(&gaps(&x, 0.0)?);
-    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &bounds, tol, loose_gap(scale))? {
+    let loose = loose_gap(scale);
+    let tol = match close_within(&mut |x| gaps(x, 0.0), &mut x, &bounds, tol, loose)? {
         t if t > tol && moves.is_empty() && start <= t => return Some(BTreeMap::new()),
         t => t,
     };
@@ -1673,7 +1802,9 @@ fn close_group(
         }
         let t1 = (t + dt).min(1.0);
         let mut trial = x.clone();
-        if least_squares(&mut |x| gaps(x, t1), &mut trial, &bounds, tol) {
+        // Each step as closed as the start, or within the conflict check where the loop's gap
+        // grows as it moves (axes a hair out of parallel, #6211).
+        if close_within(&mut |x| gaps(x, t1), &mut trial, &bounds, tol, loose).is_some() {
             // A step that moved some loop value too far (through a link and a limit, or close to
             // a dead point) is taken again in halves.
             let next = effective(&trial, t1);
@@ -1688,7 +1819,7 @@ fn close_group(
             dt *= 0.5;
         }
     }
-    if largest(&gaps(&x, 1.0)?) > tol {
+    if largest(&gaps(&x, 1.0)?) > tol.max(loose) {
         return None;
     }
     // The values that changed from what is stored.
@@ -1845,6 +1976,15 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
         dof.clear();
     }
     placed.remove(&0);
+    // A placement that is not a rigid motion within range (values that ran off to infinity, say)
+    // is not applied: the joints placing that occurrence report it.
+    let bad: Vec<u64> = placed.iter().filter(|(_, m)| !crate::is_placement(m)).map(|(occ, _)| *occ).collect();
+    for occ in bad {
+        placed.remove(&occ);
+        for j in asm.joints.iter().filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
+            sol.errors.push((j.id, j.name.clone(), format!("it would place occurrence {occ} outside a rigid placement within 1e9 mm")));
+        }
+    }
     sol.world = placed;
     sol.dof = dof;
     sol
@@ -1878,11 +2018,12 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
             .clone()
             .map_err(DocError::Invalid)
     };
+    let params = Params::new(doc);
     for j in &joints {
         // A joint whose expressions can't be worked out (a parameter gone) is left out rather
         // than placed by numbers that no longer say what it was defined by.
         if !j.exprs.is_empty()
-            && let Err(e) = expressed(doc, j)
+            && let Err(e) = expressed(&params, j)
         {
             sol.errors.push((j.id, j.name.clone(), e.to_string()));
             continue;
@@ -1984,19 +2125,37 @@ impl Document {
     /// Apply a solution: occurrence transforms (in their parents) for the occurrences it places,
     /// and the values of the joints that moved to close loops. Returns true when something moved.
     pub fn apply_joint_solution(&mut self, sol: &Solution) -> bool {
+        // Joints and occurrences are indexed once (the first of each id, as a search finds):
+        // searching them for each of a large design's thousands of values and occurrences took
+        // 20 ms on every change to the design.
+        let mut joint_at = std::collections::HashMap::new();
+        for (i, j) in self.assembly.joints.iter().enumerate() {
+            joint_at.entry(j.id).or_insert(i);
+        }
         let mut changed = false;
         for (id, q) in &sol.values {
-            if let Some(j) = self.assembly.joints.iter_mut().find(|j| j.id == *id) {
+            if let Some(j) = joint_at.get(id).and_then(|&i| self.assembly.joints.get_mut(i)) {
                 j.values.clone_from(q);
                 changed = true;
             }
         }
         let parents: BTreeMap<u64, u64> = self.occurrences.iter().map(|o| (o.id, o.parent)).collect();
+        let (mut occurrence_at, mut first_of) = (std::collections::HashMap::new(), std::collections::HashMap::new());
+        for (i, o) in self.occurrences.iter().enumerate() {
+            occurrence_at.entry(o.id).or_insert(i);
+            first_of.entry(o.component).or_insert(i);
+        }
         for (occ, world) in &sol.world {
             let parent = parents.get(occ).copied().unwrap_or(0);
-            let pw = if parent == 0 { IDENTITY } else { self.component_transform(parent) };
+            // Through the transforms as this loop has left them, as `component_transform` reads.
+            let occurrences = &self.occurrences;
+            let pw = if parent == 0 {
+                IDENTITY
+            } else {
+                crate::assembly::transform_through(parent, |c| first_of.get(&c).and_then(|&i| occurrences.get(i)))
+            };
             let Some(local) = mat_inverse(&pw).map(|inv| mat_mul(&inv, world)) else { continue };
-            if let Some(o) = self.occurrences.iter_mut().find(|o| o.id == *occ) {
+            if let Some(o) = occurrence_at.get(occ).and_then(|&i| self.occurrences.get_mut(i)) {
                 let (dt, da) = mismatch(&o.transform, &local);
                 if dt > 1e-9 || da > 1e-10 {
                     o.transform = local;
@@ -2030,7 +2189,7 @@ pub mod cam;
 
 #[path = "joints_edge.rs"]
 mod edge;
-pub use edge::edge_snap;
+pub use edge::{edge_axis, edge_snap};
 
 #[path = "joints_reach.rs"]
 mod reach;
@@ -2204,6 +2363,28 @@ mod tests {
         }
     }
 
+    /// The parameter values kept between expressions give what evaluating each expression on
+    /// its own gives, errors included.
+    #[test]
+    fn kept_parameters_evaluate_as_the_design_does() {
+        let mut doc = Document::new("p");
+        doc.set_param("W", "300 mm", None, None).unwrap();
+        doc.set_param("H", "W / 2", None, None).unwrap();
+        doc.set_param("A", "30 deg", None, None).unwrap();
+        let params = Params::new(&doc);
+        for (e, kind) in [
+            ("W / 4", crate::expr::Kind::Length),
+            ("H + 2 mm", crate::expr::Kind::Length),
+            ("A * 2", crate::expr::Kind::Angle),
+            ("12", crate::expr::Kind::Length),
+        ] {
+            assert_eq!(params.eval(e, kind).unwrap(), doc.eval(e, kind).unwrap(), "{e}");
+        }
+        for (e, kind) in [("Q + 1", crate::expr::Kind::Length), ("A", crate::expr::Kind::Length)] {
+            assert_eq!(params.eval(e, kind).unwrap_err().to_string(), doc.eval(e, kind).unwrap_err().to_string(), "{e}");
+        }
+    }
+
     fn close(a: &Mat, b: &Mat) -> bool {
         let (t, r) = mismatch(a, b);
         t < 1e-9 && r < 1e-9
@@ -2339,5 +2520,34 @@ mod tests {
         assert!((a - 1e-9).abs() < 1e-15, "{a}");
         let (_, a) = mismatch(&rot_z(3.0), &IDENTITY);
         assert!((a - 3.0).abs() < 1e-12, "{a}");
+    }
+
+    /// Applying a solution stores each occurrence in its parent's frame as the loop has left it:
+    /// a component the same solution moves is read moved, through its first occurrence. Joint
+    /// values land on their joints; a value for a missing joint is skipped.
+    #[test]
+    fn a_solution_places_occurrences_in_their_moved_parents() {
+        let occurrence =
+            |id, component, parent| crate::Occurrence { id, component, parent, name: format!("O{id}"), transform: IDENTITY, grounded: false };
+        // Component 1 sits at the root twice (its first occurrence is the frame its children sit
+        // in), component 2 inside 1 and component 3 inside 2.
+        let mut doc = Document {
+            assembly: chain(2, 0.0),
+            occurrences: vec![occurrence(10, 1, 0), occurrence(11, 1, 0), occurrence(20, 2, 1), occurrence(30, 3, 2)],
+            ..Document::default()
+        };
+        let w10 = mat_mul(&shift(3.0, 4.0, 5.0), &rot_y(0.3));
+        let w20 = mat_mul(&shift(-1.0, 2.0, 0.5), &rot_x(-0.2));
+        let w30 = mat_mul(&shift(0.0, 7.0, 1.0), &rot_y(1.1));
+        let world = BTreeMap::from([(10, w10), (20, w20), (30, w30)]);
+        let sol = Solution { world: world.clone(), values: BTreeMap::from([(2, vec![0.75]), (99, vec![1.0])]), ..Solution::default() };
+        assert!(doc.apply_joint_solution(&sol));
+        for (component, w) in [(1, w10), (2, w20), (3, w30)] {
+            assert!(close(&doc.component_transform(component), &w), "component {component}");
+        }
+        assert!(close(&doc.occurrences[1].transform, &IDENTITY), "only the occurrence the solution names moves");
+        let values: Vec<_> = doc.assembly.joints.iter().map(|j| j.values.clone()).collect();
+        assert_eq!(values, vec![vec![0.0], vec![0.75]]);
+        assert!(!doc.apply_joint_solution(&Solution { world, ..Solution::default() }), "applied twice, nothing moves");
     }
 }

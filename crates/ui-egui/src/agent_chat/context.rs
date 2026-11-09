@@ -1,0 +1,380 @@
+//! What the user had selected in the model, as context for a message ("Attach selection", #2286).
+//! The selection is described when the message is sent: faces and edges with the names and
+//! numbers the agent's tools take (and a size and place that survive an edit), features by name and
+//! kind, bodies by name. The conversation shows the same items as chips; the agent gets them as a
+//! block of text after the message.
+
+use std::collections::HashMap;
+
+use serde_json::{Value, json};
+use solidcore_record::Vec3;
+use solidcraft_engine::{Sel, Session};
+
+/// The most items one message carries; the rest are counted, not dropped silently.
+pub const MAX_ITEMS: usize = 64;
+
+/// What an item is, for grouping the chips: a face, edge or vertex; a step of the timeline; a body
+/// or a placed component; anything else (planes, axes, sketch geometry).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Kind {
+    Element,
+    Feature,
+    Body,
+    Other,
+}
+
+impl Kind {
+    pub const ALL: [Kind; 4] = [Kind::Element, Kind::Feature, Kind::Body, Kind::Other];
+
+    /// The message id of the group's heading.
+    pub fn heading(self) -> &'static str {
+        match self {
+            Kind::Element => "ui.agent_chat_ctx_elements",
+            Kind::Feature => "ui.agent_chat_ctx_features",
+            Kind::Body => "ui.agent_chat_ctx_bodies",
+            Kind::Other => "ui.agent_chat_ctx_other",
+        }
+    }
+
+    fn english(self) -> &'static str {
+        match self {
+            Kind::Element => "Elements",
+            Kind::Feature => "Features",
+            Kind::Body => "Bodies",
+            Kind::Other => "Other",
+        }
+    }
+}
+
+/// One selected thing: its short name for a chip, and what is known about it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    pub kind: Kind,
+    pub label: String,
+    pub detail: String,
+}
+
+/// The things a message was sent with.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Context {
+    pub items: Vec<Entry>,
+    /// Selected things past [`MAX_ITEMS`], not described.
+    pub omitted: usize,
+}
+
+impl Context {
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty() && self.omitted == 0
+    }
+
+    /// Everything counted, listed or not.
+    pub fn total(&self) -> usize {
+        self.items.len() + self.omitted
+    }
+
+    /// Add the items of another message (queued messages go as one prompt), up to the limit.
+    pub fn merge(&mut self, other: Context) {
+        self.omitted += other.omitted;
+        for item in other.items {
+            if self.items.len() < MAX_ITEMS {
+                self.items.push(item);
+            } else {
+                self.omitted += 1;
+            }
+        }
+    }
+
+    /// The block of text the agent gets after the message, `""` when nothing was selected.
+    pub fn prompt_block(&self) -> String {
+        if self.is_empty() {
+            return String::new();
+        }
+        let mut out = format!(
+            "[Selected in SolidCraft when this message was sent: {} item(s). The names, indices and points are the ones the tools take.]",
+            self.total()
+        );
+        for kind in Kind::ALL {
+            let mut lines = self.items.iter().filter(|i| i.kind == kind).peekable();
+            if lines.peek().is_none() {
+                continue;
+            }
+            out.push_str(&format!("\n{}:", kind.english()));
+            for item in lines {
+                out.push_str(&format!("\n- {}", item.label));
+                if !item.detail.is_empty() {
+                    out.push_str(&format!(": {}", item.detail));
+                }
+            }
+        }
+        if self.omitted > 0 {
+            out.push_str(&format!("\n(and {} more, not listed)", self.omitted));
+        }
+        out
+    }
+}
+
+/// The message as the agent gets it: the text, then what was selected.
+pub fn with_context(text: &str, context: &Context) -> String {
+    let block = context.prompt_block();
+    if block.is_empty() { text.to_string() } else { format!("{text}\n\n{block}") }
+}
+
+/// Describe what the session has selected, as what was clicked: see [`clicked`].
+pub fn describe_selection(session: &mut Session) -> Context {
+    let groups = clicked(session, &session.selection.clone());
+    describe_groups(session, &groups)
+}
+
+/// How many things were clicked to make a selection: the pieces a click on a rim or on a surface
+/// split by a seam selects count once.
+pub fn selection_count(session: &Session, selection: &[Sel]) -> usize {
+    clicked(session, selection).len()
+}
+
+/// A selection as the things the user clicked. A click on a circular rim or a split surface selects
+/// all its pieces (so commands get them all); here they are one group, the clicked piece first.
+/// Past [`MAX_GROUPING`] items the selection is taken as it is: nobody clicked that many rims.
+pub fn clicked(session: &Session, selection: &[Sel]) -> Vec<Vec<Sel>> {
+    let mut groups: Vec<Vec<Sel>> = Vec::new();
+    let mut taken = vec![false; selection.len()];
+    for (i, sel) in selection.iter().enumerate() {
+        if taken[i] {
+            continue;
+        }
+        let mut group = vec![sel.clone()];
+        if selection.len() <= MAX_GROUPING && matches!(sel, Sel::Edge { .. } | Sel::Face { .. }) {
+            for piece in crate::viewport::grouped_selection(session, sel) {
+                if let Some(j) = selection.iter().enumerate().position(|(j, x)| j != i && !taken[j] && crate::selection::same_item(x, &piece)) {
+                    taken[j] = true;
+                    group.push(selection[j].clone());
+                }
+            }
+        }
+        groups.push(group);
+    }
+    groups
+}
+
+/// More than this many selected things are not grouped into clicks (each grouping reads the model).
+const MAX_GROUPING: usize = 256;
+
+/// Describe a selection, each item on its own: what the picker holds. Face and edge details come
+/// from the model's own listings (`model.faces`, `model.edges`), asked once per body.
+pub fn describe(session: &mut Session, selection: &[Sel]) -> Context {
+    let groups: Vec<Vec<Sel>> = selection.iter().map(|s| vec![s.clone()]).collect();
+    describe_groups(session, &groups)
+}
+
+/// Describe groups of pieces that were clicked as one thing, each once.
+pub fn describe_groups(session: &mut Session, groups: &[Vec<Sel>]) -> Context {
+    let mut context = Context::default();
+    let mut listings: HashMap<(&'static str, String), Value> = HashMap::new();
+    for group in groups {
+        if context.items.len() >= MAX_ITEMS {
+            context.omitted += 1;
+        } else if let Some(first) = group.first() {
+            let mut item = entry(session, first, &mut listings);
+            if group.len() > 1 {
+                join_pieces(session, group, &mut item, &mut listings);
+            }
+            context.items.push(item);
+        }
+    }
+    context
+}
+
+/// An item clicked as several pieces (the halves of a rim, the patches of a split surface): one
+/// entry with the whole size, and what the tools take for every piece in its detail.
+fn join_pieces(session: &mut Session, group: &[Sel], item: &mut Entry, listings: &mut HashMap<(&'static str, String), Value>) {
+    let mut sizes = Vec::new();
+    let mut indices = Vec::new();
+    let mut names = Vec::new();
+    let mut unit = "";
+    let mut body = String::new();
+    for sel in group {
+        let found = match sel {
+            Sel::Edge { body: b, index, point } => {
+                unit = "mm";
+                body = b.clone();
+                indices.push(*index);
+                listed_edge(session, listings, b, *index, *point)
+            }
+            Sel::Face { body: b, index, .. } => {
+                unit = "mm²";
+                body = b.clone();
+                indices.push(*index);
+                listed(session, listings, "model.faces", "faces", b, *index)
+            }
+            _ => None,
+        };
+        if let Some(f) = found {
+            if let Some(n) = f["name"].as_str() {
+                names.push(n.to_string());
+            }
+            if let Some(v) = f[if unit == "mm" { "length" } else { "area" }].as_f64() {
+                sizes.push(v);
+            }
+        }
+    }
+    let pieces = group.len();
+    let total: f64 = sizes.iter().sum();
+    if matches!(group.first(), Some(Sel::Edge { .. })) && sizes.len() == pieces {
+        item.label = format!("Edge {} mm ({pieces} pieces) · {body}", num(total));
+    } else {
+        item.label = format!("{} ({pieces} pieces)", item.label);
+    }
+    let whole = if sizes.len() == pieces { format!(", total {} {unit}", num(total)) } else { String::new() };
+    let names = if names.is_empty() { String::new() } else { format!(", names {}", names.join(" + ")) };
+    item.detail = format!("clicked as one: {pieces} pieces, indices {indices:?}{names}{whole}; first piece: {}", item.detail);
+}
+
+fn entry(session: &mut Session, sel: &Sel, listings: &mut HashMap<(&'static str, String), Value>) -> Entry {
+    match sel {
+        Sel::Face { body, index, point } => {
+            let face = listed(session, listings, "model.faces", "faces", body, *index);
+            let mut parts = Vec::new();
+            // A name a person can read: the shape and its size, then the body. What the tools take
+            // (the persistent name, the index, the pick point) is in the detail.
+            let mut shape = format!("Face #{index}");
+            if let Some(f) = &face {
+                let radius = f["cylinder"]["radius"].as_f64();
+                let planar = f["plane_normal"].is_array();
+                let area = f["area"].as_f64().map(|a| format!(" {} mm²", num(a))).unwrap_or_default();
+                shape = match (radius, planar) {
+                    (Some(r), _) => format!("Round face r{}", num(r)),
+                    (None, true) => format!("Flat face{area}"),
+                    _ => format!("Curved face{area}"),
+                };
+                if let Some(name) = f["name"].as_str() {
+                    parts.push(format!("name {name}"));
+                }
+                parts.push(match (radius, planar) {
+                    (Some(r), _) => format!("cylindrical, radius {} mm", num(r)),
+                    (None, true) => format!("planar, normal {}", point3(&f["plane_normal"])),
+                    _ => "curved".to_string(),
+                });
+                if let Some(a) = f["area"].as_f64() {
+                    parts.push(format!("area {} mm²", num(a)));
+                }
+                parts.push(format!("centroid {}", point3(&f["centroid"])));
+                parts.push(format!("index {index}"));
+            }
+            parts.push(format!("pick point {}", point3(&json!(point))));
+            Entry { kind: Kind::Element, label: format!("{shape} · {body}"), detail: parts.join(", ") }
+        }
+        Sel::Edge { body, index, point } => {
+            let edge = listed_edge(session, listings, body, *index, *point);
+            let mut parts = Vec::new();
+            let mut shape = format!("Edge #{index}");
+            if let Some(e) = &edge {
+                if let Some(name) = e["name"].as_str() {
+                    parts.push(format!("name {name}"));
+                }
+                if let Some(l) = e["length"].as_f64() {
+                    shape = format!("Edge {} mm", num(l));
+                    parts.push(format!("length {} mm", num(l)));
+                }
+                parts.push(format!("from {} to {}", point3(&e["start"]), point3(&e["end"])));
+                parts.push(format!("index {index}"));
+            }
+            parts.push(format!("pick point {}", point3(&json!(point))));
+            Entry { kind: Kind::Element, label: format!("{shape} · {body}"), detail: parts.join(", ") }
+        }
+        Sel::Vertex { body, point } => {
+            Entry { kind: Kind::Element, label: format!("Vertex of {body}"), detail: format!("at {}", point3(&json!(point))) }
+        }
+        Sel::Body { name } => Entry { kind: Kind::Body, label: name.clone(), detail: String::new() },
+        Sel::Occurrence { path } => Entry {
+            kind: Kind::Body,
+            label: format!("Component occurrence {}", path.iter().map(u64::to_string).collect::<Vec<_>>().join("/")),
+            detail: format!("occurrence path {path:?}"),
+        },
+        Sel::Feature { id } => {
+            let feature = session.doc.find_feature(&id.to_string());
+            let name = feature.map(|f| f.name.clone()).unwrap_or_else(|| format!("#{id}"));
+            let kind = feature.and_then(|f| serde_json::to_value(f).ok()).and_then(|v| v["type"].as_str().map(str::to_string));
+            let mut detail = format!("feature id {id}");
+            if let Some(kind) = kind {
+                detail = format!("{kind}, {detail}");
+            }
+            if feature.is_some_and(|f| f.suppressed) {
+                detail.push_str(", suppressed");
+            }
+            Entry { kind: Kind::Feature, label: name, detail }
+        }
+        other => {
+            // Planes, axes and sketch geometry: named by their kind and whatever identifies them.
+            let value = serde_json::to_value(other).unwrap_or(Value::Null);
+            let kind = value["type"].as_str().unwrap_or("item").replace('_', " ");
+            let id = ["name", "id", "index", "sketch"].iter().find_map(|k| match &value[k] {
+                Value::String(s) => Some(s.clone()),
+                Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            });
+            let label = match id {
+                Some(id) => format!("{kind} {id}"),
+                None => kind,
+            };
+            let label: String = label.chars().take(60).collect();
+            Entry { kind: Kind::Other, label: capitalised(&label), detail: String::new() }
+        }
+    }
+}
+
+/// The listing entry for a face or edge (`index`), from a command run once per body.
+fn listed(
+    session: &mut Session,
+    listings: &mut HashMap<(&'static str, String), Value>,
+    command: &'static str,
+    list: &str,
+    body: &str,
+    index: usize,
+) -> Option<Value> {
+    let listing =
+        listings.entry((command, body.to_string())).or_insert_with(|| session.execute(command, &json!({"body": body})).unwrap_or(Value::Null));
+    let index = u64::try_from(index).ok()?;
+    listing[list].as_array()?.iter().find(|item| item["index"].as_u64() == Some(index)).cloned()
+}
+
+/// The listing entry of the edge picked at `point`: the one with that index, unless its middle is
+/// somewhere else (the selection and the listing number edges alike, but a stale index must not
+/// describe another edge), then the edge whose middle is nearest the point.
+fn listed_edge(session: &mut Session, listings: &mut HashMap<(&'static str, String), Value>, body: &str, index: usize, point: Vec3) -> Option<Value> {
+    let by_index = listed(session, listings, "model.edges", "edges", body, index);
+    let near = |e: &Value| -> Option<f64> {
+        let mid = e["mid"].as_array()?;
+        let p = |i: usize| mid.get(i).and_then(Value::as_f64);
+        let dist = ((p(0)? - point.x).powi(2) + (p(1)? - point.y).powi(2) + (p(2)? - point.z).powi(2)).sqrt();
+        dist.is_finite().then_some(dist)
+    };
+    let tolerance = |e: &Value| (0.02 * e["length"].as_f64().unwrap_or(0.0)).max(0.05);
+    if let Some(e) = &by_index
+        && near(e).is_some_and(|d| d <= tolerance(e))
+    {
+        return by_index;
+    }
+    let all = listings.get(&("model.edges", body.to_string()))?["edges"].as_array()?.clone();
+    all.into_iter().filter_map(|e| near(&e).map(|d| (d, e))).filter(|(d, e)| *d <= tolerance(e)).min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, e)| e)
+}
+
+/// A length or area to two decimals, without a trailing `.00`.
+fn num(v: f64) -> String {
+    if !v.is_finite() {
+        return "?".into();
+    }
+    let s = format!("{v:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// `(x, y, z)` from a JSON array of three numbers, `?` when it is not one.
+fn point3(v: &Value) -> String {
+    match v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect::<Vec<_>>()) {
+        Some(c) if c.len() == 3 => format!("({}, {}, {})", num(c[0]), num(c[1]), num(c[2])),
+        _ => "?".into(),
+    }
+}
+
+fn capitalised(s: &str) -> String {
+    let mut chars = s.chars();
+    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
+}

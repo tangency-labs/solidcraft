@@ -1,0 +1,18 @@
+[
+ {"note": "#3812: in an inch design, the Dimension tool's value box opens in inches (`1 in` for a 25.4 mm line), as the dimension's text shows, not in millimetres (`25.4 mm`). Enter accepts the value as offered."},
+ {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+ {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[0, 0], [25.4, 0]], "ids": ["la"]}}},
+ {"call": "engine.execute", "params": {"command": "document.units", "params": {"units": "in"}}},
+ {"call": "ui.view", "params": {"view": "top"}},
+ {"call": "ui.view", "params": {"view": "fit"}},
+ {"start": "sketch.dimension"},
+ {"click": {"sketch": [12.7, 0]}},
+ {"click": {"sketch": [12.7, 6]}},
+ {"shot": "value-box"},
+ {"key": "Enter"},
+ {"expect": {"errors": 0}},
+ {"expect": {"query": {"command": "document.inspect", "path": ["params", 0, "expression"], "value": "1 in"}}},
+ {"expect": {"query": {"command": "document.inspect", "path": ["params", 0, "unit"], "value": "in"}}},
+ {"key": "Escape"},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0, "end_at", 0], "value": 25.4}}}
+]

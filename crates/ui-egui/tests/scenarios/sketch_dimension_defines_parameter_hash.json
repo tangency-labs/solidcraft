@@ -1,0 +1,19 @@
+[
+ {"note": "#2371: typing `#width = 40` (the `#` marks a new parameter) into a new dimension's value creates the user parameter `width` and drives the dimension by it, in one step; the parameter then drives the sketch."},
+ {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+ {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[0, 0], [30, 0]], "ids": ["l1"]}}},
+ {"call": "ui.view", "params": {"view": "top"}},
+ {"call": "ui.view", "params": {"view": "fit"}},
+ {"start": "sketch.dimension"},
+ {"click": {"sketch": [15, 0]}},
+ {"click": {"sketch": [15, 6]}},
+ {"text": "#width = 40"},
+ {"key": "Enter"},
+ {"key": "Escape"},
+ {"expect": {"errors": 0}},
+ {"expect": {"param": {"width": 40}}},
+ {"expect": {"query": {"command": "document.inspect", "path": ["params", 1, "expression"], "value": "width"}}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0, "end_at", 0], "value": 40}}},
+ {"call": "engine.execute", "params": {"command": "parameters.change", "params": {"name": "width", "expression": "25"}}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0, "end_at", 0], "value": 25}}}
+]

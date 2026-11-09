@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "an axis between two parallel planes",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): XY and the top z = 20 are parallel and never meet: refused",
+ "outcome": "refused",
+ "refusal": "the planes are parallel"
+}

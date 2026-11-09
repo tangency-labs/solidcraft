@@ -1,0 +1,60 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      60,
+      40
+     ],
+     [
+      0,
+      40
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      60,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     60,
+     0
+    ],
+    "end": [
+     60,
+     40
+    ],
+    "through": [
+     80,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 20
+   }
+  }
+ ]
+}

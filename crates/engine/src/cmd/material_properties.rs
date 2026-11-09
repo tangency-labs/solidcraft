@@ -1,15 +1,24 @@
 //! Read-only validation of candidate engineering data; no assignment or simulation.
 use super::CommandSpec;
 use crate::params::bad;
+use crate::schema::material_properties::{CardModulus, CardValidated, DirectionalModulusParams, ValidateCardParams};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
-use serde_json::{Value, json};
+use serde_json::Value;
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("material.properties.validate", "Validate Physical Material Data", validate)
+const VALIDATE_CONTRACT: TypedContract<ValidateCardParams> = TypedContract::new();
+const DIRECTIONAL_CONTRACT: TypedContract<DirectionalModulusParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("material.properties.validate", "Validate Physical Material Data", crate::checked!("material.properties.validate", validate))
     .icon("material")
     .noundo()
     .doc_only()
+    .contract(&VALIDATE_CONTRACT)
+    .output(output_schema_for::<CardValidated>)
     .params("card: schema_version 1 engineering material card in SI units. Returns numerical consistency, derived isotropic moduli, missing conditions and sources needing review. Read-only; does not assign/save properties or provide an analysis solver. See docs/physical-material-cards.md"),
-    CommandSpec::new("material.properties.directional", "Directional Elastic Modulus", directional).icon("material").noundo().doc_only()
+    CommandSpec::new("material.properties.directional", "Directional Elastic Modulus", crate::checked!("material.properties.directional", directional)).icon("material").noundo().doc_only()
+        .contract(&DIRECTIONAL_CONTRACT)
+        .output(output_schema_for::<CardModulus>)
         .params("card: schema_version 1 engineering material card; direction: three finite nonzero-vector components in the card's material-local axes. Returns normalized direction, Young modulus in Pa and source/condition review. Read-only constitutive query; no structural solver, persistence or body-axis assignment. See docs/physical-material-cards.md")];
 
 fn directional(_: &mut Session, params: &Value) -> Result<Value> {
@@ -28,7 +37,7 @@ fn directional(_: &mut Session, params: &Value) -> Result<Value> {
     let direction = [component(0)?, component(1)?, component(2)?];
     let card = solidcraft_doc::physical_material::admit_card(value).map_err(|e| bad(cmd, e.to_string()))?;
     let response = card.directional_modulus(direction).map_err(|e| bad(cmd, e.to_string()))?;
-    serde_json::to_value(response).map_err(|e| bad(cmd, e.to_string()))
+    serde_json::to_value(CardModulus::from(response)).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn validate(_: &mut Session, params: &Value) -> Result<Value> {
@@ -38,13 +47,87 @@ fn validate(_: &mut Session, params: &Value) -> Result<Value> {
         .ok_or_else(|| bad("material.properties.validate", "expected {card: ...}"))?;
     let card = object.get("card").ok_or_else(|| bad("material.properties.validate", "missing card"))?;
     let result = solidcraft_doc::physical_material::validate_card(card).map_err(|e| bad("material.properties.validate", e.to_string()))?;
-    Ok(json!({"valid":true,"validation":result}))
+    let reply = CardValidated { valid: true, validation: result.into(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad("material.properties.validate", e.to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::doc::Document;
+    use serde_json::json;
     use std::sync::Arc;
+
+    fn card() -> Value {
+        json!({"schema_version":1,"designation":"Original synthetic card, not design data","family":"other",
+            "sources":[{"id":"fixture","title":"Original analytic constants","kind":"illustrative","license":"MIT OR Apache-2.0"}],
+            "properties":[{"source_id":"fixture","conditions":{"temperature_k":293.15,"state":"synthetic"},
+                "data":{"kind":"density","kg_m3":700.0}},
+                {"source_id":"fixture","data":{"kind":"elasticity","model":{
+                    "symmetry":"isotropic","young_modulus_pa":12.25e9,"poisson_ratio":0.25}}}]})
+    }
+
+    fn fixture() -> Session {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"body_name":"Specimen","length":10,"width":20,"height":5})).unwrap();
+        s.execute(
+            "material.create",
+            &json!({"name":"Synthetic","density_g_cm3":0.8,"color":"#b47846",
+            "pbr":{"metallic":0,"roughness":0.4,"dielectric_ior":1.5}}),
+        )
+        .unwrap();
+        s.execute("material.assign", &json!({"bodies":["Specimen"],"material":"Synthetic"})).unwrap();
+        s
+    }
+
+    #[test]
+    fn personal_format29_cards_upgrade_to_current_pending_format_without_changing_values() {
+        let mut s = fixture();
+        s.execute("material.edit", &json!({"material":"Synthetic","physical_card":card()})).unwrap();
+        let mass = s.execute("component.properties", &json!({})).unwrap();
+        let mut legacy = serde_json::to_value(&*s.doc).unwrap();
+        legacy["format"] = json!("solidcraft/29");
+        legacy["format_pending"] = json!(["physical-material-cards", "sheet-perforation-from-right"]);
+        let loaded = Document::from_json(&legacy.to_string()).unwrap();
+        assert_eq!(loaded.user_materials, s.doc.user_materials);
+        assert_eq!(loaded.materials, s.doc.materials);
+        assert_eq!(loaded.format, crate::doc::format::format_string(crate::doc::format::FORMAT));
+        assert!(!loaded.format_pending.iter().any(|name| name == "physical-material-cards"));
+        let bytes = solidcraft_io::write_design_container(&loaded).unwrap();
+        let reopened = solidcraft_io::read_design(&bytes).unwrap();
+        assert_eq!(reopened, loaded);
+        let mut session = Session::new(reopened);
+        assert_eq!(session.execute("component.properties", &json!({})).unwrap(), mass);
+    }
+
+    #[test]
+    fn material_inspection_preserves_legacy_entries_and_reports_unknowns_and_density_separately() {
+        let mut s = fixture();
+        let built_in = s.execute("material.list", &json!({})).unwrap();
+        for &(name, density) in solidcraft_doc::MATERIALS {
+            let row = built_in["materials"].as_array().unwrap().iter().find(|m| m["name"] == name).unwrap();
+            assert_eq!(*row, json!({"name":name,"density_g_cm3":density}));
+            let inspected = s.execute("material.inspect", &json!({"material":name.to_lowercase()})).unwrap();
+            assert_eq!(inspected["density_g_cm3"], density);
+            assert!(inspected["physical_card"].is_null());
+            assert_eq!(inspected["user"], false);
+        }
+        s.execute("material.edit", &json!({"material":"Synthetic","physical_card":card()})).unwrap();
+        let mass = s.execute("component.properties", &json!({})).unwrap();
+        let doc = s.doc.clone();
+        let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.camera, s.selection.clone());
+        let inspected = s.execute("material.inspect", &json!({"material":" synthetic "})).unwrap();
+        assert_eq!(inspected["physical_card"], serde_json::to_value(s.doc.user_materials[0].physical_card.as_ref().unwrap()).unwrap());
+        assert_eq!(inspected["density_comparison"]["assigned_density_kg_m3"], 800.0);
+        assert_eq!(inspected["density_comparison"]["card_density_kg_m3"], 700.0);
+        assert_eq!(inspected["physical_validation"]["missing_condition_fields"], json!({"elasticity":["temperature_k","state"]}));
+        for params in [json!({}), json!({"material":"missing"}), json!({"material":false})] {
+            assert!(s.execute("material.inspect", &params).is_err());
+        }
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.camera, s.selection.clone()));
+        assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    }
 
     #[test]
     fn directional_command_reports_modulus_and_preserves_state_on_refusal() {
@@ -133,6 +216,8 @@ mod tests {
             "properties":[{"source_id":"test","data":{"kind":"elasticity","model":{"symmetry":"isotropic","young_modulus_pa":12e9,"poisson_ratio":0.25}}}]});
         s.execute("material.properties.directional", &json!({"card":elastic,"direction":[1,2,3]})).unwrap();
         assert!(s.execute("material.properties.directional", &json!({"card":elastic,"direction":[0,0,0]})).is_err());
+        s.execute("material.inspect", &json!({"material":"Steel"})).unwrap();
+        assert!(s.execute("material.inspect", &json!({"material":"missing"})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert!(s.model.is_stale());
         assert_eq!(before, (s.revision, s.evaluations, s.active_sketch, s.undo.len(), s.redo.len()));

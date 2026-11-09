@@ -38,7 +38,12 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let e = e.map_err(|e| e.to_string())?;
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules") {
+        // vendored code keeps its own licences: the patched crates (vendor/README.md) and the
+        // kernel (solidcore/); their images, STEP files and fonts are not SolidCraft's assets.
+        if name.starts_with('.')
+            || name.starts_with("target")
+            || matches!(name.as_str(), "plan" | "dist" | "node_modules" | "corpus" | "solidcore" | "vendor")
+        {
             continue;
         }
         let p = e.path();
@@ -58,6 +63,9 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
 
 fn needs_attribution(path: &str) -> bool {
     // Include code masters, native work, catalogs, metadata and licence texts in the collection.
+    if path.starts_with("assets/locales/pending/") {
+        return false;
+    }
     if path.starts_with("assets/") {
         return !path.ends_with(".md");
     }
@@ -71,7 +79,12 @@ fn missing<'a>(files: &'a [String], attribution: &str) -> Vec<&'a str> {
 }
 
 pub fn run(root: &Path) -> Result<(), String> {
-    let attribution = std::fs::read_to_string(root.join("ATTRIBUTION.md")).map_err(|e| format!("ATTRIBUTION.md: {e}"))?;
+    let mut attribution = std::fs::read_to_string(root.join("ATTRIBUTION.md")).map_err(|e| format!("ATTRIBUTION.md: {e}"))?;
+    // Rows still pending (attribution/pending/*.md) count: they are folded on main.
+    for (_, row) in crate::pending::attribution_rows(root)? {
+        attribution.push('\n');
+        attribution.push_str(&row);
+    }
     let mut files = Vec::new();
     walk(root, root, &mut files)?;
     files.sort();
@@ -79,6 +92,7 @@ pub fn run(root: &Path) -> Result<(), String> {
     if !missing.is_empty() {
         return Err(format!("assets missing attribution rows:\n{}", missing.iter().map(|path| format!("  {path}")).collect::<Vec<_>>().join("\n")));
     }
+    crate::render_assets::run(root, &files, &attribution)?;
     println!("assets: {} files, all attributed", files.iter().filter(|path| needs_attribution(path)).count());
     Ok(())
 }
@@ -98,6 +112,22 @@ mod tests {
         assert!(needs_attribution("design/project.vectorcraft"));
         assert!(!needs_attribution("assets/README.md"));
         assert!(!needs_attribution("crates/ui/src/widget.rs"));
+    }
+
+    #[test]
+    fn vendored_code_is_not_an_asset() {
+        let root = std::env::temp_dir().join(format!("solidcraft-xtask-assets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("solidcore/assets")).unwrap();
+        std::fs::create_dir_all(root.join("vendor/patched")).unwrap();
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::write(root.join("solidcore/assets/logo.svg"), "x").unwrap();
+        std::fs::write(root.join("vendor/patched/upstream.svg"), "x").unwrap();
+        std::fs::write(root.join("assets/ours.svg"), "x").unwrap();
+        let mut files = Vec::new();
+        walk(&root, &root, &mut files).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(files, ["assets/ours.svg"]);
     }
 
     #[test]

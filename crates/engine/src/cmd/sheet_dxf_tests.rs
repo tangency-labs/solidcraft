@@ -2,10 +2,11 @@
 //! a laser-cutting shop can use it as it is: layers by role, bend notes, letters cut or etched,
 //! one file per sheet body.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
 
 use crate::Session;
 
@@ -103,7 +104,7 @@ fn point(e: &Entity, code: i32) -> Vec2 {
 }
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
-fn loops(s: &Session) -> Vec<solidcraft_geom::Loop2> {
+fn loops(s: &Session) -> Vec<solidcore_record::Loop2> {
     let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
     regions.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.clone())).collect()
 }
@@ -345,7 +346,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     // OUTLINE: the tray's outer contour alone, one entity for each of its segments (lines and arcs).
     let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
     let plate =
-        regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcraft_geom::Loop2 { segs: Vec::new() });
+        regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
     assert_eq!(on("OUTLINE").len(), solidcraft_io::loop_shapes(&plate).len());
     assert!(on("OUTLINE").iter().all(|e| e.0 == "LINE" || e.0 == "ARC"), "{:?}", on("OUTLINE").iter().map(|e| &e.0).collect::<Vec<_>>());
     // CUT: what is cut out inside it that is no text: the Ø5 hole as one CIRCLE, the slot's four lines.
@@ -471,6 +472,46 @@ fn a_bend_note_sits_beside_each_bend_line_when_asked_for() {
     assert!(note.is_some_and(|e| values(e, 40) == [5.0]));
 }
 
+#[test]
+fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
+    // The included angle is 180° less the bend angle: 122° for a 58° bend, 90° for a 90° one.
+    for (deg, included) in [(58.0, 122.0), (90.0, 90.0)] {
+        let mut plain = Vec::new();
+        for display in ["bend", "included"] {
+            let mut s = sheet_of_2mm();
+            run(&mut s, "sheet.manage_rules", json!({"name": "Sheet2", "angle_display": display}));
+            let mut s = plate_in(s, &[]);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg")}));
+            let dxf = export(&mut s, json!({"bend_notes": true}));
+            let notes: Vec<String> = entities(&dxf).iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect();
+            let shown = if display == "included" { included } else { deg };
+            assert_eq!(notes, [format!("B1 UP {shown}%%d R1")], "{deg}° under {display}");
+            plain.push(export(&mut s, json!({})));
+        }
+        // Without notes the setting changes nothing in the file.
+        assert_eq!(plain.first(), plain.get(1), "{deg}°");
+    }
+}
+
+/// A body whose base flange names its rule keeps that rule's notes whichever rule is active when
+/// the DXF is written, and a bend down reads its included angle the same way.
+#[test]
+fn a_bend_note_follows_the_bodys_own_rule_and_bends_down_too() {
+    let mut s = sheet_of_2mm();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Sheet2", "angle_display": "included"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "rule": "Sheet2"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "58 deg", "flip": true}));
+    let notes = |s: &mut Session| -> Vec<String> {
+        entities(&export(s, json!({"bend_notes": true}))).iter().filter(|e| e.0 == "TEXT").map(|e| string(e, 1)).collect()
+    };
+    assert_eq!(notes(&mut s), ["B1 DOWN 122%%d R1"]);
+    run(&mut s, "sheet.manage_rules", json!({"name": "Other", "thickness": "2 mm", "angle_display": "bend", "active": true}));
+    assert_eq!(notes(&mut s), ["B1 DOWN 122%%d R1"], "another active rule does not change this body's notes");
+}
+
 /// Two sheet bodies: a lid and, 200 mm away, a side wall with one bend.
 fn lid_and_wall() -> Session {
     let mut s = Session::default();
@@ -553,4 +594,80 @@ fn the_file_of_a_body_is_named_after_it_and_no_two_share_a_name() {
     assert_eq!(names("p.dxf", &["a/b:c", "  ", "wall."]), ["p-a_b_c.dxf", "p-body.dxf", "p-wall.dxf"]);
     // Two bodies that would share a file (in any case) get a number.
     assert_eq!(names("p.dxf", &["Lid", "lid", "LID", "Lid_2"]), ["p-Lid.dxf", "p-lid_2.dxf", "p-LID_3.dxf", "p-Lid_2_2.dxf"]);
+}
+
+/// #4314: a cutter that cuts every line gets a file without the bend lines, or with everything
+/// on layer 0. The default keeps the role layers and the dashed bend lines.
+#[test]
+fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
+    let mut s = tray_with(&marks());
+    let layer = |e: &Entity| e.1.iter().find(|(c, _)| *c == 8).map(|(_, v)| v.clone()).unwrap_or_default();
+    let default = entities(&export(&mut s, json!({})));
+    let bends = |es: &[Entity]| es.iter().filter(|e| matches!(layer(e).as_str(), "BEND_UP" | "BEND_DOWN")).count();
+    assert_eq!(bends(&default), 4, "the tray's four bends");
+    let without = entities(&export(&mut s, json!({"bend_lines": false})));
+    assert_eq!(bends(&without), 0);
+    assert_eq!(without.len(), default.len() - 4, "only the bend lines go");
+    let single = entities(&export(&mut s, json!({"layers": "single"})));
+    assert_eq!(single.len(), default.len());
+    assert!(single.iter().all(|e| layer(e) == "0"), "{:?}", single.iter().map(layer).collect::<Vec<_>>());
+    for bad in [json!({"bend_lines": "no"}), json!({"layers": "one"})] {
+        assert!(s.execute("sheet.export_dxf", &bad).is_err(), "{bad}");
+    }
+}
+
+/// The DXF of a sheet folded across a curved outer outline has the curve as drawn, not arcs fitted
+/// to it, and no seams where the fold cut it: the blank, with its bend line where the bend is.
+#[test]
+fn a_curved_outline_folded_across_stays_its_curve_in_the_dxf() {
+    let blanks: [(&str, &str, Value, &str); 3] = [
+        ("circle", "sketch.circle.center", json!({"center": [0, 0], "radius": 50}), "CIRCLE"),
+        ("ellipse", "sketch.ellipse", json!({"center": [0, 0], "major": [80, 0], "minor_radius": 40}), "ELLIPSE"),
+        (
+            "spline",
+            "sketch.spline.fit_point",
+            json!({"points": [[70, -5], [40, 40], [0, 40], [-50, 35], [-85, 0], [-40, -50], [0, -35], [35, -25]], "periodic": true}),
+            "SPLINE",
+        ),
+    ];
+    for (name, id, p, kind) in blanks {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+        run(&mut s, id, p);
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+        let flat_loops = loops(&s);
+        let area: f64 = flat_loops.iter().map(|l| l.signed_area().abs()).sum();
+        run(&mut s, "sheet.fold", json!({"points": [[10, -200, 2.5], [10, 200, 2.5]]}));
+        let dxf = export(&mut s, json!({}));
+        let es = entities(&dxf);
+        assert!(count(&es, kind) >= 1, "{name}: no {kind}: {:?}", es.iter().map(|e| e.0.as_str()).collect::<Vec<_>>());
+        if kind != "CIRCLE" {
+            assert_eq!(count(&es, "ARC"), 0, "{name}: curves came back as fitted arcs");
+        }
+        // The only straight line is the bend line, across the sheet on the zone's centre line.
+        let lines: Vec<&Entity> = es.iter().filter(|e| e.0 == "LINE").collect();
+        assert_eq!(lines.len(), 1, "{name}: seams left in the outline");
+        let (a, b) = (point(lines[0], 10), point(lines[0], 11));
+        assert!((a.x - 10.0).abs() < 1e-6 && (b.x - 10.0).abs() < 1e-6, "{name}: bend line {a:?} to {b:?}");
+        // The blank is the blank: as much of it as was drawn, exactly.
+        let after: f64 = loops(&s).iter().map(|l| l.signed_area().abs()).sum();
+        assert!((after - area).abs() < 1e-6 * area, "{name}: {after} vs {area}");
+    }
+}
+
+/// A fold across the straight part of a curved outline keeps the curve as drawn as well: an arc
+/// stays one arc, not the 0.001 mm chords a fold used to leave.
+#[test]
+fn a_curve_away_from_a_fold_stays_its_curve_in_the_dxf() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 50], [-60, 50], [-60, -50], [0, -50]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -50], "through": [50, 0], "end": [0, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Blank"}));
+    run(&mut s, "sheet.fold", json!({"points": [[-20, -200, 2.5], [-20, 200, 2.5]]}));
+    let es = entities(&export(&mut s, json!({})));
+    assert_eq!(count(&es, "ARC"), 1, "{:?}", es.iter().map(|e| e.0.as_str()).collect::<Vec<_>>());
+    assert!(count(&es, "LINE") < 12, "the arc went to chords: {} lines", count(&es, "LINE"));
 }

@@ -4,7 +4,7 @@ use crate::geom::Aabb3;
 use crate::render::{FaceAppearance, ProductMesh, ProductScene};
 use crate::{EngineError, Result, Session};
 
-pub const MAX_PRODUCT_BODIES: usize = 16_384;
+pub const MAX_PRODUCT_BODIES: usize = solidcraft_render::job::MAX_CPU_BODIES;
 
 /// Extract authoritative, visible geometry. Does not settle a live gesture implicitly.
 /// `render.scene` is the explicit model-reading command for that boundary.
@@ -12,11 +12,11 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
     if s.model.is_stale() {
         return Err(EngineError::Other("render scene is stale; finish the modelling gesture before previewing".into()));
     }
-    let world = s.world_state();
+    let world = s.world_state()?;
     let mut scene = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
     for body in world.bodies.iter().filter(|b| s.body_visible(&b.name)) {
         if scene.meshes.len() >= MAX_PRODUCT_BODIES {
-            return Err(EngineError::Other("render scene exceeds 16384 visible bodies".into()));
+            return Err(EngineError::Other("render scene exceeds 262144 visible bodies".into()));
         }
         let mesh = body.mesh();
         scene.bounds = scene.bounds.union(&mesh.bounds());
@@ -32,16 +32,19 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
                     color: look.color,
                     opacity: look.opacity.clamp(0.0, 1.0),
                     surface: look.opaque_surface().map_err(|e| EngineError::Other(e.to_string()))?,
+                    transmission: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
         let surface = s.doc.model_body_look(body).map(|l| l.opaque_surface()).transpose().map_err(|e| EngineError::Other(e.to_string()))?.flatten();
+        scene.meshes.try_reserve(1).map_err(|_| EngineError::Other("could not reserve captured render bodies".into()))?;
         scene.meshes.push(ProductMesh {
             name: body.name.clone(),
             mesh,
             color,
             opacity: s.doc.model_body_opacity(body).clamp(0.0, 1.0),
             surface,
+            transmission: None,
             faces,
         });
     }
@@ -52,15 +55,15 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
 mod tests {
     use super::*;
     use crate::Sel;
-    use crate::geom::Vec3;
     use crate::render::*;
     use serde_json::json;
+    use solidcore_record::Vec3;
     use std::sync::Arc;
 
     #[test]
     fn product_scene_keeps_placed_appearances_and_meshes_without_design_overlays() {
         let mut s = Session::default();
-        let component = s.execute("component.create", &json!({"name":"Part"})).unwrap();
+        let component = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
         s.execute("appearance.assign", &json!({"bodies":["Block"],"color":"#20a080","opacity":0.4})).unwrap();
         s.execute("appearance.assign", &json!({"faces":[[5,5,10]],"color":"#ff0000","opacity":0.7})).unwrap();
@@ -77,7 +80,7 @@ mod tests {
             assert_eq!(m.color, [32, 160, 128]);
             assert_eq!(m.opacity, 0.4);
             assert!(m.faces.iter().any(|f| f.color == [255, 0, 0] && f.opacity == 0.7));
-            assert!(Arc::ptr_eq(&m.mesh, &s.world_state().body(&m.name).unwrap().mesh()));
+            assert!(Arc::ptr_eq(&m.mesh, &s.world_state().unwrap().body(&m.name).unwrap().mesh()));
         }
         s.selection = vec![Sel::Body { name: first.meshes[0].name.clone() }];
         s.section = Some((Vec3::ZERO, Vec3::X));

@@ -1,0 +1,25 @@
+{
+  "commands": [
+    {"command":"file.new","params":{"name":"Original opaque material finishes"}},
+    {"command":"document.metadata.set","params":{"values":{"license":"MIT OR Apache-2.0","author":"SolidCraft contributors","project":"Original opaque material finish study","org.solidcraft.material_finish_demo":{"source":"assets/appearances/opaque_finishes.rs","mechanical_axes":"Unassigned","license":"MIT OR Apache-2.0","optical_data_status":"Original illustrative previews, not measured","schema_version":1,"source_repository":"https://github.com/tangency-labs/solidcraft","texture_status":"None","author":"SolidCraft contributors","density_source":"assets/materials/library.rs"},"description":"Six original radius-10 mm specimens. Uniform illustrative PBR finishes and generic densities; oak has no grain, PLA has no printed layers. No measured optical constants or certified engineering properties."}}},
+    {"command":"solid.sphere","params":{"center":[0,0.0,10],"radius":10,"body_name":"Steel specimen"}},
+    {"command":"material.assign","params":{"material":"Steel","bodies":["Steel specimen"]}},
+    {"command":"appearance.assign","params":{"bodies":["Steel specimen"],"appearance":"Steel - Satin PBR"}},
+    {"command":"solid.sphere","params":{"center":[30,0.0,10],"radius":10,"body_name":"Aluminum specimen"}},
+    {"command":"material.assign","params":{"material":"Aluminum","bodies":["Aluminum specimen"]}},
+    {"command":"appearance.assign","params":{"bodies":["Aluminum specimen"],"appearance":"Aluminum - Satin PBR"}},
+    {"command":"solid.sphere","params":{"center":[60,0.0,10],"radius":10,"body_name":"Copper specimen"}},
+    {"command":"material.assign","params":{"material":"Copper","bodies":["Copper specimen"]}},
+    {"command":"appearance.assign","params":{"bodies":["Copper specimen"],"appearance":"Copper - Clean PBR"}},
+    {"command":"solid.sphere","params":{"center":[0,30.0,10],"radius":10,"body_name":"ABS Plastic specimen"}},
+    {"command":"material.assign","params":{"material":"ABS Plastic","bodies":["ABS Plastic specimen"]}},
+    {"command":"appearance.assign","params":{"bodies":["ABS Plastic specimen"],"appearance":"ABS - Molded PBR"}},
+    {"command":"solid.sphere","params":{"center":[30,30.0,10],"radius":10,"body_name":"PLA specimen"}},
+    {"command":"material.assign","params":{"material":"PLA","bodies":["PLA specimen"]}},
+    {"command":"appearance.assign","params":{"bodies":["PLA specimen"],"appearance":"PLA - Smooth PBR"}},
+    {"command":"solid.sphere","params":{"center":[60,30.0,10],"radius":10,"body_name":"Oak specimen"}},
+    {"command":"material.assign","params":{"material":"Oak","bodies":["Oak specimen"]}},
+    {"command":"appearance.assign","params":{"bodies":["Oak specimen"],"appearance":"Wood - Oak Uniform PBR Preview"}},
+    {"command":"component.properties","params":{}}
+  ]
+}

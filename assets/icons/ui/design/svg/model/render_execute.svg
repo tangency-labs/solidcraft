@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render image — start rendering the picture</title>
+  <path d="M9 12L45 12A5 5 0 0 1 50 17L50 43A5 5 0 0 1 45 48L9 48A5 5 0 0 1 4 43L4 17A5 5 0 0 1 9 12Z" fill="#e2e8ef"/>
+  <defs><clipPath id="pic1"><path d="M9 12L45 12A5 5 0 0 1 50 17L50 43A5 5 0 0 1 45 48L9 48A5 5 0 0 1 4 43L4 17A5 5 0 0 1 9 12Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#pic1)">
+  <path d="M4 40.8L17.8 27.12L30.68 38.64L38.04 32.88L50 42.96L50 48L4 48Z" fill="#328bd3"/>
+  </g>
+  <path d="M9 12L45 12A5 5 0 0 1 50 17L50 43A5 5 0 0 1 45 48L9 48A5 5 0 0 1 4 43L4 17A5 5 0 0 1 9 12Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="47.5" cy="47.5" r="14" fill="#ffffff"/>
+  <circle cx="47.5" cy="47.5" r="12" fill="#236ead"/>
+  <path d="M43.9 41.7L53.3 47.5L43.9 53.3Z" fill="#ffffff" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a box written by Export STEP and read back",
+ "source": "analytic",
+ "method": "box 30x20x10 from (5,-10,0): V = 6000, A = 2(600 + 300 + 200) = 2200, 6 faces, box (5,-10,0)-(35,10,10). The re-imported body is graded, not the exported one (the design holds only the import)",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 6000.0,
+ "area_mm2": 2200.0,
+ "bbox": {
+  "min": [
+   5.0,
+   -10.0,
+   0.0
+  ],
+  "max": [
+   35.0,
+   10.0,
+   10.0
+  ]
+ }
+}

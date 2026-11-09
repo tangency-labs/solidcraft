@@ -1,0 +1,2943 @@
+{
+  "metadata": {
+    "schema_version": "0.2.0",
+    "language": "en",
+    "status": "specified_unbound",
+    "provenance_id": "ORIGINAL-2026-10-CATALOG",
+    "normalization": {
+      "reference_contribution_ev": "An authoring ratio in a fixed calibration scene, not lumens, watts, candela or measured irradiance. A change of one EV doubles the calibrated linear signal.",
+      "CAL-LIGHT-001": {
+        "scene": "Original reference scene: B=1000 mm; centered Lambertian sphere radius 0.25B with linear reflectance 0.18; no floor, environment emission or other lights.",
+        "measurement": "Measure each emitter separately using six fixed orthographic views along +/-X, +/-Y and +/-Z. Average masked-sphere linear luminance in each view, then average the six means. Use the same sampling, camera geometry and scene version for all emitters.",
+        "target": "Zero reference EV is one arbitrary normalized linear response unit. An emitter target is 2 raised to its reference EV. An adapter must solve and record the corresponding source gain; this dataset does not invent that gain.",
+        "camera": "Reference camera exposure is fixed at 0 EV for calibration; use linear scene-referred values before view transforms. This is a calibration fixture requirement, not a command to change the user camera.",
+        "scale": "Resolve gains at the applied physical scale before locking the rig. Do not treat point intensity and area radiance as interchangeable.",
+        "state": "Calibration procedure specified; no calibration renders or measurements have been performed."
+      },
+      "CAL-ENV-SUN-001": "Use the same reference sphere and six-view measurement with only the resolved environment sun active. That recorded signal becomes zero reference EV for explicitly editorial fill; preserve the environment sun unchanged.",
+      "relative_solar_irradiance": "A dimensionless illustrative solar reference. Value 1.0 is not a measured lunar or terrestrial irradiance.",
+      "orientation": "For target_b lights, aim the emitting front normal toward target_b. Project world +Z into the light plane as local up; if degenerate, use +Y. Apply roll_rad about the emitting normal. Width follows local right and height local up.",
+      "capability_failure": "Missing required capabilities or unresolved references block authoring with no scene mutation. No silent material, light-type, medium or optical-model substitution is permitted."
+    }
+  },
+  "items": [
+    {
+      "id": "STU-001",
+      "name": "Single-side product softbox",
+      "catalog_id": "LUZ-001",
+      "mode": "studio",
+      "description": "A numeric side-key arrangement with one passive fill card for a general opaque product.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.2,
+            -1.2,
+            1.0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 1.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "fill_card",
+          "type": "diffuse_card",
+          "role": "reflector",
+          "position_b": [
+            0.8,
+            -0.1,
+            0.0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.9,
+            "height": 1.3
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.75,
+              0.75,
+              0.75
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        }
+      ],
+      "exposed_controls": [
+        "key position_b",
+        "key size_b",
+        "fill_card position_b"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "One dominant shadow and a plausible passive-card fill."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-002",
+      "name": "Three-point product studio",
+      "catalog_id": "LUZ-003",
+      "mode": "studio",
+      "description": "A fixed key, fill and rear rim with separate reference contributions.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.2,
+            -1.2,
+            1.0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 1.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            1.2,
+            -1.0,
+            0.6
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 1.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "rim",
+          "type": "rectangular_area",
+          "position_b": [
+            0.7,
+            1.1,
+            1.0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.25,
+            "height": 1.2
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -0.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "fill intensity.value",
+        "rim intensity.value",
+        "key size_b"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Rim is narrow enough to reveal the silhouette without covering it."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-003",
+      "name": "White product with dark edge cards",
+      "catalog_id": "LUZ-013",
+      "mode": "studio",
+      "description": "Neutral areas and passive black flags define a white product without material tinting.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.4,
+            -0.8,
+            1.1
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.9,
+            "height": 1.2
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            1.4,
+            -1.1,
+            0.7
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 1.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "left_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_b": [
+            -0.85,
+            0.0,
+            0.1
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.6,
+            "height": 1.4
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.02,
+              0.02,
+              0.02
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        },
+        {
+          "id": "right_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_b": [
+            0.85,
+            0.0,
+            0.1
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.6,
+            "height": 1.4
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.02,
+              0.02,
+              0.02
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        }
+      ],
+      "exposed_controls": [
+        "left_flag position_b",
+        "right_flag position_b",
+        "fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Product whites remain distinct and flags stay outside the selected camera path."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-004",
+      "name": "Black housing with broad side reflections",
+      "catalog_id": "LUZ-012",
+      "mode": "studio",
+      "description": "Broad lateral sources reveal dark surfaces; a high front flag shapes reflections.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.5,
+            -0.4,
+            0.7
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.5,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            1.5,
+            -0.4,
+            0.7
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.5,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -0.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "front_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_b": [
+            0,
+            -0.9,
+            1.15
+          ],
+          "normal": [
+            0,
+            1,
+            0
+          ],
+          "size_b": {
+            "width": 0.9,
+            "height": 0.4
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.02,
+              0.02,
+              0.02
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        }
+      ],
+      "exposed_controls": [
+        "key size_b",
+        "fill intensity.value",
+        "front_flag position_b"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Retain dark base appearance and check that the high flag does not block the chosen view."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-005",
+      "name": "Mirror-metal vertical strips",
+      "catalog_id": "LUZ-021",
+      "mode": "studio",
+      "description": "Two narrow reflected bands and weak front fill describe polished curved surfaces.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-018",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "left_strip",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.1,
+            -0.3,
+            0.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.12,
+            "height": 1.6
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "right_strip",
+          "type": "rectangular_area",
+          "position_b": [
+            1.1,
+            -0.3,
+            0.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.12,
+            "height": 1.6
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "front_fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0,
+            -1.8,
+            0.8
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.1,
+            "height": 0.8
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -3.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "left_strip size_b.width",
+        "right_strip size_b.width",
+        "front_fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Bands remain continuous and do not clip the whole metal surface."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-006",
+      "name": "Brushed-metal grazing strip",
+      "catalog_id": "LUZ-022",
+      "mode": "studio",
+      "description": "A long grazing key crosses the existing brush direction; the rig never edits anisotropy.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-018",
+        "CAP-020",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.3,
+            -1.0,
+            0.45
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 0.18
+          },
+          "roll_rad": 1.5707963267948966,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0.9,
+            -1.0,
+            1.0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.1,
+            "height": 1.1
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "key roll_rad",
+        "key position_b",
+        "fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "The existing material tangent frame, rather than camera movement, controls anisotropy."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-007",
+      "name": "Clear-glass bright-field panel",
+      "catalog_id": "LUZ-031",
+      "mode": "studio",
+      "description": "One luminous rear panel and two passive side flags define clear vessel edges.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-027",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "rear_panel",
+          "type": "rectangular_area",
+          "position_b": [
+            0,
+            1.2,
+            0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.5,
+            "height": 1.8
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "left_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_b": [
+            -0.65,
+            0.05,
+            0
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.5,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        },
+        {
+          "id": "right_flag",
+          "type": "diffuse_card",
+          "role": "flag",
+          "position_b": [
+            0.65,
+            0.05,
+            0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.5,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        }
+      ],
+      "exposed_controls": [
+        "rear_panel intensity.value",
+        "left_flag position_b",
+        "right_flag position_b"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Glass retains actual thickness and interfaces; no opacity or absorption value is changed."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-008",
+      "name": "Clear-glass dark-field strips",
+      "catalog_id": "LUZ-032",
+      "mode": "studio",
+      "description": "Rear-side strips outline glass against a passive dark card.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-027",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "left_strip",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.05,
+            0.65,
+            0.1
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.13,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "right_strip",
+          "type": "rectangular_area",
+          "position_b": [
+            1.05,
+            0.65,
+            0.1
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.13,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -0.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "back_card",
+          "type": "diffuse_card",
+          "role": "background",
+          "position_b": [
+            0,
+            1.7,
+            0
+          ],
+          "normal": [
+            0,
+            -1,
+            0
+          ],
+          "size_b": {
+            "width": 2.0,
+            "height": 2.0
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        }
+      ],
+      "exposed_controls": [
+        "left_strip position_b",
+        "right_strip position_b",
+        "left_strip size_b.width"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Center stays dark without suppressing material transmission or reflections."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-009",
+      "name": "Powered-display exterior key",
+      "catalog_id": "LUZ-074",
+      "mode": "studio",
+      "description": "One external soft area for a device whose display already owns its emission.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-013",
+        "CAP-025",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.25,
+            -0.5,
+            1.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.0,
+            "height": 0.7
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "key position_b",
+        "key size_b",
+        "key intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "Keep existing display emission unchanged and record its material source; do not create an equivalent screen light."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Display content remains readable with a real cover-glass reflection."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-010",
+      "name": "PCB overview and relief",
+      "catalog_id": "LUZ-071",
+      "mode": "studio",
+      "description": "Two top areas and one low strip illuminate board labels, tall parts and joints.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-035",
+        "CAP-038",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -0.7,
+            -0.5,
+            1.1
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 0.8
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0.7,
+            0.5,
+            1.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.0,
+            "height": 0.8
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "relief",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.2,
+            -0.4,
+            0.1
+          ],
+          "target_b": [
+            0,
+            0,
+            0.05
+          ],
+          "size_b": {
+            "width": 0.9,
+            "height": 0.12
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "relief position_b",
+        "relief intensity.value",
+        "fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Silkscreen, solder and component shadows remain distinct at native geometry scale."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-011",
+      "name": "FDM layer grazing view",
+      "catalog_id": "LUZ-058",
+      "mode": "studio",
+      "description": "A transverse strip reveals existing printed layers without changing their texture amplitude.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-033",
+        "CAP-035",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "strip",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.25,
+            -0.1,
+            0.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 0.12
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0.2,
+            -1.2,
+            0.8
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.0,
+            "height": 1.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "strip position_b",
+        "strip roll_rad",
+        "fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Layer direction and scale remain material-owned and fixed between comparisons."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-012",
+      "name": "Wood-joint grazing study",
+      "catalog_id": "LUZ-232",
+      "mode": "studio",
+      "description": "A low strip crosses a selected wood joint with weak broad fill.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-035",
+        "CAP-097",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "explicit_region_max_extent",
+        "definition": "B is the maximum positive extent of the explicitly selected joint region, not the full board.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "strip",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.2,
+            -0.35,
+            0.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 0.12
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0,
+            -1.5,
+            1.0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 1.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "strip position_b",
+        "strip size_b",
+        "fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Gap and mating geometry are unchanged; appearance does not certify fit tolerance."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-013",
+      "name": "Wood-grain comparison area",
+      "catalog_id": "LUZ-233",
+      "mode": "studio",
+      "description": "One broad neutral source and gray reflector provide a stable sample-comparison stage.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-033",
+        "CAP-079",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.3,
+            -1.0,
+            1.0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.5,
+            "height": 1.2
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [
+        {
+          "id": "gray_card",
+          "type": "diffuse_card",
+          "role": "reflector",
+          "position_b": [
+            0.9,
+            0,
+            0
+          ],
+          "normal": [
+            -1,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.0,
+            "height": 1.2
+          },
+          "roll_rad": 0.0,
+          "material": {
+            "model": "lambertian",
+            "reflectance_linear_srgb": [
+              0.35,
+              0.35,
+              0.35
+            ]
+          },
+          "emission": 0.0,
+          "casts_shadow": true,
+          "two_sided": true,
+          "note": "Original idealized neutral card; reflectance is an authoring input, not a measured commercial material."
+        }
+      ],
+      "exposed_controls": [
+        "key position_b",
+        "key size_b",
+        "gray_card position_b"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Face-grain and end-grain samples share lighting and locked exposure."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-014",
+      "name": "Automotive roof and side bands",
+      "catalog_id": "LUZ-101",
+      "mode": "studio",
+      "description": "Two roof areas and long side strips describe a car aligned along local Y.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-021",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "roof_left",
+          "type": "rectangular_area",
+          "position_b": [
+            -0.42,
+            0,
+            1.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.35,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "roof_right",
+          "type": "rectangular_area",
+          "position_b": [
+            0.42,
+            0,
+            1.2
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.35,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -0.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "side_left",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.1,
+            0,
+            0.25
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.5,
+            "height": 0.12
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "side_right",
+          "type": "rectangular_area",
+          "position_b": [
+            1.1,
+            0,
+            0.25
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.5,
+            "height": 0.12
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "roof_left size_b",
+        "roof_right position_b",
+        "side_left intensity.value",
+        "side_right intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Sources remain outside bodywork and paint reflections retain surface continuity."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-015",
+      "name": "Brake assembly through wheel opening",
+      "catalog_id": "LUZ-202",
+      "mode": "studio",
+      "description": "Two external areas target an existing wheel-well opening rather than illuminating through bodywork.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-018",
+        "CAP-006",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "explicit_region_max_extent",
+        "definition": "B is the maximum positive extent of the selected wheel-well region.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "side_key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.2,
+            -1.0,
+            0.4
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 0.7
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "opening_fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0.8,
+            -1.2,
+            0.1
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.35,
+            "height": 0.6
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "opening_fill target_b",
+        "opening_fill size_b",
+        "side_key position_b"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Bodywork and wheel components cast real shadows; reject an occluded light path instead of moving solids."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-016",
+      "name": "Robot workcell and target tray",
+      "catalog_id": "LUZ-215",
+      "mode": "studio",
+      "description": "Two elevated areas and a declared tray fill for a fixed robot-workspace stage.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-078",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "declared_workspace_max_extent",
+        "definition": "B comes from a fixed declared workcell envelope, not the current arm pose.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "key",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.0,
+            -0.6,
+            1.5
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 1.2
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "fill",
+          "type": "rectangular_area",
+          "position_b": [
+            1.0,
+            0.5,
+            1.5
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 1.2,
+            "height": 1.2
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "tray_fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0,
+            -1.4,
+            0.35
+          ],
+          "target_b": [
+            0,
+            0.2,
+            -0.3
+          ],
+          "size_b": {
+            "width": 0.9,
+            "height": 0.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.5,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "key position_b",
+        "tray_fill target_b",
+        "tray_fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "Check source clearance against the user-declared robot swept volume; retain the same stage across pose snapshots."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Payload and gripper cast coherent tray shadows throughout the selected sequence."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-017",
+      "name": "Spacecraft integration studio",
+      "catalog_id": "LUZ-251",
+      "mode": "studio",
+      "description": "A broad cleanroom-style stage for spacecraft integration views, explicitly separate from orbital or lunar lighting.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-043",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "ceiling",
+          "type": "rectangular_area",
+          "position_b": [
+            0.1,
+            0,
+            1.8
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 2.0,
+            "height": 2.0
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "left",
+          "type": "rectangular_area",
+          "position_b": [
+            -1.4,
+            -0.7,
+            0.3
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "right",
+          "type": "rectangular_area",
+          "position_b": [
+            1.4,
+            0.5,
+            0.6
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 1.5
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -1.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "ceiling position_b",
+        "ceiling size_b",
+        "left intensity.value",
+        "right intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "Label output as an integration studio; do not present it as natural space illumination."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Deployed hardware clears all source geometry and thermal-blanket folds remain visible."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-018",
+      "name": "LED diffuser-bar authoring reference",
+      "catalog_id": "LUZ-241",
+      "mode": "studio",
+      "description": "One finite analytic strip behind an existing diffuser, with an explicitly separate low exterior inspection area.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Explicit center of the existing diffuser plane; +Y points into the luminaire, +Z remains up.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "led_strip",
+          "type": "rectangular_area",
+          "position_b": [
+            0,
+            0.025,
+            0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 0.025
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        },
+        {
+          "id": "inspection",
+          "type": "rectangular_area",
+          "position_b": [
+            -1,
+            -1.2,
+            0.8
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.8,
+            "height": 0.8
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -3.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "led_strip position_b",
+        "led_strip size_b.width",
+        "led_strip intensity.value",
+        "inspection intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "The analytic led_strip is the sole LED energy owner. Existing diffuser material remains unchanged.",
+        "The source-to-diffuser clearance must be confirmed against actual free space; block an unresolved aperture frame."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Observe spacing-dependent diffuser illumination without asserting measured LED output."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-019",
+      "name": "Light-guide entrance source",
+      "catalog_id": "LUZ-245",
+      "mode": "studio",
+      "description": "A small finite area couples light into an existing guide entrance; there is no exit-emitter shortcut.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-025",
+        "CAP-026",
+        "CAP-029",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Explicit center of the guide entrance aperture; +Y points along the entrance optical path, +Z remains up.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "entrance_emitter",
+          "type": "rectangular_area",
+          "position_b": [
+            0,
+            -0.04,
+            0
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.015,
+            "height": 0.015
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": 0.0,
+            "reference_id": "CAL-LIGHT-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "entrance_emitter position_b",
+        "entrance_emitter size_b",
+        "entrance_emitter intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "For the calibrated studio comparison, require zero unaccounted environment illumination. Preserve existing environment data; ask for an explicit compatible lighting variant rather than changing it silently.",
+        "No light is added at the guide exit. Guide material, absorption and surface topology remain unchanged."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Block if required optical transport is unavailable; do not replace internal reflection with emissive paint."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-020",
+      "name": "Lunar physical single-sun reference",
+      "catalog_id": "LUZ-261",
+      "mode": "lunar_physical",
+      "description": "An illustrative finite-disk solar source with no atmospheric sky or studio fill.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "sun",
+          "type": "directional_sun",
+          "direction": [
+            0.4504281101536532,
+            0.3002854067691021,
+            -0.8407991389534859
+          ],
+          "direction_convention": "Unit vector along incoming photon travel in the subject frame.",
+          "angular_diameter_rad": 0.0093,
+          "angular_diameter_note": "Approximate illustrative solar angular diameter; not an ephemeris or site-specific value.",
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color_note": "Neutral RGB authoring reference, not a measured solar spectrum.",
+          "intensity": {
+            "quantity": "relative_solar_irradiance",
+            "value": 1.0
+          },
+          "energy_owner": "rig_sun",
+          "visible_emitter_policy": "The environment must not contribute a second solar disk or equivalent directional source."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "sun direction",
+        "sun angular_diameter_rad",
+        "sun intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "The rig owns the only sun. Block application if the environment already emits an equivalent sun unless ownership is explicitly transferred.",
+        "Require no atmospheric sky illumination, atmospheric haze or unexplained ambient fill. Preserve real terrain-reflected light.",
+        "Solar direction and size are illustrative authoring inputs, not a mission ephemeris or measured irradiance."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "One solar disk owner; shadows follow the finite angular source and real terrain."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-021",
+      "name": "Lunar physical environment-sun passthrough",
+      "catalog_id": "LUZ-262",
+      "mode": "lunar_physical",
+      "description": "Adds no lights. Uses one existing environment-owned low-angle sun for a natural-light study.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [],
+      "modifiers": [],
+      "exposed_controls": [
+        "inspect environment-owned solar direction without changing it on rig application"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require exactly one resolved environment-owned sun and record its parameters. This preset never creates a second sun.",
+        "Require no atmospheric sky or haze. No studio fill or constant ambient is introduced.",
+        "Low solar elevation is an explicit environment input, not an inferred date or mission condition."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Empty lights array is intentional; illumination comes only from the declared environment sun and passive surfaces."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-022",
+      "name": "Lunar zero-source night audit",
+      "catalog_id": "LUZ-268",
+      "mode": "lunar_physical",
+      "description": "An idealized zero-incident-light diagnostic. It does not claim to model Earthshine, starlight or a specific real lunar night.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [],
+      "modifiers": [],
+      "exposed_controls": [
+        "emitter-audit target region"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require explicitly zero incident environment radiance and no enabled local emitters for this diagnostic; black background color alone is insufficient.",
+        "Do not create a sun, Earth source, atmosphere, sky fill or exposure compensation.",
+        "Any visible energy must be traced to a declared source or reported as a diagnostic discrepancy."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Expected illumination is zero in this authored idealization; a brighter reference needs a separately declared real source."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-023",
+      "name": "SELENE physical arm-pose sunlight",
+      "catalog_id": "LUZ-271",
+      "mode": "lunar_physical",
+      "description": "Adds no lights to an existing single-sun lunar scene; isolates lighting ownership for arm-pose comparisons.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-011",
+        "CAP-097",
+        "CAP-079",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "selected_subject_max_extent",
+        "definition": "B is the maximum positive extent of the selected subject bounding box, excluding lights, cards, floor, cameras and background.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [],
+      "modifiers": [],
+      "exposed_controls": [
+        "arm-region target",
+        "source-state comparison lock"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require one resolved environment-owned sun. Rig adds no atmospheric sky, haze or fill.",
+        "Arm pose and sample geometry are supplied externally and do not change when applying this preset.",
+        "Hold environment solar state and manual camera exposure fixed between arm snapshots."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Joint occlusion and cast shadows follow supplied poses; genuinely occluded detail is allowed to remain dark."
+      ],
+      "status": "specified_unbound"
+    },
+    {
+      "id": "STU-024",
+      "name": "SELENE editorial sample-vial fill",
+      "catalog_id": "LUZ-277",
+      "mode": "lunar_editorial",
+      "description": "An explicitly editorial area fill improves sample-vial readability beside one environment-owned sun.",
+      "required_capabilities": [
+        "CAP-001",
+        "CAP-009",
+        "CAP-011",
+        "CAP-025",
+        "CAP-027",
+        "CAP-081",
+        "CAP-059"
+      ],
+      "subject_scale_policy": {
+        "mode": "explicit_region_max_extent",
+        "definition": "B is the maximum positive extent of the explicitly selected vial-and-gripper region.",
+        "origin": "Selected subject bounding-box center unless an explicit per-preset aperture origin is stated.",
+        "axes": "Subject-local right-handed frame: +Z up, -Y front, +X right. Camera motion does not move the rig.",
+        "position_and_size_units": "Dimensionless multiples of B; multiply by B in millimeters exactly once when authoring.",
+        "angle_units": "radians",
+        "fit_policy": "Fit once on explicit user action, then store real transforms. Do not refit per pose, frame, selected face or camera move.",
+        "degenerate_subject_policy": "Block if there is no positive finite selected-subject extent.",
+        "normalization_policy": "Source gains are resolved through CAL-LIGHT-001 at the applied physical scale; point and area source units are never assumed equivalent."
+      },
+      "lights": [
+        {
+          "id": "editorial_fill",
+          "type": "rectangular_area",
+          "position_b": [
+            0.7,
+            -1.1,
+            0.65
+          ],
+          "target_b": [
+            0,
+            0,
+            0
+          ],
+          "size_b": {
+            "width": 0.5,
+            "height": 0.8
+          },
+          "roll_rad": 0.0,
+          "color": {
+            "space": "linear_srgb",
+            "value": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "intensity": {
+            "quantity": "reference_contribution_ev",
+            "value": -2.5,
+            "reference_id": "CAL-ENV-SUN-001"
+          },
+          "emission_sides": "front_only",
+          "energy_owner": "analytic_light",
+          "visible_emitter_policy": "If represented by a visible mesh, it must share this source owner and add no duplicate energy."
+        }
+      ],
+      "modifiers": [],
+      "exposed_controls": [
+        "editorial_fill position_b",
+        "editorial_fill size_b",
+        "editorial_fill intensity.value"
+      ],
+      "locks": [
+        "Require manual camera exposure locked across comparisons. This rig does not set exposure, white balance, tone mapping or output settings.",
+        "Material, CAD geometry, object pose and animation remain unchanged when applying the rig.",
+        "Resolve source and modifier clearance before authoring. Block unresolved or intersecting placements instead of silently moving geometry.",
+        "One energy owner per physical emitter. Analytic and visible mesh representations must not double-count emission.",
+        "Check every required capability before authoring or rendering. If any is unavailable, keep the scene unchanged and report the missing capability IDs.",
+        "All samples are specified_unbound: no SolidCraft runtime adapter, asset installation or renderer support is promised.",
+        "Require exactly one environment-owned sun and do not modify it.",
+        "Calibrate CAL-ENV-SUN-001 from the environment sun alone in the reference scene, then set this fill relative to that signal. Block if the reference is unresolved.",
+        "Mark the result lunar_editorial. The fill is deliberate added energy and must never be labeled unassisted natural lunar illumination.",
+        "No atmospheric sky or haze is introduced; vial material, arm pose and camera parameters remain unchanged."
+      ],
+      "validation": [
+        "Confirm all normalized coordinates are resolved once in millimeters and all angle fields use radians.",
+        "Record the calibrated source gains, capability report, subject reference and manual-exposure camera snapshot.",
+        "Compare a clean undenoised linear render before judging fine optical details.",
+        "Record the editorial fill and show an A/B with it disabled under identical exposure."
+      ],
+      "status": "specified_unbound"
+    }
+  ]
+}

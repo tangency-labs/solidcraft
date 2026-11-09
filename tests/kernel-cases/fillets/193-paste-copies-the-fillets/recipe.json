@@ -1,0 +1,78 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     40,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "S",
+    "distance": 10,
+    "operation": "new",
+    "body_name": "Block",
+    "name": "Block"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Block",
+    "radius": 2,
+    "edges": [
+     [
+      20,
+      0,
+      10
+     ],
+     [
+      20,
+      20,
+      10
+     ]
+    ],
+    "name": "Round"
+   }
+  },
+  {
+   "command": "timeline.copy",
+   "params": {
+    "features": [
+     "S",
+     "Block",
+     "Round"
+    ]
+   }
+  },
+  {
+   "command": "timeline.paste",
+   "params": {
+    "translate": [
+     0,
+     40,
+     0
+    ]
+   }
+  }
+ ]
+}

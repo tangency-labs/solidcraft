@@ -1,0 +1,22 @@
+[
+  {"note": "#6490: Show origin and bodies at the top. The History on the left starts with the Bodies folder and the Origin, the browser's own rows; their folds and eyes work there. The browser is hidden so every row handle below is the History's."},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Block"}}},
+  {"call": "ui.set", "params": {"showBrowser": false}},
+  {"call": "engine.execute", "params": {"command": "view.history_layout", "params": {"dock": "left"}}},
+  {"frames": 3},
+  {"note": "Off by default: the History lists only the features."},
+  {"expect": {"hidden_handles": ["row:Bodies", "row:Origin"]}},
+  {"call": "ui.prefs", "params": {"timeline_origin_bodies": true}},
+  {"frames": 3},
+  {"expect": {"shown_handles": ["row:Bodies", "row:Block", "row:Origin"], "hidden_handles": ["row:XY"]}},
+  {"click": {"handle": "row:Origin"}},
+  {"frames": 2},
+  {"expect": {"shown_handles": ["row:XY", "row:XZ", "row:YZ", "eye:XY"]}},
+  {"click": {"handle": "eye:Block"}},
+  {"frames": 2},
+  {"expect": {"hidden": ["Block"]}},
+  {"note": "The History at the bottom is unchanged."},
+  {"call": "engine.execute", "params": {"command": "view.history_layout", "params": {"dock": "bottom"}}},
+  {"frames": 3},
+  {"expect": {"hidden_handles": ["row:Bodies", "row:Origin"]}}
+]

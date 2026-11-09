@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a joint whose two origins are on the same occurrence",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a joint needs two different occurrences: both origins on Arm is refused",
+ "outcome": "refused",
+ "refusal": "two different occurrences"
+}

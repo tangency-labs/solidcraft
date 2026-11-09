@@ -7,6 +7,7 @@ use crate::Session;
 use serde_json::{Value, json};
 use solidcraft_doc::FaceAttachmentStatus;
 use solidcraft_doc::config::FaceCertificate;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"))
@@ -22,7 +23,7 @@ fn status(s: &Session, sketch: &str) -> FaceAttachmentStatus {
     s.placed_document().sketch_face_attachment(id, &s.model)
 }
 
-fn healthy(s: &Session, sketch: &str) -> (solidcraft_geom::Plane, Option<FaceCertificate>) {
+fn healthy(s: &Session, sketch: &str) -> (solidcore_record::Plane, Option<FaceCertificate>) {
     match status(s, sketch) {
         FaceAttachmentStatus::Healthy { plane, target, .. } => (plane, target.certificate),
         other => panic!("{sketch}: {other:?}"),
@@ -107,12 +108,48 @@ fn a_chamfer_face_takes_a_sketch_that_follows_the_chamfer() {
     let n = std::f64::consts::FRAC_1_SQRT_2;
     assert!((plane.normal().x - n).abs() < 1e-9 && (plane.normal().z - n).abs() < 1e-9, "{plane:?}");
     // A bigger chamfer moves the face inward: the sketch goes with it.
-    let height = |p: &solidcraft_geom::Plane| (p.origin - solidcraft_geom::Vec3::new(40., 0., 10.)).dot(p.normal());
+    let height = |p: &solidcore_record::Plane| (p.origin - solidcore_record::Vec3::new(40., 0., 10.)).dot(p.normal());
     assert!((height(&plane) + 3. * n).abs() < 1e-9, "{plane:?}");
     run(&mut s, "parameters.change", json!({"name": "bevel", "expression": "5 mm"}));
     no_errors(&s);
     assert!((height(&healthy(&s, "OnBevel").0) + 5. * n).abs() < 1e-9);
     healthy(&reopened(&s), "OnBevel");
+}
+
+/// #7476: a cone's base and the flat top of a cut-off cone take a sketch, as a cylinder's caps
+/// do, on the origin and placed along a slanted axis. The sketch on the top follows the height.
+#[test]
+fn the_flat_faces_of_a_cone_take_a_sketch_that_follows_the_cone() {
+    use solidcore_record::Vec3;
+    let slant = Vec3::new(1., 1., 0.).normalized().unwrap();
+    for (base, axis, along) in [(Vec3::ZERO, json!("Z"), Vec3::Z), (Vec3::new(5., -3., 2.), json!([1, 1, 0]), slant)] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "tall", "expression": "20 mm"}));
+        let at = [base.x, base.y, base.z];
+        run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 4, "height": "tall", "base": at, "axis": axis, "name": "Cut"}));
+        run(&mut s, "solid.cone", json!({"radius": 3, "height": 5, "base": [40, 0, 0], "name": "Full"}));
+        no_errors(&s);
+        let top = |tall: f64| base + along * tall;
+        sketch_on(&mut s, [top(20.).x, top(20.).y, top(20.).z], "OnTop");
+        sketch_on(&mut s, at, "OnBase");
+        sketch_on(&mut s, [40., 0., 0.], "OnFullBase");
+        let height = |p: &solidcore_record::Plane| (p.origin - base).dot(along);
+        for (name, role) in [("OnTop", ":top"), ("OnBase", ":bottom"), ("OnFullBase", ":bottom")] {
+            let FaceAttachmentStatus::Healthy { plane, target, .. } = status(&s, name) else { panic!("{name}: {:?}", status(&s, name)) };
+            assert_eq!(target.certificate, Some(FaceCertificate::Lineage), "{name}");
+            assert!(target.name.ends_with(role), "{name}: {}", target.name);
+            let axis = if name == "OnFullBase" { Vec3::Z } else { along };
+            assert!(plane.normal().cross(axis).len() < 1e-9, "{name}: {plane:?}");
+        }
+        assert!((height(&healthy(&s, "OnTop").0) - 20.).abs() < 1e-9);
+        assert!(height(&healthy(&s, "OnBase").0).abs() < 1e-9);
+        run(&mut s, "parameters.change", json!({"name": "tall", "expression": "30 mm"}));
+        no_errors(&s);
+        assert!((height(&healthy(&s, "OnTop").0) - 30.).abs() < 1e-9);
+        assert!(height(&healthy(&s, "OnBase").0).abs() < 1e-9);
+        let t = reopened(&s);
+        assert!((height(&healthy(&t, "OnTop").0) - 30.).abs() < 1e-9);
+    }
 }
 
 /// A plate with a boss patterned 3 times along x, `pitch` apart.
@@ -248,10 +285,10 @@ fn counterbore_floors_and_their_pattern_copies_take_a_sketch() {
 }
 
 /// The middle of the largest triangle of each flat face of the first body.
-fn flat_faces(s: &Session) -> Vec<(usize, solidcraft_geom::Vec3)> {
+fn flat_faces(s: &Session) -> Vec<(usize, solidcore_record::Vec3)> {
     let state = s.model.state();
     let body = &state.bodies[0].body;
-    let mesh = body.tessellate(0.01).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     (0..body.face_count())
         .filter(|index| body.planar_face(*index).is_some())
         .filter_map(|index| {

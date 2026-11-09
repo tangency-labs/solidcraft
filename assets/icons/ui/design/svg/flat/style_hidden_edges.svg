@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Shaded with hidden edges</title>
+  <path d="M32 6 L55 19 L55 45 L32 58 L9 45 L9 19Z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L15.44 22.64M32 32L48.56 22.64M32 32L32 50.72" fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L32 13.28M32 32L48.56 41.36M32 32L15.44 41.36" fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4.5 4"/>
+</svg>
