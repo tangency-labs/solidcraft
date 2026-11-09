@@ -1635,6 +1635,15 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
     Ok(())
 }
 
+/// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
+/// body name, in order: the first that fails is the feature's error, as there.
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>) -> kernel::Result<()> {
+    for (name, check) in checks {
+        check.run().map_err(|e| kernel::KernelError::Failed(format!("body `{name}`: {e}")))?;
+    }
+    Ok(())
+}
+
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
 /// still its result in `doc`: a feature saved before format 14 names the pieces it splits a body
 /// into as the later features pick them ([`crate::lineage::order_legacy_lumps`]), which neither
@@ -2626,7 +2635,7 @@ impl Model {
                 // A parameter with an error fails the features using it, with that error.
                 let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
                 // The bodies whose check runs beside the features after this one.
-                let mut apart: Option<ModelState> = None;
+                let mut apart: Option<Vec<(String, kernel::KeptCheck)>> = None;
                 let refused = checks.refused(i);
                 let mut r = match frame_error.or(bad_param) {
                     Some(e) => Err(kernel::KernelError::Failed(e)),
@@ -2652,8 +2661,8 @@ impl Model {
                         // The checks the feature's steps left to its end: the bodies it keeps.
                         if !deferred {
                             Ok(())
-                        } else if checks.apart(&state, &next) {
-                            apart = Some(next.clone());
+                        } else if let Some(detached) = checks.detach(&state, &next) {
+                            apart = Some(detached);
                             Ok(())
                         } else {
                             check_kept(&state, &next)
@@ -2685,8 +2694,8 @@ impl Model {
                         repair: repair.clone(),
                         ms: t0.elapsed().as_secs_f64() * 1000.0,
                     };
-                    let (name, before) = (f.name.clone(), state.clone());
-                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || check_kept(&before, &after)));
+                    let name = f.name.clone();
+                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after)));
                 }
                 if r.is_ok() {
                     // Profiles picked by curves that no longer bound a profile exactly were found

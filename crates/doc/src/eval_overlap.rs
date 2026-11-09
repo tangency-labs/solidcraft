@@ -2,9 +2,8 @@
 //!
 //! Under [`kernel::Validation::EachFeature`] a feature ends with SMLib's full check of the bodies
 //! it keeps, and the next feature used to wait for it: a third to a half of an evaluation went to
-//! those checks, on one core. When a check reads only the steps' own results
-//! ([`kernel::check_kept_apart`]), [`Checks`] runs it on a thread of its own while the
-//! evaluation goes on. What the features after it produce stands only once it passes: their
+//! those checks, on one core. [`Checks`] detaches each check from the bodies it reads
+//! ([`kernel::detach_kept`]) and runs it on a thread of its own while the evaluation goes on. What the features after it produce stands only once it passes: their
 //! cache entries are held until then, and a refusal takes the evaluation back to the refused
 //! feature, which then fails with the check's error and warnings, as it did when the check ran
 //! in line. The results are the same either way; only the time differs.
@@ -79,15 +78,17 @@ impl Checks {
         }
     }
 
-    /// Whether the check of the bodies `after` adds to `before` can run beside the features
-    /// after it.
-    pub fn apart(&self, before: &ModelState, after: &ModelState) -> bool {
-        self.on
-            && after
+    /// The check of the bodies `after` adds to `before`, detached from them so it can run beside
+    /// the features after it ([`kernel::detach_kept`]); `None` when it runs in line.
+    pub fn detach(&self, before: &ModelState, after: &ModelState) -> Option<Vec<(String, kernel::KeptCheck)>> {
+        self.on.then(|| {
+            after
                 .bodies
                 .iter()
                 .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
-                .all(|b| kernel::check_kept_apart(&b.body))
+                .map(|b| (b.name.clone(), kernel::detach_kept(&b.body)))
+                .collect()
+        })
     }
 
     /// The failure feature `index` ends with, when its check refused it before.
