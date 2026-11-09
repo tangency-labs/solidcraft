@@ -437,6 +437,12 @@ pub(crate) fn owns_keyboard_input(app: &mut SolveApp, ctx: &egui::Context) -> bo
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
+    // Look for installed agents the first time the panel opens (in the background), before it
+    // is drawn, so its first frame says they are being looked for.
+    #[cfg(not(target_arch = "wasm32"))]
+    if shown(app) && app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+        refresh(app, &ctx);
+    }
     let view = PanelView::of(app, &ctx);
     let mut prefs = AgentPanelPrefs::read(&app.preferences);
     draw(&mut app.agent_chat, &view, &mut prefs, ui);
@@ -466,11 +472,6 @@ pub fn draw(chat: &mut AgentChat, view: &PanelView, prefs: &mut AgentPanelPrefs,
     new_chat_shortcut(chat, &ctx);
     if !chat.open {
         return;
-    }
-    // Look for installed agents the first time the panel opens (in the background).
-    #[cfg(not(target_arch = "wasm32"))]
-    if chat.detection.is_none() && chat.detecting.is_none() {
-        chat.actions.push(PanelAction::Refresh);
     }
     #[cfg(not(target_arch = "wasm32"))]
     if prefs.popped {
@@ -1251,9 +1252,7 @@ fn content(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow: Flow
 fn desktop_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, flow: Flow, prefs: &AgentPanelPrefs) {
     let top = ui.cursor().top();
     let shared = view.shared;
-    if chat.detection.is_none() && chat.detecting.is_none() {
-        chat.actions.push(PanelAction::Refresh);
-    }
+
     let state = chat.state();
     let bounds = ui.available_rect_before_wrap();
     let gap = Tokens::get().space_8;
@@ -3024,6 +3023,23 @@ mod tests {
         let input = solidcraft_ui_registry::rect_of("agent_chat:input").expect("the text box is drawn");
         assert_eq!(report.focus.iter().map(|r| r.rect).collect::<Vec<_>>(), [input], "the text box takes the keyboard");
         assert!(chat.actions.is_empty());
+    }
+
+    /// The first frame after the chat opens already looks for agents, so it says it is looking
+    /// rather than that none were found.
+    #[test]
+    fn the_first_frame_after_opening_shows_the_agents_being_detected() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.layout = ui_kit::LayoutMode::Docked;
+        toggle(&mut app);
+        assert!(app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none());
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 800.0))), ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| show(&mut app, ui));
+        let detecting = tr("ui.agent_chat_detecting");
+        let shown = crate::test_support::text_shapes(&output).any(|text| text.galley.text() == detecting);
+        output.textures_delta.clear();
+        assert!(shown, "the first frame says it is detecting");
     }
 
     /// The panel's place and fold are its own state: toggled and stored without the app.
