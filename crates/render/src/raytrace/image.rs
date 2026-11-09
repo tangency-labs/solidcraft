@@ -15,8 +15,8 @@ use crate::{
     surface::{OpaqueSurface, srgb8_to_linear},
 };
 use solidcore_record::Vec3;
+use solidcraft_color::srgb::encode8;
 use solidcraft_geom::prelude::*;
-use solidcraft_geom::srgb::encode8;
 
 #[cfg(test)]
 #[path = "environment_image_tests.rs"]

@@ -95,25 +95,25 @@ fn caustics_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.studio.caustics = enabled.then(solidcraft_engine::render::job::CausticOptions::default);
     }
     if let Some(options) = &mut app.render_workspace.view.studio.caustics {
-        let photons = crate::i18n::tr("render.caustics_photons");
+        let photons = solidcraft_ui_text::tr("render.caustics_photons");
         ui_kit::row(ui, photons, |ui| {
             let field = ui_kit::number_field_preserving(ui, &mut options.photons, 1..=65536, 64.0, "");
             crate::scenario::publish_target("render:caustics:photons", field.rect);
             field
         });
-        let radius = crate::i18n::tr("render.caustics_radius");
+        let radius = solidcraft_ui_text::tr("render.caustics_radius");
         ui_kit::row(ui, radius, |ui| {
             let field = ui_kit::number_field_preserving(ui, &mut options.radius_mm, 1e-6..=1e6, 0.1, " mm");
             crate::scenario::publish_target("render:caustics:radius", field.rect);
             field
         });
-        let seed = crate::i18n::tr("render.children.seed");
+        let seed = solidcraft_ui_text::tr("render.children.seed");
         ui_kit::row(ui, seed, |ui| {
             let field = ui_kit::number_field_preserving(ui, &mut options.seed, 0..=u32::MAX, 1.0, "");
             crate::scenario::publish_target("render:caustics:seed", field.rect);
             field
         });
-        let depth = crate::i18n::tr("render.caustics_depth");
+        let depth = solidcraft_ui_text::tr("render.caustics_depth");
         ui_kit::row(ui, depth, |ui| {
             let field = ui_kit::number_field_preserving(ui, &mut options.max_depth, 1..=16, 1.0, "");
             crate::scenario::publish_target("render:caustics:depth", field.rect);

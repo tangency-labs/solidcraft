@@ -1,0 +1,9 @@
+#### WR-541. The corner ball of two rounds' seam is refused when a trace point's centre misses by a solve step (fork follow-up of WR-420)
+- **Severity:** Wrong result (the seam round fails, 1001)
+- **Area:** Fillets
+- **Location:** the fork's `SmFilletSolver::CalcSphereFilletGeom` (not in the pinned v1.0.1; the Rust port's opt-in WR-420, `Kernel::fixes.fillet_corner_ball_patch`). It takes the ball's centre from the trace points and requires every point's centre within tolerance of the first.
+- **What happens:** At the seam's end on the bottom face, both offset cylinders collapse onto their axes. A point of their intersection there fixes neither base parameter round its axis, so its solve stops a step short of the axes' crossing. On SolidCraft's tray (rig fillets/1557), whose rounds are read back as cylinders with their axes a rounding apart from SMLib's own cones, the end point's centre is 2.8e-4 off. The ball is then not made and the traced seam round fails.
+- **Trigger:** a tray whose bottom rounds are cylinders, its vertical edges and seams rounded R2 (the fork's capi `ops_kernel` case).
+- **How found:** reported by SolidCraft. The fork's fix is tangency-labs/smlib@bc6ddf9 ("a seam round's corner ball is centred where the cylinders' axes meet"), which is not merged upstream.
+- **Confirmed:** no; this changes fork-only code that the port carries behind WR-420.
+- **Rust port:** with `Kernel::fixes.fillet_corner_ball_center_from_axes` (and `fillet_corner_ball_patch`), `FilletSolver::sphere_fillet_geom_parts` centres the ball at the middle of the axes' nearest points (`axes_meet`). Nearly parallel axes, where `1 - (a0.a1)^2` is below `SM_EFF_ZERO_SQRT`, are refused, and so are nearest points farther apart than the tolerance. The trace points are no longer compared. Test: `corner_ball_centre_is_where_the_axes_meet` in `blend/fillet_solver/p2.rs`, which covers axes a rounding apart, parallel axes and axes that miss each other.

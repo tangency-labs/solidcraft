@@ -1,0 +1,2789 @@
+{
+ "cases": [
+  {
+   "name": "DropCurveCurve_remove_knots_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_knots_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_knots_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_remove_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_reduce_once_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_reduce_once_0.01",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "DropCurveCurve_reduce_once_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "DropCurveCurve_reduce_once_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_reduce_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveCurve_reduce_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_degen_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "DropCurveCurve_degen_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_remove_knots_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_remove_knots_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_remove_knots_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "closedCurve_remove_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "closedCurve_reduce_once_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_reduce_once_0.01",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "closedCurve_reduce_once_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "closedCurve_reduce_once_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "closedCurve_reduce_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": false
+   }
+  },
+  {
+   "name": "closedCurve_reduce_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "closedCurve_degen_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_degen_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvToOffset_remove_knots_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_remove_knots_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvToOffset_remove_knots_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "crvToOffset_remove_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_reduce_once_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_reduce_once_0.01",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvToOffset_reduce_once_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "crvToOffset_reduce_once_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_reduce_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvToOffset_reduce_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_degen_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvToOffset_degen_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_remove_knots_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_remove_knots_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_remove_knots_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "crvTrim1_remove_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_reduce_once_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_reduce_once_0.01",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvTrim1_reduce_once_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "crvTrim1_reduce_once_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_reduce_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim1_reduce_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_degen_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_degen_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_remove_knots_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_remove_knots_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_remove_knots_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "crvTrim2_remove_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_reduce_once_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_reduce_once_0.01",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "crvTrim2_reduce_once_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "crvTrim2_reduce_once_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_reduce_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": false
+   }
+  },
+  {
+   "name": "crvTrim2_reduce_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_degen_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_degen_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "curve0_remove_knots_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_remove_knots_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "curve0_remove_knots_1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "curve0_remove_knots_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_reduce_once_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_reduce_once_0.01",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.01
+   }
+  },
+  {
+   "name": "curve0_reduce_once_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "curve0_reduce_once_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_reduce_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.001,
+    "inplace": false
+   }
+  },
+  {
+   "name": "curve0_reduce_10",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 10.0,
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_degen_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "curve0_degen_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_crvTrim1_compat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_crvTrim1_compat_tol_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_crvTrim1_compat_tol_1e-09",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "knot_tol": 1e-09
+   }
+  },
+  {
+   "name": "closedCurve_crvTrim1_compat_tol_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_crvTrim1_compat_adj_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_crvTrim1_compat_adj_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim2_compat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim2_compat_tol_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim2_compat_tol_1e-09",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "knot_tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim2_compat_tol_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim2_compat_adj_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim2_compat_adj_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim2.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     }
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_DropCurveCurve_compat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_DropCurveCurve_compat_tol_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim2_DropCurveCurve_compat_tol_1e-09",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ],
+    "knot_tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim2_DropCurveCurve_compat_tol_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim2_DropCurveCurve_compat_adj_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim2_DropCurveCurve_compat_adj_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, DropCurveCurve.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim2.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "DropCurveCurve.smc"
+      }
+     }
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_crvToOffset_compat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_crvToOffset_compat_tol_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "closedCurve_crvToOffset_compat_tol_1e-09",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    ],
+    "knot_tol": 1e-09
+   }
+  },
+  {
+   "name": "closedCurve_crvToOffset_compat_tol_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.001
+   }
+  },
+  {
+   "name": "closedCurve_crvToOffset_compat_adj_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "closedCurve_crvToOffset_compat_adj_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvToOffset.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "closedCurve.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvToOffset.smc"
+      }
+     }
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim1_compat",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim1_compat_tol_0",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.0
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim1_compat_tol_1e-09",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "knot_tol": 1e-09
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim1_compat_tol_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_tol",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "knot_tol": 0.001
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim1_compat_adj_1e-06",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "crvTrim1_crvTrim1_compat_adj_0.001",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvTrim1.smc (prog_test curve input; SM_API tests TestSmCreateRectangle / my_test_reversed_line_join reach these NL_CrvTool routines through SmNurbsCurve / SmBSplineCurveNLib)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     },
+     {
+      "smc": {
+       "$upstream_file": "crvTrim1.smc"
+      }
+     }
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "cubic_remove_knots_tight",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "cubic_remove_knots_loose",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000.0
+   }
+  },
+  {
+   "name": "cubic_remove_knots_zero",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "polyline_remove_knots",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_knots",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      2,
+      3,
+      3
+     ]
+    },
+    "tol": 10.0
+   }
+  },
+  {
+   "name": "line_reduce_once",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "line_reduce",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "cubic_reduce_once_tight",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "reduce_degree_once",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "cubic_reduce_huge",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1000000000.0
+   }
+  },
+  {
+   "name": "cubic_reduce_zero",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "reduce_degree",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "cubic_degen_none",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       -1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       3,
+       0.5,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "line_degen_single",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "single_compat",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "cpts": [
+       [
+        0,
+        0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        3,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_cubic_compat",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "make_compatible",
+    "crvs": [
+     {
+      "cpts": [
+       [
+        0,
+        0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0,
+        0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        3,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "line_cubic_compat_adj",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "make_compatible_adj",
+    "crvs": [
+     {
+      "cpts": [
+       [
+        0,
+        0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     {
+      "cpts": [
+       [
+        0,
+        0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        3,
+        0.5,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "degen_all",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": false
+   }
+  },
+  {
+   "name": "degen_all_inplace",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": true
+   }
+  },
+  {
+   "name": "degen_start",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": false
+   }
+  },
+  {
+   "name": "degen_start_inplace",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": true
+   }
+  },
+  {
+   "name": "degen_end",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": false
+   }
+  },
+  {
+   "name": "degen_end_inplace",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.5,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": true
+   }
+  },
+  {
+   "name": "degen_mid",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       5,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": false
+   }
+  },
+  {
+   "name": "degen_mid_inplace",
+   "upstream_ref": "edge case (degenerate / boundary input)",
+   "inputs": {
+    "op": "remove_degen_segs",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       4,
+       0.0,
+       -1.7976931348623157e+308
+      ],
+      [
+       5,
+       0,
+       0.0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 1e-06,
+    "inplace": true
+   }
+  }
+ ]
+}

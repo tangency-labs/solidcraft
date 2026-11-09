@@ -120,17 +120,24 @@ fn hdr_commands_reply_with_their_schemas() {
 
 /// `set` names the render setup's fields: `patched_settings` reads the patched setup as a
 /// `RenderSetup`, which refuses any other key, so the schema refuses a misspelt one too (and
-/// more than 13 at once).
+/// more than `SETUP_FIELDS` at once). `coats` is one of them (#12783).
 #[test]
 fn the_set_schema_names_the_setup_fields() {
     let root = input_schema_for::<HdrCaptureParams>();
     let root = root.as_value();
     let set = &root["properties"]["set"];
-    for (patch, takes) in
-        [(json!({}), true), (json!({"width": 640, "height": 480, "job": {"method": "gpu_path"}}), true), (json!({"widht": 640}), false)]
-    {
+    for (patch, takes) in [
+        (json!({}), true),
+        (json!({"width": 640, "height": 480, "job": {"method": "gpu_path"}}), true),
+        (json!({"coats": {}}), true),
+        (json!({"widht": 640}), false),
+    ] {
         assert_eq!(conforms(root, set, &patch), takes, "{patch}");
     }
     // `conforms` doesn't read `maxProperties`, so the limit is pinned here.
-    assert_eq!((set["maxProperties"].as_u64(), set["properties"].as_object().map(|p| p.len())), (Some(13), Some(super::SETUP_FIELDS.len())), "{set}");
+    assert_eq!(
+        (set["maxProperties"].as_u64(), set["properties"].as_object().map(|p| p.len())),
+        (Some(crate::schema::render_settings::SETUP_FIELDS.len() as u64), Some(crate::schema::render_settings::SETUP_FIELDS.len())),
+        "{set}"
+    );
 }

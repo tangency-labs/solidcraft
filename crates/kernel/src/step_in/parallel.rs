@@ -161,7 +161,16 @@ fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Bod
     let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
     // SMLib's face i is the record's `smlib_order` face and the body's `body_order` face (an
     // empty order is the same one).
-    let (Some(smlib_order), Some(body_order)) = (smlib_order, body_order) else { return Err(renumbered()) };
+    let Some(body_order) = body_order else { return Err(renumbered()) };
+    // SMLib's export may number the edges and vertices otherwise than the record (a surface model
+    // whose open shell uses faces against their surfaces beside closed shells: SMLib walks those
+    // faces as their surfaces face). An import still lists SMLib's faces in the record's order;
+    // that is taken where each face is checked to be the record's face it would be.
+    let smlib_order = match smlib_order {
+        Some(order) => order,
+        None if faces_in_record_order(record, body.record(), &body_order.faces) => Default::default(),
+        None => return Err(renumbered()),
+    };
     let at = |order: &[usize], i: usize| if order.is_empty() { Some(i) } else { order.get(i).copied() };
     let faces = brep.counts().map_err(|e| failed(KernelError::Failed(format!("SMLib: {e}"))))?[0];
     let mut of_record = vec![usize::MAX; body.face_count()];
@@ -175,6 +184,44 @@ fn smlib_body(record: &solidcore_record::brep::Brep) -> std::result::Result<(Bod
         return Err(renumbered());
     }
     Ok((body, of_record))
+}
+
+/// Whether SMLib's face `i` of a body made from `record` (the body's face `body_order[i]`, or `i`
+/// for an empty order) is the record's face `i`, face by face: the same kind of surface, the same
+/// loops of the same lengths, each loop through the same corners (within the vertices' and the
+/// records' tolerances, whichever way and from wherever SMLib walks it).
+fn faces_in_record_order(record: &solidcore_record::brep::Brep, body: &solidcore_record::brep::Brep, body_order: &[usize]) -> bool {
+    use solidcore_record::brep::{Brep, Loop};
+    if record.faces.len() != body.faces.len() || !(body_order.is_empty() || body_order.len() == body.faces.len()) {
+        return false;
+    }
+    // Each loop's corners: the start of each of its edges as the loop walks them, with its tolerance.
+    let corners = |b: &Brep, l: &Loop| -> Option<Vec<([f64; 3], f64)>> {
+        let vertex = |v: u32| b.vertices.get(usize::try_from(v).ok()?).map(|x| (x.point, x.tolerance));
+        match l {
+            Loop::Vertex { vertex: v } => Some(vec![vertex(*v)?]),
+            Loop::Edges { edges } => edges
+                .iter()
+                .map(|e| {
+                    let edge = b.edges.get(usize::try_from(e.edge).ok()?)?;
+                    vertex(if e.forward { edge.vertices[0] } else { edge.vertices[1] })
+                })
+                .collect(),
+        }
+    };
+    let slack = record.tolerance + body.tolerance;
+    (0..record.faces.len()).all(|i| {
+        let at = if body_order.is_empty() { Some(i) } else { body_order.get(i).copied() };
+        let (Some(a), Some(b)) = (record.faces.get(i), at.and_then(|k| body.faces.get(k))) else { return false };
+        if std::mem::discriminant(&a.surface) != std::mem::discriminant(&b.surface) || a.loops.len() != b.loops.len() {
+            return false;
+        }
+        a.loops.iter().zip(&b.loops).all(|(x, y)| {
+            let (Some(p), Some(q)) = (corners(record, x), corners(body, y)) else { return false };
+            p.len() == q.len()
+                && p.iter().all(|(u, tu)| q.iter().any(|(w, tw)| (0..3).map(|k| (u[k] - w[k]).powi(2)).sum::<f64>().sqrt() <= tu + tw + slack))
+        })
+    })
 }
 
 /// The face of its one operand each face of `body` is, from its history.

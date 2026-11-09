@@ -1,0 +1,499 @@
+{
+ "cases": [
+  {
+   "name": "quad_roots_m1_m2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1638",
+   "inputs": {
+    "c": [
+     2.0,
+     3.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quad_roots_half_twothirds",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1646",
+   "inputs": {
+    "c": [
+     2.0,
+     7.0,
+     6.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quad_double_root",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1653",
+   "inputs": {
+    "c": [
+     1.0,
+     2.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quad_imaginary",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1661",
+   "inputs": {
+    "c": [
+     1.0,
+     -1.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "cubic_three_roots",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1674",
+   "inputs": {
+    "c": [
+     6.0,
+     11.0,
+     6.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "cubic_triple_root",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1682",
+   "inputs": {
+    "c": [
+     1.0,
+     3.0,
+     3.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "cubic_single_and_double",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1690",
+   "inputs": {
+    "c": [
+     2.0,
+     5.0,
+     4.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "cubic_one_real",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1698",
+   "inputs": {
+    "c": [
+     1.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quartic_four_roots",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1712",
+   "inputs": {
+    "c": [
+     -24.0,
+     -38.0,
+     -13.0,
+     2.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quartic_quadruple_root",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1721",
+   "inputs": {
+    "c": [
+     1.0,
+     4.0,
+     6.0,
+     4.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quartic_two_double_roots",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1730",
+   "inputs": {
+    "c": [
+     2.0,
+     7.0,
+     9.0,
+     5.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "quartic_pm1_double",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:1739",
+   "inputs": {
+    "c": [
+     1.0,
+     0.0,
+     -2.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_constant",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_all_zero",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_linear",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     2.0,
+     4.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_zero_const_zero_lin",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     0.0,
+     3.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_zero_const",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     2.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_disc_slightly_neg",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.00000001,
+     2.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_disc_neg_beyond_sqrt",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.00001,
+     2.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quad_tol_zero_double",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     2.0,
+     1.0
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "edge_quad_tiny_leading",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     2.0,
+     1e-13
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_falls_to_quad",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     2.0,
+     3.0,
+     1.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_falls_to_linear",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     2.0,
+     4.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_x3",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_x3_minus_x",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     -1.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_scaled",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     6000000.0,
+     11000000.0,
+     6000000.0,
+     1000000.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_neg_leading",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     -6.0,
+     -11.0,
+     -6.0,
+     -1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_cubic_tol_big",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     2.0,
+     3.0,
+     0.5
+    ],
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_quartic_x4_plus_1",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_x4",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_x4_minus_x",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_falls_to_cubic",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     6.0,
+     11.0,
+     6.0,
+     1.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_falls_to_quad",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     2.0,
+     3.0,
+     1.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_all_zero",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_biquadratic",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     4.0,
+     0.0,
+     -5.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  },
+  {
+   "name": "edge_quartic_tol_one",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     2.0,
+     3.0,
+     4.0,
+     5.0
+    ],
+    "tol": 1.0
+   }
+  },
+  {
+   "name": "edge_quartic_tol_zero",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     4.0,
+     6.0,
+     4.0,
+     1.0
+    ],
+    "tol": 0.0
+   }
+  },
+  {
+   "name": "edge_quartic_v_negative",
+   "upstream_ref": "source/SMLib/src/SmPolynomial.cpp (edge case)",
+   "inputs": {
+    "c": [
+     1.0,
+     0.0,
+     3.0,
+     0.0,
+     1.0
+    ],
+    "tol": 1e-12
+   }
+  }
+ ]
+}

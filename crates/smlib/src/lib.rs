@@ -55,7 +55,7 @@ pub enum Error {
     /// middle of the edge it was found for, and why there is no room, when the refusal names them.
     TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, why: Option<RoomReason> },
     /// A shell, offset or thicken whose wall is thicker than a face curves: the face's offset
-    /// folds (solidcore's `ShellRefused`, `ShellRefusal::Fold`). The largest wall that works,
+    /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).

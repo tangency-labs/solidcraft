@@ -250,8 +250,9 @@ pub(crate) fn folder_chip(
     let state = history.inside(folder.start, folder.end, folder.open);
     let picked = app.tree.picked_timeline_groups.contains(&folder.id)
         || (!folder.open && history.folders.joints.get(&folder.id).is_some_and(|j| j.iter().any(|j| app.tree.picked_joints.contains(j))));
+    let icon = crate::timeline::folder_kind_icon(app, folder.id).unwrap_or("feature_group");
     let chip = HistoryGroupChip {
-        icon: "feature_group",
+        icon,
         name: &name,
         count,
         open: folder.open,
@@ -295,6 +296,7 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
         crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
         ui.close();
     }
+    crate::timeline::edit_holes_item(app, ui, folder.id);
     if crate::context_menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
         app.tree.picked_timeline_groups.retain(|g| *g != folder.id);
         let _ = app.run("timeline.ungroup", json!({ "group": folder.id }));

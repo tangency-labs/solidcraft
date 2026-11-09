@@ -28,7 +28,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<CanvasDecalParams>(),
         &["angle", "at", "center", "data", "face", "flip", "name", "offset", "opacity", "path", "width"],
     );
-    assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "name", "opacity", "visible", "width"]);
+    assert_keys(input_schema_for::<CanvasEditParams>(), &["angle", "canvas", "center", "flip", "locked", "name", "opacity", "visible", "width"]);
     assert_keys(input_schema_for::<CanvasCalibrateParams>(), &["a", "b", "canvas", "distance"]);
     assert_keys(input_schema_for::<CanvasDeleteParams>(), &["canvas"]);
 }
