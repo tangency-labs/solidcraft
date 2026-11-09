@@ -902,7 +902,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
 
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
-    let through_point = offset_through_point(d).is_some();
+    let through_point = offset_through_point(d).is_some() || angle_through_point(d).is_some();
     // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
     let placing = !crate::dialogs_move::placements(d).is_empty();
     let shared = placing && crate::dialogs_move::moves_shared(app, d);
@@ -985,8 +985,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, direction_only } => {
+        Kind::AnglePlane { angle, offset, direction_only } => {
             enter |= expr_row(ui, "Angle", angle);
+            // Optional distance before the turn (#12038); Through point hides it like Offset Plane.
+            if !through_point {
+                enter |= expr_row(ui, "Offset", offset);
+            }
             ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);

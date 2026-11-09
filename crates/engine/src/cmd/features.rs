@@ -203,7 +203,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; offset?: length expr to move base along its normal before the turn (not with through); through?: point ref the parallel plane goes through instead of offset; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto the (possibly offset) base and turn about the line through pivot, or that plane's origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -3318,6 +3318,7 @@ fn plane_offset(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::PlaneRef;
     let cmd = "construct.plane.at_angle";
     // The plane follows the edge, face or construction axis it turns about, or the length
     // expressions of an `{origin, dir}` axis's origin.
@@ -3326,6 +3327,23 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
+    // Optional offset (or through-point) before the turn: same mutual exclusion as Offset Plane.
+    let through = match p.get("through").filter(|t| !t.is_null()) {
+        Some(_) if p.get("offset").is_some_and(|o| !o.is_null()) => return Err(bad(cmd, "give `offset` or `through`, not both")),
+        Some(t) => Some(super::construct::geo(s, Some(t), cmd, "through")?),
+        None => None,
+    };
+    let offset_distance = match &through {
+        Some(_) => None,
+        None => match p.get("offset").filter(|o| !o.is_null()) {
+            Some(_) => {
+                let d = req_expr(cmd, p, "offset")?;
+                check_expr(s, &d, Kind::Length, cmd, "offset")?;
+                Some(d)
+            }
+            None => None,
+        },
+    };
     let direction_only = crate::params::bool_(p, "direction_only").unwrap_or(false);
     // With `direction_only` the plane turns about the pivot and never reads the origin, so a
     // parameter in it would only block deleting that parameter.
@@ -3337,8 +3355,15 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
         None => None,
     };
-    let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
-        base: Box::new(base),
+    let wrap = |base: PlaneRef| -> PlaneRef {
+        match (&through, &offset_distance) {
+            (Some(point), _) => PlaneRef::ThroughPoint { base: Box::new(base), point: Box::new(point.clone()) },
+            (None, Some(distance)) => PlaneRef::Offset { base: Box::new(base), distance: distance.clone() },
+            (None, None) => base,
+        }
+    };
+    let at_angle = |base: PlaneRef| PlaneRef::AtAngle {
+        base: Box::new(wrap(base)),
         axis_origin: axis_origin.clone(),
         axis_dir,
         angle: angle.clone(),
