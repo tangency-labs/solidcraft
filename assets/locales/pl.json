@@ -1621,7 +1621,7 @@
   "dialog.step": "Krok",
   "document.changed_on_disk": "{name} zmienił się na dysku",
   "document.changed_on_disk_detail": "{name} został zmieniony przez inny program lub komputer od chwili otwarcia lub ostatniego zapisu. Nadpisz zastępuje te zmiany twoimi, a Zapisz kopię zachowuje obie wersje.",
-  "document.copy_name": "{name} – kopia",
+  "document.copy_name": "{name} — kopia",
   "document.newer_file": "Zapisano w nowszym SolidCraft (format {format}, ta wersja czyta do {reads}). Jeśli czegoś brakuje, zaktualizuj program.",
   "document.newer_file_change": "Zapisano w nowszym SolidCraft (format {format} ze zmianą `{change}`, której ta wersja nie zna). Jeśli czegoś brakuje, zaktualizuj program.",
   "document.newer_file_not_read": "Nie odczytano: {what}. Zapisanie to zachowa.",
