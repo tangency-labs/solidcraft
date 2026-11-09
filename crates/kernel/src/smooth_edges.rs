@@ -480,9 +480,8 @@ mod tests {
             let body = ring(count);
             let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
             assert_eq!(mesh.edges.len(), 6 * count);
-            let vertical: Vec<usize> = (0..mesh.edges.len())
-                .filter(|i| (mesh.edges[*i].first().unwrap().z - mesh.edges[*i].last().unwrap().z).abs() > 2.9)
-                .collect();
+            let vertical: Vec<usize> =
+                (0..mesh.edges.len()).filter(|i| (mesh.edges[*i].first().unwrap().z - mesh.edges[*i].last().unwrap().z).abs() > 2.9).collect();
             assert_eq!(vertical.len(), 2 * count);
             for i in vertical {
                 assert!(mesh.smooth_edges[i], "{count}: wall join {i} is G2, ends included");
