@@ -395,6 +395,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
+        let vertices_before = std::mem::take(&mut self.0.vertices_before);
         // The cleanup's face and edge merges notify through the session's store, so the
         // survivors keep the attributes of the objects merged into them.
         let result = self.with_target_env(k, |k, target, env| {
@@ -404,7 +405,17 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 &relations,
                 check_all_edges,
                 Some(&mut *env),
-            )
+            )?;
+            // As the boolean's merge places its own after its cleanup (#3090): a vertex the
+            // fillet made on a target edge stands on that edge's curve, which may lie up to the
+            // edge's tolerance off one of its faces, past the B-rep's intersection tolerance that
+            // every vertex/face gap must stay under. The fillet's vertices (those the target did
+            // not have) go to the corner their faces define, under the boolean's guards.
+            let vertices: Vec<_> = p1::vertices(target, None)?
+                .into_iter()
+                .filter(|v| !vertices_before.contains(v))
+                .collect();
+            crate::boolean::merge::p1::place_vertices_on_face_corners(k, target, &vertices, env)
         });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
@@ -513,25 +524,7 @@ impl FilletSession<'_> {
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
         let tolerance = approx_tol3d(k, 0.5 * self.objects.target.tolerance());
-        NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))?;
-        self.place_new_vertices_on_face_corners(k)
-    }
-
-    /// As the boolean's merge places its own after its cleanup (#3090): a vertex the fillet
-    /// made on a target edge stands on that edge's curve, which may lie up to the edge's
-    /// tolerance off one of its faces, past the B-rep's intersection tolerance that every
-    /// vertex/face gap must stay under. The fillet's vertices (those the target did not have)
-    /// go to the corner their faces define, under the boolean's guards. Done after the net
-    /// scope, on the faces as every later reader of the body evaluates them.
-    fn place_new_vertices_on_face_corners(&mut self, k: &mut Kernel) -> Result<()> {
-        let vertices_before = std::mem::take(&mut self.objects.vertices_before);
-        let vertices: Vec<_> = p1::vertices(self.objects.target, None)?
-            .into_iter()
-            .filter(|v| !vertices_before.contains(v))
-            .collect();
-        FinishAccess(&mut self.objects).with_target_env(k, |k, target, env| {
-            crate::boolean::merge::p1::place_vertices_on_face_corners(k, target, &vertices, env)
-        })
+        NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
     }
 
     /// The body of [`Self::do_fillet`], in its tolerance's [`NetScope`].
