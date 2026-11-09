@@ -808,6 +808,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "free_orbit_upright",
         "hidden_toolbar_tabs",
         "hide_constraint_glyphs_zoomed_out",
+        "hide_hovered",
         "history_in_browser",
         "history_play_button",
         "history_sketches",
