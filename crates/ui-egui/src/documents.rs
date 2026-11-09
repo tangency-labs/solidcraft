@@ -1000,11 +1000,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 _ => solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name),
             };
             let label = format!("{shown_name}{}", if *dirty { " •" } else { "" });
-            let text = ui
-                .painter()
-                .layout_no_wrap(label, crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button), t.app_bar_text)
-                .size()
-                .x;
+            let text =
+                ui.painter().layout_no_wrap(label, crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.app_bar_text).size().x;
             (text + 40.0).clamp(72.0, MAX_FIT)
         })
         .collect();
@@ -1092,7 +1089,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         let name_display = solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name);
         let label = format!("{name_display}{}", if *dirty { " •" } else { "" });
         let font = if active {
-            crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button)
+            crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button)
         } else {
             FontId::proportional(solidcraft_theme::Tokens::get().font_button)
         };
@@ -1718,6 +1715,7 @@ mod tests {
     /// changes not saved yet says so below, since a cut name hides the tab's bullet.
     #[test]
     fn tab_tooltip_says_where_the_design_is_saved() {
+        crate::i18n::install();
         assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false, false), "/srv/designs/plate.solidcraft");
         assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true, false), "a-long-name\n/srv/a-long-name.solidcraft");
         assert_eq!(tab_tooltip("Untitled", None, false, false), "Not saved yet");

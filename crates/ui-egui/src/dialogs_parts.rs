@@ -334,6 +334,7 @@ mod tests {
     /// don't know keeps the library's name.
     #[test]
     fn family_names_follow_the_language() {
+        crate::i18n::install();
         let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());
         let _german = solidcraft_ui_text::scope("de");
@@ -413,6 +414,7 @@ mod tests {
     /// Every dimension the library gives for a size is labelled in words, in each family.
     #[test]
     fn every_library_dimension_has_a_label_in_words() {
+        crate::i18n::install();
         let mut s = solidcraft_engine::Session::default();
         let l = families(&s.execute("parts.library", &json!({})).unwrap());
         assert!(l.len() >= 7, "{}", l.len());

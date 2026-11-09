@@ -1,0 +1,16 @@
+#### UB-272. `BuildOffsetOfFaceuse` passes an `SmTArray<SmBSplineCurve*>` to `MakeFaceWithCurves` cast as an `SmTArray<SmCurve*>`
+- **Severity:** Crash / undefined behaviour
+- **Area:** Offset
+- **Location:** `source/SMLib/src/SmOffsetExecutive.cpp:3985`, `SmOffsetExecutive::BuildOffsetOfFaceuse` (def. `:3643`): the 2D-boolean branch passes `(SmTArray<SmCurve*>*)&sUVCurves` as `cpOpt3DCurves` of `SmBrep::MakeFaceWithCurves` (`source/SMLib/src/SmBrep.cpp:15972`). The same cast appears at `SmOffsetExecutive.cpp:4009` (the `CreateCurvesFromFace` output of the same branch) and at `source/SMLib/src/SmBrep.cpp:5126`, `SmBrep::CreateNormalProjectionCurves` (def. `:5033`), into `SmFace::CreateCurvesByTrimming`.
+- **What happens:** `sUVCurves` is an `SmTArray<SmBSplineCurve*>`. The C-style cast reinterprets it as an `SmTArray<SmCurve*>`, an unrelated instantiation of the template, and the callee reads and writes it through that type. The two arrays have the same layout, and today `SmCurve` is the B-spline's primary base at offset zero, so the code works. It is still undefined behaviour, and UBSan reports it. At `:4009` it is worse. `SmFace::CreateCurvesFromFace` (`SmFace.cpp:7149`) fills its `SmTArray<SmCurve*>` 3D output with copies of the edges' curves (`:7265-7269`), which need not be B-splines (an `SmLine` edge stays an `SmLine`). The caller then reads them as `SmBSplineCurve*`. It calls `ConvertTo2D` on them, which is virtual, and passes the array on as `cpOptUVCurves` of `MakeFaceWithCurves` (`:4020`). Any non-virtual B-spline access to such a curve there would be a real wrong-type access. That use was not traced further.
+- **Trigger:** the shell path of the offset: a face whose offset surface's domain needs the 2D boolean (`BuildOffsetOfFaceuse`, cpp:3765-3928).
+- **How found:** an ASan+UBSan build of the SolidCraft fork's capi `ops_kernel` shell cases, replay 9471c17 (tangency-labs/solidcore#1180). There it was reported at `SmBrep.cpp:16480`, the fork's line for `MakeFaceWithCurves`.
+- **Confirmed:** read at the pin (`3fd5b95`); the sanitizer report is from the fork build in #1180. The reference build here is not sanitized.
+- **Fix direction (upstream):** build an `SmTArray<SmCurve*>` from the B-spline pointers before the call, or have the callees take `const SmCurve*` spans.
+- **Rust port:** no analogue, so nothing to fix. Curves are values of the `Curve` enum, never pointers cast between array types:
+  - `topology::brep::p7::make_face_with_curves` takes a `FaceCurvesInput` whose `curves_3d` is `Option<Vec<Option<Curve>>>` and `uv_curves` is `Option<Vec<Curve>>` (`crates/solidcore/src/topology/brep/p7.rs:1056`).
+  - The 2D-boolean branch, `build_boolean_offset_faces` in `crates/solidcore/src/offset/offset_executive/p1.rs`, moves the face's UV `Curve`s into `curves_3d` (`:1953`).
+  - It reads `create_curves_from_face`'s `curves_3d: Option<Vec<Curve>>` back as the UV curves (`:2022`).
+  - Each of those UV curves keeps its real kind and dispatches on it. The case that would tell whether upstream treats a non-B-spline curve there as a B-spline (the `:4009` read above) is not separately compared.
+  - `SmBrep::CreateNormalProjectionCurves` is not ported.
+- Fixes tangency-labs/solidcore#1180.

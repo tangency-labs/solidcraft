@@ -1970,6 +1970,7 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
 /// the parameter name kept as typed.
 #[test]
 fn the_status_after_a_dimension_is_in_the_interface_language() {
+    crate::i18n::install();
     let pl = solidcraft_ui_text::Locale::for_language("pl");
     let en = solidcraft_ui_text::Locale::for_language("en");
     let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));

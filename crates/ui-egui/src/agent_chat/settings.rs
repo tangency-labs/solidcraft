@@ -1829,6 +1829,7 @@ mod card_tests {
 
     #[test]
     fn model_warning_only_for_explicitly_missing_tools() {
+        crate::i18n::install();
         assert_eq!(
             capability_warning("local:4b", Some(false)).as_deref(),
             Some("local:4b can't use SolidCraft's tools, so it can only chat. Pick a model with tool support.")

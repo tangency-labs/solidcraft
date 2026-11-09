@@ -1210,6 +1210,7 @@ mod tests {
     /// its hover line names the code for those who know it.
     #[test]
     fn continuity_rows_are_words_and_keep_the_codes_for_the_hover_text() {
+        crate::i18n::install();
         for orders in [patch_orders(), blend_orders(), boundary_orders()] {
             assert_eq!(orders.first(), Some(&Continuity::G0), "{orders:?}");
         }

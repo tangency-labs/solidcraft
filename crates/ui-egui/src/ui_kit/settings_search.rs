@@ -973,6 +973,7 @@ mod tests {
 
     #[test]
     fn search_matches_a_label_a_subsequence_and_the_english_source() {
+        crate::i18n::install();
         assert!(matches_text("zoom", &["Reverse zoom direction"]));
         assert!(matches_text("zo", &["Reverse zoom direction"]));
         assert!(!matches_text("rzd", &["Reverse zoom direction"]));
@@ -1025,6 +1026,7 @@ mod tests {
 
     #[test]
     fn search_finds_right_to_left_labels_typed_in_reading_order() {
+        crate::i18n::install();
         let _language = solidcraft_ui_text::scope("he");
         let label = solidcraft_ui_text::tr("prefs.bodies_folders");
         assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
@@ -1134,6 +1136,7 @@ mod tests {
 
     #[test]
     fn the_search_field_names_the_window_it_searches() {
+        crate::i18n::install();
         let name = solidcraft_ui_text::tr("ui.preferences").to_lowercase();
         for id in ["prefs.search", "prefs.search_empty"] {
             let text = solidcraft_ui_text::tr(id).to_lowercase();
@@ -1343,6 +1346,7 @@ mod tests {
 
     #[test]
     fn sketch_short_labels_keep_the_legacy_search_terms_in_every_complete_locale() {
+        crate::i18n::install();
         let cases = [
             ("prefs.sketch.tracking_guides", "Center and midpoint alignment guides"),
             ("prefs.sketch.tracking_points", "Alignment guides from end points and corners while drawing"),

@@ -141,6 +141,7 @@ mod timeline_marks_tests;
 mod status_tests {
     #[test]
     fn the_status_bar_names_commands_by_label() {
+        crate::i18n::install();
         assert_eq!(super::command_label("solid.fillet"), "Fillet");
         assert_eq!(
             super::friendly_error("solid.shell", "invalid parameters for `solid.shell`: offset: must be positive"),
@@ -293,7 +294,6 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
-pub mod start_page;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
@@ -817,7 +817,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
-    /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
+    /// The language the installed font fallback chain is ordered for (`fonts::fallback_order`);
     /// changing `preferences.language` re-installs the fonts on the next frame.
     applied_fonts_language: String,
     /// The interface font the fonts were last set up with (`Prefs::ui_font`).

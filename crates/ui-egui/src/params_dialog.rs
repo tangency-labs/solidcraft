@@ -1388,6 +1388,7 @@ mod tests {
 
     #[test]
     fn the_apply_live_choice_is_remembered_and_turning_it_on_applies_what_waits() {
+        crate::i18n::install();
         assert!(crate::prefs::Prefs::default().parameters_apply_live, "live updates stay the default");
         // The hint above the check box says when edits apply, whichever way it is set.
         assert_eq!(hint(true), solidcraft_ui_text::tr("manage.parameters_hint"));

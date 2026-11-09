@@ -1,0 +1,12 @@
+#### WR-470. `SmBrep::ReadFromFile` returns `SM_SUCCESS` for a B-rep that its own `ValidatePointers` rejects (inconsistent radial edge use lists)
+- **Severity:** Wrong result
+- **Area:** File reading
+- **Location:** `source/SMLib/src/SmBrep.cpp:31982` `SmBrep::ReadFromFile`, which calls `MakeTopologyFromData` (`:19284`-`:20660`). The latter rewrites each edge use's `m_pNext` / `m_pLast` from the records' next indices (`:20247`-`:20263`) and never checks the result. The check that fails is `SmBrep::ValidatePointers` (`:30890`), tests 76 and 134 of its table (`:30673`, `:30731`).
+- **What happens:** for an ASCII `.smb` whose edge use records are in range but inconsistent, `MakeTopologyFromData` builds radial edge use lists that do not close consistently: an edge use whose radial partner does not point back to it, or an edge with no primary edge use. It then returns success, and `ReadFromFile` returns `SM_SUCCESS` with a B-rep that is structurally corrupt. Upstream's own pointer validation rejects that B-rep right after the read. The Rust port (`topology.brep_p10`) returns `InvalidInput` for these graphs instead.
+- **Trigger:** single-byte overwrites of `pt_TestFiles` streams, read with `bRebuildUVTrimCurves = TRUE`:
+  - `plane_square.smb`, `surf_extrude.smb`, `surf_rev.smb`: edge use 0's type `0` -> `9` (bytes 1235 / 1233 / 1235). The read returns status 0 with counts 1 1 1 1 4 4. `ValidatePointers` returns `SM_ERR` at levels 0-2 with test 76 "Radial partner points back to edgeuse" (`surf_extrude` and `surf_rev` also fail edge/vertex tolerance tests 59 and 82, and `surf_rev` test 1).
+  - `ellips_ts2.smb`: edge use 11's edge `11` -> `19` (byte 1452). The read returns status 0 with counts 1 1 1 3 20 20. `ValidatePointers` fails test 134 "Edge primary edgeuse is non-Null".
+  - The unmodified files validate with no reports.
+- **How found:** `topology.brep_p7` difftest cases `read_{plane_square,surf_extrude,surf_rev,ellips_ts2}.smb_index1`, where Rust and C++ disagree (PR #1270). Measured by calling `SmBrep::ValidatePointers(&reports, SM_LEVEL_0..2, NULL, SM_NO_WALK)` on the B-rep `ReadFromFile` returned, in the C++ reference, inside the case's isolated child process. This was a temporary shim probe and is not committed.
+- **Confirmed:** yes, with the C++ reference build: `ValidatePointers` rejects all four B-reps that `ReadFromFile` reported as `SM_SUCCESS`.
+- **Related:** UB-164 (the same unchecked cross-references, which crash or hang on other streams).

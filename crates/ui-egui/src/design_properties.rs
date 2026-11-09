@@ -592,6 +592,7 @@ mod tests {
 
     #[test]
     fn each_field_is_labelled_from_the_table_of_keys() {
+        crate::i18n::install();
         use solidcraft_engine::doc::metadata::{KEYS, Owner, keys};
         let english = solidcraft_ui_text::Locale::for_language("en");
         for k in KEYS {

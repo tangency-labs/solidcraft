@@ -1,0 +1,8 @@
+{
+  "unit": "surface.surface_p6",
+  "cases": [
+    {"name": "fuzz01069_cpp_crash", "origin": "fuzz-out/n2000/surface.surface_p6/fuzz01069.json (crash: cpp: killed by signal 11)", "issue": "UB-231", "cpp_skip": "the C++ reference still crashes (rc=-11) on this input (main 4bb0f022, 2026-10-22)", "rust": "ok", "inputs": {"op": {"dom": [0, 0, 1e-300, 1e-09], "op": "trim", "remove": true, "side": 0}, "surface": {"plane": {"n": [0, 0, 1], "o": [0, 0, 0]}}}},
+    {"name": "fuzz01197_c_invalid_argument_bad_index_count", "origin": "fuzz-out/n2000/surface.surface_p6/fuzz01197.json (timeout: rust: no result after 20 s)", "cpp": "harness: c++: invalid argument: bad index/count 4294967296 (max 64)", "rust": "harness: 4294967296 samples", "inputs": {"op": {"curve": {"bspline": {"cpts": [[0.622, -0.255, 1.63, -1.7976931348623157e+308]], "dim": 3, "p": 2, "u": [0.44]}}, "ivl": [-0.328, 0.44], "n": 4294967296, "op": "sample", "right": true, "start": true, "tt": 0, "vals": [132.0, 48.7, 1.35, 1.5, -21.0, 0.331], "want2": true, "want3": false}, "surface": {"revolution": {"a": [0.537, -0.0565, 1.16], "axis": [0.0, 0.0, 1.0], "b": [0.409, -0.0565, 2.2], "p": [-1.67, -0.0565, 1.19], "swap": false}}}},
+    {"name": "fuzz01289_cpp_crash", "origin": "fuzz-out/n2000/surface.surface_p6/fuzz01289.json (crash: cpp: killed by signal 11)", "issue": "UB-231", "cpp_skip": "the C++ reference still crashes (rc=-11) on this input (main 4bb0f022, 2026-10-22)", "rust": "ok", "inputs": {"op": {"dom": [-1e-300, 0, 0, 10], "op": "trim", "remove": false, "side": 0}, "surface": {"sms": {"$upstream_file": "offset_nurb.sms"}}}}
+  ]
+}

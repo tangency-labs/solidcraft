@@ -2879,9 +2879,7 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 let (icon, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
                 crate::icons::paint_ink(ui.painter(), icon, "status_warning", t.form_error);
                 ui.label(
-                    egui::RichText::new(app.tr("ui.panel_layout.restore_failed"))
-                        .font(crate::ui_kit::type_face::semibold(t.font_label))
-                        .color(t.form_error),
+                    egui::RichText::new(app.tr("ui.panel_layout.restore_failed")).font(crate::fonts::semibold(t.font_label)).color(t.form_error),
                 );
                 let retry = ui_kit::button(ui, app.tr("ui.panel_layout.try_again"), ui_kit::Button::Primary);
                 crate::scenario::publish_target("prefs:panel_restore_retry", retry.rect);
@@ -4620,6 +4618,7 @@ mod tests {
     /// a browser (the web app), set through `ui.prefs` and saved with the settings.
     #[test]
     fn keep_unsaved_in_browser_is_off_and_only_the_web_app_offers_it() {
+        crate::i18n::install();
         use serde_json::json;
         assert!(!crate::prefs::Prefs::default().keep_unsaved_in_browser);
         let label = solidcraft_ui_text::tr("prefs.keep_unsaved_in_browser").to_string();
@@ -5611,6 +5610,7 @@ mod tests {
     /// The question is short, says what stays, and exists in every language.
     #[test]
     fn the_restore_question_is_short_and_says_what_stays() {
+        crate::i18n::install();
         let english = solidcraft_ui_text::tr("ui.3d_mouse_restore_ask");
         assert_eq!(english, "Set the 3D mouse settings back to their defaults? Your calibration and button mapping stay.");
         for catalog in crate::i18n::LOCALES {
@@ -5739,6 +5739,7 @@ mod tests {
     /// chosen, or the device itself read, or no device: no such note.
     #[test]
     fn preferences_says_when_the_daemon_is_read_instead_of_the_device_asked_for() {
+        crate::i18n::install();
         use SpaceMouseDriver::{Automatic, Direct, Spacenavd};
         let note = solidcraft_ui_text::tr("ui.3d_mouse_driver_fallback").to_string();
         assert!(note.contains("spacenavd") && note.contains("could not be opened"));
@@ -5911,6 +5912,7 @@ mod tests {
     /// after an axis is reassigned.
     #[test]
     fn the_circles_and_the_rows_tell_the_same_story_after_a_reassignment() {
+        crate::i18n::install();
         use crate::space_mouse::{DriverMapping, SAME_AXES, motion_story, reassign, row_label};
         let mapping = Some(DriverMapping::default());
         // Unchanged: each motion is read by the row of its own number.
@@ -5932,6 +5934,7 @@ mod tests {
     /// silent; the section's own header carries no badge any more.
     #[test]
     fn a_visible_line_says_what_the_3d_mouse_waits_for() {
+        crate::i18n::install();
         assert_eq!(solidcraft_ui_text::tr("ui.3d_mouse_waiting"), "Waiting for Movement");
         assert_eq!(solidcraft_ui_text::tr("ui.3d_mouse_reset_view"), "Reset view");
         let mut h = crate::scenario::Harness::new();
@@ -5972,6 +5975,7 @@ mod tests {
     /// gone once there is one.
     #[test]
     fn the_wiggle_hint_has_text_and_shows_until_a_device_is_confirmed() {
+        crate::i18n::install();
         assert_eq!(solidcraft_ui_text::tr("ui.3d_mouse_wiggle"), "If you have one plugged in, wiggle it.");
         for catalog in crate::i18n::LOCALES {
             let text = solidcraft_ui_text::Locale::for_language(catalog.id).text("ui.3d_mouse_wiggle");
@@ -5990,6 +5994,7 @@ mod tests {
     /// in plain words and does not ask for a movement; with a daemon reachable it still waits for one.
     #[test]
     fn preferences_says_when_a_device_is_found_but_not_allowed() {
+        crate::i18n::install();
         for catalog in crate::i18n::LOCALES {
             for key in ["ui.3d_mouse_denied", "ui.3d_mouse_denied_short"] {
                 let text = solidcraft_ui_text::Locale::for_language(catalog.id).text(key);
@@ -6542,6 +6547,7 @@ mod tests {
 
     #[test]
     fn preferences_structure_order_groups_and_unique_field_homes() {
+        crate::i18n::install();
         assert_eq!(
             PAGES,
             [
@@ -7320,6 +7326,62 @@ mod tests {
         }
     }
 
+    /// #11445: the theme row opens on the theme in use each time Preferences or its page shows it,
+    /// and the arrows still move it freely while it stays in view.
+    #[test]
+    fn theme_row_opens_on_the_theme_in_use_each_time_it_comes_into_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"theme":"dark","language":"en","open":"Appearance"}));
+        h.frames(4);
+        let count = theme_choices(&h.app).len();
+        let page_back = |h: &mut crate::scenario::Harness| {
+            for _ in 0..=count {
+                if crate::scenario::rect_of("prefs:theme_previous").is_none() {
+                    return;
+                }
+                h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
+                h.frames(3);
+            }
+            panic!("the previous arrow never reached the start: the row is held in place");
+        };
+        page_back(&mut h);
+        // A theme the row does not show at its start.
+        let far =
+            theme_choices(&h.app).into_iter().map(|(id, _)| id).find(|id| crate::scenario::rect_of(&format!("prefs:theme:{id}")).is_none()).unwrap();
+        let shows = |id: &str| {
+            let viewport = crate::scenario::rect_of("prefs:theme_viewport").unwrap();
+            crate::scenario::rect_of(&format!("prefs:theme:{id}")).is_some_and(|rect| viewport.expand(1.0).contains_rect(rect))
+        };
+        h.call("ui.prefs", json!({"theme":far}));
+        h.frames(4);
+        assert!(shows(&far), "a theme chosen elsewhere comes into view: {far}");
+        page_back(&mut h);
+        assert!(!shows(&far), "the arrows move the row away from the theme in use");
+        h.call("ui.prefs", json!({"button":"ok"}));
+        h.frames(3);
+        h.call("ui.prefs", json!({"open":"Appearance"}));
+        h.frames(4);
+        assert!(shows(&far), "reopening Preferences shows the theme in use: {far}");
+        page_back(&mut h);
+        h.frames(4);
+        assert!(!shows(&far), "the row stays where the arrows leave it");
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.frames(3);
+        h.call("ui.prefs", json!({"open":"Appearance"}));
+        h.frames(4);
+        assert!(shows(&far), "coming back to the page shows the theme in use: {far}");
+        page_back(&mut h);
+        h.app.prefs_window.filter = "Onyx".to_owned();
+        h.frames(5);
+        h.app.prefs_window.filter.clear();
+        h.frames(5);
+        assert!(shows(&far), "clearing a search shows the theme in use: {far}");
+        assert_eq!(h.app.preferences.theme, far, "showing a theme never chooses one");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+    }
+
     #[test]
     fn appearance_controls_edit_real_fields_and_cancel_restores_them() {
         let mut h = crate::scenario::Harness::new();
@@ -7617,6 +7679,7 @@ mod tests {
 
     #[test]
     fn theme_options_provider_registry_filters_unknown_and_retains_unavailable() {
+        crate::i18n::install();
         use crate::theme_options::{Availability, Provider};
         let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1","name":"Providers","base":"dark","options":[
             {"id":"blur","type":"range","default":0},
@@ -7685,6 +7748,7 @@ mod tests {
 
     #[test]
     fn blur_slider_reserves_readout_meter_and_disabled_reason() {
+        crate::i18n::install();
         use crate::theme_files::OptionValue;
         use crate::theme_options::Availability;
         let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
@@ -9729,6 +9793,7 @@ mod tests {
     /// XZ and YZ. Saved, refused when unknown, and taken back by Cancel and Restore Defaults.
     #[test]
     fn origin_plane_names_change_only_the_names_shown() {
+        crate::i18n::install();
         use OriginPlaneNames::{TopFrontRight, Xyz};
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
         assert_eq!(old.origin_plane_names, Xyz, "older preferences keep XY, XZ and YZ");
@@ -9797,6 +9862,7 @@ mod tests {
     /// choice's "or" was English in every language, and Direct interaction had no message.
     #[test]
     fn modifier_choice_and_direct_interaction_are_translated() {
+        crate::i18n::install();
         let _japanese = solidcraft_ui_text::scope("ja");
         let either = crate::tool_modifiers::ModifierCombo::CTRL_ALT.shown_label();
         assert!(either.contains(" または ") && !either.contains(" or "), "{either}");
@@ -10673,6 +10739,7 @@ mod tests {
 
     #[test]
     fn creo_navigation_settings_show_localised_bindings() {
+        crate::i18n::install();
         let _language = solidcraft_ui_text::scope("de");
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         control(&mut app, &json!({"open":"Navigation", "nav":"creo", "language":"de"})).unwrap();
