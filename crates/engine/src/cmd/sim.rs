@@ -53,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SetupReply>)
         .noundo()
         .doc_only()
-        .params("stock: {box: {min: [x,y,z], max: [x,y,z]}}, mm in the workpiece frame; tools: [{id, diameter, flute_length, shape?: flat|ball|bull (cut) or cone|taper|profile (reported, not cut), plus the fields that shape needs: bull takes corner_radius, above 0 and below the tool radius}], mm; gcode: text for a generic 3-axis machine; initial_tool?: the tool the moves before the first M6 cut with; resolution?: ray spacing h in mm (default: the finest of 0.05 to 20 mm whose stock fits half of memory_mb); memory_mb?: cap from 1 to 1024 (default 512); rapid_mm_min?: rapid feed in mm/min, above 0 (default 5000), used for rapids and for moves with no feed. Parses the G-code, builds the stock uncut and resets the cursor and the playhead to 0, replacing any earlier simulation. Each move takes its path length over its feed; an arc takes its own arc length. A move with no tool, or a tool not listed, is a diagnostic. Replies moves, bounds, h, memory_estimate {bytes, budget}, diag_count and diagnostics [{line, col, severity, msg}] (the first 200). Bad or too large input is refused and nothing changes. Nothing is cut yet: see sim.run."),
+        .params("stock: {box: {min: [x,y,z], max: [x,y,z]}}, mm in the workpiece frame; tools: [{id, diameter, flute_length, shape?: flat|ball|bull (cut) or cone|taper|profile (reported, not cut), plus the fields that shape needs: bull takes corner_radius, above 0 and at most the tool radius (equal to it is a ball)}], mm; gcode: text for a generic 3-axis machine; initial_tool?: the tool the moves before the first M6 cut with; resolution?: ray spacing h in mm (default: the finest of 0.05 to 20 mm whose stock fits half of memory_mb); memory_mb?: cap from 1 to 1024 (default 512); rapid_mm_min?: rapid feed in mm/min, above 0 (default 5000), used for rapids and for moves with no feed. Parses the G-code, builds the stock uncut and resets the cursor and the playhead to 0, replacing any earlier simulation. Each move takes its path length over its feed; an arc takes its own arc length. A move with no tool, or a tool not listed, is a diagnostic. Replies moves, bounds, h, memory_estimate {bytes, budget}, diag_count and diagnostics [{line, col, severity, msg}] (the first 200). Bad or too large input is refused and nothing changes. Nothing is cut yet: see sim.run."),
     CommandSpec::new("sim.run", "Run Simulation", crate::checked!("sim.run", run))
         .contract(&RUN)
         .output(output_schema_for::<RunReply>)
@@ -161,13 +161,14 @@ fn shape_of(t: &ToolParams) -> std::result::Result<Shape, String> {
         ShapeName::Flat => Ok(Shape::Flat),
         ShapeName::Ball => Ok(Shape::Ball),
         ShapeName::Bull => {
-            // A bull-nose's corner is strictly inside its radius: at the radius it is a ball, at zero a flat end.
+            // A corner radius above 0 and at most the tool radius: at the radius the corner is a ball, which is
+            // what the bull-nose becomes (a corner of 0 is a flat end, which takes no corner radius).
             let radius = t.diameter / 2.0;
             let rc = t
                 .corner_radius
-                .filter(|r| r.is_finite() && *r > 0.0 && *r < radius)
-                .ok_or_else(|| format!("tool {id}: bull corner_radius must be above 0 and below the tool radius {radius} mm"))?;
-            Ok(Shape::Bull { rc })
+                .filter(|r| r.is_finite() && *r > 0.0 && *r <= radius)
+                .ok_or_else(|| format!("tool {id}: bull corner_radius must be above 0 and at most the tool radius {radius} mm"))?;
+            Ok(if rc == radius { Shape::Ball } else { Shape::Bull { rc } })
         }
         ShapeName::Cone => Ok(Shape::Cone { tip_d: length(t.tip_diameter, "tip_diameter")?, angle: half_angle()? }),
         ShapeName::Taper => Ok(Shape::Taper { a0: length(t.a0, "a0")?, r0: length(t.r0, "r0")?, angle: half_angle()? }),

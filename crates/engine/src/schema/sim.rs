@@ -31,7 +31,7 @@ pub enum ShapeName {
     Flat,
     /// Corner radius equal to the tool radius.
     Ball,
-    /// Needs `corner_radius`, above 0 and below the tool radius.
+    /// Needs `corner_radius`, above 0 and at most the tool radius (at the radius it is a ball).
     Bull,
     /// Needs `tip_diameter` and `angle`.
     Cone,
@@ -53,7 +53,7 @@ pub struct ToolParams {
     /// The shape (default `flat`).
     #[serde(default)]
     pub shape: Option<ShapeName>,
-    /// `bull`: the corner radius, mm, above 0 and below the tool radius.
+    /// `bull`: the corner radius, mm, above 0 and at most the tool radius (equal to it is a ball).
     #[serde(default)]
     pub corner_radius: Option<f64>,
     /// `cone`: the tip diameter, mm.

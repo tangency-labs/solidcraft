@@ -153,10 +153,6 @@ fn hostile_sim_params_are_refused_not_panicked() {
             with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": -1}])),
         ),
         (
-            "bull with a corner radius at the tool radius",
-            with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": 3}])),
-        ),
-        (
             "bull with a corner radius above the tool radius",
             with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": 1e9}])),
         ),
@@ -486,6 +482,18 @@ fn a_ball_slot_removes_its_analytic_volume() {
     let removed = run["removed_volume"].as_f64().unwrap_or(f64::NAN);
     assert!((removed - want).abs() <= 0.02 * want, "removed {removed} mm^3, analytic {want} mm^3");
     assert!(call(&mut s, "sim.status", &json!({}))["diag_count"] == 0, "a ball is cut, not reported");
+}
+
+#[test]
+fn a_bull_nose_at_the_tool_radius_cuts_as_a_ball() {
+    let removed = |tool: Value| {
+        let mut s = Session::default();
+        call(&mut s, "sim.setup", &slot_with(tool));
+        call(&mut s, "sim.run", &json!({}))["removed_volume"].as_f64().unwrap_or(f64::NAN)
+    };
+    let ball = removed(json!({"id": 0, "diameter": 6, "flute_length": 20, "shape": "ball"}));
+    let bull = removed(json!({"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": 3}));
+    assert_eq!(ball, bull);
 }
 
 #[test]
