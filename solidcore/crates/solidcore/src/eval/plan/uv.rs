@@ -130,7 +130,8 @@ pub(crate) fn wrap_into(x: f64, (a, b): (f64, f64)) -> f64 {
         return a;
     }
     let w = x - ((x - a) / period).floor() * period;
-    w.clamp(a, b)
+    // `period > 0` above, so `a < b`; max then min cannot panic (`f64::clamp` does on NaN).
+    w.max(a).min(b)
 }
 
 impl Domain {
@@ -138,7 +139,7 @@ impl Domain {
         let mut out = uv;
         for (d, x) in out.iter_mut().enumerate() {
             if let (Some((a, b)), None) = (self.range[d], self.period[d]) {
-                *x = x.clamp(a.min(b), a.max(b));
+                *x = x.max(a.min(b)).min(a.max(b));
             }
         }
         out
@@ -214,7 +215,7 @@ impl Starts {
                 *longer = longer.iter().step_by(2).copied().chain(last).collect();
                 longer.dedup();
             }
-            let mut grid = Vec::with_capacity(us.len() * vs.len());
+            let mut grid = Vec::new();
             for &u in &us {
                 for &v in &vs {
                     if let Some((q, _, _)) = s.derivs(u, v) {
