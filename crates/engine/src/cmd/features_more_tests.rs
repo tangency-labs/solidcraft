@@ -2594,6 +2594,64 @@ fn an_imported_assembly_with_a_repeated_part_moves_as_one() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #13382: a design saved by a version whose STEP reader numbered the file's bodies otherwise
+/// opens with each body where it was and with its own shape. Here the older reader left the
+/// file's first body out, so every stored name and tree index after it is one lower. The names
+/// went by index: each body took the next one's name, and that name put it in the next part's
+/// component.
+#[test]
+fn an_import_saved_by_an_older_step_reader_opens_with_its_bodies_in_place() {
+    use solidcraft_doc::FeatureKind;
+    use solidcraft_doc::kernel::StepNode;
+    let dir = std::env::temp_dir().join(format!("solidcraft-13382-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("parts.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    // Three parts of different sizes, each in its own component and placed apart.
+    for (k, (name, size)) in [("Small", [10, 10, 10]), ("Long", [40, 6, 6]), ("Tall", [8, 8, 30])].into_iter().enumerate() {
+        let made = run(&mut src, "component.create", json!({"name": name}));
+        run(&mut src, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "body_name": name}));
+        run(&mut src, "component.activate", json!({"component": 0}));
+        // The first part is grounded where it is made.
+        if k > 0 {
+            run(&mut src, "occurrence.move", json!({"occurrence": made["occurrence"], "translate": [100 * k, 0, 0], "space": "world"}));
+        }
+    }
+    run(&mut src, "file.export", json!({"path": path}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    let before: Vec<_> = names.iter().map(|n| placed_bounds(&s, n)).collect();
+
+    // The design as the older reader saved it: no body 0, the others numbered from 0.
+    let mut doc = (*s.doc).clone();
+    let f = doc.features.iter_mut().find(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+    let first = f.body_names.remove(0);
+    fn renumber(nodes: &mut [StepNode]) {
+        for n in nodes {
+            n.bodies = n.bodies.iter().filter(|b| **b != 0).map(|b| b - 1).collect();
+            renumber(&mut n.children);
+        }
+    }
+    if let FeatureKind::Import { components, skip, .. } = &mut f.kind {
+        renumber(components);
+        assert!(skip.is_empty(), "no part is placed twice: {skip:?}");
+    }
+
+    let opened = Session::opened(doc, None);
+    let now: Vec<String> = opened.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(now.len(), 3, "the body the older reader left out is built too: {now:?}");
+    for (n, b) in names.iter().zip(&before) {
+        if *n == first {
+            continue;
+        }
+        let got = placed_bounds(&opened, n);
+        assert!(shifted(*b, got, [0.0; 3]), "{n} opened at {got:?}, was at {b:?}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A 20 × 30 × 8 plate made in its own component and stood up by its placement (turned
 /// `angle` degrees about X), the way an imported part set upright is: in the world it lies
 /// flat at `x0`..`x0 + 20`, y 0..30, z 0..8. The design is active again afterwards.
