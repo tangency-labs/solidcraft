@@ -1255,10 +1255,15 @@ fn a_horizontal_distance_from_the_origin_changed_from_zero_moves_the_point() {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let disc = std::f64::consts::PI * 16.0 * 5.0;
-    for value in ["0.5 mm", "0 mm", "0.5 mm", "-0 mm"] {
+    for (value, x) in [("0.5 mm", 0.5), ("0 mm", 0.0), ("0.5 mm", 0.5), ("-0 mm", 0.0)] {
         let r = run(&mut s, "parameters.change", json!({"name": "Offset", "expression": value}));
         assert_eq!(r["errors"], json!([]), "{value}: {r}");
         assert!(rel(volume(&mut s), disc) < 1e-3, "{value}");
+        // The disc is centred on the point, so its box's middle in x is where the point went.
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let b = &m["bodies"][0]["bbox"];
+        let middle = (b["min"][0].as_f64().unwrap_or(f64::NAN) + b["max"][0].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        assert!((middle - x).abs() < 1e-3, "{value}: the point is at x = {middle}, want {x}: {m}");
     }
 }
 
