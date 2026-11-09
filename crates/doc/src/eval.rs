@@ -1802,19 +1802,27 @@ fn hash_placement(m: &Mat, h: &mut impl Hasher) {
 /// relative to it (a sketch projecting a face of another part, To Object, a mirror of a placed
 /// body) is evaluated again. `st` is the model the feature starts from, which says what
 /// component a body it names belongs to (without it, every component is taken as read).
-/// [`placement_digest`] of a mirror of placed bodies: its own component's frame, each placement it
-/// was picked at (the copy's component, frame and the frame it was picked in) and the offsets of
-/// the bodies it mirrors (#1938).
-fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+/// [`placement_digest`] of a mirror of placed bodies: each placement it was picked at (the copy's
+/// component, that component's frame and the frame it was picked in) relative to its own
+/// component's frame, and the offsets of the bodies it mirrors (#1938). It mirrors in a plane of
+/// its own component and places its copies by those two frames relative to it, so a joint that
+/// moves its own part together with what it mirrors leaves it as it was (#14271). A plane read
+/// from model geometry can lie in another part, so its own frame counts then too, as before.
+fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+    let own = doc.component_transform(f.component);
+    let Some(inverse) = crate::mat_inverse(&own) else { return placements_hash(doc) };
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    if !placement_reuse::local_plane(plane, 0) {
+        own.iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    }
     // A feature added after the mirror that builds on its copies needs them made for that.
     placement_reuse::copies_only_shown(doc, f).hash(&mut h);
     for placed in placements.iter().map(|path| mirror_copy_frame(doc, path)) {
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
-            frame.iter().chain(&picked).flatten().for_each(|x| x.to_bits().hash(&mut h));
+            hash_placement(&crate::mat_mul(&inverse, &frame), &mut h);
+            hash_placement(&crate::mat_mul(&inverse, &picked), &mut h);
         }
     }
     for b in bodies {
@@ -1965,7 +1973,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
         // A mirror of placed bodies follows the placements it was picked at and its own component's
         // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
-        FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
+        FeatureKind::Mirror { placements, bodies, plane, .. } if !placements.is_empty() => {
+            return mirror_placements_digest(doc, f, plane, placements, bodies);
+        }
         // A combine moves tools placed differently from its target into the target's frame (#3383).
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
