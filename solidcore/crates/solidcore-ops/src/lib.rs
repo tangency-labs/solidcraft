@@ -66,6 +66,8 @@ pub use order::Order;
 pub use step_assembly::{placed_bodies, PlacedBody};
 
 #[cfg(test)]
+mod noisy_round_tests;
+#[cfg(test)]
 mod test_corpus;
 #[cfg(test)]
 mod tests;
