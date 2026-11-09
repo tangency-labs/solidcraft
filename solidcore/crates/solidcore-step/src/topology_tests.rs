@@ -576,6 +576,52 @@ fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
     });
 }
 
+/// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
+/// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
+/// vertex's angle round the tube, as a band round the axis gets one round the tube.
+#[test]
+fn a_quarter_elbow_gets_a_seam_round_the_axis() {
+    let mut w = W::default();
+    // The tube circle at u = 0 (in the plane y = 0, about (20, 0, 0)) and at u = π/2 (x = 0).
+    let ring = |w: &mut W, c: V, n: V, x: V| {
+        let v = w.vertex([c[0] + 5.0 * x[0], c[1] + 5.0 * x[1], c[2] + 5.0 * x[2]]);
+        let k = w.circle(c, n, x, 5.0);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    // Each circle runs with the torus's v about its normal −(the tube's direction there).
+    let start = ring(&mut w, [20.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    let end = ring(&mut w, [0.0, 20.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},20.,5.)"));
+    // The face lies to the left of its loops in (u, v): from u = 0 it runs −v, from π/2 +v.
+    let (x, y) = (w.oe(start, false), w.oe(end, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let tube = w.face(&[bx, by], torus, true);
+    // The end disks, facing out of the elbow: −y at its start, −x at its end.
+    let p0 = w.plane([20.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(start, true);
+    let bx = w.bound(&[x], true, true);
+    let d0 = w.face(&[bx], p0, true);
+    let p1 = w.plane([0.0, 20.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let x = w.oe(end, false);
+    let bx = w.bound(&[x], true, true);
+    let d1 = w.face(&[bx], p1, true);
+    let shell = closed_shell(&mut w, &[tube, d0, d1]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('elbow',#{shell})"));
+    let r = read_solids(&w.file(&[solid]));
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    let s = r.solids.into_iter().next().unwrap();
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    solidcore_ops::record_check::agreement(&s.brep).unwrap();
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The seam: a circle about the axis (centred on it), a quarter turn long.
+    let seam = s.brep.edges.iter().find(
+        |e| matches!(&e.curve, solidcore_record::brep::Curve::Circle { frame, .. } if frame.origin[0].abs() < 1e-9 && frame.origin[1].abs() < 1e-9),
+    );
+    let [t0, t1] = solidcore_ops::label::edge_curve_interval(seam.expect("a seam about the axis")).unwrap();
+    assert!((t1 - t0 - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{t0} {t1}");
+}
+
 /// A ball whose one face is bounded by two vertex loops, at its poles: the whole sphere, closed
 /// by a meridian seam from pole to pole.
 #[test]
