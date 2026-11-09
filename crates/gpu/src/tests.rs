@@ -2,7 +2,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Body, BoolOp};
 
-use solidcore::eval::EvalSurface;
+use solidcore_tess::EvalSurface;
 use solidcore_tess::TessPlan;
 use solidcraft_viewport_gpu::{GpuError, PackedPlans, SHADER, TessGpu, VERTEX_STRIDE, open_headless};
 

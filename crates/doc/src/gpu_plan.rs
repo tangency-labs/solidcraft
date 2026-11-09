@@ -4,7 +4,7 @@
 //! its CPU evaluation and this one for the GPU, so the viewport's cache, keyed by each plan's
 //! allocation, keeps its uploads from frame to frame.
 
-use solidcore_convert::vec3;
+use solidcore_tess::vec3;
 use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan, TessPlan};
 
 /// `plan` in solidcore-tess's form: the same surfaces, nodes, triangles and edges, with no pole
@@ -18,17 +18,17 @@ pub fn gpu_plan(plan: &TessPlan) -> solidcore_tess::TessPlan {
     }
 }
 
-fn curve(c: &EvalCurve) -> solidcore::eval::EvalCurve {
-    solidcore::eval::EvalCurve::new(c.degree, c.knots.clone(), c.ctrl.clone())
+fn curve(c: &EvalCurve) -> solidcore_tess::EvalCurve {
+    solidcore_tess::EvalCurve::new(c.degree, c.knots.clone(), c.ctrl.clone())
 }
 
-fn surface(s: &EvalSurface) -> solidcore::eval::EvalSurface {
+fn surface(s: &EvalSurface) -> solidcore_tess::EvalSurface {
     match s {
-        EvalSurface::Plane { origin, du, dv } => solidcore::eval::EvalSurface::Plane { origin: vec3(*origin), du: vec3(*du), dv: vec3(*dv) },
+        EvalSurface::Plane { origin, du, dv } => solidcore_tess::EvalSurface::Plane { origin: vec3(*origin), du: vec3(*du), dv: vec3(*dv) },
         EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => {
-            solidcore::eval::EvalSurface::nurbs_closed(*degree, knots.clone(), *count, ctrl.clone(), *closed)
+            solidcore_tess::EvalSurface::nurbs_closed(*degree, knots.clone(), *count, ctrl.clone(), *closed)
         }
-        EvalSurface::Revolved { profile, origin, axis, transform, swap } => solidcore::eval::EvalSurface::Revolved {
+        EvalSurface::Revolved { profile, origin, axis, transform, swap } => solidcore_tess::EvalSurface::Revolved {
             profile: curve(profile),
             origin: vec3(*origin),
             axis: vec3(*axis),
@@ -53,8 +53,8 @@ fn face(f: &FacePlan) -> solidcore_tess::FacePlan {
 
 #[cfg(test)]
 mod tests {
-    use solidcore_convert::vec3;
     use solidcore_record::Vec3;
+    use solidcore_tess::vec3;
     use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan, TessPlan};
 
     /// Every field of every surface kind, face and edge comes across unchanged, read back through
@@ -86,10 +86,10 @@ mod tests {
         };
         let gpu = super::gpu_plan(&plan);
         let [plane, nurbs, revolved] = gpu.surfaces.as_slice() else { panic!("{:?}", gpu.surfaces) };
-        assert_eq!(*plane, solidcore::eval::EvalSurface::Plane { origin: vec3(Vec3::X), du: vec3(Vec3::Y), dv: vec3(Vec3::Z) });
-        let solidcore::eval::EvalSurface::Nurbs(n) = nurbs else { panic!("{nurbs:?}") };
+        assert_eq!(*plane, solidcore_tess::EvalSurface::Plane { origin: vec3(Vec3::X), du: vec3(Vec3::Y), dv: vec3(Vec3::Z) });
+        let solidcore_tess::EvalSurface::Nurbs(n) = nurbs else { panic!("{nurbs:?}") };
         assert_eq!((n.degree(), n.knots(), n.count(), n.ctrl(), n.closed()), ([2, 1], &knots, [3, 2], ctrl.as_slice(), [true, false]));
-        let solidcore::eval::EvalSurface::Revolved { profile: p, origin, axis, transform: t, swap } = revolved else { panic!("{revolved:?}") };
+        let solidcore_tess::EvalSurface::Revolved { profile: p, origin, axis, transform: t, swap } = revolved else { panic!("{revolved:?}") };
         assert_eq!((p.degree(), p.knots(), p.ctrl()), (profile.degree, profile.knots.as_slice(), profile.ctrl.as_slice()));
         assert_eq!((*origin, *axis, *t, *swap), (vec3(Vec3::Z), vec3(Vec3::Y), transform, true));
         let [f] = gpu.faces.as_slice() else { panic!("{:?}", gpu.faces) };

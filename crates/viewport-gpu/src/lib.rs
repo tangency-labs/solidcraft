@@ -13,11 +13,11 @@
 //! with [`GpuMesh::indices`]; nothing comes back to the CPU.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
-use solidcore::eval::{EvalCurve, EvalSurface};
 use solidcore_record::Vec3;
 #[cfg(not(target_arch = "wasm32"))]
 use solidcore_tess::Mesh;
 use solidcore_tess::TessPlan;
+use solidcore_tess::{EvalCurve, EvalSurface};
 use wgpu::util::DeviceExt;
 
 pub mod capture;
@@ -567,9 +567,9 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
             EvalSurface::Plane { origin, du, dv } => {
                 head[0] = 0;
                 head[8] = word(data.len())?;
-                push3(&mut data, solidcore_convert::record_vec3(*origin));
-                push3(&mut data, solidcore_convert::record_vec3(*du));
-                push3(&mut data, solidcore_convert::record_vec3(*dv));
+                push3(&mut data, solidcore_tess::record_vec3(*origin));
+                push3(&mut data, solidcore_tess::record_vec3(*du));
+                push3(&mut data, solidcore_tess::record_vec3(*dv));
             }
             EvalSurface::Nurbs(n) => {
                 let (degree, knots, count, ctrl, closed) = (n.degree(), n.knots(), n.count(), n.ctrl(), n.closed());
@@ -594,8 +594,8 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
                 head[5] = k;
                 head[7] = c;
                 head[8] = word(data.len())?;
-                push3(&mut data, solidcore_convert::record_vec3(*origin));
-                push3(&mut data, solidcore_convert::record_vec3(*axis));
+                push3(&mut data, solidcore_tess::record_vec3(*origin));
+                push3(&mut data, solidcore_tess::record_vec3(*axis));
                 data.extend(transform.iter().flatten().map(|x| *x as f32));
                 head[9] = u32::from(*swap);
                 let m = transform;

@@ -53,9 +53,6 @@ solidcore-record = { path = "solidcore/crates/solidcore-record" }
 # Geometry made drawable (solidcore's layers §3): the display mesh and its levels of detail, the
 # types SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
 solidcore-tess = { path = "solidcore/crates/solidcore-tess" }
-# The one conversion between the record's vectors and the kernel evaluator's, which solidcore-tess
-# uses too. Vendored with solidcore, in the same subtree.
-solidcore-convert = { path = "solidcore/crates/solidcore-convert" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 

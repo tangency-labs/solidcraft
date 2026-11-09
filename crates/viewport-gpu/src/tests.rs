@@ -83,9 +83,9 @@ fn tessellation_without_vertices_does_not_dispatch() {
     let Some(gpu) = gpu() else { return };
     let plan = TessPlan {
         surfaces: vec![EvalSurface::Plane {
-            origin: solidcore_convert::vec3(Vec3::ZERO),
-            du: solidcore_convert::vec3(Vec3::X),
-            dv: solidcore_convert::vec3(Vec3::Y),
+            origin: solidcore_tess::vec3(Vec3::ZERO),
+            du: solidcore_tess::vec3(Vec3::X),
+            dv: solidcore_tess::vec3(Vec3::Y),
         }],
         faces: vec![solidcore_tess::FacePlan { surface: Some(0), ..Default::default() }],
         ..Default::default()

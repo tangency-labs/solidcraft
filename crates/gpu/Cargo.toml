@@ -11,8 +11,6 @@ workspace = true
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
-solidcore = { workspace = true }
-solidcore-convert = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-tess = { workspace = true }
 robust = "1.2"
