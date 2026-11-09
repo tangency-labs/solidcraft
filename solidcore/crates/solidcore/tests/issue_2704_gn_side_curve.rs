@@ -1,9 +1,10 @@
 //! #2704: with the G^n section's touch circles alone (the default kernel since its flag,
-//! `fillet_gn_section_generator`, was retired), a variable box round failed at one end
-//! ("failure to calculate intersection of fillet surface with side face", 1001) for laws such
-//! as 4 to 0, 2 to 0, 4 to 2, 0.5 to 4 and 8 to 4, and not for 4 to 3 or 0 to 4. The touch
-//! circle's section leaves the end face's plane at an end, so the side curve must come from
-//! the plane's equation (WR-682), not the plane's domain or the surfaces' domains.
+//! `fillet_gn_section_generator`, was retired: WR-685 addendum 2026-11-06), a variable box
+//! round failed at one end ("failure to calculate intersection of fillet surface with side
+//! face", 1001) for laws such as 4 to 0, 2 to 0, 4 to 2, 0.5 to 4 and 8 to 4, and not for
+//! 4 to 3 or 0 to 4. The touch circle's section leaves the end face's plane at an end, so
+//! the side curve must come from the plane's equation (WR-682), not the plane's domain or
+//! the surfaces' domains.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

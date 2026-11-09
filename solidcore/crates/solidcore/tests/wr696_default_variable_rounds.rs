@@ -17,11 +17,13 @@
     clippy::indexing_slicing
 )]
 
+use solidcore::blend::definition_check::{bare_blend_faces, BlendFaceKind, BlendFaceLog};
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::NoRoomReason;
 use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::p1::{
@@ -172,4 +174,53 @@ fn folding_balls_are_refused_on_the_default_kernel() {
         err.contains("fold over one another where its radius is 19.63563:"),
         "{err}"
     );
+}
+
+/// A law built from its control radii.
+type LawOf<'a> = &'a dyn Fn(&[f64]) -> FilletLaw;
+
+/// The rounds above are their definitions (review of tangency-labs/solidcore#2936): with
+/// SolidCraft's fix set (every fix, so `fillet_round_as_definition` too) each face the
+/// round makes, its pieces and the corner balls' zones between them, is a
+/// [`solidcore::surface::procedural_blend::ProceduralBlend`], and none is bare
+/// (`blend::definition_check`). The default kernel builds the same faces as their certified
+/// nets: `fillet_round_as_definition`, which keeps the definition, is a fix of its own and
+/// stays off by default.
+#[test]
+fn the_rounds_are_their_definitions_with_every_fix() {
+    let linear = |r: &[f64]| {
+        law(
+            1,
+            r,
+            &[0.0, 0.25, 0.5, 0.75, 1.0],
+            &[0.0, 0.25, 0.5, 0.75, 1.0],
+            &[2, 1, 1, 1, 2],
+        )
+    };
+    let dip = |r: &[f64]| law(1, r, &[0.0, 0.5, 1.0], &[0.0, 0.5, 1.0], &[2, 1, 2]);
+    let cases: [(&[f64], LawOf, usize); 2] = [
+        (&[3.0, 2.0, 4.0, 2.0, 3.0], &linear, 6),
+        (&[4.0, 2.0, 4.0], &dip, 3),
+    ];
+    for (r, law_of, faces) in cases {
+        let k = &mut Kernel::default();
+        k.fixes = UpstreamFixes::all();
+        k.blend_face_log = Some(BlendFaceLog::default());
+        let mut b = create_box(k, Vec3::ZERO, 20.0, 20.0, 20.0).unwrap();
+        let (p, q) = (Point3::new(0.0, 0.0, 20.0), Point3::new(20.0, 0.0, 20.0));
+        round(k, &mut b, p, q, r, law_of).expect("the round builds");
+        let made = k.blend_face_log.as_ref().unwrap().last().to_vec();
+        // the round's pieces, and a corner ball's zone at each corner of the law
+        assert_eq!(made.len(), faces, "{r:?}");
+        assert!(made.iter().any(|m| m.kind == BlendFaceKind::Round), "{r:?}");
+        for m in &made {
+            let s = b.face(m.face).unwrap().surface.as_ref().unwrap();
+            assert!(
+                s.procedural_blend().is_some(),
+                "{r:?}: {:?} is not a definition",
+                m.kind
+            );
+        }
+        assert!(bare_blend_faces(&b, &made).unwrap().is_empty(), "{r:?}");
+    }
 }
