@@ -659,7 +659,7 @@ fn straight_edge_axis(pts: &[Vec3]) -> Option<Vec3> {
 }
 
 /// Normal of the mesh face `f` near `p`.
-fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
+pub(crate) fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
     m.triangles
         .iter()
         .zip(&m.tri_face)

@@ -66,7 +66,7 @@ pub(crate) fn dims(kind: usize, opts: &HoleOpts, to_object: bool) -> Vec<Dim> {
 
 /// Tapped bores use the engine's catalogued cut-tap drill, including Unified and parallel pipe sizes.
 /// A custom draft with an error must not illustrate its stale, last valid designation.
-fn bore_diameter(diameter: &str, opts: &HoleOpts, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> Option<f64> {
+pub(crate) fn bore_diameter(diameter: &str, opts: &HoleOpts, eval: &dyn Fn(&str, ValueKind) -> Option<f64>) -> Option<f64> {
     if opts.tapped {
         if opts.custom_thread.as_ref().is_some_and(|draft| draft.error.is_some()) {
             return None;
