@@ -818,6 +818,7 @@ pub fn setup_fonts(ctx: &egui::Context) {
 #[cfg(test)]
 pub(crate) fn test_context() -> egui::Context {
     crate::i18n::install();
+    crate::icon_svg::install();
     let ctx = egui::Context::default();
     setup_bundled_fonts(&ctx);
     ctx

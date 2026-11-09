@@ -20,6 +20,7 @@ pub(crate) mod file_view;
 mod framing;
 mod history;
 mod history_group;
+pub mod icons;
 mod layout;
 mod look_chain;
 pub mod menu;

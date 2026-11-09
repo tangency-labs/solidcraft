@@ -853,6 +853,8 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
+        // The app's icons, likewise, before the first frame.
+        icon_svg::install();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
