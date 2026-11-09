@@ -237,7 +237,7 @@ impl StageBar {
                 result.stage = Some(index);
             }
         }
-        let search_width = super::CommandSearch::closed_width(ui.ctx()).max(188.0);
+        let search_width = super::CommandSearch::closed_width(ui.ctx(), Some("S")).max(188.0);
         let action_width = actions.iter().map(|a| super::actions::icon_label_width(ui, a.label, a.icon, a.primary)).sum::<f32>();
         ui.add_space((ui.available_width() - search_width - action_width - t.space_4 * (actions.len() + 2) as f32).max(t.space_8));
         for (index, item) in actions.iter().enumerate() {

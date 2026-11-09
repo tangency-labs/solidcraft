@@ -1205,8 +1205,9 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     let text = if format == BendTableFormat::Json {
         serde_json::to_string_pretty(&table).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
-        // Always quote text fields: body/rule names may include commas, quotes or newlines.
-        let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
+        // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
+        // as a spreadsheet formula does.
+        let quote = solidcraft_doc::csv::quoted;
         let mut csv =
             "body,rule,thickness_mm,k_factor,bend,angle_deg,direction,radius_mm,allowance_mm,length_mm,start_x_mm,start_y_mm,end_x_mm,end_y_mm,included_angle_deg\r\n"
                 .to_string();

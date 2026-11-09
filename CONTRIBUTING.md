@@ -448,7 +448,7 @@ comments only when they're about crashes, wrong results, data loss or security.
 
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
 
 ## Labels and triage
 

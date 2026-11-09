@@ -54,6 +54,7 @@ mod coverage_tests;
 mod tests;
 
 // The contracts, by command file.
+pub mod align;
 pub mod appearance;
 pub mod bom;
 pub mod browser;
@@ -105,6 +106,7 @@ pub mod render_stage;
 pub mod render_surface_resources;
 pub mod render_ui;
 pub mod save;
+pub mod save_mesh;
 pub mod section;
 pub mod select;
 pub mod sheet;
