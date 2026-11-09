@@ -1389,7 +1389,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn product_preview_lights_decode_simple_colours_as_the_cpu_image_does() {
-    use solidcraft_engine::render::StandardView;
+    use solidcraft_viewport::StandardView;
     // The CPU image's transfer (`job::image` decode/encode, `studio::tone_map`).
     let decode = |s: f64| if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) };
     let encode = |l: f64| if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
@@ -1407,7 +1407,7 @@ fn product_preview_lights_decode_simple_colours_as_the_cpu_image_does() {
         let (_, gpu) = gpu_scene(&scene).unwrap();
         let mut camera = Camera { fov: 0.0, ..Default::default() };
         camera.set_view(StandardView::Iso);
-        camera.fit(&scene.bounds);
+        camera.fit(&solidcraft_engine::render::view_bounds(&scene.bounds));
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
         let eye = camera.eye().to_f32();
         let expected: Vec<u8> = (0..3)
