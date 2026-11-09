@@ -1124,8 +1124,24 @@ pub fn gn_enclose_over(
     );
     let sysk = system(&pk, &leader, &tangent, r, side, law_r);
     let mut sx = bx_.map(Ser::constant);
+    // the highest power of eps solved for (the section's jets of order n are the face
+    // curve's)
+    let eps_solved = if n >= 1 {
+        cmin_usize(tr.e(), n - 1)
+    } else {
+        tr.e()
+    };
     for tot in 1..=(tr.s() + tr.e()) {
-        let (sg, _) = gn_try!(gn_evaluate(&sysk, &sx, tr), None);
+        // this order's coefficients are those with i + k = tot, k <= eps_solved: G's at
+        // them depend only on x's at lower or equal powers of sigma and eps, so G is
+        // computed only there (bit for bit the whole truncation's, `Trunc::computing`),
+        // and not at all at an order with none to solve (the last ones, where every
+        // i = tot - k is past tr.s)
+        let eps = cmin_usize(eps_solved, tot);
+        if tot > tr.s() + eps {
+            continue;
+        }
+        let (sg, _) = gn_try!(gn_evaluate(&sysk, &sx, tr.computing(tot, eps)), None);
         for i in 0..=cmin_usize(tr.s(), tot) {
             let k = tot - i;
             // the section's jets of order n are the face curve's (gn_top_jets, 3bc54a4)

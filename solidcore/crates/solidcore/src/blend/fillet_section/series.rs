@@ -65,10 +65,21 @@ impl GnScalar for Ivl {
 }
 
 /// `sm_Trunc`: the highest powers of sigma (`s`) and eps (`e`) kept.
+///
+/// Not the fork's: a truncation may also leave out every coefficient past a total degree
+/// `i + k` and a power of eps ([`Trunc::computing`]): those are left 0, and nothing else
+/// changes. A coefficient of a sum or a product depends only on the operands' coefficients
+/// at the same or lower powers of both sigma and eps, so the coefficients computed are
+/// bit for bit those of the whole truncation; the loops the orders set (the binomial
+/// series' terms, a composition's powers) keep the whole truncation's counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Trunc {
     s: usize,
     e: usize,
+    /// The highest total degree `i + k` computed.
+    degree: usize,
+    /// The highest power of eps computed.
+    eps: usize,
 }
 
 impl Trunc {
@@ -82,7 +93,31 @@ impl Trunc {
                 reason: "a series' orders exceed SM_GN_MAXS or SM_GN_MAXE",
             });
         }
-        Ok(Self { s, e })
+        Ok(Self {
+            s,
+            e,
+            degree: s + e,
+            eps: e,
+        })
+    }
+
+    /// This truncation, computing only the coefficients `c[i][k]` with `i + k <= degree`
+    /// and `k <= eps` (the rest left 0; see [`Trunc`]). The orders [`Trunc::s`] and
+    /// [`Trunc::e`] are this truncation's.
+    #[must_use]
+    pub const fn computing(self, degree: usize, eps: usize) -> Self {
+        Self {
+            s: self.s,
+            e: self.e,
+            degree,
+            eps,
+        }
+    }
+
+    /// Whether `c[i][k]` is computed.
+    #[inline]
+    const fn computes(self, i: usize, k: usize) -> bool {
+        i <= self.s && k <= self.e && k <= self.eps && i + k <= self.degree
     }
 
     /// The highest power of sigma kept.
@@ -134,12 +169,15 @@ impl<T: GnScalar> Ser<T> {
     }
 
     /// The coefficients kept by `tr` set from `f(i, k)`, the rest 0 (the fork's
-    /// `sm_SerConst<T>(T(0.0))` then its loops over `i <= tr.s`, `k <= tr.e`).
+    /// `sm_SerConst<T>(T(0.0))` then its loops over `i <= tr.s`, `k <= tr.e`), where `tr`
+    /// computes them ([`Trunc::computing`]).
     fn from_fn(tr: Trunc, mut f: impl FnMut(usize, usize) -> T) -> Self {
         let mut r = Self::constant(T::of(0.0));
         for (i, row) in r.c.iter_mut().enumerate().take(tr.s + 1) {
             for (k, x) in row.iter_mut().enumerate().take(tr.e + 1) {
-                *x = f(i, k);
+                if tr.computes(i, k) {
+                    *x = f(i, k);
+                }
             }
         }
         r
@@ -157,6 +195,19 @@ impl<T: GnScalar> Ser<T> {
         Self::from_fn(tr, |i, k| self.at(i, k) - b.at(i, k))
     }
 
+    /// `self = self.add(&b.scale(f, tr), tr)` in place, for a `self` that is 0 at every
+    /// coefficient `tr` does not compute (as every result of these operations under `tr`
+    /// is): each computed coefficient is `c + b f`, rounded as the two operations round it.
+    pub fn add_scaled(&mut self, b: &Self, f: T, tr: Trunc) {
+        for (i, (row, rb)) in self.c.iter_mut().zip(&b.c).enumerate().take(tr.s + 1) {
+            for (k, (x, &y)) in row.iter_mut().zip(rb).enumerate().take(tr.e + 1) {
+                if tr.computes(i, k) {
+                    *x = *x + y * f;
+                }
+            }
+        }
+    }
+
     /// `sm_SerScale`: each coefficient times `f`.
     #[must_use]
     pub fn scale(&self, f: T, tr: Trunc) -> Self {
@@ -167,10 +218,12 @@ impl<T: GnScalar> Ser<T> {
     #[must_use]
     pub fn mul(&self, b: &Self, tr: Trunc) -> Self {
         Self::from_fn(tr, |i, k| {
+            // c[i1][k1] b[i - i1][k - k1], i1 then k1 ascending
             let mut sum = T::of(0.0);
-            for i1 in 0..=i {
-                for k1 in 0..=k {
-                    sum = sum + self.at(i1, k1) * b.at(i - i1, k - k1);
+            let rows_b = b.c.iter().take(i + 1).rev();
+            for (ra, rb) in self.c.iter().take(i + 1).zip(rows_b) {
+                for (&x, &y) in ra.iter().take(k + 1).zip(rb.iter().take(k + 1).rev()) {
+                    sum = sum + x * y;
                 }
             }
             sum

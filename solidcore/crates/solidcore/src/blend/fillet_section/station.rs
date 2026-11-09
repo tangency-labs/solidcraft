@@ -673,7 +673,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 for (c, out) in cs.iter().zip(outs) {
                     let cv = [c.x, c.y, c.z];
                     for (o, &cj) in out.a.iter_mut().zip(&cv) {
-                        *o = o.add(&mono.scale(cj * sf, tr), tr);
+                        // o + mono (cj sf), each coefficient rounded as `add` of `scale`
+                        o.add_scaled(&mono, cj * sf, tr);
                     }
                 }
             }
@@ -1167,9 +1168,20 @@ fn solve_station_body(
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian(&sys, &sx)?;
     // (the coefficients of one total degree do not enter each other's: one evaluation
-    // solves them all)
+    // solves them all; G is computed only at that degree and below, and at the powers of
+    // eps solved for, bit for bit the whole truncation's there (`Trunc::computing`), and
+    // not at all at an order with none to solve)
+    let eps_solved = if opts.top >= 1 {
+        tr.e().min(opts.top - 1)
+    } else {
+        tr.e()
+    };
     for tot in 1..=(tr.s() + tr.e()) {
-        let (g, _) = gn_evaluate(&sys, &sx, tr)?;
+        let eps = eps_solved.min(tot);
+        if tot > tr.s() + eps {
+            continue;
+        }
+        let (g, _) = gn_evaluate(&sys, &sx, tr.computing(tot, eps))?;
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
             // (to order lTop - 1 in eps with lTop: gn_top_jets)
