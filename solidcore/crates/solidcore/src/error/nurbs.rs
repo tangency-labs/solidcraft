@@ -28,7 +28,7 @@
 //! | [`NurbsFailure::Memory`]              | `NL_MEM_ERR` (15)               |
 //! | [`NurbsFailure::Singular`]            | `NL_SEQ_ERR` (16)               |
 //! | [`NurbsFailure::Geometry`]            | `NL_GEO_ERR` (17)               |
-//! | [`NurbsFailure::DerivativeOrder`]     | `NL_MXD_ERR` (20)               |
+//! | [`NurbsFailure::DerivativeOrder`], [`NurbsFailure::NoDerivativeRows`] | `NL_MXD_ERR` (20) |
 //!
 //! Deviations: not upstream. A failure of a routine that has the data (a degree, an
 //! index, a parameter and its domain) carries it; the others are unit variants, and the
@@ -116,6 +116,9 @@ pub enum NurbsFailure {
     Singular,
     /// The geometry does not allow the operation (a degenerate or non-planar input).
     Geometry,
+    /// The output has no row for even the point itself, so no derivative order can be
+    /// evaluated into it.
+    NoDerivativeRows,
     /// The derivative order `given` is above the largest `max` the routines evaluate.
     DerivativeOrder {
         /// The order asked for.
@@ -149,7 +152,7 @@ impl NurbsFailure {
             Self::Memory => 15,
             Self::Singular => 16,
             Self::Geometry => 17,
-            Self::DerivativeOrder { .. } => 20,
+            Self::DerivativeOrder { .. } | Self::NoDerivativeRows => 20,
         }
     }
 
@@ -213,6 +216,7 @@ impl core::fmt::Display for NurbsFailure {
             Self::Memory => f.write_str("the memory for the result cannot be allocated"),
             Self::Singular => f.write_str("the system of equations is singular"),
             Self::Geometry => f.write_str("the geometry does not allow the operation"),
+            Self::NoDerivativeRows => f.write_str("the output has no row for the point itself"),
             Self::DerivativeOrder { given, max } => {
                 write!(
                     f,

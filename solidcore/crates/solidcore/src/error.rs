@@ -1643,6 +1643,12 @@ mod tests {
                 17,
             ),
             (
+                N::NoDerivativeRows,
+                "the output has no row for the point itself",
+                ErrorKind::Failed,
+                20,
+            ),
+            (
                 N::DerivativeOrder { given: 7, max: 4 },
                 "derivative order 7 is above the largest order, 4",
                 ErrorKind::Failed,

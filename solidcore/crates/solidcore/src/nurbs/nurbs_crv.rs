@@ -999,7 +999,7 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
 /// [`crv_derivs`] into the caller's slice: `out[k] = C^(k)(u)` for `k < out.len()`
 /// (`der = out.len() - 1`), without a heap allocation.
 ///
-/// Errors as [`crv_derivs`]; an empty `out` is [`NurbsFailure::Input`].
+/// Errors as [`crv_derivs`]; an empty `out` is [`NurbsFailure::NoDerivativeRows`].
 pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Result<()> {
     const OP: &str = OP_CDERIVS;
     let der = match out.len().checked_sub(1) {
@@ -1013,7 +1013,7 @@ pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Res
                 },
             ))
         }
-        None => return Err(SolidError::nurbs(OP, NurbsFailure::Input)),
+        None => return Err(SolidError::nurbs(OP, NurbsFailure::NoDerivativeRows)),
     };
     if cur.degree() < SMALL_DEGREE {
         crv_derivs_n::<SMALL_DEGREE>(cur, u, side, der, out)
