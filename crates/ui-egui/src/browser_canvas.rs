@@ -309,11 +309,11 @@ mod tests {
         let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
-        assert_eq!(status(&h), solidcraft_ui_text::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_click_b")));
         assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
         // With both points picked, the card and the status line ask for the direction, not Point A.
         assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
-        assert_eq!(status(&h), solidcraft_ui_text::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(solidcraft_ui_text::tr("browser.straighten_choose")));
         let picked = h.app.tree.canvas_panel.clone().unwrap();
         let rise = (picked.b[1] - picked.a[1]).atan2(picked.b[0] - picked.a[0]).to_degrees();
         assert!((rise - 18.43).abs() < 1.0, "{picked:?}");

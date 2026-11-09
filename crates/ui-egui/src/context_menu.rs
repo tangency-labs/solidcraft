@@ -1943,7 +1943,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.straightenCanvas" => {
             if let Some(c) = id_of(&p, "canvas") {
                 app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));
-                app.set_status(crate::i18n::tr("browser.straighten_click_a"), false);
+                app.set_status(solidcraft_ui_text::tr("browser.straighten_click_a"), false);
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),

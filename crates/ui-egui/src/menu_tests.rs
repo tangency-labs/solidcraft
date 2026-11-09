@@ -919,7 +919,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Lock");
     assert!(app.session.doc.canvases[0].locked);
     let items = context_menu::items(&app, &t);
-    for label in ["Edit Canvas", "Calibrate", "Delete"] {
+    for label in ["Edit Canvas", "Calibrate", "Straighten", "Delete"] {
         let item = find(&items, label);
         assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
     }

@@ -235,6 +235,7 @@ fn wrap_angle(a: f64) -> f64 {
 fn straighten(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "canvas.straighten";
     let i = find(s, p, cmd)?;
+    refuse_locked(s, i, cmd)?;
     let (a, b) = (p.get("a").and_then(vec2), p.get("b").and_then(vec2));
     let (Some(a), Some(b)) = (a, b) else { return Err(bad(cmd, "`a` and `b` must be points [x,y]")) };
     let target = match p.get("angle") {
@@ -313,6 +314,7 @@ mod tests {
             assert!(e.contains("Canvas1 is locked"), "{p}: {e}");
         }
         assert!(s.execute("canvas.calibrate", &json!({"canvas": id, "a": [0, 0], "b": [10, 0], "distance": 20})).is_err());
+        assert!(s.execute("canvas.straighten", &json!({"canvas": id, "a": [0, 0], "b": [10, 0], "angle": 45})).is_err());
         assert!(s.execute("canvas.delete", &json!({"canvas": id})).is_err());
         assert_eq!(s.doc.canvases[0], locked, "nothing changed");
         s.execute("canvas.edit", &json!({"canvas": id, "opacity": 0.9, "visible": false, "name": "Blueprint"})).unwrap();
