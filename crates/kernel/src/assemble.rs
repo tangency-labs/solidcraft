@@ -246,7 +246,7 @@ impl Assembly {
         let loose =
             Brep { version: VERSION, tolerance: self.tolerance, regions, shells, faces, edges: edges.collect(), vertices: self.vertices.clone() };
         let part = loose.canonical().map_err(invalid)?;
-        solidcraft_geom::brep::geometry::check(&part.brep).map_err(invalid)?;
+        solidcore_ops::record_check::agreement(&part.brep).map_err(invalid)?;
         let mut face_map: Vec<Option<usize>> = vec![None; self.faces.len()];
         for (c, &k) in part.faces.iter().enumerate() {
             if let Some(slot) = kept.get(k as usize).and_then(|i| face_map.get_mut(*i)) {

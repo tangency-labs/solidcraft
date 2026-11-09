@@ -10,7 +10,6 @@ use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
 
 pub mod eval;
 pub mod form;
-pub mod geometry;
 pub mod normal_section;
 pub mod placement;
 mod split;

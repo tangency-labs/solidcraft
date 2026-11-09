@@ -28,7 +28,7 @@ mod native_tests {
             assert!((v - exact).abs() < 1e-6 * exact, "{name}: SMLib volume {v}, closed form {exact}");
             let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
             solidcore_ops::record_check::validate(&native).unwrap();
-            solidcraft_geom::brep::geometry::check(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
+            solidcore_ops::record_check::agreement(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(report, Report { nurbs_edges: report.nurbs_edges, ..Report::default() }, "{name}: every face agrees");
             let [f, e, n] = b.counts().unwrap();
             assert_eq!((native.faces.len(), native.edges.len(), native.vertices.len()), (f, e, n), "{name}");
@@ -179,7 +179,7 @@ mod native_tests {
         assert_eq!((record.faces.len(), record.edges.len(), record.vertices.len()), (f, e + 1, v));
         assert_eq!((record.shells.len(), record.regions.len()), (1, 2));
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -227,7 +227,7 @@ mod native_tests {
         let r = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
         let (record, _) = r.to_native_ordered().unwrap();
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -279,7 +279,7 @@ mod native_tests {
         assert_eq!(record.regions.len(), 3);
         assert!(record.regions.iter().all(|g| !g.void));
         assert_eq!(record.regions[0].shells.len(), 2, "the infinite region lists both solids");
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         // V = 180000 - h/6 (A0 + 4 Am + A1), h = 9, Am = 55 x 35.
         let want = 180000.0 - 9.0 / 6.0 * (100.0 + 4.0 * 55.0 * 35.0 + 6000.0);
         let back = Brep::from_record(&record, true).unwrap();

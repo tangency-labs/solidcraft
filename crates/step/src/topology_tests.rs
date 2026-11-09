@@ -212,7 +212,7 @@ fn one_solid(ex: &p21::Exchange) -> Solid {
     assert_eq!(r.solids.len(), 1);
     let s = r.solids.into_iter().next().unwrap();
     solidcore_ops::record_check::validate(&s.brep).unwrap();
-    solidcraft_geom::brep::geometry::check(&s.brep).unwrap();
+    solidcore_ops::record_check::agreement(&s.brep).unwrap();
     s
 }
 
@@ -911,7 +911,7 @@ fn step_conformance_parts() {
         assert!(r.failures.is_empty() && r.solids.len() == 1, "{name}: {:?}", r.failures);
         let b = &r.solids[0].brep;
         solidcore_ops::record_check::validate(b).unwrap();
-        solidcraft_geom::brep::geometry::check(b).unwrap();
+        solidcore_ops::record_check::agreement(b).unwrap();
         assert_eq!(b.regions.len(), 2, "{name}");
     }
 }

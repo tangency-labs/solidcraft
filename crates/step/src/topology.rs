@@ -1266,7 +1266,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
         solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
-        solidcraft_geom::brep::geometry::check(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+        solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
