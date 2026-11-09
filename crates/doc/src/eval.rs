@@ -4659,7 +4659,7 @@ fn line_in_sketch_plane(ss: &SolvedSketch, origin: Vec3, dir: Vec3) -> Result<(V
 /// A construction point `name` of the timeline so far, as evaluated, in the frame `frame` places
 /// in the world: the frame a sketch is evaluated in, its component's placement or the placement
 /// of the face it is attached to (#12075). The point is kept in its own component's frame.
-pub(crate) fn construction_point_in(doc: &Document, st: &ModelState, name: &str, frame: &Mat) -> Result<Vec3> {
+pub(crate) fn construction_point_in(doc: &Document, st: &ModelState, name: &str, author: u64, frame: &Mat) -> Result<Vec3> {
     let c = st
         .construct
         .iter()
@@ -4672,6 +4672,12 @@ pub(crate) fn construction_point_in(doc: &Document, st: &ModelState, name: &str,
         return Ok(*p);
     }
     let owner = doc.feature(c.feature).map_or(0, |f| f.component);
+    // The same definition is authored in this occurrence, even when it is not the first.
+    // Its point is already in the author coordinates; using the first occurrence here
+    // would introduce the difference between the two placements.
+    if owner == author {
+        return Ok(*p);
+    }
     let inverse = crate::mat_inverse(frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
     let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
     Ok(crate::apply_point(&relative, *p))
@@ -8587,7 +8593,7 @@ fn eval_sketch(
         Some(Ok(frame)) => frame,
         _ => doc.component_transform(f.component),
     };
-    let mut warns = crate::project::refresh_links_with(doc, vals, &fst, &plane, &mut sk, anchor, lost_names, Some(&link_frame))?;
+    let mut warns = crate::project::refresh_links_with(doc, vals, &fst, &plane, &mut sk, anchor, lost_names, Some(&(f.component, link_frame)))?;
     drop(fst);
     sk.refresh_offsets()?;
     if let Some(w) = face_warning {

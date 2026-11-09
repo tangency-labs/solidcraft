@@ -89,8 +89,8 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
     resolve_at(doc, vals, st, plane, kind, src, None)
 }
 
-/// [`resolve`] for a sketch evaluated in `frame` (where it is placed in the world: its
-/// component's placement, or the placement of the face it is attached to). A construction point
+/// [`resolve`] for a sketch evaluated in `frame`: its author component and that component's
+/// world placement, including the author path of a face-attached sketch. A construction point
 /// is kept in its own component's frame and is brought into this one (#12075); without a frame
 /// it is taken in the root's.
 pub fn resolve_at(
@@ -100,7 +100,7 @@ pub fn resolve_at(
     plane: &Plane,
     kind: LinkKind,
     src: &LinkSource,
-    frame: Option<&crate::Mat>,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Resolved> {
     let key = cache_key(st, plane, kind, src);
     if let Some(k) = &key
@@ -126,7 +126,7 @@ fn resolve_uncached(
     plane: &Plane,
     kind: LinkKind,
     src: &LinkSource,
-    frame: Option<&crate::Mat>,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Resolved> {
     let lost = |what: &str| DocError::Invalid(format!("{what} no longer exists"));
     let mut moved = false;
@@ -312,8 +312,8 @@ fn resolve_uncached(
         // A construction point, by name (#12075), where the timeline so far puts it, in the
         // sketch's frame.
         LinkSource::ConstructionPoint { name } => {
-            let frame = frame.copied().unwrap_or(crate::IDENTITY);
-            let p = crate::eval::construction_point_in(doc, st, name, &frame).map_err(|_| lost(&format!("point {name}")))?;
+            let (author, frame) = frame.copied().unwrap_or((0, crate::IDENTITY));
+            let p = crate::eval::construction_point_in(doc, st, name, author, &frame).map_err(|_| lost(&format!("point {name}")))?;
             vec![LinkGeom::Point(plane.to_local(p))]
         }
         LinkSource::Axis { name } => {
@@ -965,7 +965,7 @@ pub fn refresh_links_at(
     plane: &Plane,
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
-    frame: Option<&crate::Mat>,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Vec<String>> {
     refresh_links_in(doc, vals, st, plane, sk, anchor, LostNames::Fail, frame)
 }
@@ -980,7 +980,7 @@ pub(crate) fn refresh_links_with(
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
     lost_names: LostNames,
-    frame: Option<&crate::Mat>,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Vec<String>> {
     refresh_links_in(doc, vals, st, plane, sk, anchor, lost_names, frame)
 }
@@ -1096,7 +1096,7 @@ fn refresh_links_in(
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
     lost_names: LostNames,
-    frame: Option<&crate::Mat>,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Vec<String>> {
     let mut warn = Vec::new();
     let links = sk.links.clone();

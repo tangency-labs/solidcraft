@@ -346,6 +346,54 @@ fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
     }
 }
 
+/// A face-attached sketch authored through the second occurrence must not translate a point
+/// of its own definition by the difference from the first occurrence (#12075).
+#[test]
+fn a_construction_point_of_the_second_author_occurrence_stays_in_its_own_frame() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    let component = part["component"].as_u64().unwrap();
+    run(&mut s, "construct.point.vertex", json!({"point":{"point":[3,4,10]},"name":"Pivot"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":part["occurrence"],"translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
+    let pick = {
+        let world = s.world_state().unwrap();
+        let body = world.body("Base (Part:2)").unwrap();
+        let face = body.body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.999)).unwrap();
+        json!({"body":body.name,"index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
+    };
+    let id = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
+    let feature = s.doc.feature(id).unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("not a sketch") };
+    assert_eq!(solidcraft_doc::face_anchor::plane_face_anchor(plane).unwrap().author_path, vec![second]);
+    run(&mut s, "sketch.project", json!({"refs":[{"point":"Pivot"}]}));
+    // Check the immediate creation path as well as the later model refresh.
+    let check = |s: &Session| {
+        assert!(s.model.result(id).unwrap().error.is_none());
+        let state = s.model.state();
+        let ss = state.sketch(id).unwrap();
+        let link = ss.sketch.links.first().unwrap();
+        assert!(!link.lost);
+        let point = ss.sketch.link_points(&link.id).first().and_then(|p| ss.sketch.points.get(*p)).unwrap();
+        let at = ss.plane.to_world(point.pos);
+        assert!((at.x - 3.).abs() < 1e-7 && (at.y - 4.).abs() < 1e-7 && (at.z - 10.).abs() < 1e-7, "{at:?}");
+    };
+    check(&s);
+    run(&mut s, "sketch.finish", json!({}));
+    check(&s);
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.ground", json!({"occurrence":second,"grounded":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[0,15,0],"capture":true}));
+    check(&s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened);
+    run(&mut reopened, "sketch.edit", json!({"sketch":id}));
+    check(&reopened);
+    run(&mut reopened, "sketch.finish", json!({}));
+    check(&reopened);
+}
+
 #[test]
 fn project_whole_body_can_create_unlinked_geometry() {
     let mut s = Session::default();

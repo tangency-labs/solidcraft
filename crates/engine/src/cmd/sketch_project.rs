@@ -319,17 +319,17 @@ fn owner_frame(s: &Session, doc: &Document, comp: u64) -> solidcraft_doc::Mat {
     if comp == s.active_component { s.active_component_frame() } else { doc.component_transform(comp) }
 }
 
-/// The frame [`state_for_sketch`] puts sketch `id`'s model in: the attached face's placement for
-/// a sketch on a face, else its component's. `None` when the face's placement is gone.
-fn sketch_frame(s: &Session, doc: &Document, id: u64) -> Option<solidcraft_doc::Mat> {
+/// The author component and its placement used by [`state_for_sketch`], including a face
+/// attachment's explicit author path. `None` when that placement is gone.
+fn sketch_frame(s: &Session, doc: &Document, id: u64) -> Option<(u64, solidcraft_doc::Mat)> {
     let comp = doc.feature(id).map(|f| f.component).unwrap_or(0);
     let attachment = doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
     match attachment {
-        Some(anchor) => anchor.author_frame(doc, comp).ok(),
-        None => Some(owner_frame(s, doc, comp)),
+        Some(anchor) => anchor.author_frame(doc, comp).ok().map(|frame| (comp, frame)),
+        None => Some((comp, owner_frame(s, doc, comp))),
     }
 }
 
