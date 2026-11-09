@@ -750,11 +750,8 @@ mod tests {
         arc.x = Vec3::new(0.0, 0.0, 0.0);
         let e = quadratic_arc_tol(&arc, 0.01).unwrap_err();
         assert!(matches!(
-            e,
-            SolidError::Nlib {
-                code: NlibCode::Geometry,
-                ..
-            }
+            e.nurbs_failure(),
+            Some(crate::error::nurbs::NurbsFailure::Geometry)
         ));
     }
 

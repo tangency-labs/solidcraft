@@ -673,6 +673,7 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .unwrap(),
         );
         assert_eq!(result["preflight"]["resolved"]["executor"], "cpu-raytrace");
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "available_ram");
         assert_eq!(result["export"]["frame"]["executor"], "cpu-raytrace");
         assert_eq!(result["preflight"]["request"]["integrator"], "raytrace");
         assert_eq!(result["preflight"]["request"]["raytrace"].get("progressive"), options.get("progressive"));
@@ -689,11 +690,12 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .arg(&saved)
                 .args(["--setup", "Portable setup", "--out"])
                 .arg(&overridden)
-                .args(["--width", "12", "--height", "8", "--exposure", "1.25"])
+                .args(["--width", "12", "--height", "8", "--exposure", "1.25", "--legacy-memory-admission"])
                 .env("SOLIDCRAFT_GPU", "must-not-be-read-for-cpu")
                 .output()
                 .unwrap(),
         );
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "software_pool_only");
         assert_eq!(result["preflight"]["request"]["width"], 12);
         assert_eq!(result["preflight"]["request"]["height"], 8);
         assert_eq!(result["preflight"]["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -773,7 +775,13 @@ fn typed_gpu_render_selects_its_host_without_a_progressive_runtime_flag() {
         let script = render_setup_script(&dir, job.clone());
         let out = dir.0.join("gpu.png");
         let mut command = cli();
-        command.arg("render").arg(&script).args(["--setup", "Portable setup", "--out"]).arg(&out).env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
+        command
+            .arg("render")
+            .arg(&script)
+            .args(["--setup", "Portable setup", "--out"])
+            .arg(&out)
+            .arg("--legacy-memory-admission")
+            .env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
         if job.is_null() {
             command.arg("--progressive");
         }

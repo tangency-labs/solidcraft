@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 
 use solidcore::kernel::Kernel;
+use solidcore::mass::enclosure::VolumeSign;
 use solidcore::topology::brep::validation;
 use solidcore::topology::Brep;
 
@@ -25,8 +26,8 @@ pub struct Soundness {
     pub check: Result<Vec<String>, String>,
     /// Whether the body is a manifold solid.
     pub manifold: Option<bool>,
-    /// Its volume, when it is a manifold solid.
-    pub volume: Option<f64>,
+    /// Its volume's sign, when it is a manifold solid.
+    pub volume: Option<VolumeSign>,
     /// Its face, edge and vertex counts.
     pub counts: [usize; 3],
 }
@@ -35,7 +36,7 @@ impl Soundness {
     /// Whether the check is clean and a manifold body has a positive volume.
     pub fn sound(&self) -> bool {
         self.check.as_ref().is_ok_and(Vec::is_empty)
-            && (self.manifold != Some(true) || self.volume.is_some_and(|v| v > 0.0))
+            && (self.manifold != Some(true) || matches!(self.volume, Some(VolumeSign::Positive(_))))
     }
 
     /// One line: `sound`, the check's line count, manifold, volume and counts.
@@ -164,7 +165,7 @@ pub fn probe(runner: &dyn crate::UnitDiff) {
 
 #[cfg(test)]
 mod tests {
-    use super::{measure, start, take};
+    use super::{measure, start, take, VolumeSign};
     use solidcore::kernel::Kernel;
 
     fn cube() -> solidcore::topology::Brep {
@@ -198,8 +199,7 @@ mod tests {
         assert!(s.sound(), "{}", s.line());
         assert_eq!(s.manifold, Some(true));
         assert!(
-            s.volume
-                .is_some_and(|v| (v - 1000.0).abs() <= 1e-6 * 1000.0),
+            matches!(s.volume, Some(VolumeSign::Positive(e)) if e.lo <= 1000.0 && 1000.0 <= e.hi),
             "{}",
             s.line()
         );

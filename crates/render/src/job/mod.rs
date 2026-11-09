@@ -21,9 +21,11 @@ mod cpu_path;
 mod cpu_sky;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) mod denoise;
+mod denoise_diagnostics;
 pub(crate) mod encoding;
 pub mod finishing;
 mod host;
+mod host_memory;
 pub(crate) mod image;
 pub mod led_strip;
 mod lens;
@@ -36,9 +38,11 @@ pub mod looks;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) mod output;
 pub mod photographic;
+pub mod photon_sources;
 mod png;
 pub mod presentation;
 mod punctual;
+mod quality;
 mod regrade;
 #[cfg(test)]
 mod rt2_tests;
@@ -49,32 +53,50 @@ pub use caustics::CausticOptions;
 pub use cpu_budget::{CpuBudget, CpuBudgetLimits, MAX_CPU_BODIES, MAX_CPU_SAMPLES_PER_PIXEL, MAX_CPU_TRIANGLES, MAX_CPU_WORK, NATIVE_CPU_POOL_BYTES};
 pub use cpu_path::CpuPathOptions;
 pub use cpu_sky::CpuSky;
+pub use denoise_diagnostics::{DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) use host::FRAME_METADATA_BYTES;
 pub(crate) use host::Reservation;
 pub use host::{
-    CaptureLease, CaptureProfile, CpuHost, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
+    CaptureLease, CaptureProfile, CpuHost, DenoiseMaskInfo, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention,
     LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
 };
+pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
 pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
 pub use presentation::OutputOptions;
 pub use punctual::{MAX_PUNCTUAL_LIGHTS, MIN_GPU_SPOT_COSINE_GAP, PunctualDiagnostics, PunctualLightOptions, PunctualLights, SpotConeOptions};
+pub use quality::{
+    DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
+    resolve_supersampling, single_supersample, supersampled_dimensions,
+};
 
 /// Native path-tracing ceilings, further restricted by the actual device.
 /// Kept in the device-independent layer so saved intent and UI agree with execution.
 pub const GPU_PATH_LIMITS: crate::RenderLimits =
-    crate::RenderLimits { max_dimension: 8192, max_pixels: 16_777_216, max_scratch_bytes: 8 * 1024 * 1024 * 1024 };
+    crate::RenderLimits { max_dimension: 8192, max_pixels: 33_554_432, max_scratch_bytes: 128 * 1024 * 1024 * 1024 };
 pub const MAX_GPU_PATH_TRIANGLES: u64 = 8_000_000;
 pub const MAX_GPU_PATH_BODIES: usize = 65_536;
-pub const MAX_GPU_DIELECTRICS: usize = 32;
+/// Optical target count is independent of simultaneous containment and ray depth.
+pub const MAX_OPTICAL_TARGETS: usize = 128;
+pub const MAX_GPU_DIELECTRICS: usize = MAX_OPTICAL_TARGETS;
+pub const MAX_NESTED_MEDIA: usize = 16;
+pub const MAX_PATH_DEPTH: u8 = 64;
+pub const MAX_SAMPLES_PER_PIXEL: u32 = 65_536;
+pub const MAX_CAUSTIC_PHOTONS: u32 = 1_048_576;
 
 /// Runtime sampling intent, separate from saved documents and device resources.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct JobOptions {
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<CausticOptions>,
     #[serde(skip_serializing_if = "aging::AgingStack::is_empty")]
@@ -102,11 +124,20 @@ pub struct JobOptions {
     pub tone_map: ToneMap,
     /// Optional final spatial filter. Raw progressive accumulation remains unchanged.
     pub denoise: bool,
+    #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
+    pub denoise_settings: DenoiseSettings,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub denoise_diagnostics: bool,
+    /// Trace at this multiple of both output dimensions, then resolve in linear light.
+    #[serde(skip_serializing_if = "single_supersample")]
+    pub supersampling: u32,
 }
 
 impl Default for JobOptions {
     fn default() -> Self {
         Self {
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             aging: Default::default(),
             nested_media: false,
@@ -124,6 +155,9 @@ impl Default for JobOptions {
             lighting: None,
             tone_map: ToneMap::default(),
             denoise: false,
+            denoise_settings: DenoiseSettings::default(),
+            denoise_diagnostics: false,
+            supersampling: 1,
         }
     }
 }
@@ -170,6 +204,10 @@ impl JobOptions {
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "sampling pass target overflow"))
     }
     pub fn validate(&self) -> Result<()> {
+        self.denoise_settings.validate()?;
+        if !matches!(self.supersampling, 1 | 2) {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "supersampling must be 1 or 2"));
+        }
         if let Some(caustics) = self.caustics {
             caustics.validate()?;
         }
@@ -205,12 +243,12 @@ impl JobOptions {
         if let Some(lens) = self.lens {
             lens.validate()?;
         }
-        if !(1..=4096).contains(&self.samples)
-            || !(1..=16).contains(&self.max_depth)
+        if !(1..=MAX_SAMPLES_PER_PIXEL).contains(&self.samples)
+            || !(1..=u32::from(MAX_PATH_DEPTH)).contains(&self.max_depth)
             || !self.exposure_ev.is_finite()
             || !(-32.0..=32.0).contains(&self.exposure_ev)
         {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "samples must be 1..4096, depth 1..16 and exposure -32..32 EV"));
+            return Err(JobError::new(ErrorCode::InvalidRequest, "samples must be 1..65536, depth 1..64 and exposure -32..32 EV"));
         }
         Ok(())
     }
@@ -227,6 +265,15 @@ pub struct ImageWorkPreview {
 
 /// One bounded quantum of image work. Implementations check cancellation between quanta.
 pub trait ImageWork: Send {
+    /// Bounded guide counts on the internal trace grid.
+    fn denoise_diagnostics(&self) -> Option<DenoiseDiagnostics> {
+        None
+    }
+    /// Categorical diagnostic PNG at the requested final output dimensions.
+    fn take_denoise_mask(&mut self) -> Option<Vec<u8>> {
+        None
+    }
+
     /// Cumulative omissions seen through the most recent complete image pass.
     /// Adaptive jobs include pilot paths and every production Fresnel stratum.
     fn punctual_diagnostics(&self) -> Option<PunctualDiagnostics> {
@@ -256,6 +303,16 @@ impl ImageWork for ImageTask {
 /// Device-independent executor boundary. The host owns admission leases and publication;
 /// an executor owns computation only. GPU implementations live above the render crate.
 pub trait ImageExecutor: Send + Sync {
+    fn supports_supersampling(&self) -> bool {
+        false
+    }
+    fn supports_denoise_controls(&self) -> bool {
+        false
+    }
+    fn supports_denoise_diagnostics(&self) -> bool {
+        false
+    }
+
     fn supports_glass_models(&self) -> bool {
         false
     }
@@ -307,6 +364,12 @@ pub trait ImageExecutor: Send + Sync {
     }
     fn descriptor(&self) -> Result<crate::ExecutorDescriptor>;
     fn admit(&self, scene: &crate::ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission>;
+    /// Validate the captured producer representation under its already reserved
+    /// work lease. Check and Start run this before a job identity is created.
+    /// Implementations must observe cancellation and retain no unbilled state.
+    fn validate_prepared(&self, _scene: &crate::ProductScene, _request: &ImageRequest, _options: JobOptions, cancel: &CancelToken) -> Result<()> {
+        cancel.check()
+    }
     fn begin(&self, scene: crate::ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>>;
 }
 
@@ -721,14 +784,14 @@ fn bounded_dielectrics<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std
     impl<'de> serde::de::Visitor<'de> for Inputs {
         type Value = Vec<DielectricOptions>;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("at most eight dielectric overrides")
+            f.write_str("at most 128 dielectric overrides")
         }
         fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error> {
             let mut inputs = Vec::new();
             inputs.try_reserve_exact(8).map_err(serde::de::Error::custom)?;
             while let Some(input) = sequence.next_element()? {
-                if inputs.len() == 8 {
-                    return Err(serde::de::Error::custom("at most eight dielectric overrides"));
+                if inputs.len() == MAX_OPTICAL_TARGETS {
+                    return Err(serde::de::Error::custom("at most 128 dielectric overrides"));
                 }
                 inputs.push(input);
             }
@@ -798,17 +861,35 @@ pub fn cpu_camera_sampling(
     Ok(Some(CpuProgressiveOptions { samples_per_pixel, ..progressive }))
 }
 
-/// The CPU filter shares the bounded float4 presentation envelope; it never
-/// enlarges a profile or implies that a linear EXR companion is requested.
+/// Filtering runs on the internal trace grid, before supersample reconstruction.
+/// Its storage and work still have to fit the explicitly selected CPU profile.
 pub fn validate_cpu_denoise_image(width: u32, height: u32) -> Result<()> {
-    linear_exr::encoded_limit(width, height)
-        .map(|_| ())
-        .map_err(|_| JobError::new(ErrorCode::InvalidRequest, "CPU denoising requires 1..8192 sides and at most 16777216 pixels"))
+    let pixels = u64::from(width).checked_mul(u64::from(height));
+    if width == 0
+        || height == 0
+        || width > MAX_TRACE_DIMENSION
+        || height > MAX_TRACE_DIMENSION
+        || pixels.is_none_or(|pixels| pixels > MAX_TRACE_PIXELS)
+    {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "CPU denoising requires 1..16384 internal sides and at most 134217728 pixels"));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RaytraceOptions {
+    /// Zero selects a bounded native worker count; one keeps serial execution.
+    pub threads: u16,
+    /// Sample captured HDR radiance using its exact-solid-angle importance table.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub environment_importance_sampling: bool,
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<CausticOptions>,
     /// One bounded world-space participating medium, available with explicit Path.
@@ -829,6 +910,13 @@ pub struct RaytraceOptions {
     /// Optional CPU spatial output filtering; never changes the raw film or sampling.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub denoise: bool,
+    #[serde(skip_serializing_if = "DenoiseSettings::is_default")]
+    pub denoise_settings: DenoiseSettings,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub denoise_diagnostics: bool,
+    /// Trace at this multiple of both output dimensions, then resolve in linear light.
+    #[serde(skip_serializing_if = "single_supersample")]
+    pub supersampling: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lens: Option<ThinLens>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -868,6 +956,10 @@ pub struct RaytraceOptions {
 impl Default for RaytraceOptions {
     fn default() -> Self {
         Self {
+            threads: 0,
+            environment_importance_sampling: false,
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             volume: None,
             sun: None,
@@ -875,6 +967,9 @@ impl Default for RaytraceOptions {
             aging: None,
             adaptive: None,
             denoise: false,
+            denoise_settings: DenoiseSettings::default(),
+            denoise_diagnostics: false,
+            supersampling: 1,
             path: None,
             lens: None,
             output: None,
@@ -1126,7 +1221,14 @@ impl RaytraceOptions {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
+        self.denoise_settings.validate()?;
+        if self.threads > MAX_CPU_THREADS || !matches!(self.supersampling, 1 | 2) {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "CPU threads must be 0..64 and supersampling 1 or 2"));
+        }
         let _ = self.retained_volume_bytes()?;
+        if self.metal_energy_compensation && self.path.is_none() {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "CPU rough metal energy compensation requires explicit Indirect lighting"));
+        }
         if let Some(caustics) = self.caustics {
             caustics.validate()?;
             if self.path.is_none() {
@@ -1215,8 +1317,9 @@ impl RaytraceOptions {
         }) {
             return Err(JobError::new(ErrorCode::InvalidRequest, "invalid constant raytrace environment"));
         }
-        if self.dielectrics.len() > 8 || self.dielectrics.capacity() > 8 {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "at most eight dielectric overrides"));
+        let optical_limit = if self.path.is_some() { MAX_OPTICAL_TARGETS } else { 8 };
+        if self.dielectrics.len() > optical_limit || self.dielectrics.capacity() > optical_limit {
+            return Err(JobError::new(ErrorCode::InvalidRequest, format!("at most {optical_limit} dielectric overrides for this CPU transport")));
         }
         for (index, input) in self.dielectrics.iter().enumerate() {
             if let Some(model) = input.model {
