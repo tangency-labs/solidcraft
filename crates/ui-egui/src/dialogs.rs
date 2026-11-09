@@ -11108,6 +11108,26 @@ mod refused_ok_tests {
         SolveApp::new(session, Default::default())
     }
 
+    fn corner_join_face_hits(app: &SolveApp) -> [(usize, Vec3); 2] {
+        let state = app.session.model.state();
+        let sheet = &state.surface_sheets[0];
+        let body = state.body(&sheet.body).unwrap();
+        let query = solidcraft_engine::geom::brep::query::Query::new(body.body.record());
+        [0, 1].map(|joint| {
+            let source = sheet.bend_source_edge(joint, body).unwrap();
+            sheet
+                .bend_face_indices(body, &source)
+                .into_iter()
+                .find_map(|index| {
+                    let face = body.body.record().faces.get(index)?;
+                    let surface = solidcraft_engine::geom::brep::eval::SurfaceEval::new(face.parameters()).ok()?;
+                    let point = surface.point(face.domain.map(|[lo, hi]| 0.5 * (lo + hi)))?;
+                    query.face_contains(index, point, 1e-6).then_some((index, point))
+                })
+                .expect("a built flange has a point inside one of its faces")
+        })
+    }
+
     #[test]
     fn corner_join_dialog_sends_named_sources_not_viewport_picks() {
         let mut app = corner_join_app(Session::default());
@@ -11115,8 +11135,9 @@ mod refused_ok_tests {
         let mut dialog = Dialog::for_command(&app, "sheet.corner_join").unwrap();
         assert_eq!(dialog.command(), Some("sheet.corner_join"));
         assert!(preview_commands(&app, &dialog).is_err());
-        dialog.inputs[0].items = vec![Sel::Face { body: body.clone(), index: 0, point: Vec3::new(50.0, 0.0, 10.0) }];
-        dialog.inputs[1].items = vec![Sel::Face { body, index: 0, point: Vec3::new(100.0, 30.0, 10.0) }];
+        for (input, (index, point)) in dialog.inputs.iter_mut().zip(corner_join_face_hits(&app)) {
+            input.items = vec![Sel::Face { body: body.clone(), index, point }];
+        }
         for (mode, kind) in ["butt", "partial_overlap", "full_overlap"].iter().enumerate() {
             if let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, .. }) = &mut dialog.kind {
                 *kind = mode;
@@ -11126,7 +11147,7 @@ mod refused_ok_tests {
             assert_eq!(command, "sheet.corner_join");
             assert_eq!(params["kind"], *kind);
             for key in ["covering", "covered"] {
-                assert!(params[key].as_str().unwrap().contains(":rim."));
+                assert!(params[key].as_str().unwrap().contains('|'));
             }
             assert_eq!(params.get("overlap").is_some(), mode == 1);
             assert!(params.get("points").is_none());
@@ -11162,13 +11183,14 @@ mod refused_ok_tests {
             let occurrence = component["occurrence"].as_u64().unwrap();
             let mut app = corner_join_app(session);
             app.session.execute("occurrence.move", &json!({"occurrence": occurrence, "translate": translate, "axis": axis, "angle": angle})).unwrap();
+            let local_hits = corner_join_face_hits(&app);
             let state = app.session.model.state();
             let sheet = &state.surface_sheets[0];
             let definition = sheet.body.clone();
-            let local_points = [Vec3::new(50.0, 0.0, 10.0), Vec3::new(100.0, 30.0, 10.0)];
-            let definition_body = &state.bodies.iter().find(|body| body.name == definition).unwrap().body;
-            let joints = sheet.corner_joints_at(definition_body, local_points, 1e-6).unwrap();
-            let sources = joints.map(|joint| sheet.bend_source_edge(joint).unwrap().to_string());
+            let local_points = local_hits.map(|(_, point)| point);
+            let definition_body = state.bodies.iter().find(|body| body.name == definition).unwrap();
+            let joints = sheet.corner_joints_at(&definition_body.body, local_points, 1e-6).unwrap();
+            let sources = joints.map(|joint| sheet.bend_source_edge(joint, definition_body).unwrap().to_string());
             let world = crate::open_meshing::session_world(&app.session);
             let body = world.bodies.iter().find(|body| body.source_name.as_deref() == Some(definition.as_str())).unwrap();
             let points = local_points.map(|point| solidcraft_engine::doc::apply_point(&body.source_transform, point));
@@ -11176,7 +11198,7 @@ mod refused_ok_tests {
             for order in [[0, 1], [1, 0]] {
                 let mut dialog = Dialog::for_command(&app, "sheet.corner_join").unwrap();
                 for (input, source) in dialog.inputs.iter_mut().zip(order) {
-                    input.items = vec![Sel::Face { body: body.name.clone(), index: 0, point: points[source] }];
+                    input.items = vec![Sel::Face { body: body.name.clone(), index: local_hits[source].0, point: points[source] }];
                 }
                 for (mode, expected_kind) in ["butt", "partial_overlap", "full_overlap"].iter().enumerate() {
                     let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, .. }) = &mut dialog.kind else {
@@ -11205,8 +11227,9 @@ mod refused_ok_tests {
         let app = corner_join_app(Session::default());
         let state = app.session.model.state();
         let sheet = &state.surface_sheets[0];
-        let covering = sheet.bend_source_edge(0).unwrap();
-        let covered = sheet.bend_source_edge(1).unwrap();
+        let body = state.body(&sheet.body).unwrap();
+        let covering = sheet.bend_source_edge(0, body).unwrap();
+        let covered = sheet.bend_source_edge(1, body).unwrap();
         let feature: FeatureKind = serde_json::from_value(json!({
             "type": "sheet_corner_join", "body": sheet.body,
             "covering": covering, "covered": covered,
@@ -11237,7 +11260,8 @@ mod refused_ok_tests {
         let reference = corner_join_app(Session::default());
         let state = reference.session.model.state();
         let sheet = &state.surface_sheets[0];
-        let sources = [sheet.bend_source_edge(0).unwrap(), sheet.bend_source_edge(1).unwrap()];
+        let body = state.body(&sheet.body).unwrap();
+        let sources = [sheet.bend_source_edge(0, body).unwrap(), sheet.bend_source_edge(1, body).unwrap()];
         let mut session = Session::default();
         for (command, params) in [
             ("sketch.create", json!({"plane": "XY", "name": "Base"})),
@@ -11350,10 +11374,11 @@ mod refused_ok_tests {
             assert_eq!(built.flange_corners, sources, "the async preview carries the same authoritative pairs");
             assert_eq!(serde_json::to_value(&session.doc).unwrap(), before, "discovery must not change the design");
             let sheet = &preview.after.surface_sheets[0];
+            let body = preview.after.body(&sheet.body).unwrap();
             let pair = &sources[0];
             for source in pair {
-                let joint = sheet.bend_joint_for_edge_name(source).unwrap();
-                assert_eq!(sheet.bend_source_edge(joint).unwrap(), *source);
+                let joint = sheet.bend_joint_for_edge_name(source, body).unwrap();
+                assert_eq!(sheet.bend_source_edge(joint, body).unwrap(), *source);
             }
             assert!(
                 crate::dialogs_sheet::flange_corner_sources(&preview.after, &preview.after, None).is_empty(),

@@ -590,24 +590,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         }
         FlangeType::Edge => {
             let edges = flange_edges(s, p, cmd)?;
-            let corners = match p.get("corners").filter(|value| !value.is_null()) {
-                Some(value) => {
-                    let items = value
-                        .as_array()
-                        .filter(|items| items.len() <= 2000)
-                        .ok_or_else(|| bad(cmd, "corners: expected an array of at most 2000 corner choices"))?;
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(index, item)| {
-                            serde_json::from_value::<crate::schema::sheet::FlangeCornerParams>(item.clone())
-                                .map_err(|error| bad(cmd, format!("corner {}: {error}", index + 1)))?;
-                            read_corner_join(s, item, cmd)
-                        })
-                        .collect::<Result<Vec<_>>>()?
-                }
-                None => Vec::new(),
-            };
+            let corners = flange_corners(s, p, cmd)?;
             let then = then_steps(s, p, cmd)?;
             if !then.is_empty() && edges.iter().any(|e| !e.segments.is_empty()) {
                 return Err(bad(cmd, "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)"));
@@ -709,6 +692,23 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(reply)
         }
     }
+}
+
+pub(super) fn flange_corners(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidcraft_doc::CornerJoinParams>> {
+    let Some(value) = p.get("corners").filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let items =
+        value.as_array().filter(|items| items.len() <= 2000).ok_or_else(|| bad(cmd, "corners: expected an array of at most 2000 corner choices"))?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            serde_json::from_value::<crate::schema::sheet::FlangeCornerParams>(item.clone())
+                .map_err(|error| bad(cmd, format!("corner {}: {error}", index + 1)))?;
+            read_corner_join(s, item, cmd)
+        })
+        .collect()
 }
 
 fn corner_join(s: &mut Session, p: &Value) -> Result<Value> {

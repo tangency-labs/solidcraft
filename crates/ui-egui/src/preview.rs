@@ -1019,7 +1019,7 @@ fn flange_faces(after: &ModelState, sources: &[[solidcraft_engine::doc::SheetEdg
         .filter_map(|sources| {
             let mut candidates = after.surface_sheets.iter().filter_map(|sheet| {
                 let body = after.body(&sheet.body)?;
-                let faces = sources.each_ref().map(|source| sheet.bend_face_indices(&body.body, source));
+                let faces = sources.each_ref().map(|source| sheet.bend_face_indices(body, source));
                 if faces.iter().any(Vec::is_empty) {
                     return None;
                 }
@@ -2290,8 +2290,8 @@ mod tests {
     #[test]
     fn flange_corner_preview_metadata_is_current_only() {
         let sources = vec![[
-            solidcraft_engine::doc::SheetEdgeName::parse("F7.base:rim.l1:top").unwrap(),
-            solidcraft_engine::doc::SheetEdgeName::parse("F7.base:rim.l2:top").unwrap(),
+            solidcraft_engine::doc::SheetEdgeName::parse("F7:top(F1:side:l1)|F7:bend.inner(F1:side:l1)").unwrap(),
+            solidcraft_engine::doc::SheetEdgeName::parse("F7:top(F1:side:l2)|F7:bend.inner(F1:side:l2)").unwrap(),
         ]];
         let built = || Built { flange_corners: sources.clone(), ..pose() };
         let mut preview = PreviewState::default();

@@ -1309,7 +1309,7 @@ pub(super) fn sheet_eval(
         FeatureKind::SheetCornerJoin { body, corner } => {
             let mut candidates = st.surface_sheets.iter().enumerate().filter(|(_, sheet)| match body {
                 Some(name) => &sheet.body == name,
-                None => corner.joint_pair(|source| sheet.bend_joint_for_edge_name(source)).is_ok(),
+                None => st.body(&sheet.body).is_some_and(|built| corner.joint_pair(|source| sheet.bend_joint_for_edge_name(source, built)).is_ok()),
             });
             let Some((i, before)) = candidates.next() else {
                 return Err(DocError::reselect(body.as_ref().map(|name| name.to_string()).unwrap_or_else(|| corner.covering.to_string())));
@@ -1318,7 +1318,8 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("select a sheet body; these corner sources match more than one sheet".into()));
             }
             let mut next = before.clone();
-            corner.apply(&mut next, |source| before.bend_joint_for_edge_name(source), |expr| val(vals, expr, Kind::Length))?;
+            let built = st.body(&before.body).ok_or_else(|| DocError::reselect(&before.body))?;
+            corner.apply(&mut next, |source| before.bend_joint_for_edge_name(source, built), |expr| val(vals, expr, Kind::Length))?;
             *st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))? = next;
             rebuild_surface_sheet(st, i)
         }
@@ -1471,14 +1472,32 @@ pub(super) fn sheet_eval(
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id, PanelsBy::Bends(&[]));
             if !corners.is_empty() {
+                let prev = std::mem::take(&mut sk.parts);
+                let solid = sk.build()?;
+                let mut built = st.body(&before.body).cloned().ok_or_else(|| DocError::reselect(&before.body))?;
+                let depth = built.names.depth().unwrap_or(0).saturating_add(1);
+                let lineage =
+                    crate::lineage::SheetBefore::of(&built, &prev).and_then(|previous| crate::lineage::sheet_lineage(Some(previous), &sk, &solid));
+                replace_traced_sheet_body(&mut built, solid, lineage.clone(), &sk.frames);
+                built.names = crate::naming::NameCell::traced(
+                    Some(std::sync::Arc::new(crate::naming::NamingOrigin {
+                        feature: f.clone(),
+                        before: std::sync::Arc::new(st.clone()),
+                        depth,
+                        mats: Vec::new(),
+                        sheets: st.sheets.clone(),
+                    })),
+                    lineage.map(std::sync::Arc::new),
+                );
                 let sources = sk.clone();
                 for corner in corners {
-                    let joints = corner.joint_pair(|source| sources.bend_joint_for_edge_name(source))?;
+                    let joints = corner.joint_pair(|source| sources.bend_joint_for_edge_name(source, &built))?;
                     if !joints.iter().any(|joint| made.contains(joint)) {
                         return Err(DocError::Invalid("a flange corner choice must include one of this feature's bends".into()));
                     }
-                    corner.apply(&mut sk, |source| sources.bend_joint_for_edge_name(source), |expr| val(vals, expr, Kind::Length))?;
+                    corner.apply(&mut sk, |source| sources.bend_joint_for_edge_name(source, &built), |expr| val(vals, expr, Kind::Length))?;
                 }
+                sk.parts = prev;
             }
             if let Some(slot) = st.surface_sheets.get_mut(i) {
                 *slot = sk;
