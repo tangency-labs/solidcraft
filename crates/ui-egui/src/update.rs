@@ -200,7 +200,7 @@ pub fn detect(p: &Probe) -> InstallKind {
             if let Some(id) = env("FLATPAK_ID") {
                 return InstallKind::Flatpak(id);
             }
-            if env("SNAP").is_some() && env("SNAP_NAME").is_none_or(|n| n.starts_with("solidcraft")) {
+            if is_snap(&env) {
                 // Locally installed (unasserted) snaps have revisions x1, x2, …
                 return InstallKind::Snap { store: !env("SNAP_REVISION").is_some_and(|r| r.starts_with('x')) };
             }
@@ -233,6 +233,12 @@ pub fn detect(p: &Probe) -> InstallKind {
         "macos" => app_bundle(&exe).map_or(InstallKind::Other, InstallKind::MacApp),
         _ => InstallKind::Other,
     }
+}
+
+/// The SolidCraft Snap is running: `SNAP` is set and `SNAP_NAME`, when set, is ours. SolidCraft
+/// started from a terminal inside another snap (a confined editor) sees that snap's variables.
+pub(crate) fn is_snap(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    env("SNAP").is_some() && env("SNAP_NAME").is_none_or(|n| n.starts_with("solidcraft"))
 }
 
 /// `path` is inside `dir` (Windows paths: case-insensitive).
