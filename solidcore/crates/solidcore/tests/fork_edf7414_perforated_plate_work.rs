@@ -196,6 +196,89 @@ fn a_plate_made_in_one_call_walks_each_hole_a_fixed_number_of_times() {
     assert_eq!(plate_in_one_call_walks(16), 3 * 256);
 }
 
+/// The plate's point classifications (`point_3d_classify`, as a hole's loop is placed)
+/// are the same, field for field, whether its holes' walks are left out or every loop is
+/// walked (`memoize_curve_caches` off): at a grid over the plate and its border, and at
+/// points on each hole's circle, inside and outside it by a tenth, one and ten times the
+/// classification tolerance, and at its centre. Leaving them out walks fewer loops.
+#[test]
+fn a_plate_classifies_its_points_the_same_with_its_holes_left_out() {
+    use solidcore::intersect::point_class::{PointClassType, PointClassification};
+    use solidcore::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
+    use solidcore::EntityRef;
+
+    let n = 4;
+    let mut k = Kernel::default();
+    let (curves, w) = plate_and_hole_curves(&mut k, n);
+    let plate = create_planar_faces(&mut k, &curves).unwrap();
+    let f = plate.face_list()[0];
+    let tol = 1e-6;
+    let mut points = Vec::new();
+    for i in -2..=42 {
+        for j in -2..=42 {
+            points.push(Point3::new(
+                w * f64::from(i) / 40.0,
+                w * f64::from(j) / 40.0,
+                0.0,
+            ));
+        }
+    }
+    for i in 1..=n {
+        for j in 1..=n {
+            let (x, y) = (PITCH * f64::from(i), PITCH * f64::from(j));
+            points.push(Point3::new(x, y, 0.0));
+            for a in 0..12 {
+                let (s, c) = (f64::from(a) * PI / 6.0 + 0.1).sin_cos();
+                for d in [0.0, 0.1, -0.1, 1.0, -1.0, 10.0, -10.0] {
+                    let r = RADIUS + d * tol;
+                    points.push(Point3::new(x + r * c, y + r * s, 0.0));
+                }
+            }
+        }
+    }
+    let classify = |memo: bool| {
+        let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
+        k.memoize_curve_caches = memo;
+        let mut b = plate.clone_standing_for_self().unwrap();
+        let classes: Vec<(String, PointClassType)> = points
+            .iter()
+            .map(|&p| {
+                let mut pc = PointClassification::<EntityRef>::new(tol);
+                let r = point_3d_classify(
+                    &k,
+                    &mut b,
+                    f,
+                    p,
+                    tol,
+                    false,
+                    &mut pc,
+                    Point3dClassifyOptions::default(),
+                );
+                (format!("{r:?} {pc:?}"), pc.point_class())
+            })
+            .collect();
+        (classes, k.work_counters.loop_walks())
+    };
+    let (left_out, fewer) = classify(true);
+    let (walked, every) = classify(false);
+    for ((p, a), b) in points.iter().zip(&left_out).zip(&walked) {
+        assert_eq!(a, b, "at {p:?}");
+    }
+    // the points take every class the face has: in it, on an edge, outside it
+    for class in [
+        PointClassType::Face,
+        PointClassType::Edge,
+        PointClassType::Unknown,
+    ] {
+        assert!(walked.iter().any(|c| c.1 == class), "{class:?}");
+    }
+    println!(
+        "{} points: {fewer} loop walks, {every} walking every loop",
+        points.len()
+    );
+    assert!(fewer < every / 4, "{fewer} of {every}");
+}
+
 /// The plate with its `n` x `n` holes extruded 12 high in one sweep (`extrude_region` of
 /// the outline and the hole circles, as a sketch and an extrude make it, with every fix
 /// on as SolidCraft runs): checks its topology and its exact volume, and returns the loop
@@ -209,7 +292,7 @@ fn plate_extruded_walks(n: u32) -> u64 {
     use solidcore::prism::extrude::extrude_region;
     use solidcore::prism::profile::{Loop2, Region2, Seg2};
 
-    let mut k = Kernel::default();
+    let mut k = Kernel::new(&solidcore::kernel::KernelOptions::default());
     k.fixes = UpstreamFixes::all();
     let w = PITCH * f64::from(n + 1);
     let q = Point2::new;

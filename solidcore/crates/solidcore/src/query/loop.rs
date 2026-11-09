@@ -11,6 +11,7 @@
 //! | [`UvContainment`]            | its return value and out-params                |
 //! | `calc_quad_num` (private)    | `sm_CalcQuadNum` (file static, unit `topology.loopuse`) |
 //! | `WindingHull` (crate)        | none (a shortcut for `sm_AssertTestFace37`)    |
+//! | `WalkExclusion` (crate)      | none (a shortcut for `SmFace::PointClassify`)  |
 //!
 //! Deviations:
 //! - **Topology.** The loop is a [`LoopId`] of a [`Brep`], taken mutably: upstream's
@@ -52,7 +53,10 @@
 //! - **Winding hulls.** Not upstream: `WindingHull` bounds every UV point the walk can
 //!   evaluate on a loop, so a caller that only asks whether a point is inside can leave
 //!   out the walk for a point outside it (`SmFace::AssertValid` test 37, which tests every
-//!   inner loop against every other).
+//!   inner loop against every other). `WalkExclusion` adds what rules out an answer on
+//!   the loop too (the point off the hull by the walk's UV tolerance, its surface point
+//!   off every edge curve's box by the edge's), so a face's point classification, which
+//!   stops only on those answers, can leave out its inner loops' walks.
 //! - **Loops.** Both walk loops keep upstream's bounds (1000 steps per edge use and
 //!   1000 re-evaluations per step, then `SM_POC_UNKNOWN`); the `goto Got_dThisParam`
 //!   re-evaluations are an inner loop. No recursion.
@@ -72,7 +76,7 @@ use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::loopuse::{uv_corner_boundaries_with_topology, QueryTopology};
-use crate::topology::{Brep, EdgeId, EdgeuseId, LoopId};
+use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId};
 
 /// Upper bound of the steps along one edge use and of the re-evaluations of one step
 /// (upstream's infinite-loop guards).
@@ -844,18 +848,29 @@ pub(crate) fn contains_uv_point_with_topology(
 /// loop's trim curves, for a loop whose walk cannot fail or change the B-rep away from
 /// the test point. For a test point strictly outside the box in `u` or `v` the walk's
 /// answer is not [`PointContainment::Inside`] ([`WindingHull::excludes`]), so a caller
-/// that only asks "inside?" need not walk.
+/// that only asks "inside?" need not walk; outside it by more than the walk's UV
+/// tolerance, the answer is not [`PointContainment::OnBoundary`] by a trim either
+/// ([`WalkExclusion`]).
 ///
 /// Why: every point the walk evaluates (`sLastEndUV`, each step, each local solve's point)
-/// is on a trim curve at an edge parameter. A loop is given a hull only when each of its
-/// trims is a B-spline with positive weights whose basis evaluates (as many control points
-/// as its knots and degree call for) over its edge's whole interval, or a line (whose
-/// points over the interval lie between its points at the interval's ends), so those points
-/// lie in the box of the B-spline trims' control points and the line trims' ends. With the
-/// test point outside that box in one coordinate, every evaluated point is in one open
-/// half-plane through it, so the walk's quadrant numbers take two adjacent values and its
-/// winding count ends at `0` or `±1`: [`PointContainment::Outside`]. Every earlier return
-/// of the walk (on an edge, on a pole side, `Unknown`) is not `Inside` either.
+/// is on a trim curve at a parameter of its edge's interval, widened by the local solves'
+/// slack ([`with_solve_slack`]: a solve's interval is the edge's, or two steps' widened by
+/// `SM_EFF_ZERO`, and its answer stays in it). A loop is given a hull only when each of its
+/// trims is either
+/// - a B-spline with positive weights whose evaluation cannot fail (as many control points
+///   as its knots and degree call for, a degree the evaluators take, finite knots and no
+///   positive knot gap short enough for their `1e-24` divisor guards, which only ever
+///   divide by knot differences spanning the evaluated span), without out-of-bounds
+///   evaluation (so a parameter past its domain is clamped into it) and with its edge's
+///   interval in its domain: its points lie in the box of its control points; or
+/// - a line, whose points over the widened interval lie between its points at the
+///   widened interval's ends (a line extends past them);
+///
+/// so no evaluation reads an undefined point and every evaluated point lies in the box.
+/// With the test point outside that box in one coordinate, every evaluated point is in
+/// one open half-plane through it, so the walk's quadrant numbers take two adjacent values
+/// and its winding count ends at `0` or `±1`: [`PointContainment::Outside`]. Every earlier
+/// return of the walk (on an edge, on a pole side, `Unknown`) is not `Inside` either.
 ///
 /// A hull is also given only when the walk's point-independent steps cannot fail or edit
 /// the B-rep: the loop, its loop use, face use and face exist; every edge use has an edge
@@ -872,6 +887,8 @@ pub(crate) fn contains_uv_point_with_topology(
 pub(crate) struct WindingHull {
     lo: Point2,
     hi: Point2,
+    /// The face the walk reads its zone tolerance from (the loop use's face use's).
+    face: FaceId,
 }
 
 impl WindingHull {
@@ -910,8 +927,10 @@ impl WindingHull {
             let trim = match trim_curve.kind() {
                 CurveKind::BSpline(trim) => trim,
                 CurveKind::Line(_) => {
-                    // a line's points over the edge's interval lie between its ends
-                    for t in [edge.interval.min(), edge.interval.max()] {
+                    // a line's points over the widened interval lie between its points
+                    // at the widened interval's ends
+                    let widened = with_solve_slack(&edge.interval);
+                    for t in [widened.min(), widened.max()] {
                         let e = trim_curve.evaluate_point(k, t).ok()?;
                         if !(e.x.is_finite() && e.y.is_finite()) {
                             return None;
@@ -935,7 +954,9 @@ impl WindingHull {
                     .all(|w| matches!(w, [a, b] if a <= b));
             let domain = trim.natural_interval();
             let within = edge.interval.min() >= domain.min() && edge.interval.max() <= domain.max();
-            if !(well_made && within) {
+            if !(well_made && within && evaluates_everywhere(nurb.knots(), p))
+                || trim.is_out_of_bounds_enabled()
+            {
                 return None;
             }
             for c in cpts {
@@ -950,7 +971,7 @@ impl WindingHull {
                 hi = Point2::new(hi.x.max(e.x), hi.y.max(e.y));
             }
         }
-        (lo.x <= hi.x && lo.y <= hi.y).then_some(Self { lo, hi })
+        (lo.x <= hi.x && lo.y <= hi.y).then_some(Self { lo, hi, face: f })
     }
 
     /// Whether `uv` lies outside the hull in `u` or `v` by more than an evaluation's
@@ -960,17 +981,207 @@ impl WindingHull {
     /// domain at the walk's UV tolerance (`SmExtent2d::GetPointBoundaries`, the walk's
     /// first test; such a point is never excluded).
     pub(crate) fn excludes(&self, uv: Point2, on_domain_side: bool) -> bool {
-        if on_domain_side || !(uv.x.is_finite() && uv.y.is_finite()) {
+        !on_domain_side && self.excludes_by(uv, 0.0)
+    }
+
+    /// Whether `uv` lies outside the hull in `u` or `v` by more than `margin` and an
+    /// evaluation's rounding (`1e-6` of the hull's size and of the coordinates).
+    fn excludes_by(&self, uv: Point2, margin: f64) -> bool {
+        if !(uv.x.is_finite() && uv.y.is_finite() && margin.is_finite()) {
             return false;
         }
         let pad =
             |lo: f64, hi: f64, x: f64| 1e-6 * (1.0 + (hi - lo) + lo.abs().max(hi.abs()) + x.abs());
         let out = |lo: f64, hi: f64, x: f64| {
-            let m = pad(lo, hi, x);
+            let m = margin + pad(lo, hi, x);
             x < lo - m || x > hi + m
         };
         out(self.lo.x, self.hi.x, uv.x) || out(self.lo.y, self.hi.y, uv.y)
     }
+}
+
+/// Not upstream: the parameters a curve may be evaluated at by the local solves of
+/// [`contains_uv_point`] and the drops it makes, for an interval `ivl` they are given: a
+/// solve keeps its answer in its interval, which is the edge's or two steps' widened by
+/// `SM_EFF_ZERO` (the walk's), and a drop's curve cache keeps a span whose interval lies
+/// in `ivl` to `SM_EFF_ZERO` (`IsContainedBy`). So `ivl` widened by `SM_EFF_ZERO` and
+/// the rounding of those sums and comparisons (a few units in the last place of the
+/// interval's ends).
+fn with_solve_slack(ivl: &Extent1d) -> Extent1d {
+    let mut widened = *ivl;
+    widened.expand_absolute(EFF_ZERO + 4.0 * f64::EPSILON * (1.0 + ivl.max_dimension()));
+    widened
+}
+
+/// Not upstream: whether a B-spline of degree `p` on `knots` (nondecreasing, as many as
+/// its control points call for) evaluates at every finite parameter, points and
+/// derivatives (`sm_CrvEval`, `sm_CrvDerivs`): a degree below the evaluators' scratch
+/// bounds, finite knots, and every positive knot gap far above the `1e-24` (basis) and
+/// `SM_EFF_ZERO_SQ` (derivative) divisor guards. Each divisor they test is a difference
+/// of two knots on either side of the evaluated span (which `FindSpan` returns nonempty),
+/// so it is at least that span's length less a few roundings of the knots' size.
+fn evaluates_everywhere(knots: &[f64], p: usize) -> bool {
+    let size = knots.iter().fold(0.0_f64, |m, u| m.max(u.abs()));
+    let shortest = 1e-12 * (1.0 + size);
+    p < crate::nurbs::knots::MAX_DEGREE
+        && size.is_finite()
+        && knots
+            .windows(2)
+            .all(|w| matches!(w, [a, b] if b == a || b - a >= shortest))
+}
+
+/// Not upstream: what a point classification of face `f` at `uv` needs to leave out an
+/// inner loop's walk ([`contains_uv_point`]) that cannot answer
+/// [`PointContainment::Inside`] or [`PointContainment::OnBoundary`]: the face's surface
+/// point at `uv`, the walk's UV tolerance there, and that `uv` lies off the sides of the
+/// surface's natural domain (where the walk reads the loop's corners and the surface's
+/// poles). Each is computed as the walk computes it, on the same copy of the surface, so a
+/// walk left out would have computed the same values without failing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct WalkExclusion {
+    face: FaceId,
+    uv: Point2,
+    point: Point3,
+    /// The walk's UV tolerance (the face's zone tolerance mapped to UV at `uv`, at least
+    /// `100 SM_EFF_ZERO`).
+    tol_uv: f64,
+}
+
+impl WalkExclusion {
+    /// The values at `uv` for loops of face `f` walked on `surface` (the copy the walk is
+    /// given), or `None` where one of them fails or `uv` lies on a side of the natural
+    /// domain: every loop is then walked.
+    pub(crate) fn at(
+        k: &Kernel,
+        b: &Brep,
+        f: FaceId,
+        surface: &Surface,
+        uv: Point2,
+    ) -> Option<Self> {
+        if !(uv.x.is_finite() && uv.y.is_finite()) {
+            return None;
+        }
+        let zone_tol = b.face(f).ok()?.tolerance;
+        let domain = surface.natural_uv_domain_with_nurb(k).ok()?;
+        let point = surface.evaluate_point(k, uv).ok()?;
+        let tol_uv = map_to_2d(k, zone_tol, uv, surface).ok()?;
+        let finite = point.x.is_finite() && point.y.is_finite() && point.z.is_finite();
+        if !(finite && tol_uv.is_finite()) || domain.point_boundaries(uv, tol_uv) != 0 {
+            return None;
+        }
+        Some(Self {
+            face: f,
+            uv,
+            point,
+            tol_uv: tol_uv.max(EFF_ZERO * 100.0),
+        })
+    }
+
+    /// Whether the walk of loop `l` of `b` (a loop of this face) from the point cannot
+    /// answer [`PointContainment::Inside`] or [`PointContainment::OnBoundary`], cannot
+    /// fail and cannot edit the B-rep, so a classification that only stops on those
+    /// answers need not walk it.
+    ///
+    /// Why: the loop has a [`WindingHull`] on this face (no failure, no edit, not
+    /// `Inside`; the surface steps are this value's), and the walk's other answers are
+    /// not on its boundary:
+    /// - On a pole side: `uv` is off every side of the natural domain.
+    /// - On a trim (`dPrevDist < tol`, the chord between edge uses `<= tol`, a step's
+    ///   point or a local solve's distance `<= tol`): each measures the distance from
+    ///   `uv` to an evaluated trim point or a chord between two of them, all in the hull,
+    ///   and `uv` lies outside it by more than the floored UV tolerance in one coordinate.
+    /// - On an edge curve (the 3D drop): the drop succeeds only with a distance below the
+    ///   edge's tolerance, measured from the surface point to the curve at a parameter of
+    ///   the edge's interval (a line's drop clamps into it) or of that interval widened
+    ///   by the solves' slack (an ellipse's, through its NURB, which clamps into its
+    ///   domain), or to the undefined point a failed evaluation leaves. The surface point
+    ///   lies farther than the tolerance from every edge curve's box over those
+    ///   parameters ([`drop_cannot_reach`]) and from the undefined point. Edge curves of
+    ///   other kinds (whose drops may answer from an analytic replacement) keep the walk.
+    pub(crate) fn excludes(&self, k: &Kernel, b: &Brep, l: LoopId) -> bool {
+        let Some(hull) = WindingHull::of(k, b, l) else {
+            return false;
+        };
+        if hull.face != self.face || !hull.excludes_by(self.uv, self.tol_uv) {
+            return false;
+        }
+        let Some(lu) = b.loop_(l).ok().and_then(|lp| lp.loopuse) else {
+            return false;
+        };
+        let Ok(eus) = eu1::loopuse_edgeuses(b, lu) else {
+            return false;
+        };
+        eus.iter().all(|&eu| {
+            edge_of(b, eu)
+                .and_then(|e| b.edge(e))
+                .is_ok_and(|edge| drop_cannot_reach(k, edge, self.point))
+        })
+    }
+}
+
+/// Not upstream: whether the walk's drop of `point` on `edge`'s curve (`DropPoint`,
+/// [`SolverOperation::Intersect`] at the edge's tolerance) cannot succeed: `point` lies
+/// farther than the tolerance (and an evaluation's rounding) from the box of every curve
+/// point the drop can measure its distance to, and from [`Vec3::UNDEF`] (where a failed
+/// evaluation leaves it).
+///
+/// The boxes, each a certified enclosure: a line's points over the edge's interval (its
+/// drop clamps the foot into the interval), the box of its two ends; an ellipse's points
+/// over the interval widened by the solves' slack and cut to its domain (the ellipse
+/// evaluates, solves and is boxed through one NURB, which clamps a parameter into its
+/// domain: a circle's drop clamps into the interval, another ellipse's solves its cache's
+/// spans), the box of the control points of the spans over it, an enclosure for positive
+/// weights. Other curves give `false`.
+fn drop_cannot_reach(k: &Kernel, edge: &crate::topology::Edge, point: Point3) -> bool {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::b_spline_curve::BoundingBoxRequest;
+    use crate::nurbs::math::NOW;
+    let Some(curve) = edge.curve.as_ref() else {
+        return false;
+    };
+    let interval = match curve.kind() {
+        CurveKind::Line(_) => edge.interval,
+        CurveKind::Ellipse(e) => {
+            let base = e.base();
+            let positive = base.nurb.as_ref().is_some_and(|nurb| {
+                nurb.cpts()
+                    .iter()
+                    .all(|c| c.w == NOW || (c.w > 0.0 && c.w.is_finite()))
+            });
+            if !positive || base.is_out_of_bounds_enabled() {
+                return false;
+            }
+            match with_solve_slack(&edge.interval).intersect(&curve.natural_interval()) {
+                Ok(ivl) => ivl,
+                Err(_) => return false,
+            }
+        }
+        _ => return false,
+    };
+    let req = BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let Some(enclosure) = curve
+        .calculate_bounding_box(k, &interval, req, true)
+        .ok()
+        .and_then(|boxes| boxes.normal)
+    else {
+        return false;
+    };
+    let (lo, hi) = (enclosure.min(), enclosure.max());
+    let coords = [
+        lo.x, lo.y, lo.z, hi.x, hi.y, hi.z, point.x, point.y, point.z,
+    ];
+    if !(coords.iter().all(|c| c.is_finite()) && edge.tolerance.is_finite()) {
+        return false;
+    }
+    let size = coords.iter().fold(0.0_f64, |m, c| m.max(c.abs()));
+    let reach = edge.tolerance + 1e-6 * (1.0 + (hi - lo).length() + size);
+    let out = |lo: f64, hi: f64, x: f64| x < lo - reach || x > hi + reach;
+    let off_box = out(lo.x, hi.x, point.x) || out(lo.y, hi.y, point.y) || out(lo.z, hi.z, point.z);
+    off_box && point.distance(Vec3::UNDEF) > reach
 }
 
 /// Not upstream: whether some edge use of loop `l` has no UV trim curve (or the loop's
@@ -1302,6 +1513,212 @@ mod tests {
         let mut b = square(plane(), true, &[]);
         b.edge_mut(EdgeId::from_index(2)).unwrap().interval = Extent1d::from_min_max(0.0, 1.5);
         assert_eq!(WindingHull::of(&Kernel::default(), &b, l), None);
+    }
+
+    /// No hull for a trim evaluated past its domain (it may extrapolate out of its
+    /// control points' box) or one with a positive knot gap short enough for the
+    /// evaluators' divisor guards (its evaluation may fail and read an undefined point).
+    #[test]
+    fn no_winding_hull_where_a_trim_may_leave_its_box() {
+        let l = LoopId::from_index(0);
+        let k = Kernel::default();
+        let mut b = square(plane(), true, &[]);
+        let mut out_of_bounds = BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(-5.0, 5.0, 0.0, NOW),
+                    CPoint::new(-5.0, -5.0, 0.0, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        );
+        out_of_bounds.set_out_of_bounds_enabled(true);
+        b.edgeuse_mut(EdgeuseId::from_index(3))
+            .unwrap()
+            .uv_trim_curve = Some(Curve::from(out_of_bounds));
+        assert_eq!(WindingHull::of(&k, &b, l), None);
+
+        let mut b = square(plane(), true, &[]);
+        let nurb = NurbCurve::new(
+            vec![
+                CPoint::new(-5.0, 5.0, 0.0, NOW),
+                CPoint::new(-5.0, 0.0, 0.0, NOW),
+                CPoint::new(-5.0, -5.0, 0.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 0.5, 1.0, 1.0],
+        )
+        .unwrap();
+        let mut short_gap = BSplineCurve::from_nurb(nurb, 2, false);
+        // (set on the curve as built, whose construction may tidy so close a knot)
+        let knots = short_gap.nurb.as_mut().unwrap().knots_mut();
+        knots[2] = 1e-15;
+        assert_eq!(*knots, [0.0, 0.0, 1e-15, 1.0, 1.0]);
+        b.edgeuse_mut(EdgeuseId::from_index(3))
+            .unwrap()
+            .uv_trim_curve = Some(Curve::from(short_gap));
+        assert_eq!(WindingHull::of(&k, &b, l), None);
+    }
+
+    /// A copy of loop `l`'s face's surface (as the face's point classification gives
+    /// the walk) and the face.
+    fn surface_of(b: &Brep, l: LoopId) -> (Surface, FaceId) {
+        let f = b.loop_(l).unwrap().face;
+        let surface = b.face(f).unwrap().surface.as_ref().unwrap();
+        (surface.clone_for_evaluation().unwrap(), f)
+    }
+
+    /// The walk exclusion's values at `uv` for loop `l`'s face.
+    fn exclusion_at(k: &Kernel, b: &Brep, l: LoopId, uv: [f64; 2]) -> Option<WalkExclusion> {
+        let (surface, f) = surface_of(b, l);
+        WalkExclusion::at(k, b, f, &surface, Point2::new(uv[0], uv[1]))
+    }
+
+    /// Whether loop `l`'s walk from `uv` is left out, checking that the walk it leaves
+    /// out answers neither inside nor on the loop; returns that and the walk's answer.
+    fn left_out_and_walk(b: &Brep, l: LoopId, uv: [f64; 2]) -> (bool, PointContainment) {
+        let k = Kernel::default();
+        let left_out = exclusion_at(&k, b, l, uv).is_some_and(|x| x.excludes(&k, b, l));
+        let (surface, _) = surface_of(b, l);
+        let mut walked = b.clone_standing_for_self().unwrap();
+        let r = contains_uv_point(
+            &k,
+            &mut walked,
+            l,
+            Some(&surface),
+            Point2::new(uv[0], uv[1]),
+            0.0,
+        )
+        .unwrap();
+        if left_out {
+            assert!(
+                !matches!(
+                    r.containment,
+                    PointContainment::Inside | PointContainment::OnBoundary
+                ),
+                "{uv:?}: {r:?}"
+            );
+        }
+        (left_out, r.containment)
+    }
+
+    /// The square of line edges with B-spline trims, on a plane whose UV is its (x, y):
+    /// every walk the exclusion leaves out on a grid around it, and at points across its
+    /// right side by fractions and multiples of the walk's tolerance, answers neither
+    /// inside nor on it. A point just outside the hull's padding (the walk's UV tolerance
+    /// `1e-6` and the rounding pad `1e-6 (1 + 10 + 5 + 5)`) is left out; a point within
+    /// the tolerance of the side is walked and is on it.
+    #[test]
+    fn a_walk_exclusion_leaves_out_only_walks_off_a_square() {
+        let b = square(plane(), true, &[]);
+        let l = LoopId::from_index(0);
+        let mut uvs = Vec::new();
+        for i in -17..=17 {
+            for j in -17..=17 {
+                uvs.push([f64::from(i) * 0.7, f64::from(j) * 0.7]);
+            }
+        }
+        for d in [
+            0.0, 1e-7, 5e-7, 1e-6, 2e-6, 1e-5, 2.1e-5, 2.3e-5, 1e-4, 1e-2,
+        ] {
+            uvs.extend([[5.0 + d, 1.3], [5.0 - d, 1.3], [-0.4, -5.0 - d]]);
+        }
+        let mut left_out = 0;
+        for &uv in &uvs {
+            left_out += usize::from(left_out_and_walk(&b, l, uv).0);
+        }
+        assert!(left_out > 500, "{left_out}");
+        assert!(left_out_and_walk(&b, l, [5.0 + 3e-5, 1.3]).0);
+        assert_eq!(
+            left_out_and_walk(&b, l, [5.0 + 5e-7, 1.3]),
+            (false, PointContainment::OnBoundary)
+        );
+        assert_eq!(
+            left_out_and_walk(&b, l, [0.0, 0.0]),
+            (false, PointContainment::Inside)
+        );
+    }
+
+    /// A point on a side of the surface's natural domain is always walked (the walk then
+    /// reads the loop's corners and the surface's poles): the same point off the sides of
+    /// a larger domain is left out.
+    #[test]
+    fn a_walk_exclusion_walks_a_point_on_a_side_of_the_domain() {
+        let k = Kernel::default();
+        let l = LoopId::from_index(0);
+        let b = square(plane(), true, &[]);
+        assert!(exclusion_at(&k, &b, l, [8.0, 1.0]).is_some_and(|x| x.excludes(&k, &b, l)));
+        let on_side = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(-8.0, -8.0, 8.0, 8.0),
+        ));
+        let b = square(on_side, true, &[]);
+        assert_eq!(exclusion_at(&k, &b, l, [8.0, 1.0]), None);
+    }
+
+    /// Edge curves that are B-splines keep the walk (a B-spline's drop may answer from an
+    /// analytic replacement the edge's box does not hold), though the hull rules the
+    /// point out.
+    #[test]
+    fn a_walk_exclusion_walks_loops_of_b_spline_edges() {
+        let k = Kernel::default();
+        let l = LoopId::from_index(0);
+        let mut b = square(plane(), true, &[]);
+        let v = [[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]];
+        for i in 0..4_usize {
+            b.edge_mut(EdgeId::from_index(i as u32)).unwrap().curve =
+                Some(trim(v[i], v[(i + 1) % 4]));
+        }
+        assert!(
+            WindingHull::of(&k, &b, l).is_some_and(|h| h.excludes(Point2::new(8.0, 1.0), false))
+        );
+        for uv in [[8.0, 1.0], [0.0, 30.0], [-12.0, -12.0]] {
+            assert!(!left_out_and_walk(&b, l, uv).0, "{uv:?}");
+        }
+    }
+
+    /// A circle's loop (an ellipse edge, as a hole's loop is made): every walk left out
+    /// on a grid over and around the face's domain answers neither inside nor on it, and
+    /// most walks off the circle's box are left out.
+    #[test]
+    fn a_walk_exclusion_leaves_out_only_walks_off_a_circle() {
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+        let mut k = Kernel::default();
+        let frame = Axis2Placement::new(Vec3::new(3.0, -2.0, 0.0), Vec3::X, Vec3::Y);
+        let circle = Ellipse::create_canonical_circle(&k, &frame, 2.0, None, None).unwrap();
+        let b = crate::primitive::api_trim_ops::create_planar_faces(&mut k, &[Curve::from(circle)])
+            .unwrap();
+        let f = b.face_list()[0];
+        let l = b.face(f).unwrap().loops[0];
+        let lu = b.loop_(l).unwrap().loopuse.unwrap();
+        for eu in eu1::loopuse_edgeuses(&b, lu).unwrap() {
+            let edge = b.edge(edge_of(&b, eu).unwrap()).unwrap();
+            assert!(matches!(
+                edge.curve.as_ref().unwrap().kind(),
+                crate::curve::curve::CurveKind::Ellipse(_)
+            ));
+        }
+        let domain = b.face(f).unwrap().uv_domain;
+        let (lo, hi) = (domain.min(), domain.max());
+        let mut left_out = 0;
+        for i in -20..=60 {
+            for j in -20..=60 {
+                let uv = [
+                    lo.x + (hi.x - lo.x) * f64::from(i) / 40.0,
+                    lo.y + (hi.y - lo.y) * f64::from(j) / 40.0,
+                ];
+                left_out += usize::from(left_out_and_walk(&b, l, uv).0);
+            }
+        }
+        assert!(left_out > 3000, "{left_out}");
     }
 
     #[test]
