@@ -6037,6 +6037,8 @@ fn item_times_stay_beside_their_items() {
 /// went back reads as none, never as a negative time.
 #[test]
 fn lengths_of_time_read_in_seconds_minutes_and_hours() {
+    // The English catalog: under nextest no other test has installed it in this process.
+    crate::i18n::install();
     assert_eq!(times::span(0.0), "0 s");
     assert_eq!(times::span(59_999.0), "59 s");
     assert_eq!(times::span(60_000.0), "1 min");
