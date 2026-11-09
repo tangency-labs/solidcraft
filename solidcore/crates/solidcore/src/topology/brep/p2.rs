@@ -560,7 +560,7 @@ fn brep_shells(k: &mut Kernel, b: &Brep) -> Result<Vec<ShellId>> {
 fn check_uv_trim_curve(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
     match p1::check_uv_trim_curve(k, b, eu) {
         Ok(()) => Ok(true),
-        Err(SolidError::Upstream { code: SM_ERR, .. }) => Ok(false),
+        Err(e) if e.upstream_status() == Some(SM_ERR) => Ok(false),
         Err(e) => Err(e),
     }
 }

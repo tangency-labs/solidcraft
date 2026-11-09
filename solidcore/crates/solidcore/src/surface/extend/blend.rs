@@ -265,9 +265,8 @@ fn along(
             // an ask that does not work, as a weight not positive
             let span = match span_of_definition(k, &next, idx, target) {
                 Ok(span) if span.certified.is_finite() && feet_on(k, &next, &span)? => span,
-                Ok(_) | Err(SolidError::InvalidInput { .. } | SolidError::Upstream { .. }) => {
-                    return Ok(None)
-                }
+                Ok(_) | Err(SolidError::InvalidInput { .. }) => return Ok(None),
+                Err(e) if e.upstream_status().is_some() => return Ok(None),
                 Err(e) => return Err(e),
             };
             let length = (y - x) / rate;
