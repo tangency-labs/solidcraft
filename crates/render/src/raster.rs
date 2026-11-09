@@ -376,7 +376,7 @@ mod tests {
     use super::*;
     use crate::StandardView;
     use crate::scene::{SceneLine, SceneMesh};
-    use solidcraft_geom::Mesh;
+    use solidcore_tess::Mesh;
     use std::sync::Arc;
 
     /// Lines are cut by the section in 3D: the kept piece ends on the plane.

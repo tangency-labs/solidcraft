@@ -325,7 +325,7 @@ pub struct SharedTris {
 impl SharedTris {
     /// `mesh`'s triangles with their vertices shared: by position and normal, or by position
     /// alone when every triangle is flat.
-    pub fn new(mesh: &solidcraft_geom::Mesh) -> SharedTris {
+    pub fn new(mesh: &solidcore_tess::Mesh) -> SharedTris {
         let corner = |i: u32| Some((mesh.positions.get(i as usize)?.to_f32(), mesh.normals.get(i as usize)?.to_f32()));
         let bits = |v: [f32; 3]| v.map(|x| (x + 0.0).to_bits());
         let flat = mesh.triangles.iter().all(|t| {
@@ -365,9 +365,9 @@ impl SharedTris {
         out
     }
 
-    /// A simplified copy of a mesh ([`solidcraft_geom::simplify::Level`]): its vertices already
+    /// A simplified copy of a mesh ([`solidcore_tess::simplify::Level`]): its vertices already
     /// shared, its triangles lit flat (each fragment with its triangle's own normal).
-    pub fn from_level(level: &solidcraft_geom::simplify::Level) -> SharedTris {
+    pub fn from_level(level: &solidcore_tess::simplify::Level) -> SharedTris {
         let mut out = SharedTris { flat: true, ..Default::default() };
         out.vertices.reserve_exact(level.positions.len() * SHARED_SIZE);
         let mut lo = [f32::INFINITY; 3];
@@ -1108,7 +1108,7 @@ pub const ACCESS_SIZE: u32 = 1024;
 impl AccessMap {
     /// The depth map of `meshes` seen along `dir` (`version`: what the GPU uploads it by):
     /// rasterise the triangles seen along `dir` (orthographic), keeping the highest point per pixel.
-    pub fn build(meshes: &[&solidcraft_geom::Mesh], dir: Vec3, version: u64) -> Option<AccessMap> {
+    pub fn build(meshes: &[&solidcore_tess::Mesh], dir: Vec3, version: u64) -> Option<AccessMap> {
         let d = dir.normalized()?;
         let u = d.cross(if d.x.abs() < 0.9 { Vec3::X } else { Vec3::Y }).normalized()?;
         let v = d.cross(u);
@@ -4611,7 +4611,7 @@ mod tests {
     fn shared_tris_share_each_vertex_once() {
         use super::{SHARED_SIZE, SharedTris};
         use solidcore_record::Vec3;
-        use solidcraft_geom::Mesh;
+        use solidcore_tess::Mesh;
         let p = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
         // Two triangles of a square, each corner its own vertex (as an STL is read).
         let mut flat = Mesh::default();
@@ -5617,7 +5617,7 @@ mod glass_tests {
                         {
                             scene.tri(p, [0.0; 3], product_color);
                         }
-                        let mesh = solidcraft_geom::Mesh {
+                        let mesh = solidcore_tess::Mesh {
                             positions: vec![Vec3::new(-3.5, -4.0, 0.0), Vec3::new(3.5, -4.0, 0.0), Vec3::new(0.0, 4.0, 0.0)],
                             normals: if flat { vec![Vec3::Z; 3] } else { vec![Vec3::Z, Vec3::new(0.6, 0.0, 0.8), Vec3::new(-0.6, 0.0, 0.8)] },
                             triangles: vec![[0, 1, 2]],

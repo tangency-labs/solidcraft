@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
 robust = "1.2"
 solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }

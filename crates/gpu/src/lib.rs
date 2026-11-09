@@ -15,7 +15,7 @@
 
 use solidcore_record::Vec3;
 #[cfg(not(target_arch = "wasm32"))]
-use solidcraft_geom::Mesh;
+use solidcore_tess::Mesh;
 use solidcraft_geom::tess::{EvalCurve, EvalSurface, TessPlan};
 use wgpu::util::DeviceExt;
 

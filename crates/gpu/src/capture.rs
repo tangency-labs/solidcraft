@@ -603,7 +603,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 mod tests {
     use super::*;
     use crate::view::TRI_SIZE;
-    use solidcraft_geom::Mesh;
+    use solidcore_tess::Mesh;
     use std::sync::Arc;
 
     /// One triangle facing the camera.
