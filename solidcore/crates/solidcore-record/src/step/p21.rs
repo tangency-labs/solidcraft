@@ -519,12 +519,37 @@ impl Lexer<'_> {
             });
         }
         self.records += 1;
-        let name = self.keyword()?;
+        let name = long_name(self.keyword()?);
         self.expect(b'(')?;
         Ok(Record {
             name,
             params: self.list_rest(1)?,
         })
+    }
+}
+
+/// Part 21 short entity names (ISO 10303-21's short-name form, which some AP203 writers use) of
+/// the geometry and topology entities a B-rep is read from, with their long names. Origin:
+/// `step-import`'s table (#2582).
+const SHORT_NAMES: [(&str, &str); 11] = [
+    ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+    ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
+    ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
+    ("CLSSHL", "CLOSED_SHELL"),
+    ("CMCRSG", "COMPOSITE_CURVE"),
+    ("CRTPNT", "CARTESIAN_POINT"),
+    ("DRCTN", "DIRECTION"),
+    ("FCOTBN", "FACE_OUTER_BOUND"),
+    ("FCSRF", "FACE_SURFACE"),
+    ("PLYLP", "POLY_LOOP"),
+    ("TRMCRV", "TRIMMED_CURVE"),
+];
+
+/// An entity name as its long form where it is one of [`SHORT_NAMES`].
+fn long_name(name: String) -> String {
+    match SHORT_NAMES.iter().find(|(short, _)| *short == name) {
+        Some((_, long)) => (*long).to_string(),
+        None => name,
     }
 }
 
@@ -838,6 +863,19 @@ mod tests {
     /// A DATA section holding `data`, with no header.
     fn data(data: &str) -> String {
         format!("ISO-10303-21;DATA;{data}ENDSEC;END-ISO-10303-21;")
+    }
+
+    #[test]
+    fn short_entity_names_read_as_their_long_names() {
+        let ex = parse(&data(
+            "#1=CRTPNT('',(0.,1.,2.));#2=PLYLP('',(#1));#3=SOME_SHRT('');",
+        ))
+        .unwrap();
+        let name = |id: u64| ex.get(id).map(|e| e.name().to_string());
+        assert_eq!(name(1).as_deref(), Some("CARTESIAN_POINT"));
+        assert_eq!(name(2).as_deref(), Some("POLY_LOOP"));
+        // A name outside the table is kept as written.
+        assert_eq!(name(3).as_deref(), Some("SOME_SHRT"));
     }
 
     #[test]

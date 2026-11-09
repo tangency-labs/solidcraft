@@ -426,7 +426,8 @@ fn item_shells(ex: &Exchange, item: u64) -> R<(Vec<u64>, Kind)> {
     let e = entity(ex, item)?;
     let p = e.params();
     match e.name() {
-        "MANIFOLD_SOLID_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
+        // A FACETED_BREP is a manifold solid whose faces are planar polygons (POLY_LOOPs).
+        "MANIFOLD_SOLID_BREP" | "FACETED_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
         "BREP_WITH_VOIDS" => {
             let mut shells = vec![rid(p.get(1), "outer shell")?];
             let voids = refs(p.get(2), "voids")?;
@@ -531,6 +532,9 @@ struct Builder<'b, 'a> {
     sense_mismatches: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     raised_edges: HashSet<u32>,
+    /// The line edges of POLY_LOOPs, by their two CARTESIAN_POINTs (lower id first): faces that
+    /// share a side share its edge, as a faceted B-rep's do.
+    poly_edges: HashMap<(u64, u64), u32>,
 }
 
 impl<'b, 'a> Builder<'b, 'a> {
@@ -549,6 +553,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             faces: Vec::new(),
             sense_mismatches: 0,
             raised_edges: HashSet::new(),
+            poly_edges: HashMap::new(),
         }
     }
 
@@ -817,8 +822,70 @@ impl<'b, 'a> Builder<'b, 'a> {
                 Ok((LoopB::Edges(uses), outer))
             }
             "VERTEX_LOOP" => Ok((LoopB::Vertex(self.vertex(rid(lp.params().get(1), "vertex loop")?)?), outer)),
+            "POLY_LOOP" => {
+                let mut uses = self.poly_loop(lp_id, edges_so_far)?;
+                if !orientation {
+                    reverse(&mut uses);
+                }
+                Ok((LoopB::Edges(uses), outer))
+            }
             n => Err(format!("#{lp_id}: {}", unsupported(format!("loop {n}")))),
         }
+    }
+
+    /// A POLY_LOOP (ISO 10303-42: a closed polygon of points) as edge uses: a line from each
+    /// point to the next and from the last back to the first, a point written twice in a row
+    /// skipped. Each point is a vertex and each side an edge, shared with every other loop that
+    /// has the same two points, as the faces of a FACETED_BREP share them.
+    fn poly_loop(&mut self, lp_id: u64, edges_so_far: &mut usize) -> R<Vec<(u32, bool)>> {
+        let lp = entity(self.ex, lp_id)?;
+        let mut pts = refs(lp.params().get(1), "poly loop")?;
+        pts.dedup();
+        if pts.len() > 1 && pts.first() == pts.last() {
+            pts.pop();
+        }
+        *edges_so_far = edges_so_far.saturating_add(pts.len());
+        if pts.len() < 3 || *edges_so_far > MAX_LOOP {
+            return Err(format!("poly loop #{lp_id} with {} points", pts.len()));
+        }
+        let mut uses = Vec::with_capacity(pts.len());
+        for (k, &a) in pts.iter().enumerate() {
+            let b = *pts.get((k + 1) % pts.len()).ok_or("poly loop point")?;
+            let key = (a.min(b), a.max(b));
+            let forward = a < b;
+            if let Some(&e) = self.poly_edges.get(&key) {
+                uses.push((e, forward));
+                continue;
+            }
+            let (va, vb) = (self.point_vertex(key.0)?, self.point_vertex(key.1)?);
+            let (pa, pb) = (self.point(va)?, self.point(vb)?);
+            if v3(pa).dist(v3(pb)) <= self.tol {
+                return Err(format!("poly loop #{lp_id}: a side of no length"));
+            }
+            let e = index(self.edges.len())?;
+            self.edges.push(EdgeB {
+                curve: BCurve::Line { start: pa, end: pb },
+                interval: [0.0, 1.0],
+                vertices: [va, vb],
+                tolerance: self.tol,
+                form: None,
+            });
+            self.poly_edges.insert(key, e);
+            uses.push((e, forward));
+        }
+        Ok(uses)
+    }
+
+    /// The vertex at CARTESIAN_POINT `id` (a POLY_LOOP's corner), one per point.
+    fn point_vertex(&mut self, id: u64) -> R<u32> {
+        if let Some(v) = self.vertex_ids.get(&id) {
+            return Ok(*v);
+        }
+        let point = self.reader.point(id)?;
+        let i = index(self.vertices.len())?;
+        self.vertices.push(Vertex { point, tolerance: self.tol });
+        self.vertex_ids.insert(id, i);
+        Ok(i)
     }
 
     /// A face as a shell uses it: its index and whether its normal there is its surface's
@@ -833,7 +900,9 @@ impl<'b, 'a> Builder<'b, 'a> {
             let (f, forward) = self.face(rid(p.get(2), "oriented face element")?, depth + 1)?;
             return Ok((f, forward == flag(p.get(3), "oriented face orientation")?));
         }
-        if !matches!(e.name(), "ADVANCED_FACE" | "FACE_SURFACE") {
+        // A plain FACE carries no surface: it is the plane its loops lie in.
+        let implicit = e.name() == "FACE";
+        if !matches!(e.name(), "ADVANCED_FACE" | "FACE_SURFACE" | "FACE") {
             return Err(format!("#{id}: {}", unsupported(format!("face {}", e.name()))));
         }
         if !self.face_ids.insert(id) {
@@ -843,8 +912,6 @@ impl<'b, 'a> Builder<'b, 'a> {
         if self.faces.len() >= MAX_FACES {
             return Err(format!("more than {MAX_FACES} faces"));
         }
-        let step_surface = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
-        let same_sense = flag(p.get(3), "face same_sense")?;
         let bounds = refs(p.get(1), "face bounds")?;
         if bounds.len() > MAX_BOUNDS {
             return Err(format!("face #{id} with {} bounds", bounds.len()));
@@ -862,6 +929,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
             return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
         }
+        let (step_surface, same_sense) = if implicit {
+            (std::sync::Arc::new(self.loop_plane(&loops).map_err(|m| format!("face #{id}: {m}"))?), true)
+        } else {
+            let s = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
+            (s, flag(p.get(3), "face same_sense")?)
+        };
         let extent = self.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
         // Loops relative to the record's natural normal: the face's normal is STEP's surface
@@ -877,6 +950,40 @@ impl<'b, 'a> Builder<'b, 'a> {
         let i = index(self.faces.len())?;
         self.faces.push(FaceB { step: id, surface, loops, outer, forward: sense, extent: None });
         Ok((i, sense))
+    }
+
+    /// The plane a plain FACE's loops lie in (ISO 10303-42: a FACE with no face geometry is
+    /// bounded by loops in one plane): its normal by Newell's method over the first edge loop's
+    /// points (each edge at nine points), so its outer loop runs counter-clockwise about it; its
+    /// origin the loop's first point. Refused where the points span no plane or leave it by more
+    /// than the tolerance.
+    fn loop_plane(&self, loops: &[LoopB]) -> R<crate::geom::Surface> {
+        let Some(LoopB::Edges(es)) = loops.iter().find(|l| matches!(l, LoopB::Edges(_))) else { return Err("no edge loop".into()) };
+        let mut pts: Vec<Vec3> = Vec::new();
+        for &(e, forward) in es {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+            let [lo, hi] = edge.interval;
+            for k in 0..8 {
+                let f = f64::from(k) / 8.0;
+                pts.push(c.point(if forward { lo + (hi - lo) * f } else { hi - (hi - lo) * f }).ok_or("edge point")?);
+            }
+        }
+        let first = *pts.first().ok_or("an empty loop")?;
+        let mut normal = Vec3::new(0.0, 0.0, 0.0);
+        for (a, b) in pts.iter().zip(pts.iter().cycle().skip(1)) {
+            normal += (*a - first).cross(*b - first);
+        }
+        let z = normal.normalized().ok_or_else(|| unsupported("a face with no surface whose loop spans no plane"))?;
+        if pts.iter().any(|p| (*p - first).dot(z).abs() > self.tol) {
+            return Err(unsupported("a face with no surface whose loop leaves its plane"));
+        }
+        let far = pts.iter().copied().max_by(|a, b| (*a - first).len().total_cmp(&(*b - first).len())).ok_or("an empty loop")?;
+        let d = far - first;
+        let x = (d - z * d.dot(z)).normalized().ok_or("a degenerate loop")?;
+        Ok(crate::geom::Surface::Plane {
+            position: Placement { origin: [first.x, first.y, first.z], axis: [z.x, z.y, z.z], ref_direction: [x.x, x.y, x.z] },
+        })
     }
 
     /// Points along a face's loops (each edge at nine points, and its vertex loops), and along

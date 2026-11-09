@@ -538,6 +538,72 @@ fn bands_and_caps_without_seams_get_one() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// A half torus between its rims (a fillet round a bore, `torus_ring` of the step-conformance
+/// set): its face winds around the axis between two circles about it, and gets a seam round the
+/// tube on the face's side, closing the solid with the annulus.
+#[test]
+fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
+    let mut w = W::default();
+    let ring = |w: &mut W, r: f64| {
+        let v = w.vertex([r, 0.0, 0.0]);
+        let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (inner, outer) = (ring(&mut w, 15.0), ring(&mut w, 25.0));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},20.,5.)"));
+    let (x, y) = (w.oe(outer, true), w.oe(inner, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let tube = w.face(&[bx, by], torus, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (x, y) = (w.oe(outer, false), w.oe(inner, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let annulus = w.face(&[bx, by], plane, false);
+    let shell = closed_shell(&mut w, &[tube, annulus]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ring',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    // The two rims and one seam, a tube half circle from the outer rim's vertex to the inner's.
+    assert_eq!(counts(&s.brep), [2, 1, 2, 3, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    let seam = s.brep.edges.iter().find(|e| matches!(e.curve, solidcore_record::brep::Curve::Circle { radius, .. } if (radius - 5.0).abs() < 1e-9));
+    let seam = seam.expect("a tube circle seam");
+    // On the face's side: up the tube, over its top (z > 0), from angle 0 to π.
+    let [t0, t1] = solidcore_ops::label::edge_curve_interval(seam).unwrap();
+    assert!((t1 - t0 - std::f64::consts::PI).abs() < 1e-9, "{t0} {t1}");
+    faces_away(&s.brep, 0, |p| {
+        let r = p[0].hypot(p[1]).max(1e-9);
+        [20.0 * p[0] / r, 20.0 * p[1] / r, 1.0]
+    });
+}
+
+/// A FACETED_BREP: a tetrahedron of four FACE_SURFACEs on planes, each bounded by a POLY_LOOP of
+/// three of its four points. Each point is one vertex and each side one edge, shared by the two
+/// faces it bounds, so the shell closes.
+#[test]
+fn a_faceted_brep_of_poly_loops_is_a_closed_solid() {
+    let mut w = W::default();
+    let p = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]].map(|q| w.pt(q));
+    // Each face's points counter-clockwise seen from outside.
+    let tri = |w: &mut W, i: [usize; 3], o: V, z: V, x: V| {
+        let l = w.add(format!("POLY_LOOP('',(#{},#{},#{}))", p[i[0]], p[i[1]], p[i[2]]));
+        let b = w.add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        let s = w.plane(o, z, x);
+        w.add(format!("FACE_SURFACE('',(#{b}),#{s},.T.)"))
+    };
+    let k = 1.0 / 3f64.sqrt();
+    let faces = [
+        tri(&mut w, [0, 2, 1], [0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]),
+        tri(&mut w, [0, 1, 3], [0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        tri(&mut w, [0, 3, 2], [0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        tri(&mut w, [1, 2, 3], [10.0, 0.0, 0.0], [k, k, k], [-k * 3f64.sqrt() / 2f64.sqrt(), k * 3f64.sqrt() / 2f64.sqrt(), 0.0]),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("FACETED_BREP('tetra',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 4, 6, 4]);
+    faces_away(&s.brep, 0, |_| [2.0, 2.0, 2.0]);
+}
+
 /// A 20 × 20 × 5 plate with a hole of radius 3 through it; with `marked`, its square bounds are
 /// FACE_OUTER_BOUNDs, otherwise every bound is a FACE_BOUND and the hole is listed first.
 fn plate(marked: bool) -> p21::Exchange {
@@ -886,7 +952,6 @@ fn hostile_topology_is_an_error_never_a_panic() {
             }),
         ),
         ("an unsupported loop", Box::new(|t: &str| t.replacen("EDGE_LOOP(", "POLY_LOOP(", 1))),
-        ("an unsupported solid", Box::new(|t: &str| t.replace("MANIFOLD_SOLID_BREP", "FACETED_BREP"))),
     ];
     for (what, edit) in cases {
         let r = edited(edit);
