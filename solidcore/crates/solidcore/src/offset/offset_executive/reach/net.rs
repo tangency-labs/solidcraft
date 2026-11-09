@@ -4,20 +4,28 @@
 //!
 //! A net is its own surface over its knots and, past a side the offset executive extends,
 //! the extension it builds (`Continuity::Ruled`, definitions-and-certificates.md §6.1;
-//! `surface/extend.rs`): each row across the side continues as the line its end is tangent
-//! to, so past `v = v1` the surface is the set of the lines `G(u, v1) + λ G_v(u, v1)`, here
-//! `G + (v − v1) G_v`. Where the rows across the side end in one weight ratio (every
-//! polynomial net, a rational extrusion's or revolution's) the extension's weights stay
-//! constant along it and it is that very surface, on these parameters. Where the ratios
-//! differ, the homogeneous lines reach a finite distance on other parameters, and past it
-//! the product form `S + s S_v` is these lines again on these parameters (or, with no such
-//! form, the extension is refused and left short, and the meeting found on the lines is
-//! not reached: the operation fails, it builds nothing wrong). Past two sides the first
-//! side's extension is extended again: `G + Δu G_u + Δv G_v + Δu Δv G_uv` at the box's
-//! corner, which holds where both sides' rows end in one weight ratio; another corner is not
-//! enclosed here. A closed direction is not extended: the net runs on round its seam. A
-//! side collapsed to a point (a pole) is not extended either, and nothing past it is
-//! enclosed.
+//! `surface/extend.rs`), side after side in `BoxSide::ALL`'s order, the v sides on the
+//! surface the u sides left. Each row across a side continues as the line its end is tangent
+//! to: past a side the surface is the set of the lines `G + λ G_u` from the side (`G` and
+//! its partials taken at the side), whichever of the executive's two forms is built there,
+//! the homogeneous lines `H + s (H_u + μ H)` (`s = Δu`, one `μ` along the side) or, past
+//! their reach, the product form `S + s S_u`. Projected, the lines are `G + σ G_u` with
+//! `σ = s / (1 + s κ)`, `κ = (p / h) C / W ≥ 0` the lines' weight rate
+//! (`C = Σ N_j (ρ w_n − w_(n−1))`, `W = Σ N_j w_n` along the side, [`Lines`]), and the
+//! product form is `κ = 0`: where the rows end in one weight ratio `κ` is 0 and the two are
+//! one. Which is built
+//! depends on the distance asked, which the reach does not know, so both are enclosed, `κ`
+//! taken over its hull with 0. Past a v side the lines start from what the u sides left,
+//! `E + Δv E_v` at that side (`E` the net on its knots, `G + σ G_u` past a u side): either
+//! form runs each line from its point of the side along that point's tangent, only at another
+//! pace along it, so the lines are one surface on other parameters (as far as the form built
+//! reaches; with no form that reaches, the extension is refused and left short, and the
+//! meeting found is not reached: the operation fails, it builds nothing wrong). The meeting
+//! is a point, not a parameter, so these parameters serve. At a corner past a u and a
+//! v side, `E_v = G_v + σ G_uv + σ_v G_u` carries the u side's parameters, so the corner
+//! differs between the two forms; each is enclosed. A closed direction is not extended: the
+//! net runs on round its seam. A side collapsed to a point (a pole) is not extended either,
+//! and nothing past it is enclosed.
 //!
 //! A meeting is proved by Krawczyk's operator (definitions-and-certificates.md §4.3): a box
 //! `Y` about Newton's root `ỹ` with `K(Y) = ỹ − C F(ỹ) + (I − C F′(Y)) (Y − ỹ)` strictly
@@ -27,12 +35,15 @@
 //! knot line), and smooth on each piece, and `F′(Y)` is the hull of the pieces' enclosures
 //! of its partials (from either side on a line): along the segment from `ỹ` to any point of
 //! `Y`, `F` is the integral of its derivative, which lies in that hull wherever it exists,
-//! so the mean-value form `F(y) ∈ F(ỹ) + F′(Y) (y − ỹ)` holds [Neumaier 1990, §2.1]. At most
-//! [`KRAWCZYK_STEPS`] steps run.
+//! so the mean-value form `F(y) ∈ F(ỹ) + F′(Y) (y − ỹ)` holds [Neumaier 1990, §2.1]. Taken
+//! over enclosures that hold both forms past a u side, `K(Y)` holds each form's own, so a box
+//! it proves holds a root of whichever is built. At most [`KRAWCZYK_STEPS`] steps run.
 
 use std::cell::Cell;
 
-use crate::blend::fillet_section::certificate::{inverse4, nurbs_partials_over_box};
+use crate::blend::fillet_section::certificate::{
+    curve_derivs_over, inverse4, nurbs_partials_over_box, NurbsCurve,
+};
 use crate::blend::fillet_section::interval::{round_up, Ivl};
 use crate::blend::fillet_section::station::Nurbs;
 use crate::error::{Result, SolidError};
@@ -141,9 +152,32 @@ pub(super) struct Net {
     closed: [bool; 2],
     /// Whether the executive extends each side (`BoxSide::ALL` order).
     extends: [bool; 4],
-    /// Whether the rows across each side end in one weight ratio (`BoxSide::ALL` order):
-    /// a corner past two such sides is enclosed (module docs).
-    uniform: [bool; 4],
+    /// The weights of the homogeneous lines past each u side (low, high), from which the
+    /// extension's parameters there follow (module docs); `None` where they are not proved
+    /// positive.
+    lines: [Option<Lines>; 2],
+}
+
+/// The homogeneous lines `H + s (H_u + μ H)` the executive continues the rows by past a u
+/// side (`surface/extend.rs`, Ruled), as their weight's rate against the side's weight:
+/// `κ = (p / h) C / W ≥ 0` along the side, with `C = Σ N_j (ρ w_n − w_(n−1))` and
+/// `W = Σ N_j w_n` the curve `(C, W)` over the v knots (`ρ` the rows' largest end weight
+/// ratio, `h` the end span, `p` the degree in u).
+#[derive(Debug, Clone)]
+struct Lines {
+    curve: NurbsCurve,
+    scale: Ivl,
+}
+
+/// Which extension past a u side a jet encloses ([`Net::jet`]): either one the executive
+/// may build, or the homogeneous lines alone (for Newton's steps and the tests).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Form {
+    Either,
+    Lines,
+    /// The product form alone (`κ = 0`), for the tests.
+    #[cfg(test)]
+    Product,
 }
 
 impl Net {
@@ -191,42 +225,17 @@ impl Net {
             // side are left)
             *e = !direction_closed && surface.side_diameter(k, &dom, side)?.lower > 0.0;
         }
-        let weight = |i: usize, j: usize| {
-            let at = i
-                .checked_mul(cn.nv)?
-                .checked_add(j)?
-                .checked_mul(4)?
-                .checked_add(3)?;
-            cn.pw.get(at).copied()
-        };
-        // whether every row's end weight ratio `w_(n-1) / w_n` across a side is one number
-        let one_ratio = |ends: &dyn Fn(usize) -> Option<(f64, f64)>, rows: usize| {
-            let mut first: Option<f64> = None;
-            for r in 0..rows {
-                let Some((inner, end)) = ends(r) else {
-                    return false;
-                };
-                let ratio = inner / end;
-                #[allow(clippy::float_cmp)] // one ratio, as the extension takes it
-                let same = first.is_none_or(|f| f == ratio);
-                if !(ratio.is_finite() && same) {
-                    return false;
-                }
-                first = Some(ratio);
-            }
-            true
-        };
-        let (lu, lv) = (cn.nu.saturating_sub(1), cn.nv.saturating_sub(1));
-        let uniform = [
-            one_ratio(&|j| Some((weight(1, j)?, weight(0, j)?)), cn.nv),
-            one_ratio(
-                &|j| Some((weight(lu.checked_sub(1)?, j)?, weight(lu, j)?)),
-                cn.nv,
-            ),
-            one_ratio(&|i| Some((weight(i, 1)?, weight(i, 0)?)), cn.nu),
-            one_ratio(
-                &|i| Some((weight(i, lv.checked_sub(1)?)?, weight(i, lv)?)),
-                cn.nu,
+        let lu = cn.nu.saturating_sub(1);
+        let lines = [
+            Self::lines(&cn, 0, 1, cn.u.get(cn.p + 1).map(|k| k - lo.x)),
+            Self::lines(
+                &cn,
+                lu,
+                lu.saturating_sub(1),
+                cn.u.len()
+                    .checked_sub(cn.p + 2)
+                    .and_then(|i| cn.u.get(i))
+                    .map(|k| hi.x - k),
             ),
         ];
         Ok(Some(Self {
@@ -234,8 +243,81 @@ impl Net {
             range: [(lo.x, hi.x), (lo.y, hi.y)],
             closed,
             extends,
-            uniform,
+            lines,
         }))
+    }
+
+    /// The lines past the u side whose rows end at column `end`, the column before it
+    /// `inner`, its end span `h` long ([`Lines`]), with `ρ` and `ρ w_n − w_(n−1)` in the
+    /// floating point the executive forms them in (`extend.rs`, `ruled`); `None` where a
+    /// weight or `h` is not positive.
+    fn lines(cn: &Nurbs, end: usize, inner: usize, h: Option<f64>) -> Option<Lines> {
+        let weight = |i: usize, j: usize| -> Option<f64> {
+            let at = i
+                .checked_mul(cn.nv)?
+                .checked_add(j)?
+                .checked_mul(4)?
+                .checked_add(3)?;
+            cn.pw.get(at).copied().filter(|w| *w > 0.0)
+        };
+        let ends = (0..cn.nv)
+            .map(|j| Some((weight(end, j)?, weight(inner, j)?)))
+            .collect::<Option<Vec<_>>>()?;
+        let rho = ends
+            .iter()
+            .fold(f64::NEG_INFINITY, |m, (wn, wn1)| m.max(wn1 / wn));
+        let h = h.filter(|h| *h > 0.0)?;
+        if !rho.is_finite() {
+            return None;
+        }
+        #[allow(clippy::cast_precision_loss)] // a degree
+        let p = cn.p as f64;
+        let pw = ends
+            .iter()
+            .flat_map(|&(wn, wn1)| [rho * wn - wn1, wn, 0.0, 1.0])
+            .collect();
+        Some(Lines {
+            curve: NurbsCurve {
+                p: cn.q,
+                n: cn.nv,
+                u: cn.v.clone(),
+                pw,
+            },
+            scale: Ivl::from(p) / Ivl::from(h),
+        })
+    }
+
+    /// `κ` and `κ_v` of the lines past the u side `side` (`BoxSide::ALL` order) over `v`
+    /// ([`Lines`]): the lines' own for [`Form::Lines`], and hulled with 0 for
+    /// [`Form::Either`], as `κ = 0` is the executive's other extension there (module docs);
+    /// `None` where they are not enclosed.
+    fn kappa(&self, side: usize, v: Ivl, form: Form) -> Result<Option<(Ivl, Ivl)>> {
+        let Some(lines) = self.lines.get(side).and_then(Option::as_ref) else {
+            return Ok(None);
+        };
+        let ders = match curve_derivs_over(&lines.curve, v, 1, None) {
+            Ok(d) => d,
+            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(_) => return Ok(None),
+        };
+        let (Some(d0), Some(d1)) = (ders.first(), ders.get(1)) else {
+            return Ok(None);
+        };
+        let (c, w, cv, wv) = (d0.x, d0.y, d1.x, d1.y);
+        if w.lo.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+            return Ok(None);
+        }
+        let kappa = lines.scale * c / w;
+        let rate = lines.scale * (cv * w - c * wv) / (w * w);
+        let with_zero = |x: Ivl| match form {
+            Form::Lines => x,
+            Form::Either => x.hull(Ivl::from(0.0)),
+            #[cfg(test)]
+            Form::Product => Ivl::from(0.0),
+        };
+        let (kappa, rate) = (with_zero(kappa), with_zero(rate));
+        let finite = |x: Ivl| x.lo.is_finite() && x.hi.is_finite();
+        Ok((finite(kappa) && finite(rate)).then_some((kappa, rate)))
     }
 
     /// The parts of `[a, b]` in direction `d` (0 for u): on the knots, past each side the
@@ -312,21 +394,26 @@ impl Net {
     }
 
     /// The point and first partials of the net and its extension (module docs) over
-    /// `u × v`, enclosed; `None` where they are not (past a side not extended, past two
-    /// sides one of which ends its rows in more than one weight ratio, or as
-    /// [`Net::partials`]).
+    /// `u × v`, enclosed for either extension the executive may build past a u side;
+    /// `None` where they are not (past a side not extended, or as [`Net::partials`] and
+    /// [`Net::kappa`]).
     ///
     /// # Errors
     ///
     /// A cancel.
     pub(super) fn jet(&self, u: Ivl, v: Ivl) -> Result<Option<Jet>> {
+        self.jet_as(u, v, Form::Either)
+    }
+
+    /// [`Net::jet`] for the extensions past the u sides `form` names.
+    fn jet_as(&self, u: Ivl, v: Ivl, form: Form) -> Result<Option<Jet>> {
         let (Some(us), Some(vs)) = (self.parts(0, u.lo, u.hi), self.parts(1, v.lo, v.hi)) else {
             return Ok(None);
         };
         let mut out: Option<Jet> = None;
         for &pu in &us {
             for &pv in &vs {
-                let Some(jet) = self.part_jet(pu, pv)? else {
+                let Some(jet) = self.part_jet(pu, pv, form)? else {
                     return Ok(None);
                 };
                 out = Some(out.map_or(jet, |h| h.hull(jet)));
@@ -336,10 +423,10 @@ impl Net {
     }
 
     /// The jet over one part of a box ([`Net::parts`]): on the knots, the net's own; past a
-    /// side, or two, the extension's (module docs), from the net's partials at the side,
-    /// `G + Δu G_u + Δv G_v + Δu Δv G_uv` and its partials (`Δ` zero along a side the part
-    /// is on).
-    fn part_jet(&self, pu: Part, pv: Part) -> Result<Option<Jet>> {
+    /// u side, `E = G + σ G_u` with `σ = Δu / (1 + |Δu| κ)` ([`Net::kappa`]); past a v side,
+    /// `E + Δv E_v` at that side (module docs), each with its partials, from the net's
+    /// partials at the sides (`Δ` zero along a side the part is on).
+    fn part_jet(&self, pu: Part, pv: Part, form: Form) -> Result<Option<Jet>> {
         let at = |p: Part| match p {
             Part::On(a, b) => (a, b),
             Part::Past { at, .. } => (at, at),
@@ -353,12 +440,6 @@ impl Net {
             }
         };
         let (du, dv) = (past(pu, 0), past(pv, 1));
-        let uniform = |d: Option<(Ivl, usize)>| {
-            d.is_some_and(|(_, side)| self.uniform.get(side).copied().unwrap_or(false))
-        };
-        if du.is_some() && dv.is_some() && !(uniform(du) && uniform(dv)) {
-            return Ok(None);
-        }
         let lk = if du.is_none() && dv.is_none() { 1 } else { 2 };
         let Some(g) = Self::partials(&self.cn, at(pu), at(pv), lk)? else {
             return Ok(None);
@@ -372,23 +453,49 @@ impl Net {
             }));
         }
         let xuv = of_v3(g.at(1, 1));
-        let zero = Ivl::from(0.0);
-        let (eu, ev) = (du.map_or(zero, |(d, _)| d), dv.map_or(zero, |(d, _)| d));
+        let (zero, one) = (Ivl::from(0.0), Ivl::from(1.0));
+        // σ and its partials `σ_u`, `σ_v`, `σ_uv`: (0, 1, 0, 0) on the u knots
+        let (sigma, sigma_u, sigma_v, sigma_uv) = match du {
+            None => (zero, one, zero, zero),
+            Some((d, side)) => {
+                let (v0, v1) = at(pv);
+                let Some((kappa, rate)) = self.kappa(side, Ivl::new(v0, v1), form)? else {
+                    return Ok(None);
+                };
+                // `|Δu|`: past the low side Δu ≤ 0
+                let far = if side == 0 { zero - d } else { d };
+                let q = one + far * kappa;
+                if q.lo.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                    return Ok(None);
+                }
+                let q2 = q * q;
+                (
+                    d / q,
+                    one / q2,
+                    zero - d * far * rate / q2,
+                    zero - Ivl::from(2.0) * far * rate / (q2 * q),
+                )
+            }
+        };
+        let ev = dv.map_or(zero, |(d, _)| d);
+        // the extension past the u side (or the net, on its knots) and its partials at v
+        let e = add(x, scale(xu, sigma));
+        let eu = scale(xu, sigma_u);
+        let ev_ = add(add(xv, scale(xuv, sigma)), scale(xu, sigma_v));
+        let euv = add(scale(xuv, sigma_u), scale(xu, sigma_uv));
         Ok(Some(Jet {
-            p: add(
-                add(x, scale(xu, eu)),
-                add(scale(xv, ev), scale(xuv, eu * ev)),
-            ),
-            su: add(xu, scale(xuv, ev)),
-            sv: add(xv, scale(xuv, eu)),
+            p: add(e, scale(ev_, ev)),
+            su: add(eu, scale(euv, ev)),
+            sv: ev_,
         }))
     }
 
     /// The point and partials at `(u, v)`, as floating point numbers (for Newton's
-    /// steps); `None` where [`Net::jet`] encloses nothing there.
+    /// steps), past a u side on the homogeneous lines ([`Form::Lines`]); `None` where
+    /// [`Net::jet`] encloses nothing there.
     fn at(&self, u: f64, v: f64) -> Result<Option<(Vec3, Vec3, Vec3)>> {
         Ok(self
-            .jet(Ivl::from(u), Ivl::from(v))?
+            .jet_as(Ivl::from(u), Ivl::from(v), Form::Lines)?
             .map(|j| (middle(j.p), middle(j.su), middle(j.sv))))
     }
 
@@ -1234,60 +1341,83 @@ mod tests {
         }
     }
 
-    /// The point of the model's extension (module docs) nearest `x`, by Gauss–Newton on the
-    /// model's parameters from `(u, v)`, and its distance from `x`.
-    fn model_distance(n: &Net, x: Vec3, (mut u, mut v): (f64, f64)) -> f64 {
-        for _ in 0..60 {
-            let (p, su, sv) = n.at(u, v).unwrap().unwrap();
-            let r = p - x;
-            let (a, b, c) = (su.dot(su), su.dot(sv), sv.dot(sv));
-            let (g, h) = (su.dot(r), sv.dot(r));
-            let det = a * c - b * b;
-            u -= (c * g - b * h) / det;
-            v -= (a * h - b * g) / det;
+    /// The distance of `x`, the built extension's point at `(u, v)`, from the model's
+    /// extension of `form` (module docs): on the v knots the model's point at `(u, v)` (past
+    /// a u side the parameters are the construction's own); past a v side, from the line
+    /// `E + λ E_v` the model runs from that side at `u` (the built extension runs the same
+    /// line at another pace).
+    fn model_distance(n: &Net, form: Form, x: Vec3, (u, v): (f64, f64)) -> f64 {
+        let at = |u: f64, v: f64| {
+            let j = n.jet_as(Ivl::from(u), Ivl::from(v), form).unwrap().unwrap();
+            (middle(j.p), middle(j.sv))
+        };
+        let [_, (v0, v1)] = n.range;
+        if (v0..=v1).contains(&v) {
+            return (at(u, v).0 - x).length();
         }
-        (n.at(u, v).unwrap().unwrap().0 - x).length()
+        let (e, ev) = at(u, if v < v0 { v0 } else { v1 });
+        let r = x - e;
+        (r - ev * (r.dot(ev) / ev.dot(ev))).length()
     }
 
-    /// The model of the extension past the sides and the corner (module docs) is the surface
-    /// the executive builds: the quarter cylinder extended `Ruled` by 1.5 on every side
-    /// (`extended_sides_keeping_parameters`, as the offset executive asks), its points past
-    /// the top, past the arc's end and past both lie on the model's extension within
-    /// rounding (the rows end in one weight ratio, so the two agree as surfaces and
-    /// parameters).
-    #[test]
-    fn the_extension_model_is_the_ruled_extension_the_executive_builds() {
+    /// The points of `source` extended `Ruled` by `distance` on every side
+    /// (`extended_sides_keeping_parameters`, as the offset executive asks) past its unit
+    /// box, on a 9 × 9 grid over the result's box, each with its distance from the model's
+    /// extension of `form`.
+    fn built_against_model(source: &Surface, distance: f64, form: Form) -> Vec<((f64, f64), f64)> {
         use crate::surface::extend::Continuity;
         let k = Kernel::default();
-        let source = quarter_cylinder();
-        let n = net(&k, &source);
+        let n = net(&k, source);
         let built = source
-            .extended_sides_keeping_parameters(&k, &BoxSide::ALL, Continuity::Ruled, 1.5)
+            .extended_sides_keeping_parameters(&k, &BoxSide::ALL, Continuity::Ruled, distance)
             .unwrap()
             .surface;
         let dom = built.natural_uv_domain_with_nurb(&k).unwrap();
         let (lo, hi) = (dom.min(), dom.max());
-        let mut checked = 0;
+        let mut out = Vec::new();
         for i in 0..=8 {
             for j in 0..=8 {
                 let u = lo.x + (hi.x - lo.x) * f64::from(i) / 8.0;
                 let v = lo.y + (hi.y - lo.y) * f64::from(j) / 8.0;
-                let past_u = !(0.0..=1.0).contains(&u);
-                let past_v = !(0.0..=1.0).contains(&v);
-                if !(past_u || past_v) {
+                if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
                     continue;
                 }
                 let x = built
                     .evaluate_point(&k, crate::geom::vector2d::Point2::new(u, v))
                     .unwrap();
                 let x = Vec3::new(x.x, x.y, x.z);
-                let d = model_distance(&n, x, (u, v));
-                assert!(d < 1e-9, "({u}, {v}): {d}");
-                checked += 1;
+                out.push(((u, v), model_distance(&n, form, x, (u, v))));
             }
         }
-        // past the arc's two ends, the top and the bottom, and the four corners
-        assert!(checked >= 32, "{checked}");
+        out
+    }
+
+    /// The model of the extension past the sides and the corner (module docs) is the surface
+    /// the executive builds: the quarter cylinder extended by 1.5, whose rows end in one
+    /// weight ratio, and the uneven bump extended by 1, whose rows do not (the homogeneous
+    /// lines past its u sides, their corners with the v sides carrying the lines'
+    /// parameters), and by 200, past the lines' reach (the product form past its u sides,
+    /// `κ = 0`): every point past the sides and the corners lies on the model within
+    /// rounding.
+    #[test]
+    fn the_extension_model_is_the_ruled_extension_the_executive_builds() {
+        let cases = [
+            (quarter_cylinder(), 1.5, Form::Lines),
+            (uneven_bump(), 1.0, Form::Lines),
+            (uneven_bump(), 200.0, Form::Product),
+        ];
+        for (source, distance, form) in cases {
+            let found = built_against_model(&source, distance, form);
+            for ((u, v), d) in &found {
+                assert!(*d < 1e-9, "({u}, {v}): {d}");
+            }
+            // past the two ends in u, the two in v, and the four corners
+            assert!(found.len() >= 32, "{}", found.len());
+        }
+        // the two forms' corners differ there: the lines' model misses the product form's
+        let lines = built_against_model(&uneven_bump(), 200.0, Form::Lines);
+        let most = lines.iter().map(|(_, d)| *d).fold(0.0, f64::max);
+        assert!(most > 1e-6, "{most}");
     }
 
     /// A line through the axis at z 1.5 along (1, 1, 0) / √2 meets the cylinder 2 along it;
