@@ -167,7 +167,7 @@ impl EvalCurve {
         if !(w.abs() > 1e-300) {
             return None;
         }
-        let mut d: Vec<Vec3> = Vec::with_capacity(order + 1);
+        let mut d: Vec<Vec3> = Vec::new();
         for k in 0..=order {
             let mut x = xyz(*a.get(k)?);
             for i in 1..=k {
