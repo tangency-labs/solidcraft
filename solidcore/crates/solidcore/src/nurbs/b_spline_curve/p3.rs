@@ -1870,10 +1870,27 @@ impl BSplineCurve {
                         Some(m) => m.nurb.as_ref().and_then(curve_bounds),
                     }
                     .is_some_and(|b| b.radius_clears(radius_tol)));
+            // Not upstream (with `Kernel::memoize_curve_caches`): with
+            // `query_statuses_pass_on` the search's own status is reported, so the shortcut
+            // above is off. Where the bounds are evaluable (`|C'|` and `|C' x C''|` bounded
+            // away from zero, so the objective evaluates everywhere) and clear the
+            // tolerance, they prove what the search looks for, no radius below it, and the
+            // curve is not searched either: a failure of the search itself, which its status
+            // would report, is not looked for (a hole's circle on a plate, every copy a new
+            // curve the memo never holds)
+            let radius_clear = radius_clear
+                || (k.memoize_curve_caches
+                    && k.fixes.query_statuses_pass_on
+                    && match mapped.as_ref() {
+                        None => curve_bounds(cur),
+                        Some(m) => m.nurb.as_ref().and_then(curve_bounds),
+                    }
+                    .is_some_and(|b| b.radius_clears(radius_tol)));
             let solutions = if radius_sized && radius_clear {
                 radii = true;
                 Vec::new()
             } else if radius_sized {
+                k.work_counters.add_radius_search();
                 let (radii_ok, sols) = global_property_analysis(
                     k,
                     copy_curve,
