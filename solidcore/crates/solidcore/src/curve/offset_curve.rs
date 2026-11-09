@@ -647,18 +647,25 @@ impl OffsetCurve {
             return base.knots(k, interval);
         }
         let base_ivl = interval.map(|ivl| {
-            Extent1d::from_min_max(
-                self.base_parameter(ivl.min()),
-                self.base_parameter(ivl.max()),
-            )
+            let u0 = self.base_parameter(ivl.min());
+            let u1 = self.base_parameter(ivl.max());
+            let (min_u, max_u) = if u0 > u1 { (u1, u0) } else { (u0, u1) };
+            Extent1d::from_min_max(min_u - EFF_ZERO, max_u + EFF_ZERO)
         });
         let (base_knots, base_mults) = base.knots(k, base_ivl.as_ref())?;
-        let knots = base_knots
+        let mut knots = Vec::with_capacity(base_knots.len());
+        let mut mults = Vec::with_capacity(base_mults.len());
+        for (u, m) in base_knots
             .into_iter()
             .rev()
-            .map(|u| self.base_parameter(u))
-            .collect();
-        let mults = base_mults.into_iter().rev().collect();
+            .zip(base_mults.into_iter().rev())
+        {
+            let t = self.base_parameter(u);
+            if interval.is_none_or(|ivl| ivl.contains_value(t, 0.0)) {
+                knots.push(t);
+                mults.push(m);
+            }
+        }
         Ok((knots, mults))
     }
 
@@ -1067,5 +1074,29 @@ mod tests {
             .unwrap();
         assert_eq!(sub_knots, vec![1.5]);
         assert_eq!(sub_mults, vec![2]);
+
+        // A knot at 0.3 on [0.0, 1.0] reverses to 0.7. Querying [0.7, 0.7] must include it despite roundoff.
+        let mut cur_unit = crate::nurbs::nurbs_crv::allocate_nurb_curve(2, 1, 4).unwrap();
+        cur_unit
+            .knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.3, 1.0, 1.0]);
+        let base_unit = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+            cur_unit, 3, false,
+        ));
+        let mut c_unit = OffsetCurve::new(
+            3,
+            base_unit,
+            Extent1d::from_min_max(0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            false,
+        )
+        .unwrap();
+        let _ = c_unit.reverse_parameterization(&Extent1d::from_min_max(0.0, 1.0));
+        let (pt_knots, pt_mults) = c_unit
+            .knots(k, Some(&Extent1d::from_min_max(0.7, 0.7)))
+            .unwrap();
+        assert_eq!(pt_knots, vec![0.7]);
+        assert_eq!(pt_mults, vec![1]);
     }
 }
