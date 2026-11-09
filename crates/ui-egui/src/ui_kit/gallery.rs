@@ -1239,11 +1239,11 @@ const ELEMENTS: &[Element] = &[
             &mut s.selected,
             &[WindowPage {
                 group: Some("prefs.input"),
-                icon: "settings",
+                icon: Icon::Kit("settings"),
                 label: "ui.general",
                 handle: "gallery:page",
                 scroll: true,
-                draw: |ui, _: &mut ()| {
+                draw: &|ui, _: &mut ()| {
                     text(ui, "General", Text::Inline);
                 },
             }],

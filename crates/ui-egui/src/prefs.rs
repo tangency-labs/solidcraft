@@ -340,102 +340,102 @@ pub const PAGE_ASSISTANT: usize = 10;
 pub const PAGE_PLUGINS: usize = 11;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
-const WINDOW_PAGES: &[ui_kit::WindowPage<SolveApp>] = &[
+const WINDOW_PAGES: &[ui_kit::WindowPage<'static, SolveApp>] = &[
     ui_kit::WindowPage {
-        icon: "prefs_general",
+        icon: ui_kit::Icon::Kit("prefs_general"),
         label: "ui.general",
         group: None,
         handle: "prefs:page:General",
         scroll: true,
-        draw: window_page::<PAGE_GENERAL>,
+        draw: &window_page::<PAGE_GENERAL>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_appearance",
+        icon: ui_kit::Icon::Kit("prefs_appearance"),
         label: "prefs.structure.appearance",
         group: Some("prefs.structure.look"),
         handle: "prefs:page:Appearance",
         scroll: true,
-        draw: window_page::<PAGE_APPEARANCE>,
+        draw: &window_page::<PAGE_APPEARANCE>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_layout",
+        icon: ui_kit::Icon::Kit("prefs_layout"),
         label: "prefs.structure.layout",
         group: None,
         handle: "prefs:page:Layout",
         scroll: true,
-        draw: window_page::<PAGE_LAYOUT>,
+        draw: &window_page::<PAGE_LAYOUT>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_graphics",
+        icon: ui_kit::Icon::Kit("prefs_graphics"),
         label: "ui.graphics",
         group: None,
         handle: "prefs:page:Graphics",
         scroll: true,
-        draw: window_page::<PAGE_GRAPHICS>,
+        draw: &window_page::<PAGE_GRAPHICS>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_design",
+        icon: ui_kit::Icon::Kit("prefs_design"),
         label: "ui.design",
         group: Some("prefs.structure.work"),
         handle: "prefs:page:Design",
         scroll: true,
-        draw: window_page::<PAGE_DESIGN>,
+        draw: &window_page::<PAGE_DESIGN>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_sketch",
+        icon: ui_kit::Icon::Kit("prefs_sketch"),
         label: "prefs.structure.sketch",
         group: None,
         handle: "prefs:page:Sketch",
         scroll: true,
-        draw: window_page::<PAGE_SKETCH>,
+        draw: &window_page::<PAGE_SKETCH>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_tools",
+        icon: ui_kit::Icon::Kit("prefs_tools"),
         label: "prefs.structure.tools",
         group: None,
         handle: "prefs:page:Tools",
         scroll: true,
-        draw: window_page::<PAGE_TOOLS>,
+        draw: &window_page::<PAGE_TOOLS>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_navigation",
+        icon: ui_kit::Icon::Kit("prefs_navigation"),
         label: "ui.navigation",
         group: Some("prefs.input"),
         handle: "prefs:page:Navigation",
         scroll: true,
-        draw: window_page::<PAGE_NAVIGATION>,
+        draw: &window_page::<PAGE_NAVIGATION>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_mouse3d",
+        icon: ui_kit::Icon::Kit("prefs_mouse3d"),
         label: "prefs.structure.mouse3d",
         group: None,
         handle: "prefs:page:3D mouse",
         scroll: true,
-        draw: window_page::<PAGE_MOUSE3D>,
+        draw: &window_page::<PAGE_MOUSE3D>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_shortcuts",
+        icon: ui_kit::Icon::Kit("prefs_shortcuts"),
         label: "prefs.shortcuts",
         group: None,
         handle: "prefs:page:Shortcuts",
         scroll: false,
-        draw: window_page::<PAGE_SHORTCUTS>,
+        draw: &window_page::<PAGE_SHORTCUTS>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_assistant",
+        icon: ui_kit::Icon::Kit("prefs_assistant"),
         label: "prefs.assistant",
         group: Some("prefs.extend"),
         handle: "prefs:page:Assistant",
         scroll: true,
-        draw: window_page::<PAGE_ASSISTANT>,
+        draw: &window_page::<PAGE_ASSISTANT>,
     },
     ui_kit::WindowPage {
-        icon: "prefs_plugins",
+        icon: ui_kit::Icon::Kit("prefs_plugins"),
         label: "ui.plugins",
         group: None,
         handle: "prefs:page:Plugins",
         scroll: true,
-        draw: window_page::<PAGE_PLUGINS>,
+        draw: &window_page::<PAGE_PLUGINS>,
     },
 ];
 
@@ -2753,24 +2753,20 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = if capturing { window.keep_open_on_escape() } else { window };
     let mut selected = app.prefs_window.section;
     let layout_page = selected == PAGE_LAYOUT;
-    let (closed, action) = window.show_pages_with_header(
-        ctx,
-        &mut selected,
-        WINDOW_PAGES,
-        app,
-        search_header,
-        clear_search,
-        Some((Tokens::get().space_24 * 2.0, crate::settings_profiles::sidebar)),
-        |ui| {
-            let defaults = ui_kit::button(ui, solidcraft_ui_text::tr("prefs.restore_page_defaults"), ui_kit::Button::Ghost).backing_on_hover_text(
-                solidcraft_ui_text::tr(if layout_page { "ui.panel_layout.page_defaults_hint" } else { "ui.reset_the_settings_on_this_page" }),
-            );
-            crate::scenario::publish_target("prefs:defaults", defaults.rect);
-            if defaults.clicked() {
-                button = Some("defaults");
-            }
-        },
-    );
+    let hooks = ui_kit::panel::PageListHooks {
+        header: &search_header,
+        on_select: &|app: &mut SolveApp, _| clear_search(app),
+        sidebar_footer: Some((Tokens::get().space_24 * 2.0, &crate::settings_profiles::sidebar)),
+    };
+    let (closed, action) = window.show_pages_with_header(ctx, &mut selected, WINDOW_PAGES, app, &hooks, |ui| {
+        let defaults = ui_kit::button(ui, solidcraft_ui_text::tr("prefs.restore_page_defaults"), ui_kit::Button::Ghost).backing_on_hover_text(
+            solidcraft_ui_text::tr(if layout_page { "ui.panel_layout.page_defaults_hint" } else { "ui.reset_the_settings_on_this_page" }),
+        );
+        crate::scenario::publish_target("prefs:defaults", defaults.rect);
+        if defaults.clicked() {
+            button = Some("defaults");
+        }
+    });
     if let Some(rect) = crate::scenario::rect_of("dialog:page_body") {
         crate::scenario::publish_rect("prefs:page_body", rect);
     }
