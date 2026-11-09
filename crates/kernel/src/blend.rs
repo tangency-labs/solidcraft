@@ -234,22 +234,40 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
     }
 }
 
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane, such as the rounds along a boss's base at its upright edges.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FilletTurn {
+    /// The rounds run on to where they cross and meet in a mitre.
+    #[default]
+    Mitre,
+    /// The rounds end at the side edge and the corner is their section revolved about it, a
+    /// torus tangent to both. Refused where it is not built (unequal or variable rounds, a
+    /// concave, curved or tangent side edge, a corner of four edges), with the reason.
+    Swept,
+}
+
 /// Constant-radius fillet of the edges nearest to the given points. A radius too large for the
 /// faces around the edges is refused with [`KernelError::TooLarge`] ([`fillet_max`] finds the
 /// largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "fillet");
-    body.require_brep("fillet")?;
-    crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
+    fillet_turning(body, edges, radius, FilletTurn::Mitre)
 }
 
-/// [`fillet`], with the picks whose edges are gone: where some of the rounds overflow their
-/// faces, those are built first, and a picked edge one of them removes whole is not rounded (the
-/// others round what is left of their edges).
-pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Vec3>)> {
+/// [`fillet`], its rounds turning at side edges as `turn` says.
+fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
-    let (b, gone) = crate::blend_smlib::fillet_removing(body, edges, radius)?;
+    crate::blend_smlib::fillet(body, edges, radius, turn).and_then(|b| closed(body, b))
+}
+
+/// [`fillet`], its rounds turning at side edges as `turn` says, with the picks whose edges are
+/// gone: where some of the rounds overflow their faces, those are built first, and a picked edge
+/// one of them removes whole is not rounded (the others round what is left of their edges).
+pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+    let _span = solidcraft_profile::span("kernel", "fillet");
+    body.require_brep("fillet")?;
+    let (b, gone) = crate::blend_smlib::fillet_removing(body, edges, radius, turn)?;
     Ok((closed(body, b)?, gone))
 }
 
@@ -515,10 +533,11 @@ fn radius_step(radius: f64) -> f64 {
 /// them (a refusal of a fillet feature's exact fit runs it to name the largest that fits, and
 /// so does `fit: reduce`). Only a refusal as too large
 /// ([`KernelError::TooLarge`]) narrows the search: any other failure of a candidate is the
-/// search's error, since a smaller radius would not be the largest that fits.
-pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f64, Body)>> {
+/// search's error, since a smaller radius would not be the largest that fits. The rounds turn at
+/// side edges as `turn` says.
+pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(f64, Body)>> {
     let _span = solidcraft_profile::span("kernel", "fillet_max");
-    largest_that_fits(radius, |r| fillet(body, edges, r))
+    largest_that_fits(radius, |r| fillet_turning(body, edges, r, turn))
 }
 
 /// [`fillet_max`] for an equal-distance chamfer of these edges: the largest distance below
@@ -566,21 +585,21 @@ fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<O
 /// each reduced to fit, are too large together, or there are too many to search (each search is
 /// up to 16 fillets, and this runs in the live preview). Any failure other than a refusal as too
 /// large is the error.
-pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(Vec<f64>, Body)>> {
+pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(Vec<f64>, Body)>> {
     let _span = solidcraft_profile::span("kernel", "fillet_max_each");
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
-    let one = || -> Result<Option<(Vec<f64>, Body)>> { Ok(fillet_max(body, edges, radius)?.map(|(r, b)| (vec![r; edges.len()], b))) };
+    let one = || -> Result<Option<(Vec<f64>, Body)>> { Ok(fillet_max(body, edges, radius, turn)?.map(|(r, b)| (vec![r; edges.len()], b))) };
     let Some(groups) = interacting_groups(body, edges).filter(|g| g.len() > 1 && g.len() <= MAX_GROUPS) else { return one() };
     let mut radii = vec![radius; edges.len()];
     let mut searches = 0;
     for g in &groups {
         let pts: Vec<Vec3> = g.iter().filter_map(|i| edges.get(*i).copied()).collect();
-        let r = match fillet(body, &pts, radius) {
+        let r = match fillet_turning(body, &pts, radius, turn) {
             Ok(_) => continue,
             Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
                 searches += 1;
-                match fillet_max(body, &pts, radius)? {
+                match fillet_max(body, &pts, radius, turn)? {
                     Some((r, _)) => r,
                     None => return one(),
                 }
@@ -594,7 +613,7 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Optio
             }
         }
     }
-    match fillet_each(body, edges, &radii) {
+    match fillet_each(body, edges, &radii, turn) {
         Ok(b) => Ok(Some((radii, b))),
         Err(KernelError::TooLarge(_)) => one(),
         Err(e) => Err(e),
@@ -603,16 +622,16 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Optio
 
 /// The fillet of each edge at its own radius (`radii` in `edges`' order), all in one SMLib
 /// blend.
-pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_each");
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
     if let Some(r) = radii.first().filter(|r| radii.iter().all(|x| x.to_bits() == r.to_bits())) {
-        return fillet(body, edges, *r);
+        return fillet_turning(body, edges, *r, turn);
     }
     body.require_brep("fillet")?;
-    crate::blend_smlib::fillet_each(body, edges, radii).and_then(|b| closed(body, b))
+    crate::blend_smlib::fillet_each(body, edges, radii, turn).and_then(|b| closed(body, b))
 }
 
 /// The points' edges (each the edge a blend's pick there takes) grouped where they share a face
@@ -1599,7 +1618,7 @@ mod tests {
         assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
         let e = e.to_string();
         assert!(e.contains("into the hollow at (0.000, 30.000, 40.000) and open the part"), "{e}");
-        let (largest, _) = fillet_max(&case, &[top], 7.0).unwrap().unwrap();
+        let (largest, _) = fillet_max(&case, &[top], 7.0, FilletTurn::Mitre).unwrap().unwrap();
         assert!((largest - 6.828).abs() < 1e-9, "{largest}");
 
         // Just short of the corner it rounds, its whole section along the 104.
@@ -1613,8 +1632,8 @@ mod tests {
         // inner R7's arc (centre (23, 33)) only at sqrt2 (r - 9) + 7 = r, r = 13.83.
         let inside = Vec3::new(0.0, 30.0, 40.0);
         assert!(fillet(&case, &[top, inside], 7.0).is_ok());
-        assert!(fillet_each(&case, &[top, inside], &[13.8, 7.0]).is_ok());
-        let e = fillet_each(&case, &[top, inside], &[13.9, 7.0]).unwrap_err().to_string();
+        assert!(fillet_each(&case, &[top, inside], &[13.8, 7.0], FilletTurn::Mitre).is_ok());
+        let e = fillet_each(&case, &[top, inside], &[13.9, 7.0], FilletTurn::Mitre).unwrap_err().to_string();
         assert!(e.contains("into the hollow at"), "{e}");
     }
 

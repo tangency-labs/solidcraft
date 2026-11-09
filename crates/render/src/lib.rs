@@ -12,10 +12,12 @@ pub mod clear_coat;
 mod curve_display;
 pub mod film;
 mod gif;
+pub mod glass_model;
 pub mod hatch;
 pub mod job;
 pub mod lighting;
 pub mod mapping;
+pub mod optical_boundary;
 mod product;
 mod raster;
 #[cfg(feature = "raytrace-cpu")]
@@ -31,7 +33,7 @@ pub mod texture_lod;
 pub mod texture_sampling;
 pub mod transmission;
 
-pub use analysis::{AnalysisColors, AnalysisMode, SceneAnalysis};
+pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use backend::{
     Availability, BackendDescriptor, BackendId, ExecutorDescriptor, ExecutorId, MAX_RENDER_ID_BYTES, RenderFeature, RenderFormat, RenderLimits,
     RenderMode, RenderOperation, RenderPolicy, RenderProfile, RenderRequest, ResolveError, ResolvedRequest, ScratchLayout, builtin_backend,

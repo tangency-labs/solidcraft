@@ -1,0 +1,15 @@
+#### UB-44. Attribute lifetime bugs
+- **Severity:** Crash / undefined behaviour
+- **Area:** Spatial structures and small geometry
+- **Location:**
+  - `SmAttribute.cpp:1619` `SmAttribute::~SmAttribute`: deletes a dependent attribute twice, through `RemoveAttribute` -> `RemoveUser`. A user that does not list the attribute leaves dangling lists.
+  - `:816` `SmMergeRegionAttribute::Merge`: dereferences NULL when both inputs have a merge-region attribute and the result does not, and casts any `SM_AI_OTHER_REGION_ID` attribute to the merge-region class.
+  - The colour average casts whatever `SM_AI_COLOR` attribute it finds.
+  - `:1038` `SmMergeRegionAttribute::SetRegions`: writes past the "other" lists when they are shorter.
+  - `SmAObject.cpp:88` `SmAObject::Notify(SM_NO_REG_PROPAGATION)`: with two or more other regions it indexes the refilled list with the previous count (stale or out-of-range), and `SET_FROM_OTHER` can read an attribute it just deleted.
+- **What happens:** Double delete, use after free, NULL dereference, bad casts, out-of-bounds writes.
+- **Trigger:** Delete a dependent attribute that still has users; merge two merge-region-attributed objects into one without.
+- **How found:** read during porting.
+- **Confirmed:** no. The difftest skips these scripts.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput`.

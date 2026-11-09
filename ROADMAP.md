@@ -225,6 +225,12 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 ## Render foundation
 
+- Wood surface images (#1345): native CPU and GPU opaque rendering share physical
+  repeat frames and filtered mip chains. Imported maps retain exact bytes and
+  declared provenance in the design, reopen offline, and expose grain-angle
+  controls. Scalar face appearances suppress body maps. Planar projection and
+  CPU encoding/optical limits remain explicit; see [portable surfaces](docs/render-portable-surfaces-and-stages.md).
+
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](docs/render-starter-appearances.md).
 
 - Bounded linear film accumulation (#1696) supplies caller-admitted mean/variance storage and complete-pass views; actual progressive consumers remain separate. See [the film contract](docs/render-film.md).
@@ -725,7 +731,7 @@ and reference-object placement remain separate work, as do loft rails and center
   a seekable reader defers original blobs until after provisional display.
   See [container format](docs/design-container.md) and [performance measurements](docs/perf.md).
 - Warm saves with explicit `cache: true` can include a versioned native B-rep cache through SolidCraft-owned topology
-  and geometry records, with a separate truck adapter and bounded binary reader. Exact
+  and geometry records, with a separate kernel adapter and bounded binary reader. Exact
   face-source certificates and operation history survive codec round trips. A provisional
   picture can be generated before original blobs are read; editing and measurement wait
   for authoritative reconstruction. Cached metadata binds preview and reconstruction to
@@ -774,5 +780,6 @@ and reference-object placement remain separate work, as do loft rails and center
   reported case returns from 86 to 49 faces with unchanged material and bounds; regressions
   cover stepped stock, STEP round trips and saved projections from removed pieces.
 
-truck (Apache-2.0) behind our own `kernel` crate, with our own blend operation and boolean
-retry/validation; see `plan/adr/0001-geometry-kernel.md` (local) — summary in README.
+solidcore (Apache-2.0), the Rust port of NVIDIA's SMLib, vendored in `solidcore` behind
+our own `kernel` crate, with our own boundary and boolean retry/validation; see
+`plan/adr/0001-geometry-kernel.md` (local) — summary in README.

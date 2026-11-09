@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::mpsc::channel;
 
-fn transcript_clipboard_harness(layout: crate::shell::LayoutMode) -> crate::scenario::Harness {
+fn transcript_clipboard_harness(layout: crate::ui_kit::LayoutMode) -> crate::scenario::Harness {
     let mut h = narrow_chat();
     h.app.ui.layout = layout;
     h.app.preferences.agent_chat_width = 500.0;
@@ -36,7 +36,7 @@ fn transcript_click(h: &mut crate::scenario::Harness, pos: egui::Pos2) {
 
 #[test]
 fn transcript_copy_and_cut_do_not_touch_the_cad_clipboard() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = transcript_clipboard_harness(layout);
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
@@ -57,7 +57,7 @@ fn transcript_copy_and_cut_do_not_touch_the_cad_clipboard() {
 
 #[test]
 fn transcript_paste_does_not_insert_a_previously_copied_body() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = transcript_clipboard_harness(layout);
         h.frame_with(vec![egui::Event::Copy]);
         assert!(!h.app.copied_bodies.is_empty(), "prime the real CAD clipboard");
@@ -77,7 +77,7 @@ fn transcript_paste_does_not_insert_a_previously_copied_body() {
 
 #[test]
 fn transcript_key_events_do_not_run_cad_shortcuts() {
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = transcript_clipboard_harness(layout);
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
@@ -106,7 +106,7 @@ fn transcript_key_events_do_not_run_cad_shortcuts() {
 #[test]
 fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
     for hidden in ["closed", "minimized", "disabled"] {
-        let mut h = transcript_clipboard_harness(crate::shell::LayoutMode::Floating);
+        let mut h = transcript_clipboard_harness(crate::ui_kit::LayoutMode::Floating);
         h.frame_with(vec![egui::Event::Copy]);
         let at = transcript_text_position(&h);
         transcript_click(&mut h, at);
@@ -447,7 +447,7 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
 /// asked over the control channel. Turned on, the button is there; discovery waits for the panel.
 #[test]
 fn with_ai_features_off_nothing_of_the_chat_shows_or_runs() {
-    use crate::scenario::{handle_at, rect_of};
+    use solidcraft_ui_registry::{handle_at, rect_of};
     let mut h = crate::scenario::Harness::new();
     let shortcut = json!({"key": "A", "shift": true, "cmd": true});
     h.app.preferences.ai_features = false;
@@ -495,7 +495,7 @@ fn ai_features_and_the_toolbar_button_are_on_by_default() {
 /// in the side panel. The control channel does the same.
 #[test]
 fn the_chat_pops_out_into_its_own_window_and_docks_back() {
-    use crate::scenario::{handle_at, rect_of};
+    use solidcraft_ui_registry::{handle_at, rect_of};
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
     h.frames(3);
@@ -534,12 +534,12 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
 fn the_window_place_is_given_once_when_it_opens() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 686.0]);
-    let first = panel::window_builder(&app);
+    let first = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
     assert_eq!(first.position, Some(egui::pos2(1967.0, 160.0)));
     assert_eq!(first.inner_size, Some(egui::vec2(569.0, 686.0)));
     app.agent_chat.window_placed = true;
     app.preferences.agent_chat_window = Some([1967.0, 160.0, 569.0, 687.0]);
-    let later = panel::window_builder(&app);
+    let later = panel::window_builder(&app.session.doc.name, app.agent_chat.window_placed, &panel::AgentPanelPrefs::read(&app.preferences));
     assert_eq!((later.position, later.inner_size), (None, None), "nothing to move or resize once it is open");
     assert!(later.title.is_some());
     // Docked or closed, the next pop-out opens at the saved place again.
@@ -904,8 +904,8 @@ fn an_agents_new_design_keeps_its_conversation_and_continues() {
         send(&mut app, &ctx, "create another design".into());
         let active = app.agent_chat.turn.as_ref().unwrap().active.clone();
         app.ui.agent_cursor.show = animate;
-        crate::scenario::publish_handle("toolbar:file.new", egui::pos2(80.0, 100.0));
-        crate::scenario::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
+        solidcraft_ui_registry::publish_handle("toolbar:file.new", egui::pos2(80.0, 100.0));
+        solidcraft_ui_registry::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
         let response = chat_tool(&mut app, &tx, &ctx, method, params);
         assert_eq!(response["ok"], true, "{response}");
         assert!(app.agent_chat.backend.is_some(), "the agent must receive its own replacement's reply");
@@ -1136,7 +1136,7 @@ fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
         let (mut app, tx) = app_in_a_turn();
         let ctx = crate::fonts::test_context();
         app.ui.agent_cursor.show = animate;
-        crate::scenario::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
+        solidcraft_ui_registry::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
         app.ui.agent_cursor.speed = crate::agent_cursor::Speed::Times(1.0);
         let change = ask(&tx, "engine.execute", boxed(0.0));
         let shot = ask(&tx, "ui.screenshot", json!({}));
@@ -1144,7 +1144,7 @@ fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
         // Capture a request already waiting for a frame, as well as a queued command.
         let screenshot = app.control_held.pop_back().unwrap();
         app.run_control(&ctx, screenshot);
-        assert_eq!(app.pending_shots.len(), 1);
+        assert_eq!(app.shots.pending.len(), 1);
         if animate {
             app.drain_control(&ctx);
             assert!(app.agent.busy(), "the command is waiting on cursor animation");
@@ -1160,8 +1160,8 @@ fn leaving_a_tab_refuses_admitted_commands_animations_and_screenshots() {
             assert!(response["error"].as_str().is_some_and(|e| e.contains("document tab was left")));
         }
         assert!(Arc::ptr_eq(&app.session.doc, &other));
-        assert!(app.session.undo.is_empty() && app.pending_shots.is_empty());
-        assert!(app.queued_shots.is_empty(), "a cancelled screenshot must not capture the incoming tab");
+        assert!(app.session.undo.is_empty() && app.shots.pending.is_empty());
+        assert!(app.shots.queued.is_empty(), "a cancelled screenshot must not capture the incoming tab");
         crate::documents::switch(&mut app, 0);
         assert!(app.session.doc.features.is_empty() && app.session.undo.is_empty());
         // Adopting into a blank tab replaces the document and clears its old conversation.
@@ -1386,6 +1386,77 @@ fn an_interrupted_turns_changes_undo_as_one_step() {
     assert!(Arc::ptr_eq(&app.session.doc, &before));
 }
 
+/// What the user changes by hand between two messages is told to the agent before the next one,
+/// with the parameters and features it touched (#10854): the agent built a hole on a parameter,
+/// the user changed it, and the agent picked the old rim. Its own changes, and a design it has not
+/// seen yet (a new chat), bring no note.
+#[test]
+fn a_change_by_hand_between_messages_is_told_to_the_agent() {
+    use solidcraft_engine::doc::Param;
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.agent_chat.attach_selection = false;
+    let expr = |app: &SolveApp| app.session.doc.params.iter().find(|p| p.name == "w").map(|p| p.expr.clone()).unwrap();
+
+    send(&mut app, &ctx, "a box and a parameter w".into());
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "thanks".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: thanks"), "the agent made those changes itself");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    let old = expr(&app);
+    app.run("parameters.change", json!({"name": "w", "expression": "25"})).unwrap();
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]})).unwrap();
+    let added = app.session.doc.features.last().map(|f| f.name.clone()).unwrap();
+    send(&mut app, &ctx, "chamfer it".into());
+    let sent = text_of(script.prompts().last().unwrap());
+    // The new box may bring parameters of its own after `w`.
+    let new = expr(&app);
+    assert!(sent.starts_with(&format!("[The user changed the design by hand since your last reply (parameters: w {old} -> {new}")), "{sent}");
+    assert!(sent.contains(&format!("; features: {added} (new)). Read it again before")), "{sent}");
+    assert!(sent.ends_with("chat.]\n\nchamfer it"), "{sent}");
+    assert!(
+        matches!(app.agent_chat.items.iter().rev().find(|i| matches!(i, Item::User { .. })), Some(Item::User { text, .. }) if text == "chamfer it")
+    );
+    script.report(Event::Text { thought: false, text: "done".into() });
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "and again".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: and again"), "told once");
+    ended(&script, "");
+    poll(&mut app, &ctx);
+
+    // The note's other parts, and its bound on what it lists.
+    let seen = app.session.doc.as_ref().clone();
+    assert!(changed_note(&seen, &seen.clone()).is_none());
+    let mut rolled = seen.clone();
+    rolled.marker = Some(0);
+    let first = seen.features.first().map(|f| f.name.clone()).unwrap();
+    assert!(changed_note(&seen, &rolled).unwrap().contains(&format!("(the History marker is now before {first}, so it")));
+    let mut many = seen.clone();
+    let w = seen.params.iter().find(|p| p.name == "w").cloned().unwrap();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..w.clone() }));
+    assert!(changed_note(&seen, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", w.expr)));
+
+    // A new chat starts a session that has seen nothing.
+    app.run("parameters.change", json!({"name": "w", "expression": "30"})).unwrap();
+    new_chat(&mut app);
+    app.agent_chat.state = Some(State::Ready);
+    send(&mut app, &ctx, "hello".into());
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: hello"));
+}
+
 /// The same with a real agent process speaking ACP: `session/cancel` goes out, the agent answers
 /// the held prompt with the cancelled stop reason, and only then does the queued text go as a new
 /// `session/prompt`.
@@ -1543,7 +1614,7 @@ done
 }
 
 /// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
-/// session and on the one New chat opens.
+/// session and on the one New chat opens, with the custom instructions set before it (#8220).
 #[cfg(unix)]
 #[test]
 fn an_acp_agent_offering_the_standard_field_gets_the_system_note_in_every_session() {
@@ -1576,6 +1647,7 @@ done
         }
     };
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    app.preferences.agent_instructions = "Print flat side down.".into();
     new_chat(&mut app);
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     let sessions: Vec<Value> = std::fs::read_to_string(&log)
@@ -1585,11 +1657,86 @@ done
         .filter(|v| v["method"] == "session/new")
         .collect();
     assert_eq!(sessions.len(), 2);
-    for session in &sessions {
-        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(acp::SYSTEM_NOTE));
+    let notes = [acp::SYSTEM_NOTE.to_string(), acp::system_note("Print flat side down.")];
+    for (session, note) in sessions.iter().zip(&notes) {
+        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(note.as_str()));
     }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #8220: Preferences → AI shows the Custom instructions field; `ui.agent_chat` sets them (cut at
+/// the limit) and reports them; Connect sends them in the endpoint's system note, and an edit
+/// reaches the conversation New chat opens.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn custom_instructions_reach_the_system_note_of_each_new_session() {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let log = seen.clone();
+    let http: backend::HttpFn = Arc::new(move |r: &backend::HttpRequest| {
+        if r.url.ends_with("/chat/completions") {
+            log.lock().unwrap().push(serde_json::from_slice(r.body.as_deref().unwrap_or(b"null")).unwrap());
+            return Ok((200, json!({"choices": [{"message": {"role": "assistant", "content": "ok"}}]}).to_string().into_bytes()));
+        }
+        Ok((200, b"{\"data\":[]}".to_vec()))
+    });
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.services.agent_http = Some(http);
+    crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_ASSISTANT);
+    h.frames(4);
+    assert!(solidcraft_ui_registry::rect_of("prefs:agent_instructions").is_some(), "the field is on the AI page");
+    h.app.preferences.ai_features = true;
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("prefs_agent_instructions")));
+    h.frames(2);
+    h.step(&json!({"text": "M3"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.preferences.agent_instructions, "M3", "typed text lands in the field");
+    assert!(h.app.prefs_window.shell.filter.is_empty(), "Preferences search does not take the typing");
+    let long = "x".repeat(acp::INSTRUCTIONS_LIMIT + 5);
+    assert_eq!(
+        h.call("ui.agent_chat", json!({"instructions": long}))["result"]["instructions"].as_str().map(str::len),
+        Some(acp::INSTRUCTIONS_LIMIT)
+    );
+    assert!(!h.call("ui.agent_chat", json!({"instructions": 3}))["error"].is_null());
+    assert_eq!(h.call("ui.agent_chat", json!({"instructions": "Use M3 screws."}))["result"]["instructions"], "Use M3 screws.");
+
+    h.app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: "http://localhost:11434/v1".into(),
+        model: "m".into(),
+        ..Default::default()
+    });
+    h.app.agent_chat.agent_id = Some("api-1".into());
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    let sent = |n: usize| {
+        let seen = seen.clone();
+        move |a: &SolveApp| a.agent_chat.state() == State::Ready && seen.lock().unwrap().len() == n
+    };
+    connect(&mut h.app, &ctx);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "one".into());
+    until(&mut h.app, &sent(1));
+    // Editing the field leaves the running conversation's note alone.
+    h.app.preferences.agent_instructions = "Print flat side down.".into();
+    send(&mut h.app, &ctx, "two".into());
+    until(&mut h.app, &sent(2));
+    new_chat(&mut h.app);
+    until(&mut h.app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut h.app, &ctx, "three".into());
+    until(&mut h.app, &sent(3));
+    let notes: Vec<Value> = seen.lock().unwrap().iter().map(|body| body["messages"][0]["content"].clone()).collect();
+    assert_eq!(notes, [acp::system_note("Use M3 screws."), acp::system_note("Use M3 screws."), acp::system_note("Print flat side down.")]);
+    disconnect(&mut h.app);
 }
 
 fn models_reply(current: &str) -> Event {
@@ -1633,7 +1780,7 @@ fn an_endpoints_vendor_named_listing_names_its_providers() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_header_groups_models_by_provider_and_folds_them() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = narrow_chat();
     let script = Script::default();
     h.app.agent_chat.backend = Some(Box::new(script.clone()));
@@ -1885,7 +2032,7 @@ fn the_control_channel_sends_an_unlisted_model_where_it_can_go() {
 /// can be chosen too. The control and the popup stay in a narrow chat's window.
 #[test]
 fn the_header_model_picker_searches_and_takes_a_typed_model() {
-    use crate::scenario::{handle_at, rect_of};
+    use solidcraft_ui_registry::{handle_at, rect_of};
     let mut h = narrow_chat();
     let script = Script::default();
     h.app.agent_chat.backend = Some(Box::new(script.clone()));
@@ -1932,7 +2079,7 @@ fn the_header_model_picker_searches_and_takes_a_typed_model() {
 /// go through the option, and other options stay plain dropdowns.
 #[test]
 fn the_header_model_option_searches_and_takes_a_typed_model() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = narrow_chat();
     let script = Script::default();
     h.app.agent_chat.backend = Some(Box::new(script.clone()));
@@ -1971,7 +2118,7 @@ fn the_header_model_option_searches_and_takes_a_typed_model() {
 /// in the popup.
 #[test]
 fn the_header_model_picker_offers_no_typed_model_it_cannot_send_and_shows_why_listing_failed() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = narrow_chat();
     h.app.agent_chat.state = Some(State::Ready);
     h.app.agent_chat.models = vec![acp::ModelInfo { id: "fast".into(), name: "fast".into(), description: String::new() }];
@@ -1992,7 +2139,7 @@ fn the_header_model_picker_offers_no_typed_model_it_cannot_send_and_shows_why_li
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_card_of_a_running_endpoint_changes_the_chats_model() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.preferences.ai_features = true;
@@ -2016,14 +2163,14 @@ fn the_card_of_a_running_endpoint_changes_the_chats_model() {
     // The permission cards put endpoint controls below the fixed page's viewport.
     for _ in 0..32 {
         let at = handle_at("prefs:ai_model:api-1").unwrap();
-        let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+        let body = solidcraft_ui_registry::rect_of("prefs:page_body").unwrap();
         if body.contains(at) {
             break;
         }
         h.call("ui.scroll", json!({"x":body.center().x,"y":body.center().y,"delta":if at.y < body.top() {100} else {-100}}));
         h.frames(30);
     }
-    assert!(crate::scenario::rect_of("prefs:page_body").unwrap().contains(handle_at("prefs:ai_model:api-1").unwrap()));
+    assert!(solidcraft_ui_registry::rect_of("prefs:page_body").unwrap().contains(handle_at("prefs:ai_model:api-1").unwrap()));
     h.step(&json!({"click": {"handle": "prefs:ai_model:api-1"}})).unwrap();
     h.frames(3);
     assert!(handle_at("prefs:ai_model:api-1:smart").is_some());
@@ -2759,7 +2906,7 @@ fn pictures_are_read_off_the_window_thread() {
     send(&mut app, &ctx, words);
     assert_eq!(script.prompts().len(), 1);
     {
-        let _ja = crate::i18n::scope("ja");
+        let _ja = solidcraft_ui_text::scope("ja");
         control(&mut app, &ctx, &json!({"attach": at(&d, "fake.png")})).unwrap();
     }
     settle_files(&mut app, &ctx);
@@ -2905,18 +3052,145 @@ fn narrow_chat() -> crate::scenario::Harness {
     h
 }
 
+/// The rows `a_selection_held_at_the_edge_scrolls_and_keeps_its_start` draws that are in view:
+/// each row's number, where its text is, and the conversation's view.
+fn rows_in_view(h: &crate::scenario::Harness) -> Vec<(usize, egui::Rect, egui::Rect)> {
+    let mut rows = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape
+                && let Some(n) = text.galley.text().strip_prefix("Parts list row ").and_then(|n| n.parse::<usize>().ok())
+            {
+                let at = egui::Rect::from_min_size(text.pos, text.galley.size());
+                if clipped.clip_rect.intersects(at) {
+                    rows.push((n, at, clipped.clip_rect));
+                }
+            }
+        });
+    }
+    rows.sort_by_key(|r| r.0);
+    rows
+}
+
+/// #11527: a text selection held at the conversation's edge scrolls it, and keeps its start once
+/// that has scrolled out of view, so Copy takes the hidden rows too. Resting there with no button
+/// down, or after letting go, scrolls nothing.
+#[test]
+fn a_selection_held_at_the_edge_scrolls_and_keeps_its_start() {
+    let mut h = narrow_chat();
+    for n in 0..80 {
+        h.app.agent_chat.items.push(Item::Agent { thought: false, text: format!("Parts list row {n}") });
+    }
+    h.frames(4);
+    let rows = rows_in_view(&h);
+    let (&(top, _, view), &(last, last_at, _)) = (rows.first().expect("rows in view"), rows.last().expect("rows in view"));
+    assert_eq!(last, 79, "the conversation shows its end");
+    let edge = egui::pos2(last_at.left() + 10.0, view.top() + 4.0);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, top, "no button down: the pointer at the edge scrolls nothing");
+
+    // Start the selection at the end of the last row and hold it at the top edge.
+    let start = last_at.right_center() - egui::vec2(1.0, 0.0);
+    h.frame_with(vec![egui::Event::PointerMoved(start), press(start, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    for _ in 0..600 {
+        if !rows_in_view(&h).iter().any(|r| r.0 == last) {
+            break;
+        }
+        h.frame();
+    }
+    let rows = rows_in_view(&h);
+    assert!(!rows.iter().any(|r| r.0 == last), "holding the selection at the top scrolls the last row out of view");
+    let reached = rows[0].0;
+    assert!(reached < top, "row {reached} is in view, it was {top}");
+    h.frame_with(vec![press(edge, false)]);
+    let after = rows_in_view(&h)[0].0;
+    h.frames(20);
+    assert_eq!(rows_in_view(&h)[0].0, after, "letting go stops the scrolling");
+    assert!(h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the selection keeps its start out of view");
+
+    h.frame_with(vec![egui::Event::Copy]);
+    let copied = h
+        .output
+        .commands
+        .iter()
+        .find_map(|c| if let egui::OutputCommand::CopyText(text) = c { Some(text.clone()) } else { None })
+        .expect("Copy takes the selection");
+    // The selection's moving end is under the pointer, in the first row or two in view.
+    for n in [reached + 2, 78] {
+        assert!(copied.contains(&format!("Parts list row {n}\n")), "row {n} is copied whole: {copied:?}");
+    }
+    assert!(copied.trim_end().ends_with("Parts list row 79"), "the selection ends where it started, out of view: {copied:?}");
+}
+
+/// #11527: only a drag towards the edge scrolls. Holding a press on the line at the top edge, a
+/// double click there, or a drag from there into the conversation leaves it where it is.
+#[test]
+fn a_press_at_the_edge_without_a_drag_towards_it_scrolls_nothing() {
+    let mut h = narrow_chat();
+    // One paragraph taller than the conversation: every point in view is on its text.
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Bill of materials ".repeat(400) });
+    h.frames(4);
+    // Where the answer's text starts, the conversation's view, and the first line wholly in view
+    // (egui itself scrolls a pressed line that is cut off at the edge into view).
+    let answer = |h: &crate::scenario::Harness| {
+        let mut found = None;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape
+                    && text.galley.text().starts_with("Bill of materials")
+                    && clipped.clip_rect.intersects(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                {
+                    let line = text.galley.rows.iter().map(|r| r.rect().translate(text.pos.to_vec2())).find(|r| r.top() >= clipped.clip_rect.top());
+                    found = Some((text.pos.y, clipped.clip_rect, line.expect("a line wholly in view")));
+                }
+            });
+        }
+        found.expect("the answer is in view")
+    };
+    let (rest, view, line) = answer(&h);
+    let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let edge = egui::pos2(view.left() + 40.0, line.center().y);
+    assert!(edge.y < view.top() + 32.0, "the first line in view is by the edge");
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a press held at the edge scrolls nothing");
+    h.frame_with(vec![press(edge, false)]);
+    for _ in 0..2 {
+        h.frame_with(vec![press(edge, true)]);
+        h.frame_with(vec![press(edge, false)]);
+    }
+    h.frames(10);
+    assert_eq!(answer(&h).0, rest, "a double click at the edge scrolls nothing");
+    let inside = edge + egui::vec2(0.0, 20.0);
+    h.frame_with(vec![egui::Event::PointerMoved(edge), press(edge, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(inside)]);
+    h.frames(30);
+    assert_eq!(answer(&h).0, rest, "a drag from the edge into the conversation scrolls nothing");
+    h.frame_with(vec![press(inside, false)]);
+    // Towards the edge it does.
+    let middle = view.center();
+    h.frame_with(vec![egui::Event::PointerMoved(middle), press(middle, true)]);
+    h.frame_with(vec![egui::Event::PointerMoved(edge)]);
+    h.frames(30);
+    assert!(answer(&h).0 > rest, "a drag to the top edge scrolls the answer down");
+    h.frame_with(vec![press(edge, false)]);
+}
+
 /// #10172: before a connection, what the panel draws under the agent switcher (the Agent row
 /// with Add agent and Refresh) keeps the panel's side margin, docked and floating: nothing starts
 /// at the panel's edge or is cut off at the other one.
 #[test]
 fn the_agent_list_keeps_the_panels_side_margin() {
-    use crate::shell::LayoutMode;
+    use crate::ui_kit::LayoutMode;
     for layout in [LayoutMode::Docked, LayoutMode::Floating] {
         let mut h = narrow_chat();
         h.app.ui.layout = layout;
         h.frames(3);
         h.frame();
-        let panel = crate::scenario::rect_of("agent_chat:panel").expect("the panel");
+        let panel = solidcraft_ui_registry::rect_of("agent_chat:panel").expect("the panel");
         let mut texts = Vec::new();
         for clipped in &h.shapes {
             crate::test_support::each_shape(&clipped.shape, &mut |s| {
@@ -2926,7 +3200,7 @@ fn the_agent_list_keeps_the_panels_side_margin() {
             });
         }
         let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
-        let margin = crate::theme::Tokens::get().space_12 - 0.5;
+        let margin = solidcraft_theme::Tokens::get().space_12 - 0.5;
         let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
         assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
         let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
@@ -2936,7 +3210,7 @@ fn the_agent_list_keeps_the_panels_side_margin() {
 
 /// Every chip and the text box sit inside the panel.
 fn assert_inside_the_panel(chips: usize) {
-    use crate::scenario::rect_of;
+    use solidcraft_ui_registry::rect_of;
     let panel = rect_of("agent_chat:panel").expect("the panel");
     let mut rects: Vec<(String, egui::Rect)> =
         (0..chips).map(|i| (format!("file:{i}"), rect_of(&format!("agent_chat:file:{i}")).expect("a chip"))).collect();
@@ -2950,7 +3224,7 @@ fn assert_inside_the_panel(chips: usize) {
 /// a × that takes it off), inside the chat, and Send sends files with no text.
 #[test]
 fn attached_files_show_as_chips_that_can_be_taken_off_and_sent_alone() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let d = attachable("chips");
     let mut h = narrow_chat();
     let script = Script::default();
@@ -3010,7 +3284,7 @@ fn each_file_has_its_own_id_and_thumbnail() {
 /// the clipboard's picture (here given as RGBA, as the system does).
 #[test]
 fn the_plus_button_attaches_a_chosen_file_or_a_pasted_picture() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let d = attachable("plus");
     let mut h = narrow_chat();
     let chosen = at(&d, "brief.md");
@@ -3131,6 +3405,7 @@ fn a_cad_file_joins_the_message_once_its_import_is_in() {
 /// says so; any other file's × just takes it off.
 #[test]
 fn an_imported_parts_chip_says_the_part_stays() {
+    crate::i18n::install();
     assert_eq!(panel::remove_tip(&attach::Attachment::imported("motor.step".into())), tr("ui.agent_chat_remove_imported"));
     assert!(tr("ui.agent_chat_remove_imported").contains("stays in the design"));
     let picture = attach::from_rgba("a.png".into(), 2, 2, &[9; 16]).unwrap();
@@ -3142,7 +3417,7 @@ fn an_imported_parts_chip_says_the_part_stays() {
 /// chat's (the app handles them as before), nor when the chat is closed.
 #[test]
 fn files_dropped_on_the_chat_attach_and_the_app_does_not_open_them() {
-    use crate::scenario::rect_of;
+    use solidcraft_ui_registry::rect_of;
     let d = attachable("drop");
     let mut h = narrow_chat();
     h.call("ui.resize", json!({"width": 1600, "height": 1000}));
@@ -3181,7 +3456,7 @@ fn files_dropped_on_the_chat_attach_and_the_app_does_not_open_them() {
 /// one: a drop on the window is the chat's, one elsewhere is not.
 #[test]
 fn files_dropped_on_the_popped_out_chat_attach() {
-    use crate::scenario::rect_of;
+    use solidcraft_ui_registry::rect_of;
     let d = attachable("popdrop");
     let mut h = narrow_chat();
     h.call("ui.resize", json!({"width": 1600, "height": 1000}));
@@ -3208,7 +3483,7 @@ fn files_dropped_on_the_popped_out_chat_attach() {
 /// keeps to the chat (a row of chips wider than the chat would widen everything under it).
 #[test]
 fn chips_and_a_long_message_wrap_inside_a_narrow_chat() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let d = attachable("wrap");
     let mut h = narrow_chat();
     for _ in 0..6 {
@@ -3519,7 +3794,7 @@ fn assistant_click_and_shortcut_toggle_the_same_panel_without_a_connection() {
     let mut h = crate::scenario::Harness::new();
     h.frames(3);
     assert_eq!(assistant_mark(&h.app), AssistantMark::Quiet);
-    assert!(crate::scenario::handle_at("toolbar:ai").is_none());
+    assert!(solidcraft_ui_registry::handle_at("toolbar:ai").is_none());
     h.step(&json!({"click":{"handle":"titlebar:assistant"}})).unwrap();
     assert!(h.app.agent_chat.open);
     h.step(&json!({"key":"A", "shift":true,"cmd":true})).unwrap();
@@ -3601,7 +3876,7 @@ fn a_messages_pictures_open_in_a_viewer() {
     }
     assert!(h.widget("View attached").is_none(), "thumbnails replace the caption");
     let point = |name: &str| {
-        let p = crate::scenario::handle_at(name).unwrap_or_else(|| panic!("{name} is drawn"));
+        let p = solidcraft_ui_registry::handle_at(name).unwrap_or_else(|| panic!("{name} is drawn"));
         json!({"x": p.x, "y": p.y})
     };
     // Hovering is not clicking.
@@ -3612,7 +3887,7 @@ fn a_messages_pictures_open_in_a_viewer() {
     h.call("ui.click", second);
     h.frames(4);
     assert_eq!(h.app.agent_chat.gallery.as_ref().map(|g| g.at), Some(1), "the click opens the viewer on that picture");
-    assert!(crate::scenario::rect_of("agent_chat:gallery_picture").is_some(), "the picture is drawn big");
+    assert!(solidcraft_ui_registry::rect_of("agent_chat:gallery_picture").is_some(), "the picture is drawn big");
     // Next wraps round; the arrow keys step too.
     let next = point("agent_chat:gallery_next");
     h.call("ui.click", next);
@@ -3718,11 +3993,11 @@ fn the_viewer_opens_in_the_popped_out_window() {
     let Item::User { pictures, .. } = &h.app.agent_chat.items[0] else { panic!("the message") };
     let first = pictures[0].clone();
     assert!(until_decoded(&mut h, &first), "the picture was decoded");
-    let at = crate::scenario::handle_at("agent_chat:picture:0:0").expect("the thumbnail is drawn in the window");
+    let at = solidcraft_ui_registry::handle_at("agent_chat:picture:0:0").expect("the thumbnail is drawn in the window");
     h.call("ui.click", json!({"x": at.x, "y": at.y}));
     h.frames(4);
     assert!(h.app.agent_chat.gallery.is_some(), "the click opened the viewer");
-    assert!(crate::scenario::rect_of("agent_chat:gallery_picture").is_some(), "and it is drawn");
+    assert!(solidcraft_ui_registry::rect_of("agent_chat:gallery_picture").is_some(), "and it is drawn");
 }
 
 // ---- Pick context (#2286) ----
@@ -3767,7 +4042,7 @@ fn the_picker_fills_a_tray_of_chips_that_can_be_trimmed() {
         assert!(h.widget(heading).is_some(), "{heading} is drawn in the tray");
     }
     // × takes the body out: the tray and the picks stay in step.
-    let cross = crate::scenario::handle_at("agent_chat:picked_remove:3").expect("every chip has an ×");
+    let cross = solidcraft_ui_registry::handle_at("agent_chat:picked_remove:3").expect("every chip has an ×");
     h.call("ui.click", json!({"x": cross.x, "y": cross.y}));
     h.frames(4);
     assert_eq!(h.app.agent_chat.picked.len(), 3);
@@ -3935,7 +4210,7 @@ fn attached_pictures_of_any_format_are_decoded_in_the_background() {
         assert!(until_decoded(&mut h, &picture), "{format:?} was decoded");
         let texture = picture.decode.texture.get().and_then(|t| t.as_ref()).unwrap_or_else(|| panic!("{format:?} is a texture"));
         assert_eq!(texture.size()[0], width as usize, "{format:?} keeps its width");
-        assert!(crate::scenario::handle_at("agent_chat:picture:0:0").is_some(), "{format:?} has its thumbnail");
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:picture:0:0").is_some(), "{format:?} has its thumbnail");
     }
     // Bytes that are no picture: the name where the thumbnail would be, and nothing breaks.
     let broken = Picture::new(b"not a picture at all".to_vec(), "fake.png");
@@ -3971,7 +4246,7 @@ fn an_attached_picture_and_the_views_picture_share_the_viewer() {
 /// Settings › AI › Add agent opens its dialog from the Home tab too (#3483, #3513).
 #[test]
 fn add_agent_opens_its_dialog_from_home() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
     h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
     h.call("ui.home", json!({"open": true}));
@@ -4123,6 +4398,7 @@ fn said(title: &str, input: Value, output: Option<&str>) -> Option<String> {
 /// parameters and what it returned.
 #[test]
 fn tool_calls_read_as_what_they_did() {
+    crate::i18n::install();
     let extrude = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": 10}});
     assert_eq!(said("execute: solid.extrude", extrude.clone(), None).as_deref(), Some("Extrude Sketch1 by 10 mm"));
     // As an ACP agent names the bridged tool, with the body the result made.
@@ -4156,6 +4432,7 @@ fn tool_calls_read_as_what_they_did() {
 /// Details and the tooltip.
 #[test]
 fn tool_cards_show_file_names_never_paths() {
+    crate::i18n::install();
     let shot = r"ui.screenshot: C:\Users\bherbruck\AppData\Local\Temp\solidcraft-mcp-8608-b4c7b64\shot-0.png";
     assert_eq!(said(shot, json!({}), None).as_deref(), Some("Screenshot"));
     assert_eq!(said("mcp__solidcraft-app__ui.screenshot", json!({}), None).as_deref(), Some("Screenshot"));
@@ -4234,7 +4511,7 @@ fn unknown_or_malformed_tool_calls_keep_their_title_and_never_panic() {
 /// opened. A call with no words keeps its title.
 #[test]
 fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
     h.frames(3);
@@ -4274,7 +4551,7 @@ fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
 /// The card says "Screenshot"; the full temp path is only under Details.
 #[test]
 fn a_screenshot_card_hides_the_path_until_details() {
-    use crate::scenario::handle_at;
+    use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
     h.frames(3);
@@ -4301,7 +4578,7 @@ fn a_screenshot_card_hides_the_path_until_details() {
 /// the only inset left is the text's own padding inside the box (no second margin around it).
 #[test]
 fn the_composer_box_fills_its_parent_in_every_layout() {
-    use crate::scenario::rect_of;
+    use solidcraft_ui_registry::rect_of;
     for (layout, popped) in [("floating", false), ("docked", false), ("floating", true), ("docked", true)] {
         let mut h = narrow_chat();
         h.call("ui.resize", json!({"width": 1600, "height": 1000}));
@@ -4330,7 +4607,7 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
     let mut h = narrow_chat();
     h.app.agent_chat.state = Some(State::Ready);
     h.frames(4);
-    let width = crate::scenario::rect_of("agent_chat:input").expect("the text box").width();
+    let width = solidcraft_ui_registry::rect_of("agent_chat:input").expect("the text box").width();
     let ctx = crate::fonts::test_context();
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/locales");
     let mut checked = 0;
@@ -4340,12 +4617,12 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
             continue;
         }
         let language = path.file_stem().unwrap().to_string_lossy().into_owned();
-        let _scope = crate::i18n::scope(&language);
+        let _scope = solidcraft_ui_text::scope(&language);
         for key in ["ui.agent_chat_placeholder", "ui.agent_chat_placeholder_busy"] {
-            let hint = crate::i18n::tr(key).to_owned();
+            let hint = solidcraft_ui_text::tr(key).to_owned();
             let mut rows = 0;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * crate::theme::Tokens::get().form_inset).rows.len();
+                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * solidcraft_theme::Tokens::get().form_inset).rows.len();
             });
             output.textures_delta.clear();
             assert_eq!(rows, 1, "{language} {key} at {width} wide: {hint}");
@@ -4360,7 +4637,7 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
 #[test]
 fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-    app.ui.layout = crate::shell::LayoutMode::Floating;
+    app.ui.layout = crate::ui_kit::LayoutMode::Floating;
     app.preferences.ai_features = true;
     app.agent_chat.open = true;
     app.preferences.agent_chat_popped = false;
@@ -4410,9 +4687,24 @@ fn click_at(h: &mut crate::scenario::Harness, at: egui::Pos2, button: egui::Poin
 #[test]
 fn the_copy_message_button_copies_the_prompt_as_entered() {
     let mut h = chat_with_copiable_messages();
-    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let at = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
     click_at(&mut h, at, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// A prompt at the top of a short conversation is as tall as its text and its Copy message
+/// button: the button sits at the bubble's foot and the reply follows straight after, instead of
+/// the bubble stretching over the empty view below it.
+#[test]
+fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
+    // Kept to the end: the published handles and rects are its last frame's.
+    let _h = chat_with_copiable_messages();
+    let button = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    let prompt = solidcraft_ui_registry::rect_of("agent_chat:msg:0").expect("the prompt's message area");
+    let reply = solidcraft_ui_registry::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    let row = solidcraft_theme::Tokens::get().control_height;
+    assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
+    assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
 }
 
 /// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
@@ -4420,7 +4712,7 @@ fn the_copy_message_button_copies_the_prompt_as_entered() {
 #[test]
 fn the_copy_message_button_copies_the_reply_as_original_markdown() {
     let mut h = chat_with_copiable_messages();
-    let at = crate::scenario::handle_at("agent_chat:copy:1").expect("the reply's Copy message button");
+    let at = solidcraft_ui_registry::handle_at("agent_chat:copy:1").expect("the reply's Copy message button");
     click_at(&mut h, at, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
 }
@@ -4429,10 +4721,10 @@ fn the_copy_message_button_copies_the_reply_as_original_markdown() {
 #[test]
 fn right_clicking_a_message_offers_copy_message() {
     let mut h = chat_with_copiable_messages();
-    let msg = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    let msg = solidcraft_ui_registry::rect_of("agent_chat:msg:1").expect("the reply's message area");
     click_at(&mut h, msg.center(), egui::PointerButton::Secondary);
     h.frames(1); // let the popup settle at its final place before clicking its row
-    let item = crate::scenario::handle_at("agent_chat:copy_menu:1").expect("the right-click menu's Copy message row");
+    let item = solidcraft_ui_registry::handle_at("agent_chat:copy_menu:1").expect("the right-click menu's Copy message row");
     click_at(&mut h, item, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
 }
@@ -4445,7 +4737,7 @@ fn a_streaming_reply_copies_the_text_received_so_far() {
     h.frames(3);
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "half a repl".into() });
     h.frames(3);
-    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the streaming reply's button");
+    let at = solidcraft_ui_registry::handle_at("agent_chat:copy:0").expect("the streaming reply's button");
     click_at(&mut h, at, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("half a repl"));
 }
@@ -4466,7 +4758,253 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     });
     h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering".into() });
     h.frames(3);
-    assert!(crate::scenario::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
-    assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
+    assert!(solidcraft_ui_registry::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
+}
+
+fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
+    let mut h = narrow_chat();
+    h.app.home.open = false;
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.preferences.ai_features = true;
+    h.app.preferences.agent_chat_popped = false;
+    h.app.preferences.language = "en".into();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.input = "Retained responsive composer draft".into();
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "A retained conversation".into() });
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Retained profile"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
+    h.app.preferences.shared_panel_layout = true;
+    h.frames(6);
+    assert!(h.app.panel_runtime().is_some());
+    assert!(h.app.agent_chat.detecting.is_none(), "the deterministic discovery fixture starts no worker");
+    assert!(script.calls().is_empty());
+    (h, script)
+}
+
+fn shared_assistant_float(h: &mut crate::scenario::Harness, width: f32, height: f32) {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, Point, SectionId, SectionLocation, Size};
+    let instance = InstanceId::new("assistant").unwrap();
+    let source = h.app.panel_runtime().unwrap().layout().layout().containing(&instance).unwrap();
+    let origin = Point { x: 300.0, y: 200.0 };
+    let size = Size { width, height };
+    let mutation = if matches!(source.location, SectionLocation::Floating { .. }) {
+        Mutation::SetFloatingRect { section: source.id.clone(), origin, size }
+    } else {
+        Mutation::Move {
+            instance,
+            destination: Destination::NewSection {
+                section: SectionId::new("responsive-assistant").unwrap(),
+                index: 0,
+                location: SectionLocation::Floating { origin },
+                size,
+            },
+        }
+    };
+    h.app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![mutation] }).unwrap();
+    h.frames(6);
+}
+
+fn shared_assistant_body(h: &crate::scenario::Harness) -> egui::Rect {
+    let body = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|panel| panel.instance.0 == "assistant").unwrap().body.unwrap();
+    egui::Rect::from_min_size(egui::pos2(body.origin.x, body.origin.y), egui::vec2(body.size.width, body.size.height))
+}
+
+#[test]
+fn shared_assistant_wide_and_compact_present_real_regions_without_losing_the_composer_selection() {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, SectionId, SectionLocation, Size, Zone};
+    let (mut h, script) = shared_assistant_harness();
+    let input = egui::Id::unique("sc_agent_chat_input");
+    h.ctx.memory_mut(|memory| memory.request_focus(input));
+    h.frames(2);
+    let mut editor = egui::TextEdit::load_state(&h.ctx, input).unwrap();
+    editor.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(2), egui::text::CCursor::new(10))));
+    editor.store(&h.ctx, input);
+    h.frame();
+    let caret = egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range();
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input), "the docked composer starts focused");
+    let response = h.ctx.read_response(input).unwrap();
+    assert!(response.enabled() && response.interact_rect.is_positive(), "the focused composer is live and interactable");
+    assert!(!caret.unwrap().is_empty(), "exercise a real selection before moving the panel");
+    let draft = h.app.agent_chat.input.clone();
+    let document = h.app.session.doc.clone();
+    let model = h.app.session.model.state();
+    let selection = h.app.session.selection.clone();
+    let camera = h.app.cam;
+    let session = h.app.session.uid;
+    let revision = h.app.session.revision;
+    let undo = h.app.session.undo.len();
+    let dirty = h.app.session.is_dirty();
+    let controllers = h.app.panel_runtime().unwrap().controller_count();
+    for (width, height, wide) in [(900.0, 420.0, true), (500.0, 340.0, false)] {
+        shared_assistant_float(&mut h, width, height);
+        let body = shared_assistant_body(&h);
+        assert!(body.width() > body.height(), "both cases exercise the Wide host flow");
+        let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap();
+        let composer = solidcraft_ui_registry::rect_of("agent_chat:composer_footer").unwrap();
+        let switcher = solidcraft_ui_registry::rect_of("agent_chat:switcher").unwrap();
+        assert!(body.expand(1.0).contains_rect(conversation));
+        assert!(body.expand(1.0).contains_rect(composer));
+        assert!(body.expand(1.0).contains_rect(switcher));
+        if wide {
+            assert!(conversation.right() <= composer.left(), "a viable Wide body puts the real transcript beside its composer");
+            assert!(conversation.right() <= switcher.left(), "provider controls share the composer's column");
+            assert!(conversation.height() > composer.height(), "the transcript can use the full height of its own column");
+        } else {
+            assert!(conversation.bottom() <= composer.top() + 1.0, "a compact Wide body falls back to the existing vertical composition");
+            assert!(conversation.left() < composer.right() && composer.left() < conversation.right());
+        }
+        assert_eq!(h.app.agent_chat.input, draft);
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input));
+        assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
+    }
+    h.app.preferences.language = "ar".into();
+    shared_assistant_float(&mut h, 900.0, 420.0);
+    let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap();
+    let composer = solidcraft_ui_registry::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(composer.right() <= conversation.left(), "Wide mirrors the two real regions in RTL");
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input), "RTL keeps the composer focused");
+    assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
+    h.app.preferences.language = "en".into();
+    h.app
+        .dispatch_panel_layout(LayoutAction::Apply {
+            expected_revision: None,
+            mutations: vec![Mutation::Move {
+                instance: InstanceId::new("assistant").unwrap(),
+                destination: Destination::NewSection {
+                    section: SectionId::new("responsive-assistant-side").unwrap(),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: Zone::Right },
+                    size: Size { width: 360.0, height: 420.0 },
+                },
+            }],
+        })
+        .unwrap();
+    h.frames(6);
+    let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap();
+    let composer = solidcraft_ui_registry::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(conversation.bottom() <= composer.top() + 1.0);
+    assert_eq!(h.app.agent_chat.input, draft);
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input));
+    assert_eq!(egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range(), caret);
+    assert_eq!(h.app.session.uid, session);
+    assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+    assert!(Arc::ptr_eq(&h.app.session.model.state(), &model));
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!(h.app.cam, camera);
+    assert_eq!(h.app.session.revision, revision);
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.is_dirty(), dirty);
+    assert_eq!(h.app.panel_runtime().unwrap().controller_count(), controllers);
+    assert!(script.calls().is_empty(), "changing presentation must not submit, cancel or restart the retained service");
+}
+
+#[test]
+fn shared_assistant_transcript_keeps_its_scroll_position_through_responsive_width_changes() {
+    use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, SectionId, SectionLocation, Size, Zone};
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.items = (0..80).map(|n| Item::Agent { thought: false, text: format!("Parts list row {n}") }).collect();
+    shared_assistant_float(&mut h, 900.0, 420.0);
+    assert_eq!(rows_in_view(&h).last().unwrap().0, 79);
+    let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").unwrap();
+    h.call("ui.scroll", json!({"x":conversation.center().x,"y":conversation.center().y,"delta":1200}));
+    h.frames(30);
+    let before = rows_in_view(&h).first().unwrap().0;
+    assert!(before > 0 && before < 70, "exercise a middle position, not an automatic endpoint");
+    for width in [1040.0, 900.0] {
+        shared_assistant_float(&mut h, width, 420.0);
+        let after = rows_in_view(&h).first().unwrap().0;
+        assert!(before.abs_diff(after) <= 1, "fixed-height short messages keep their scroll anchor across a width change: {before} → {after}");
+        assert!(!rows_in_view(&h).iter().any(|row| row.0 == 79), "a reparent must not reset stick-to-bottom");
+    }
+    h.app
+        .dispatch_panel_layout(LayoutAction::Apply {
+            expected_revision: None,
+            mutations: vec![Mutation::Move {
+                instance: InstanceId::new("assistant").unwrap(),
+                destination: Destination::NewSection {
+                    section: SectionId::new("scrolled-assistant-side").unwrap(),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: Zone::Right },
+                    size: Size { width: 360.0, height: 420.0 },
+                },
+            }],
+        })
+        .unwrap();
+    h.frames(6);
+    let after = rows_in_view(&h).first().unwrap().0;
+    assert!(before.abs_diff(after) <= 1, "returning to Tall retains the same transcript scroll anchor: {before} → {after}");
+    assert!(script.calls().is_empty());
+    assert!(h.app.agent_chat.backend.is_some());
+}
+
+#[test]
+fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+    use solidcraft_engine::panels::{ControlId, InstanceId};
+    let (mut h, script) = shared_assistant_harness();
+    shared_assistant_float(&mut h, 900.0, 420.0);
+    let assistant = InstanceId::new("assistant").unwrap();
+    for state in [State::Ready, State::Busy, State::NeedsAuth, State::Exited, State::Failed] {
+        h.app.agent_chat.state = Some(state);
+        h.frames(2);
+        let presentation = h.app.panel_runtime().unwrap().instance_presentation(&assistant).unwrap();
+        assert_eq!(presentation.status.as_deref(), Some(state.label()));
+        assert_eq!(presentation.attention, matches!(state, State::NeedsAuth | State::Exited | State::Failed));
+    }
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.items.push(Item::Permission { key: 42, title: "Review this local request".into(), options: Vec::new(), answer: None });
+    h.frames(2);
+    let presentation = h.app.panel_runtime().unwrap().instance_presentation(&assistant).unwrap();
+    assert_eq!(presentation.status.as_deref(), Some(trf("ui.assistant_waiting", &[("count", "1")]).as_str()));
+    assert!(presentation.attention);
+    assert_eq!(h.app.agent_chat.waiting(), 1, "rendering status never answers the pending request");
+    h.app.agent_chat.items.pop();
+    h.app.agent_chat.pending.push(Pending {
+        text: "Keep this queued request until confirmation".into(),
+        image: false,
+        context: Context::default(),
+        files: Vec::new(),
+    });
+    h.app.preferences.agents =
+        (0..24).map(|n| agents::AgentConfig { id: format!("review-{n}"), name: format!("Review provider {n}"), ..Default::default() }).collect();
+    h.app.agent_chat.picking = Some(true);
+    h.frames(4);
+    let providers = solidcraft_ui_registry::rect_of("agent_chat:providers").unwrap();
+    assert!(providers.contains(solidcraft_ui_registry::handle_at("agent_chat:pick:review-0").unwrap()));
+    h.call("ui.scroll", json!({"x":providers.center().x,"y":providers.center().y,"delta":-900}));
+    h.frames(30);
+    let providers = solidcraft_ui_registry::rect_of("agent_chat:providers").unwrap();
+    let switcher = solidcraft_ui_registry::rect_of("agent_chat:switcher").unwrap();
+    assert!(
+        switcher.bottom() < providers.top() - solidcraft_theme::Tokens::get().control_height * 4.0,
+        "the real provider scroller is far from its top before New Chat"
+    );
+    assert!(script.calls().is_empty(), "scrolling the deterministic provider list starts no agent");
+    let target = HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: assistant, action: ControlId::new("new-chat").unwrap() });
+    let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
+    let at = egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0);
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(4);
+    assert!(h.app.agent_chat.confirm_new);
+    assert_eq!(h.app.agent_chat.pending.len(), 1);
+    assert!(script.calls().is_empty(), "opening confirmation cannot invoke New Chat early");
+    let confirm = solidcraft_ui_registry::rect_of("agent_chat:new_confirm").unwrap();
+    let providers = solidcraft_ui_registry::rect_of("agent_chat:providers").unwrap();
+    let composer = solidcraft_ui_registry::rect_of("agent_chat:composer_footer").unwrap();
+    assert!(providers.expand(1.0).contains_rect(confirm), "a newly requested confirmation is fully visible inside the actual provider clip");
+    assert!(shared_assistant_body(&h).contains_rect(confirm));
+    assert!(confirm.left() >= composer.left(), "the real confirmation remains reachable in the interaction column");
+    click_at(&mut h, confirm.center(), egui::PointerButton::Primary);
+    h.frames(4);
+    assert_eq!(script.calls().iter().filter(|call| call.as_str() == "new_session").count(), 1);
+    assert!(!script.calls().iter().any(|call| call.starts_with("prompt:") || call == "cancel"));
+    assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
+    assert!(h.app.agent_chat.items.is_empty());
 }

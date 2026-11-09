@@ -10,12 +10,19 @@ use solidcraft_kernel::{Construction, Continuity};
 use super::CommandSpec;
 use super::features::add_feature;
 use crate::params::{bad, str_, vec3};
+use crate::schema::features::FeatureResult;
+use crate::schema::surface_match::MatchSurfaceParams;
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const CONTRACT: TypedContract<MatchSurfaceParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("surface.match", "Match Surface", match_surface)
+    CommandSpec::new("surface.match", "Match Surface", crate::checked!("surface.match", match_surface))
         .at("SURFACE", "MODIFY")
         .icon("continuity")
+        .contract(&CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params(
             "body: surface name (the body whose face is rebuilt); faces?: [[x,y,z]] (points on that face, default: the body's first); target: body name (the body the seam must meet); edges: [[x,y,z]] (points on one edge chain of the target: the rebuilt boundary takes its place); order?: g1|g2|g3 (default g2: position and tangent plane, the curvature too, or how that curvature changes along the seam). The far boundary stays where it was and the body keeps its name",
         ),

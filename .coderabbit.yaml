@@ -1,0 +1,193 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  profile: chill
+  poem: false
+  sequence_diagrams: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  auto_review:
+    # Review when a PR is opened or marked ready, or on `@coderabbitai review`; not on every push.
+    drafts: false
+    auto_incremental_review: false
+    # Dependabot bumps are checked by CI; skip CodeRabbit reviews on them.
+    ignore_usernames:
+      - "dependabot[bot]"
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Project rule: don't change anyone's existing UX defaults unless the change is purely additive and belongs in the application.
+        A changed default is when something people already rely on in the UI changes for everyone who didn't opt in: an existing control, interaction or setting value. Examples the owner declined or reverted: right click becoming select while left click orbits (make it opt-in instead); a PR that removed all camera animation when only orbit lag was to be fixed. Flag any change to something a user already relies on: a default setting or preference value, what a command or tool does when used the usual way, the UI's default layout or behaviour, a keyboard or mouse shortcut.
+        A changed kernel or geometry result (different faces or volumes, a case that now builds or is now refused), including anything under solidcore/, is not a changed default; don't flag it as one, and expect `Changes a default: no` for it.
+        Not defaults: bug fixes and more correct results, kernel or geometry result changes, new options that are off by default, and CI or tooling config. Don't flag purely additive changes: a new command, a new setting whose default keeps today's behaviour, or a new option that appears only when someone chooses it. Don't flag bug fixes that only turn a crash or an error into the result the feature always promised.
+        When you flag one, start the comment with "Changes a default:", say what a user sees before and after, whether a setting keeps the old behaviour, and whether the PR description's `Changes a default:` line says so.
+
+    # Where code goes, SolidCraft or SolidCore: solidcore/docs/layers.md.
+    - path: "{apps,crates}/**"
+      instructions: |
+        Layers (solidcore/docs/layers.md): SolidCraft is a consumer of solidcore. It holds state,
+        selection, commands, settings, history and UI, and computes no geometry.
+        - Flag any new geometric computation here: a dot or cross product, normalising, sqrt or trig
+          on coordinates, a solve, a derivative, an intersection, a fit, a distance or area. Say which
+          layer it belongs in: a kernel primitive in solidcore/crates/solidcore if it computes
+          geometry, or a recipe in solidcore/crates/solidcore-ops if it only sequences kernel calls.
+        - Flag a new dependency on any solidcore crate other than solidcore-ops, solidcore-tess and
+          solidcore-record.
+        - Flag a new line in xtask/mesh-decisions.txt; that list only shrinks.
+        - Flag a second implementation of something solidcore already has (STEP, meshing, SSI,
+          tangent chains, frames).
+
+    # The vendored SolidCore kernel: its own review rules (from solidcore/.coderabbit.yaml, which
+    # CodeRabbit reads only at the repository root), with its paths under solidcore/.
+    - path: "solidcore/**"
+      instructions: |
+        The vendored SolidCore kernel (solidcore/). Paths in these instructions (AGENTS.md, docs/,
+        crates/) are under solidcore/.
+
+        Review for design quality as well as correctness. solidcore's rules are in AGENTS.md;
+        read the reference doc for the area a change touches before judging it.
+
+        - Flag code smells: logic duplicated from elsewhere in the kernel, special cases
+          bolted onto a general routine, tolerances or constants with no derivation, flags
+          or switches that keep an old path alive, fallbacks that hide a failure, and error
+          paths that lose the reason.
+        - Flag patches that make a symptom go away without fixing its cause: a widened
+          tolerance, a retry, an early return that skips the hard case, a test changed to
+          match new output. Ask what the root cause is and whether the change removes it.
+        - When a change reads like a patch, look at the other open pull requests and recent
+          changes in the same area. If several fixes keep touching the same code, say so,
+          and ask for the bigger picture: the shared cause, and the design that removes it.
+        - It is fine to recommend stopping and narrowing the scope. A smaller change that is
+          right, or an issue that states the real problem, is better than a larger change
+          that adds code which will have to be undone. Say so when that is the better path.
+        - Each fix needs a test that fails without it, and tests should check values a
+          wrong result would change. Tests gate on counts and values, never on timings.
+
+        The contract every construction keeps (docs/definitions-and-certificates.md):
+        - A face's surface is its definition S; its B-spline net B is an exact copy or a
+          certified approximation within a stored, proved epsilon. Every face of a result is
+          exact or certified. An operation that cannot build that refuses with a typed error
+          naming its cause and, where one exists, the size that builds. A correct refusal is a
+          correct result; a body built on a bare fitted face, an estimated bound or a widened
+          tolerance is not.
+        - A final answer (an intersection, a projection, a check, a continuity grade) reads S,
+          or B only inside a `NetScope` that asks for at least epsilon. A bound is enclosed,
+          never sampled or estimated, and rounding is counted.
+        - Layers (docs/layers.md): the kernel computes; ops decides and sequences and never
+          computes a geometric quantity; the applications compute nothing.
+        - No compatibility flags: a fix changes the default result, listing the cases it moves
+          and why each is right; no new `UpstreamFixes` field, no old path kept behind a switch.
+        - Show the problem first (AGENTS.md): a change to a case's result shows it before and
+          after from the same view, a VectorCraft schematic where the problem is a mechanism,
+          and the literature it follows. Ask for them when they are missing.
+        - Library code: no `unwrap`, `expect`, `panic!` or unchecked indexing; deterministic
+          results; input-dependent recursion bounded. Licence: only the upstream paths AGENTS.md
+          lists; never GPL/LGPL code.
+
+        The layer split (solidcore/docs/layers.md): solidcore is shared by every client, so flag
+        anything specific to one application: UI, command ids, application defaults or settings,
+        document state (selection, timeline, history). In solidcore/crates/solidcore-ops, also flag
+        any geometric quantity computed directly (a dot or cross product, normalizing, a square
+        root or trigonometry on coordinates, a linear solve, a derivative formula) instead of
+        through a kernel call: per solidcore/docs/layers.md it becomes a kernel primitive with its
+        own tests, and ops calls it.
+
+    - path: "solidcore/crates/solidcore/src/blend/**"
+      instructions: |
+        Fillets, chamfers, corners and setbacks: docs/generic-blend.md. They are one rolling-ball
+        construction (spine, rails, section, ends, corners, fold check, overflow); a failing case
+        means one of those parts is wrong for it, never a reason for a special case. Each blend
+        face carries its definition (`procedural_blend()`), or has an entry in the definition
+        ledger (crates/solidcore/tests/data/blend_definition_ledger/) and a test asserting which.
+        Cases are events decided from the geometry (a tangent end, a knife edge, a fold, a corner
+        type), not one construction tried and then the next. A round never ends at a seam's vertex
+        with a step: a picked edge continues across a seam into the rest of the same curve between
+        the same two faces, or the blend refuses. A size that does not fit is refused naming the
+        size that does.
+
+    - path: "solidcore/crates/solidcore/src/boolean/**"
+      instructions: |
+        Booleans: docs/booleans.md. The result is the regularized set operation decided on the
+        exact surfaces, or a typed refusal. Every decision point (a ray hit, a step-off point, an
+        imprinted vertex) is a root on S; no step reads a display mesh. A face set takes its class
+        (inside, outside, on) from a sector at a common edge, a ray or a coincident pair, and
+        nothing is kept or dropped for any other reason. A trimmed or copied face keeps its
+        surface's definition. Angle cut-offs and sampled coincidence are open work in the doc;
+        flag new ones standing in for a proof.
+
+    - path: "solidcore/crates/solidcore/src/offset/**"
+      instructions: |
+        Offset, shell and thicken: docs/offset-and-shell.md. A face's offset is the offset of its
+        definition S, never of its net B: exact for the analytic kinds, certified otherwise. Where
+        the distance reaches the least radius of curvature on the displaced side (towards the
+        centre of curvature) the offset collapses or folds; that is refused naming the largest
+        wall that builds, never built and repaired. A wall on the other side never folds from
+        curvature alone. The offset body's tolerance
+        is the input body's. The five-stage construction (face offsets, mitres with the extension
+        reach, arrangement, winding-number cavity rule, extraction) is the design; flag work that
+        extends the old executive instead of it.
+
+    - path: "solidcore/crates/solidcore/src/sweep/**"
+      instructions: |
+        Swept surfaces and threads: docs/procedural-sweep.md. A sweep is its definition (profile,
+        path, frame); its net is exact where the doc says so and certified otherwise. Check a
+        change against the doc's invariants and its exact-net cases.
+
+    - path: "solidcore/crates/solidcore/src/intersect/**"
+      instructions: &ssi |
+        Surface/surface intersection: docs/ssi.md. Curves come from closed forms where they exist
+        (line, circle, ellipse) and are traced otherwise; tangent contacts and branch points are
+        events with their own handling, not a retry with a smaller step. Every reported point is a
+        root on both definitions within its stated tolerance.
+    - path: "solidcore/crates/ssi/**"
+      instructions: *ssi
+    - path: "solidcore/crates/solidcore-ssi/**"
+      instructions: *ssi
+
+    - path: "solidcore/crates/solidcore/src/topology/**"
+      instructions: &validity |
+        B-rep validity, tolerances and healing: docs/validity-and-tolerances.md. A tolerance may
+        grow only to a bound: for imported data, to an enclosed (not sampled) gap, recorded; for a
+        construction, to its certificates' delta + max epsilon. A measured gap larger than that
+        means the construction is wrong: refuse, or recompute the curve from its surfaces'
+        intersection. No tube or ball may reach an entity it does not bound. A seam is an edge; a
+        face crossing its surface's seam carries it.
+    - path: "solidcore/crates/solidcore/src/heal/**"
+      instructions: *validity
+
+    - path: "solidcore/crates/solidcore-tess/**"
+      instructions: |
+        Tessellation is for display and export only (docs/layers.md): it decides nothing about the
+        model. Flag any model decision made from a mesh.
+
+    - path: "solidcore/crates/solidcore-ops/**"
+      instructions: |
+        Ops is the modelling API (docs/layers.md): it chooses entities, parameters and defaults and
+        sequences kernel calls; it never computes a geometric quantity itself (distances,
+        curvatures, intersections, fits). Results go through `finish`, which refuses a body that is
+        not a valid outward solid where a solid was asked for.
+
+    - path: "solidcore/docs/**"
+      instructions: |
+        A doc points to code, tests, records and the literature, never to a pull request or an
+        issue: no `#NNNN` and no PR or issue links, so a page reads the same whatever happens to the
+        tracker. A new page under docs/ needs the maintainers' agreement on its issue; one the
+        maintainers asked for in the pull request is fine. Figures are drawn in VectorCraft with
+        live text, their `.vectorcraft` source beside them, palette in docs/agent-style.md.
+
+    - path: "solidcore/crates/solidcore/tests/kernel_cases/**"
+      instructions: |
+        A kernel case's outcome changes in the case itself: its JSON expectation (and its
+        `gallery_note` if needed), its line in `known_failing.json` and its render beside it, never
+        a doc (the site's case gallery is generated from them). An expectation is graded on closed
+        forms or invariants of the geometry, not on another kernel's measured result; a refusal is
+        graded on the size it names.
+  pre_merge_checks:
+    custom_checks:
+      - name: "Existing defaults unchanged"
+        mode: "warning"
+        instructions: |
+          Pass if the pull request changes no UX default a user already relies on (default setting or preference values, what a command or tool does when used the usual way, the UI's default layout or behaviour, shortcuts), or if its changes are purely additive. UX defaults only: a changed kernel or geometry result (different faces or volumes, a case that now builds or is now refused), including anything under solidcore/, is not a changed default and passes.
+          Fail otherwise, naming each changed default and what a user sees before and after. Also fail if the description says `Changes a default: no` while the code changes a UX default.

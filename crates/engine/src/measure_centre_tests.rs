@@ -517,6 +517,7 @@ fn open_surface_measurements_have_no_volume_properties() {
     assert_eq!(props["total"]["open_bodies_skipped"], 1);
     assert!(props["bodies"][0]["mass_g"].is_null());
     assert!(props["total"]["center_of_mass"].is_null());
+    assert!(s.execute("inspect.center_of_mass", &json!({"bodies": ["OpenTube"]})).is_err(), "an open surface has no centre of mass");
 }
 
 #[test]
@@ -545,6 +546,43 @@ fn volume_totals_skip_open_surfaces_and_keep_closed_box_properties() {
     for key in ["volume_mm3", "mass_g", "center_of_mass"] {
         assert_eq!(props_before["total"][key], props_after["total"][key]);
     }
+    let com = run(&mut s, "inspect.center_of_mass", json!({}));
+    assert_eq!(com["skipped"].as_array().map(Vec::len), Some(1), "{com}");
+    assert_eq!(com["bodies"].as_array().map(Vec::len), Some(1), "{com}");
+    assert!(close(&com["volume"], 6000.0, 1e-9), "{com}");
+    for (axis, expected) in [5.0, 10.0, 15.0].into_iter().enumerate() {
+        assert!(close(&com["center"][axis], expected, 1e-9), "{com}");
+    }
+}
+
+/// #6173: Center of Mass reports the volume and centre Measure does. It measured the display
+/// mesh, whose flat facets cut curved faces short: a sphere of radius 10 came out 0.13 % small.
+#[test]
+fn center_of_mass_reports_the_same_volume_and_centre_as_measure() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 10, "center": [0, 0, 0], "body_name": "Ball"}));
+    run(&mut s, "solid.cylinder", json!({"base": [50, 0, 0], "radius": 10, "height": 20, "body_name": "Cup"}));
+    run(&mut s, "solid.shell", json!({"faces": [[50, 0, 20]], "thickness": 2}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let com = run(&mut s, "inspect.center_of_mass", json!({}));
+    let entry = |list: &Value, key: &str, name: &str| -> Value {
+        list.as_array().and_then(|l| l.iter().find(|b| b[key] == name)).cloned().unwrap_or_else(|| panic!("{name} in {list}"))
+    };
+    for name in ["Ball", "Cup"] {
+        let (m, c) = (entry(&measured["bodies"], "name", name), entry(&com["bodies"], "body", name));
+        assert!(close(&c["volume"], m["volume_mm3"].as_f64().unwrap(), 1e-9), "{name}: {c} vs {m}");
+        for axis in 0..3 {
+            assert!(close(&c["center"][axis], m["center_of_mass"][axis].as_f64().unwrap(), 1e-9), "{name}: {c} vs {m}");
+        }
+    }
+    assert!(close(&com["volume"], measured["total"]["volume_mm3"].as_f64().unwrap(), 1e-6), "{com} vs {measured}");
+    assert_eq!(com["skipped"].as_array().map(Vec::len), Some(0), "{com}");
+    // Worked out by hand: the sphere is 4/3 pi r^3, the cup a cylinder less its 8 x 18 bore.
+    let ball = 4.0 / 3.0 * PI * 1000.0;
+    let cup = PI * (100.0 * 20.0 - 64.0 * 18.0);
+    let (b, c) = (entry(&com["bodies"], "body", "Ball"), entry(&com["bodies"], "body", "Cup"));
+    assert!(close(&b["volume"], ball, ball * 2e-4), "{b}: want {ball}");
+    assert!(close(&c["volume"], cup, cup * 2e-4), "{c}: want {cup}");
 }
 
 /// An ASCII STL of the tetrahedron (0,0,0), (10,0,0), (0,10,0), (0,0,10), outward facing; `open`

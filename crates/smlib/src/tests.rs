@@ -78,7 +78,7 @@ fn calls_from_many_threads_are_serialised() {
 static DUMP_DIR_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 13] = [
+const NO_KERNEL: [&str; 14] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -92,6 +92,7 @@ const NO_KERNEL: [&str; 13] = [
     "word",
     "words",
     "in_call",
+    "hold_a_kernel",
 ];
 
 const ANSWERING: [&str; 63] = [
@@ -191,7 +192,7 @@ fn every_entry_point_is_in_the_guard() {
 fn every_entry_point_answers() {
     use crate::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use crate::trim::{Continuation, Holes};
-    use crate::{Blend, BooleanOp, ChamferSecond, CheckLevel};
+    use crate::{Blend, BooleanOp, ChamferSecond, CheckLevel, Turn};
     fn says<T>(_name: &str, r: Result<T>) -> Option<T> {
         r.ok()
     }
@@ -222,7 +223,7 @@ fn every_entry_point_answers() {
     says("fillet", a.fillet(&edge, 0.1, 1.0));
     says("chamfer", a.chamfer(&edge, 0.1, 1.0));
     says("blend", a.blend(Blend::Round, &edge, &[1.0], 0.1));
-    says("blend_dropping", a.blend_dropping(Blend::Round, &edge, &[1.0], 0.1));
+    says("blend_dropping", a.blend_dropping(Blend::Round, Turn::Mitre, &edge, &[1.0], 0.1));
     let corner = [p(10.0, 10.0, 10.0)];
     let three = [p(5.0, 10.0, 10.0), p(10.0, 5.0, 10.0), p(10.0, 10.0, 5.0)];
     says("blend_setback", a.blend_setback(Blend::Round, &three, &[1.0; 3], &corner, &[2.0], 0.1));
@@ -485,19 +486,6 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
     }
 }
 
-/// Each kernel has its own range of blend serials: a body keeps the serials of the kernel that
-/// made it, and another kernel's memo of solved stations must not take them for its own.
-#[test]
-fn kernels_never_issue_the_same_blend_serial() {
-    let range = core::BLEND_SERIALS_PER_KERNEL as usize;
-    let ranges = core::run("outer", |outer| {
-        let inner = core::run("inner", |inner| Ok(inner.blend_last_serial.get() as usize)).unwrap_or_default();
-        Ok([outer.blend_last_serial.get() as usize / range, inner / range])
-    });
-    let [outer, inner] = ranges.unwrap();
-    assert_ne!(outer, inner);
-}
-
 /// A panic in a call running beside another costs neither: the panicking call's kernel is thrown
 /// away and the other call and later ones go on.
 #[test]
@@ -509,4 +497,83 @@ fn a_panic_beside_a_running_call_costs_only_its_own_kernel() {
     assert!((v - 8.0).abs() < 1e-6, "{v}");
     release.send(()).unwrap();
     held.join().unwrap().unwrap();
+}
+
+/// A stuck call keeps its kernel and nothing more: the pool never holds more than its limit of
+/// idle kernels however many calls ran side by side, and once as many calls as it allows are
+/// stuck, a new call is refused rather than growing it or waiting.
+#[test]
+fn the_kernel_pool_stays_bounded_when_calls_stick() {
+    let mut pool = core::Pool { idle: Vec::new(), running: 0, most_idle: 1, most_running: 3 };
+    let mut made = 0;
+    let mut make = || {
+        made += 1;
+        made
+    };
+    let (a, b, c) = (pool.take(&mut make), pool.take(&mut make), pool.take(&mut make));
+    assert_eq!((a, b, c), (Some(1), Some(2), Some(3)), "side by side, each on its own");
+    assert_eq!(pool.take(&mut make), None, "refused, not waiting, not one more");
+    pool.put(a);
+    assert_eq!(pool.take(&mut make), Some(1), "room again, its kernel used again");
+    // The other two never come back here: they still count, and hold no idle slot.
+    pool.put(Some(1));
+    pool.put(b);
+    assert_eq!(pool.idle, [1], "no more idle than allowed");
+    assert_eq!(pool.running, 1, "one still stuck");
+    // A stopped call's kernel is not used again.
+    pool.put(None);
+    assert_eq!(pool.running, 0);
+    assert_eq!(pool.idle, [1]);
+}
+
+/// A stop reaches a running call at solidcore's next check and later calls before they start;
+/// the kernel it ran on is not used again; calls of other work and answers from a body go on.
+#[test]
+fn a_stopped_call_ends_at_its_next_check_and_holds_up_nothing() {
+    let stop = stop::Stop::new();
+    let (started, is_started) = std::sync::mpsc::channel();
+    let running = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            stop.within(|| {
+                let first: Result<()> = core::run("stopped_call", |k| {
+                    let _ = started.send(());
+                    // A long solidcore loop, until it is stopped.
+                    loop {
+                        k.check_cancelled("stopped_call")?;
+                        std::thread::yield_now();
+                    }
+                });
+                let next = Brep::make_box([0.0; 3], [1.0; 3]);
+                (first, next.map(|_| ()))
+            })
+        })
+    };
+    is_started.recv().unwrap();
+    let body = answered(|| Brep::make_box([0.0; 3], [10.0; 3]).unwrap());
+    stop.stop();
+    let (first, next) = answered(move || running.join().unwrap());
+    assert!(first.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(next.is_err_and(|e| e.to_string().contains("cancelled")), "refused before it starts");
+    // Under a stopped token, a body still answers, and is as it was.
+    let v = stop.within(|| body.volume(1e-7)).unwrap();
+    assert!((v - 1000.0).abs() < 1e-6, "{v}");
+    assert!(stop.within(|| body.boolean(&body, BooleanOp::Union)).is_err(), "an operation is refused");
+    // What fills a shared cell is not stopped.
+    assert!(stop.within(|| stop::unstoppable(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_ok());
+    // And nothing else is affected.
+    let v = body.boolean(&body, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap();
+    assert!((v - 1000.0).abs() < 1e-6, "{v}");
+}
+
+/// Every call starts with the same draws of random rays, whatever its kernel did before: what
+/// depends on them answers the same on any kernel of the pool.
+#[test]
+fn every_call_starts_clean_on_any_kernel() {
+    let draw = |k: &mut solidcore::kernel::Kernel| Ok(k.rng.next_f64());
+    let first = core::run("draw", draw).unwrap();
+    assert_eq!(core::run("draw", draw).unwrap(), first, "the same kernel, later");
+    let held = hold_a_kernel();
+    assert_eq!(core::run("draw", draw).unwrap(), first, "another kernel");
+    drop(held);
 }

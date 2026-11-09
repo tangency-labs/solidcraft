@@ -1,0 +1,21 @@
+[
+ {"note": "#7246: with Preferences › Sketch › Dimension values set to In a window, the Dimension tool places the text first and a small window opens on it. Its arrows step the value, the check applies it in one step, and the tool stays on for the next dimension."},
+ {"call": "ui.prefs", "params": {"dimension_input": "window"}},
+ {"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+ {"call": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[0, 0], [30, 0]], "ids": ["l1"]}}},
+ {"call": "ui.view", "params": {"view": "top"}},
+ {"call": "ui.view", "params": {"view": "fit"}},
+ {"start": "sketch.dimension"},
+ {"click": {"sketch": [15, 0]}},
+ {"click": {"sketch": [15, 6]}},
+ {"frames": 5},
+ {"expect": {"shown_handles": ["dimwin:value", "dimwin:up", "dimwin:down", "dimwin:ok", "dimwin:cancel"]}},
+ {"click": {"handle": "dimwin:up"}},
+ {"click": {"handle": "dimwin:up"}},
+ {"click": {"handle": "dimwin:ok"}},
+ {"frames": 3},
+ {"expect": {"errors": 0}},
+ {"expect": {"hidden_handles": ["dimwin:value"]}},
+ {"expect": {"tool": "sketch.dimension"}},
+ {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0, "end_at", 0], "value": 32}}}
+]

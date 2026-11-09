@@ -25,9 +25,11 @@ and follows it through every later feature. That covers a Cut's walls and floor
 (`F5:side:l1`, `F5:top`), a chamfer face (`F7:blend:…`), each copy a pattern or mirror makes
 (`F4:top@F6.2`: the seed's face and the copy's instance), a side wall a Join merged from two
 features (named after the first, answering to the other), the pieces a later feature split
-a face into (all pieces of one name on one oriented plane are that face), and the face Split Body
+a face into (all pieces of one name on one oriented plane are that face), the face Split Body
 cuts with a plane (`F4:section` on each part: a construction plane, a sketch line or a plane given
-outright, so a sketch on it follows the plane when a parameter moves it). A lineage face's
+outright, so a sketch on it follows the plane when a parameter moves it), and the faces of a
+thickened surface: the face that was kept, the offset (`F3:inner:F2:side:l1`) and the walls on
+the surface's edges (`F3:blend:…`). A sketch on any of those follows the thickness. A lineage face's
 plane is its current exact plane, measured in a frame that depends on the plane alone: its
 origin where the definition origin projects onto it, its x axis the first of the definition's
 X, Y and Z axes not steep to it (`|cos| < 0.6`), projected. The construction certificates

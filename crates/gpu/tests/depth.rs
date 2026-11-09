@@ -746,3 +746,117 @@ fn a_shaft_in_its_bore_leaves_the_hubs_cap_whole() {
         }
     }
 }
+
+/// A post standing on a plate, cut through by a section: the post's cut is its own (blue) cap
+/// down to the plate, whichever body came first. The post's bottom, seen through the cut, and the
+/// plate's top are the same plane; the plate's top showed through in patches, and with the post
+/// made first its cap took the plate's colour (the plate's bottom lies behind it).
+#[test]
+fn a_body_standing_on_another_keeps_its_own_cap() {
+    let plate = ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Plate"}));
+    let post = ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Post"}));
+    let colours = [
+        ("appearance.assign", json!({"bodies": ["Plate"], "appearance": "ABS - Red"})),
+        ("appearance.assign", json!({"bodies": ["Post"], "appearance": "ABS - Blue"})),
+        ("inspect.section", json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}})),
+    ];
+    for post_first in [false, true] {
+        let mut script = if post_first { vec![post.clone(), plate.clone()] } else { vec![plate.clone(), post.clone()] };
+        script.extend(colours.iter().cloned());
+        let s = session(&script);
+        for (mode, c) in capturers() {
+            for fov in [0.0, 0.6] {
+                let mut cam = view::home_camera(&s).unwrap();
+                cam.fov = fov;
+                // The session's section (`scene_with_guides` takes its own).
+                let scene = view::scene(&s, &cam).unwrap();
+                let img = c.rgba(&scene, &cam, 400, 400).unwrap();
+                let vp = cam.view_proj(1.0, scene.radius);
+                // The post's cut, 1–4 mm above the plate (a pixel is about 0.4 mm).
+                let mut wrong = Vec::new();
+                for x in (10..=30).map(f64::from) {
+                    for z in [11.0, 12.0, 13.0, 14.0] {
+                        let q = vp.apply(Vec3::new(x, 25.0, z));
+                        let (px, py) = (((q[0] / q[3] + 1.0) * 200.0) as usize, ((1.0 - q[1] / q[3]) * 200.0) as usize);
+                        let p = pixels(&img).nth(py * 400 + px).unwrap();
+                        if i16::from(p[2]) <= i16::from(p[0]) + 25 {
+                            wrong.push(((x, z), p));
+                        }
+                    }
+                }
+                assert!(wrong.is_empty(), "{mode} depth, fov {fov}, post first {post_first}: not the post's cap at {wrong:?}");
+            }
+        }
+    }
+}
+
+/// The same tie seen into the cut at an angle (#4622 review): two boxes of one footprint stacked
+/// as separate bodies, and the post on its plate. Each body's cut is its own cap down to the face
+/// it stands on, whichever body came first: the upper body's underside, seen through the cut, and
+/// the lower body's top are the same plane.
+#[test]
+fn a_body_standing_on_another_keeps_its_own_cap_seen_at_an_angle() {
+    struct Case {
+        lower: (&'static str, serde_json::Value),
+        upper: (&'static str, serde_json::Value),
+        section: serde_json::Value,
+        camera: (Vec3, f64, f64, f64),
+        /// Points on the upper body's cut, and on the lower body's.
+        upper_cut: Vec<Vec3>,
+        lower_cut: Vec<Vec3>,
+    }
+    let grid = |xs: std::ops::RangeInclusive<i32>, y: f64, zs: &[f64]| -> Vec<Vec3> {
+        xs.flat_map(|x| zs.iter().map(move |z| Vec3::new(f64::from(x), y, *z))).collect()
+    };
+    let cases = [
+        Case {
+            lower: ("solid.box", json!({"length": 40, "width": 30, "height": 4, "corner": [-20, -15, 0], "body_name": "Lower"})),
+            upper: ("solid.box", json!({"length": 40, "width": 30, "height": 4, "corner": [-20, -15, 4], "body_name": "Upper"})),
+            section: json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}}),
+            camera: (Vec3::new(0.0, 0.0, 4.0), 3.4, 0.35, 40.0),
+            upper_cut: grid(-9..=9, 0.0, &[4.8, 5.6, 6.4, 7.2]),
+            lower_cut: grid(-9..=9, 0.0, &[0.8, 1.6, 2.4, 3.2]),
+        },
+        Case {
+            lower: ("solid.box", json!({"length": 80, "width": 50, "height": 10, "body_name": "Lower"})),
+            upper: ("solid.cylinder", json!({"radius": 12, "height": 40, "base": [20, 25, 10], "body_name": "Upper"})),
+            section: json!({"plane": {"origin": [0, 25, 0], "normal": [0, -1, 0]}}),
+            camera: (Vec3::new(30.0, 25.0, 12.0), 0.25, 0.4, 90.0),
+            upper_cut: grid(10..=30, 25.0, &[11.0, 12.0, 13.0, 14.0]),
+            lower_cut: grid(12..=48, 25.0, &[3.0, 5.0, 7.0]),
+        },
+    ];
+    for case in &cases {
+        for upper_first in [false, true] {
+            let mut script = if upper_first { vec![case.upper.clone(), case.lower.clone()] } else { vec![case.lower.clone(), case.upper.clone()] };
+            script.push(("appearance.assign", json!({"bodies": ["Lower"], "appearance": "ABS - Red"})));
+            script.push(("appearance.assign", json!({"bodies": ["Upper"], "appearance": "ABS - Blue"})));
+            script.push(("inspect.section", case.section.clone()));
+            let s = session(&script);
+            for (mode, c) in capturers() {
+                for fov in [0.0, 0.6] {
+                    let mut cam = view::home_camera(&s).unwrap();
+                    (cam.target, cam.yaw, cam.pitch, cam.distance, cam.fov) = (case.camera.0, case.camera.1, case.camera.2, case.camera.3, fov);
+                    // Without the origin's axes: the Z axis runs through the samples at x = 0.
+                    let scene = view::scene_with_guides(&s, &cam, s.section, Guides { grid: false, axes: false }).unwrap();
+                    let img = c.rgba(&scene, &cam, 400, 400).unwrap();
+                    let vp = cam.view_proj(1.0, scene.radius);
+                    let at = |p: Vec3| {
+                        let q = vp.apply(p);
+                        let (x, y) = ((q[0] / q[3] + 1.0) * 200.0, (1.0 - q[1] / q[3]) * 200.0);
+                        assert!((0.0..400.0).contains(&x) && (0.0..400.0).contains(&y), "fov {fov}: {p:?} is out of the picture");
+                        pixels(&img).nth(y as usize * 400 + x as usize)
+                    };
+                    let blue = |p: [u8; 4]| i16::from(p[2]) > i16::from(p[0]) + 25;
+                    let wrong: Vec<_> = case.upper_cut.iter().filter_map(|p| at(*p).filter(|q| !blue(*q)).map(|q| (p.x, p.z, q))).collect();
+                    assert!(wrong.is_empty(), "{mode} depth, fov {fov}, upper first {upper_first}: not the upper body's cap at {wrong:?}");
+                    let wrong: Vec<_> = case.lower_cut.iter().filter_map(|p| at(*p).filter(|q| blue(*q)).map(|q| (p.x, p.z, q))).collect();
+                    assert!(
+                        wrong.is_empty(),
+                        "{mode} depth, fov {fov}, upper first {upper_first}: the upper body's colour on the lower cut at {wrong:?}"
+                    );
+                }
+            }
+        }
+    }
+}

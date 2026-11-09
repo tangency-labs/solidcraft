@@ -1,0 +1,12 @@
+id = "blend.feature_executive"
+upstream = ["source/SMLib/src/SmFeatureExecutive.cpp", "source/SMLib/inc/SmFeatureExecutive.h"]
+rust_module = "blend::feature_executive"
+depends_on = ["boolean.merge_p3", "boolean.merge_p4", "curve.curve_p4", "curve.curve_p6", "intersect.curve_class_p3", "query.face_p1", "surface.surface_p2", "topology.brep_p1", "topology.brep_p3", "topology.brep_p4", "topology.brep_p5", "topology.brep_p7", "topology.brep_p8", "topology.edge", "topology.face_p1", "topology.face_p2", "topology.face_p3", "topology.face_p4", "topology.loopuse", "topology.topology_traverser", "topology.vertex"]
+soft_depends_on = []
+est_lines = 3005
+layer = 62
+tests = ["prog_test:my_test_rebuild_fillets", "prog_test:my_test_add_by_faces", "prog_test:my_test_multi_feature", "prog_test:my_test_multi_feature_adv", "prog_test:my_test_multi_rebuilds", "prog_test:my_test_extended_surface"]
+status = "blocked"
+claimed_by = ""
+claimed_at = ""
+notes = "PR #1851, #1908, #1934. Blocked: 3 generated cases disagree with the C++ in ExtSurfaceRebuild patches (plan/findings/blend.feature_executive--ext-surface-patch-faces-differ.md; 5 more were the UB-242 stop at imprints without a vertex sector, fixed in #1934: plan/findings/blend.feature_executive--ext-surface-patch-faces-differ--addendum-2026-10-31-no-vertex-sector.md); the 21 prog_test smFeatureTest cases pass. #1908 carries attributes through the PartitionFeature and RestoreFeature copies; attributes_add_by_faces_extrusion still fails (the feature patch path does not carry yet: plan/findings/blend.feature_executive--ext-surface-patch-faces-differ--addendum-2026-10-31-attributes.md). Cases: 148 (21 upstream, 127 generated); 125 pass, 4 fail, 19 rejected (C++ crashes and hangs: plan/upstream-issues/UB-278--extsurfacerebuild-null-extended-surface.md, UB-279--dodefeature-again-reads-stitched-loop-edges.md, UB-280--extsurfacerebuild-xor-crash.md, UB-277--restorefeatures-removes-wrong-entry-keeps-deleted-feature.md, HANG-52--defeature-extension-runs-past-a-minute.md), 0 deferred. Not ported: Draw/Dump, NSidedPatchRebuild (unreachable), RebuildBrepAll (#if 0). Follow-up: SmApiRemoveFillet / sm_DefeatureFillets after blend.identify_fillet (#1844)."
