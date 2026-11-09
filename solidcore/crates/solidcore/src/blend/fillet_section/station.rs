@@ -643,14 +643,17 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut dv = *xv;
         du.set(0, 0, T::of(0.0));
         dv.set(0, 0, T::of(0.0));
+        // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
+        // powers and monomials past the degree computed are 0 there and left out
+        let top = lm.min(tr.degree());
         let mut pu = vec![Ser::constant(T::of(1.0))];
         let mut pv = vec![Ser::constant(T::of(1.0))];
-        for _ in 1..=lm {
+        for a in 1..=top {
             let (Some(lu), Some(lv)) = (pu.last().copied(), pv.last().copied()) else {
                 return Err(SolidError::sm_err(OP));
             };
-            pu.push(lu.mul(&du, tr));
-            pv.push(lv.mul(&dv, tr));
+            pu.push(lu.mul_valued(&du, a - 1, 1, tr));
+            pv.push(lv.mul_valued(&dv, a - 1, 1, tr));
         }
         let mut s = VSer::constant(zero);
         let mut su = s;
@@ -661,11 +664,11 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 fa *= a as f64;
             }
             let mut fb = 1.0_f64;
-            for (b, pvb) in pv.iter().enumerate().take(lm - a + 1) {
+            for (b, pvb) in pv.iter().enumerate().take(top - a + 1) {
                 if b > 0 {
                     fb *= b as f64;
                 }
-                let mono = pua.mul(pvb, tr);
+                let mono = pua.mul_valued(pvb, a, b, tr);
                 // a! b! is exact, 1 / (a! b!) is rounded in T (#2559)
                 let sf = T::of(1.0) / T::of(fa * fb);
                 let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
@@ -674,7 +677,7 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                     let cv = [c.x, c.y, c.z];
                     for (o, &cj) in out.a.iter_mut().zip(&cv) {
                         // o + mono (cj sf), each coefficient rounded as `add` of `scale`
-                        o.add_scaled(&mono, cj * sf, tr);
+                        o.add_scaled_from(&mono, cj * sf, a + b, tr);
                     }
                 }
             }

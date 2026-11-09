@@ -120,6 +120,12 @@ impl Trunc {
         i <= self.s && k <= self.e && k <= self.eps && i + k <= self.degree
     }
 
+    /// The highest total degree `i + k` computed.
+    #[must_use]
+    pub const fn degree(self) -> usize {
+        self.degree
+    }
+
     /// The highest power of sigma kept.
     #[must_use]
     pub const fn s(self) -> usize {
@@ -208,6 +214,21 @@ impl<T: GnScalar> Ser<T> {
         }
     }
 
+    /// [`Ser::add_scaled`] for a `b` that is 0 by construction at every total degree
+    /// `i + k` below `v` (a product of `v` factors without constant terms): those
+    /// coefficients of `self` are left as they are, as adding an exact 0 leaves them; in
+    /// f64 bit for bit [`Ser::add_scaled`]'s, in intervals the same or narrower (b's stored
+    /// coefficients there are the rounding of exact zeros).
+    pub fn add_scaled_from(&mut self, b: &Self, f: T, v: usize, tr: Trunc) {
+        for (i, (row, rb)) in self.c.iter_mut().zip(&b.c).enumerate().take(tr.s + 1) {
+            for (k, (x, &y)) in row.iter_mut().zip(rb).enumerate().take(tr.e + 1) {
+                if i + k >= v && tr.computes(i, k) {
+                    *x = *x + y * f;
+                }
+            }
+        }
+    }
+
     /// `sm_SerScale`: each coefficient times `f`.
     #[must_use]
     pub fn scale(&self, f: T, tr: Trunc) -> Self {
@@ -224,6 +245,35 @@ impl<T: GnScalar> Ser<T> {
             for (ra, rb) in self.c.iter().take(i + 1).zip(rows_b) {
                 for (&x, &y) in ra.iter().take(k + 1).zip(rb.iter().take(k + 1).rev()) {
                     sum = sum + x * y;
+                }
+            }
+            sum
+        })
+    }
+
+    /// [`Ser::mul`] for factors that are 0 by construction at every total degree below `va`
+    /// (`self`) and `vb` (`b`), as a power of a series without a constant term is: the
+    /// product is 0 below `va + vb`, and its sums leave out the terms with a factor below
+    /// its degree, in [`Ser::mul`]'s order. In f64 bit for bit [`Ser::mul`]'s (the terms
+    /// left out are signed zeros); in intervals the same enclosure of the same product or
+    /// a narrower one (the factors' stored coefficients there are the rounding of exact
+    /// zeros, and every term left out is one rounding less).
+    #[must_use]
+    pub fn mul_valued(&self, b: &Self, va: usize, vb: usize, tr: Trunc) -> Self {
+        Self::from_fn(tr, |i, k| {
+            let mut sum = T::of(0.0);
+            if i + k < va + vb {
+                return sum;
+            }
+            // c[i1][k1] b[i - i1][k - k1], i1 then k1 ascending, both factors at or above
+            // their own degree
+            let rows_b = b.c.iter().take(i + 1).rev();
+            for (i1, (ra, rb)) in self.c.iter().take(i + 1).zip(rows_b).enumerate() {
+                let terms = ra.iter().take(k + 1).zip(rb.iter().take(k + 1).rev());
+                for (k1, (&x, &y)) in terms.enumerate() {
+                    if i1 + k1 >= va && (i - i1) + (k - k1) >= vb {
+                        sum = sum + x * y;
+                    }
                 }
             }
             sum
@@ -247,8 +297,9 @@ impl<T: GnScalar> Ser<T> {
         for m in 1..=(tr.s + tr.e) {
             // dBinom *= (-0.5 - (m - 1)) / m, m an int
             binom *= (-0.5 - (m - 1) as f64) / m as f64;
-            pow = pow.mul(&z, tr);
-            sum = sum.add(&pow.scale(T::of(binom), tr), tr);
+            // z^m is 0 below degree m (z has no constant term)
+            pow = pow.mul_valued(&z, m - 1, 1, tr);
+            sum.add_scaled_from(&pow, T::of(binom), m, tr);
         }
         Ok(sum.scale(T::of(1.0) / x0.sqrt(), tr))
     }
@@ -474,6 +525,101 @@ mod tests {
         for i in 0..=2 {
             for k in 0..=2 {
                 assert!(yi.c[i][k].lo <= yd.c[i][k] && yd.c[i][k] <= yi.c[i][k].hi);
+            }
+        }
+    }
+
+    /// A series without a constant term, with coefficients of mixed sign and size.
+    fn no_constant() -> Ser<f64> {
+        let mut x = Ser::constant(0.0);
+        let mut v = 0.37_f64;
+        for i in 0..=MAX_S {
+            for k in 0..=MAX_E {
+                if i + k > 0 {
+                    v = (v * 7.3 + 0.11) % 2.0 - 1.0;
+                    x.set(i, k, v * 10f64.powi(i as i32 - 3));
+                }
+            }
+        }
+        x
+    }
+
+    #[test]
+    fn a_power_left_without_its_zero_terms_is_the_product_bit_for_bit_in_f64() {
+        let du = no_constant();
+        let mut dv = no_constant();
+        dv.set(1, 0, -2.5);
+        for (s, e) in [(MAX_S, 2), (6, 2), (5, 3), (2, MAX_E)] {
+            let tr = Trunc::new(s, e).unwrap();
+            for degree in 0..=(s + e) {
+                let trd = tr.computing(degree, e);
+                let (mut pu, mut pv) = (vec![Ser::constant(1.0)], vec![Ser::constant(1.0)]);
+                let (mut qu, mut qv) = (pu.clone(), pv.clone());
+                for a in 1..=(s + e) {
+                    pu.push(pu[a - 1].mul(&du, trd));
+                    pv.push(pv[a - 1].mul(&dv, trd));
+                    qu.push(qu[a - 1].mul_valued(&du, a - 1, 1, trd));
+                    qv.push(qv[a - 1].mul_valued(&dv, a - 1, 1, trd));
+                    assert_eq!(pu[a], qu[a], "{s} {e} {degree} {a}");
+                }
+                let (mut o, mut q) = (Ser::constant(0.25), Ser::constant(0.25));
+                for a in 0..=(s + e) {
+                    for b in 0..=(s + e - a) {
+                        o.add_scaled(&pu[a].mul(&pv[b], trd), -1.75, trd);
+                        q.add_scaled_from(&qu[a].mul_valued(&qv[b], a, b, trd), -1.75, a + b, trd);
+                    }
+                }
+                assert_eq!(o, q, "{s} {e} {degree}");
+            }
+        }
+        let tr = Trunc::new(6, 2).unwrap();
+        let mut x = no_constant();
+        x.set(0, 0, 3.0);
+        let y = x.inv_sqrt(tr).unwrap();
+        // the binomial sum the old way: pow.mul and add of scale
+        let mut z = x.scale(1.0 / 3.0, tr);
+        z.set(0, 0, 0.0);
+        let (mut pow, mut sum, mut binom) = (Ser::constant(1.0), Ser::constant(1.0), 1.0_f64);
+        for m in 1..=8 {
+            binom *= (-0.5 - f64::from(m - 1)) / f64::from(m);
+            pow = pow.mul(&z, tr);
+            sum = sum.add(&pow.scale(binom, tr), tr);
+        }
+        assert_eq!(y, sum.scale(1.0 / 3.0_f64.sqrt(), tr));
+    }
+
+    #[test]
+    fn a_power_left_without_its_zero_terms_encloses_the_product_in_intervals() {
+        let tr = Trunc::new(6, 2).unwrap();
+        let d = no_constant();
+        let mut di = Ser::constant(Ivl::from(0.0));
+        for i in 0..=MAX_S {
+            for k in 0..=MAX_E {
+                di.set(i, k, Ivl::from(d.c[i][k]));
+            }
+        }
+        let (mut p, mut q, mut pd) = (
+            Ser::constant(Ivl::from(1.0)),
+            Ser::constant(Ivl::from(1.0)),
+            Ser::constant(1.0),
+        );
+        for a in 1..=8 {
+            p = p.mul(&di, tr);
+            q = q.mul_valued(&di, a - 1, 1, tr);
+            pd = pd.mul(&d, tr);
+            for i in 0..=MAX_S {
+                for k in 0..=MAX_E {
+                    let (pc, qc) = (p.c[i][k], q.c[i][k]);
+                    // within the old enclosure, and still holding the double product
+                    assert!(
+                        pc.lo <= qc.lo && qc.hi <= pc.hi,
+                        "{a} {i} {k} {pc:?} {qc:?}"
+                    );
+                    assert!(qc.lo <= pd.c[i][k] && pd.c[i][k] <= qc.hi, "{a} {i} {k}");
+                    if i + k < a {
+                        assert_eq!((qc.lo, qc.hi), (0.0, 0.0));
+                    }
+                }
             }
         }
     }
