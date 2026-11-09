@@ -18,6 +18,7 @@ use super::types::{
     OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint,
     TouchingParam, feature_common, present,
 };
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
 
 /// Add a box primitive.
@@ -179,6 +180,78 @@ pub struct ExtrudeParams {
     /// With `thin` and `side: two_sides`: the thickness outside.
     #[serde(default)]
     pub thickness2: Option<LengthExpr>,
+}
+
+/// Revolve sketch profiles (or a planar body face) about an axis into a solid.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RevolveParams {
+    /// The axis to turn about.
+    pub axis: RevolveAxis,
+    /// How far to turn: more than 0 and at most 360 degrees. With `angle2`, the angle on the
+    /// first side, the two adding up to the turn; with `direction: symmetric`, the whole turn,
+    /// split either side. Default: 360 deg. Not used when `to` is given, though it must still
+    /// evaluate.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Two Sides: the angle on the other side, turned back from the profile. Not used when `to`
+    /// is given; used instead of `direction: symmetric` when both are given.
+    #[serde(default)]
+    pub angle2: Option<AngleExpr>,
+    /// `symmetric` splits the angle evenly either side of the profile, whichever way the axis
+    /// points. The handler ignores every other value.
+    #[serde(default)]
+    pub direction: Option<RevolveDirection>,
+    /// When true, the same as `direction: symmetric`.
+    #[serde(default)]
+    pub symmetric: Option<bool>,
+    /// Where the angle starts. Default: sketch_normal.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RevolveConventionParam")]
+    pub convention: Option<RevolveConventionParam>,
+    /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
+    /// and `direction`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RevolveToPoint")]
+    pub to: Option<RevolveToPoint>,
+    /// The sketch to revolve, by id or name. Default: the active sketch, else the last one.
+    /// Ignored when `face` is given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's profiles to revolve. Default: all of them. Ignored when `face` is
+    /// given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// A point on a planar body face to revolve instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// How the revolve combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on. Default for a join from a body's face, or
+    /// from a sketch on one: that body. Explicit `targets` or `participants` replace it.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// Something a feature's result tells the user without stopping them, with an action to take.
