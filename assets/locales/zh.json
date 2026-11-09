@@ -3584,7 +3584,6 @@
   "prefs.plugins_show_folder": "显示插件文件夹",
   "prefs.prefer_free_sketch_points": "草图点重合时优先选择可移动的点",
   "prefs.preview_choices": "所选设置预览",
-  "prefs.preview_reselect_modifier": "隐藏预览以重新选择",
   "prefs.preview_tint_new_faces": "在预览中为新表面着色",
   "prefs.print_face_highlight": "打印底面高亮",
   "prefs.print_face_highlight_tip": "视图中实体打印底面的着色和轮廓强度。0 % 不显示高亮。",
