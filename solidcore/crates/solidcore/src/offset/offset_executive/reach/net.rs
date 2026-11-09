@@ -744,7 +744,9 @@ impl Net {
 }
 
 /// Whether the full knot vector `knots` of degree `p` is clamped at both ends (its first
-/// and last `p + 1` knots equal) and has no inner knot of multiplicity above `p`.
+/// and last knots each exactly `p + 1` times: a longer run ends the surface on its last
+/// control row alone, at the end knot, where a net clamped `p + 1` times ends on the row
+/// before) and has no inner knot of multiplicity above `p`.
 fn clamped_and_continuous(knots: &[f64], p: usize) -> bool {
     let Some(ends) = p.checked_add(1) else {
         return false;
@@ -758,6 +760,18 @@ fn clamped_and_continuous(knots: &[f64], p: usize) -> bool {
     #[allow(clippy::float_cmp)] // knots repeated as stored
     let flat = |run: &[f64]| run.windows(2).all(|w| matches!(w, [a, b] if a == b));
     if !(flat(head) && flat(tail)) || knots.len() < 2 * ends {
+        return false;
+    }
+    // each end exactly `p + 1` times: the knot after the first run and the one before the
+    // last differ from them
+    let after = knots.get(ends);
+    let before = ends
+        .checked_add(1)
+        .and_then(|e| knots.len().checked_sub(e))
+        .and_then(|i| knots.get(i));
+    #[allow(clippy::float_cmp)] // knots repeated as stored
+    let longer = after == head.first() || before == tail.last();
+    if longer {
         return false;
     }
     // an inner knot's multiplicity: a run of more than `p` equal knots
