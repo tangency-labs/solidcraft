@@ -384,6 +384,9 @@ dependencies = [
 [[package]]
 name = "step-import"
 version = "0.1.0"
+dependencies = [
+ "solidcore",
+]
 
 [[package]]
 name = "syn"
