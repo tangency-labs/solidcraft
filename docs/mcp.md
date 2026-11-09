@@ -399,6 +399,22 @@ To tell whether the design changed since a call, without reading all of it again
 changes, and `document_id` names the open design (another one after `new_design` or `open`).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
+To compare design proposals with several parameter edits each, call `execute` with
+`inspect.parameter_variants`. It rebuilds a separate copy for each candidate. A direct call
+connected to the desktop window can run on a worker, like a long measurement. Use the
+baseline and each result's `metrics` to compare
+volume, mass and body count; check `ok` and `diagnostics` before applying any candidate.
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Lighter", "set": {"width": "45 mm", "thickness": "4 mm"}},
+  {"name": "Wider", "set": {"width": "75 mm", "thickness": "6 mm"}}
+]}}
+```
+
+Apply the selected values separately with `parameters.change {changes}` if you intend to
+edit the design. Use `describe_command` for the input and output schemas.
+
 Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
 (the catalog).
 
