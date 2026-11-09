@@ -15,6 +15,7 @@ use crate::schema::sketch::{
     MidpointParams, ParallelParams, PerpendicularParams, SymmetryParams, SymmetryResult, TangentMade, TangentParams, TangentResult,
 };
 use crate::schema::sketch_dimension::{DimensionResult, SketchDimensionParams};
+use crate::schema::sketch_dimensioned::{DrawDimensionedParams, DrawDimensionedResult};
 use crate::schema::sketch_session::{
     Activated, Attachment, ChainParams, ChainResult, ConstructionParams, ConstructionResult, CreateParams, CreateResult, DeleteParams, DeleteResult,
     DimensionTextParams, DimensionTextResult, DragEndParams, DragEndResult, DragParams, DragResult, Frame, MovePointParams, MovePointResult,
@@ -63,6 +64,7 @@ const DIMENSION_TEXT_CONTRACT: TypedContract<DimensionTextParams> = TypedContrac
 const OPTIONS_CONTRACT: TypedContract<OptionsParams> = TypedContract::new();
 const CHAIN_CONTRACT: TypedContract<ChainParams> = TypedContract::new();
 const SOLVE_CONTRACT: TypedContract<SolveParams> = TypedContract::new();
+const DRAW_DIMENSIONED_CONTRACT: TypedContract<DrawDimensionedParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const EXIT_CONTRACT: TypedContract<ExitParams> = TypedContract::new();
 const HORIZONTAL_VERTICAL_CONTRACT: TypedContract<HorizontalVerticalParams> = TypedContract::new();
@@ -123,8 +125,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LINE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", draw_dimensioned).icon("dimension")
+    CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", crate::checked!("sketch.draw.dimensioned", draw_dimensioned)).icon("dimension")
         .enabled(in_sketch)
+        .contract(&DRAW_DIMENSIONED_CONTRACT)
+        .output(output_schema_for::<DrawDimensionedResult>)
         .params(concat!("command: sketch creation command, params: object, dimensions: object of role to numeric or expression value, or `name = expression` (also `#name = expression`), which defines the user parameter `name` as sketch.dimension does (the reply's `defined` lists the names) (optional with as_drawn or locate), as_drawn?: bool (also dimension every other role of the shape at its size as drawn; a radius or diameter given takes the place of the other, as an edge polygon's side length does its radius, a circle otherwise takes its diameter, and a size the sketch already determines, such as the angle of a line inferred horizontal, is left out), locate?: bool (then place the shape from the sketch origin until nothing of it is left free: horizontal and vertical distances from the origin to its points, centres first, each kept only where it removes freedom, so a shape anchored to the origin or to placed geometry gets none; a point on an axis goes onto that axis instead of a 0 distance; the reply's located lists them); creates geometry and all driving dimensions atomically in one undo step", created_doc!())),
     CommandSpec::new("sketch.rectangle.two_point", "2-Point Rectangle", crate::checked!("sketch.rectangle.two_point", rect_two_point))
         .at("SKETCH", "CREATE")
