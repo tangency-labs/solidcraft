@@ -817,16 +817,33 @@ mod imp {
         })
     }
 
-    /// A box on one side of the plane through `at` square to the unit `normal`: a `size` square
-    /// in the plane, `size` deep along `normal`.
-    fn half_space(at: Vec3, normal: Vec3, size: f64) -> Result<Brep> {
+    /// What a mitre cuts away: a box on one side of the plane through `at` square to the unit
+    /// `normal`, holding every point on that side within `near` of `at` (a `2 near` square in the
+    /// plane, `near` deep along `normal`), and nothing farther. A cut only near the corner keeps
+    /// a run that turns back behind the mitre's plane farther along (#13543).
+    fn mitre_cutter(at: Vec3, normal: Vec3, near: f64) -> Result<Brep> {
         let u = if normal.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
         let u = normal.cross(u).normalized().ok_or_else(|| KernelError::Invalid("mitre plane".into()))?;
         let v = normal.cross(u);
-        let h = size * 0.5;
+        let h = near;
         let c = [at + (u + v) * h, at + (v - u) * h, at - (u + v) * h, at + (u - v) * h];
         let square: Vec<Curve> = (0..4).map(|i| Curve::Line { start: p(c[i]), end: p(c[(i + 1) % 4]) }).collect();
-        Brep::extrude(&square, p(normal), size, 0.0, DraftCorner::default(), true).map_err(|e| failed("mitre", e))
+        Brep::extrude(&square, p(normal), near, 0.0, DraftCorner::default(), true).map_err(|e| failed("mitre", e))
+    }
+
+    /// How near a corner its mitre cuts: every point a straight lead of length `lead` past the
+    /// corner, or a section reaching `reach` from the path, takes past the mitre's plane, with a
+    /// margin so that no face of the cutter lies on one of the sweep.
+    fn mitre_near(lead: f64, reach: f64) -> f64 {
+        1.05 * (lead + reach) + 1e-3
+    }
+
+    /// [`mitre_near`] for a lead or tail prism `straight` of the section at the corner `at`,
+    /// grown to reach every corner of the prism's box (rails can widen the section past `reach`).
+    fn mitre_near_prism(straight: &Brep, at: Vec3, lead: f64, reach: f64) -> Result<f64> {
+        let (lo, hi) = straight.bounds().map_err(|e| failed("sweep mitre", e))?;
+        let far = (0..8).map(|i| Vec3::new([lo, hi][i & 1][0], [lo, hi][(i >> 1) & 1][1], [lo, hi][(i >> 2) & 1][2]).dist(at)).fold(0.0f64, f64::max);
+        Ok(mitre_near(lead, reach).max(1.05 * far + 1e-3))
     }
 
     fn combined(a: &Brep, b: &Brep, op: solidcraft_smlib::BooleanOp, what: &str) -> Result<Brep> {
@@ -851,17 +868,6 @@ mod imp {
             .flat_map(|x| (0..=8).map(move |i| x.seg.point_at(f64::from(i) / 8.0)))
             .map(|q| plane.to_world(q).dist(start))
             .fold(0.0f64, f64::max);
-        let mut length = 0.0;
-        for s in path {
-            let (a, b) = seg_ends(s)?;
-            length += a.dist(b).max(match *s {
-                crate::PathSeg::Arc { a, center, angle, .. } => (a - center).len() * angle.abs(),
-                crate::PathSeg::Curve { seg, .. } => seg.length(),
-                crate::PathSeg::Bezier(_) => seg_len(s),
-                crate::PathSeg::Line { .. } => 0.0,
-            });
-        }
-        let size = 4.0 * (length + reach) + 1.0;
         let tangent = |s: Option<&crate::PathSeg>| {
             s.and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))
         };
@@ -932,10 +938,11 @@ mod imp {
                     Seed { at, piece }
                 }));
                 if let Some((at, toward, _)) = entry {
-                    piece = combined(&piece, &half_space(at, -toward, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
+                    let cut = mitre_cutter(at, -toward, mitre_near(pre, reach))?;
+                    piece = combined(&piece, &cut, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 if let Some((m, _)) = exit {
-                    piece = combined(&piece, &half_space(b1, m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
+                    piece = combined(&piece, &mitre_cutter(b1, m, mitre_near(post, reach))?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 (piece, moved_plane(&placed(&from, &last), t1 * -post))
             };
@@ -1562,13 +1569,16 @@ mod imp {
                 if let Some((at, m, turn)) = entry {
                     let pre = mitre_lead(&offsets, reach, turn, false);
                     let lead = prism(affine_moved(&first_map, t0 * -pre), t0, pre)?;
+                    let near = mitre_near_prism(&lead, at, pre, reach)?;
                     piece = combined(&piece, &lead, solidcraft_smlib::BooleanOp::Union, "sweep corner")?;
-                    piece = combined(&piece, &half_space(at, -m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
+                    piece = combined(&piece, &mitre_cutter(at, -m, near)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 if let Some((m, turn)) = exit {
-                    let tail = prism(end_map, t1, mitre_lead(&offsets, reach, turn, true))?;
+                    let post = mitre_lead(&offsets, reach, turn, true);
+                    let tail = prism(end_map, t1, post)?;
+                    let near = mitre_near_prism(&tail, b1, post, reach)?;
                     piece = combined(&piece, &tail, solidcraft_smlib::BooleanOp::Union, "sweep corner")?;
-                    piece = combined(&piece, &half_space(b1, m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
+                    piece = combined(&piece, &mitre_cutter(b1, m, near)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
             }
             body = Some(match body {

@@ -411,3 +411,31 @@ fn a_controlled_sweep_takes_a_profile_drawn_part_way_along_its_path_as_its_start
         assert!(b.min.dist(w.min) < 1e-6 && b.max.dist(w.max) < 1e-6, "{what}: {b:?} vs {w:?}");
     }
 }
+
+#[test]
+fn a_sweep_run_that_curls_back_behind_its_mitre_keeps_its_end() {
+    // #13543: up 9, right 12, up 9, then half a turn of radius 10 back to the left, tangent to
+    // the last line (one run with it). That run's mitre at (12, 9) is the plane x + y = 21; the
+    // arc's last 49 degrees lie behind it and were cut away with the lead. A 1.5 x 1.5 square,
+    // symmetric, so the mitres trade what they add and take: V = A (30 + 10 pi), and the tube
+    // reaches x = 2 - 10.75 at the arc's far side, from the start cap at y = 0.
+    let start_plane = Plane { origin: Vec3::ZERO, x: Vec3::Z, y: Vec3::X };
+    let square = region(Loop2::polygon(&[Vec2::new(-0.75, -0.75), Vec2::new(0.75, -0.75), Vec2::new(0.75, 0.75), Vec2::new(-0.75, 0.75)]));
+    let path = [
+        crate::PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 9.0, 0.0) },
+        crate::PathSeg::Line { a: Vec3::new(0.0, 9.0, 0.0), b: Vec3::new(12.0, 9.0, 0.0) },
+        crate::PathSeg::Line { a: Vec3::new(12.0, 9.0, 0.0), b: Vec3::new(12.0, 18.0, 0.0) },
+        crate::PathSeg::Arc { a: Vec3::new(12.0, 18.0, 0.0), center: Vec3::new(2.0, 18.0, 0.0), axis: Vec3::Z, angle: PI },
+    ];
+    let want = 2.25 * (30.0 + 10.0 * PI);
+    let (min, max) = (Vec3::new(-8.75, 0.0, -0.75), Vec3::new(12.75, 28.75, 0.75));
+    let plain = smlib_sweeps::sweep(&start_plane, &pieces_of(&square), &path, false).unwrap();
+    let ctl = crate::SweepControl::default();
+    let controlled = smlib_sweeps::sweep_controlled(&start_plane, &numbered(&square), &path, &ctl).unwrap();
+    // The controlled sweep runs through stations along the path: within 1e-3, as elsewhere.
+    for (what, b, tol) in [("plain", &plain, 1e-6), ("controlled", &controlled, 1e-3)] {
+        close(volume(b), want, 1e-3, what);
+        let bb = b.exact_bounds().unwrap();
+        assert!(bb.min.dist(min) < tol && bb.max.dist(max) < tol, "{what}: {bb:?} vs {min:?}..{max:?}");
+    }
+}
