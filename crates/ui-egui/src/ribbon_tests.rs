@@ -402,24 +402,27 @@ fn tip_pass(ctx: &egui::Context, menu: Rect, time: f64, at: egui::Pos2) -> Vec<(
     let mut shown: Vec<(usize, Rect)> = Vec::new();
     crate::test_support::frame(ctx, raw, |ui| {
         let ctx = ui.ctx();
-        egui::Area::new(egui::Id::unique("test_dropdown")).fixed_pos(menu.min).show(ctx, |ui| {
-            for row in 0..2 {
-                let rect = Rect::from_min_size(menu.min + vec2(0.0, row as f32 * 32.0), vec2(menu.width(), 32.0));
-                let resp = ui.interact(rect, egui::Id::unique(("test_row", row)), Sense::hover());
-                let tip = if row == 0 {
-                    menu_tip(ui, menu, &resp, |ui| {
-                        ui.label("first row");
-                    })
-                } else {
-                    menu_tip(ui, menu, &resp, |ui| {
-                        ui.label("second row");
-                    })
-                };
-                if let Some(rect) = tip {
-                    shown.push((row, rect));
+        crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Popup).area(egui::Id::unique("test_dropdown")).fixed_pos(menu.min).show(
+            ctx,
+            |ui| {
+                for row in 0..2 {
+                    let rect = Rect::from_min_size(menu.min + vec2(0.0, row as f32 * 32.0), vec2(menu.width(), 32.0));
+                    let resp = ui.interact(rect, egui::Id::unique(("test_row", row)), Sense::hover());
+                    let tip = if row == 0 {
+                        menu_tip(ui, menu, &resp, |ui| {
+                            ui.label("first row");
+                        })
+                    } else {
+                        menu_tip(ui, menu, &resp, |ui| {
+                            ui.label("second row");
+                        })
+                    };
+                    if let Some(rect) = tip {
+                        shown.push((row, rect));
+                    }
                 }
-            }
-        });
+            },
+        );
     });
     shown
 }
