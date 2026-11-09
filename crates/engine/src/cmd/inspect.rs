@@ -803,7 +803,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut comps: Vec<u64> = Vec::new();
     for c in string_list(cmd, p, "components")? {
-        let id = s.component_or_placement(&c).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let id = s.component_or_placement(&c).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         comps.push(id);
     }
     if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
