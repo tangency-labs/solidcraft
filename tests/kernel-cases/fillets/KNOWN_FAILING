@@ -15,7 +15,6 @@ cov-fillet-g2-oblique-three-edge-corner [unsupported] refused on solidcore: its 
 cov-fillet-g2-pocket-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0
 cov-junction-boss-tilt-20-root-round [fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib
 cov-junction-y-junction-120-round [unsupported] refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)
-every-box-corner-three-edges-r3-curvature-setback-3-5 [unsupported] refused since solidcore c0d3cc0124 (passed at a445bdaac6); tracked in #13522
 report-fillet-curvature-three-edges-at-bar-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)
 report-fillet-curvature-three-edges-at-bar-corner-solver-residues [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)
 report-fillet-curvature-three-edges-at-bar-corner-solver-residues-outside-setback [unsupported] solidcore#2697: solidcore's own filled corner builds this to its closed form (7e-11); SolidCraft's least-squares fit misses curvature by 4.02e-3 against 2.5e-3 at this pin
