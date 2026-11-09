@@ -98,7 +98,8 @@ fn run_with_registry(root: &Path, args: &[&str], registry: impl FnOnce() -> Resu
         return Ok(());
     }
 
-    print_report(&report);
+    let labels = !args.contains(&"--no-registry");
+    print_report(&report, labels);
 
     if args.contains(&"--check") {
         if report.problems() > 0 {
@@ -111,13 +112,17 @@ fn run_with_registry(root: &Path, args: &[&str], registry: impl FnOnce() -> Resu
         }
         if report.reported_only() > 0 {
             println!(
-                "i18n: every complete catalog ({}) carries every English message and every command label is translatable; \
+                "i18n: every complete catalog ({}) carries every English message; {}; \
                  {} message(s) are still missing from the partial catalogs (de, ko)",
                 COMPLETE.join(", "),
+                if labels { "every command label is translatable" } else { "command labels not checked here" },
                 report.reported_only()
             );
         } else {
-            println!("i18n: every catalog carries every English message; every command label is translatable");
+            println!(
+                "i18n: every catalog carries every English message; {}",
+                if labels { "every command label is translatable" } else { "command labels not checked here" }
+            );
         }
     }
     Ok(())
@@ -228,7 +233,7 @@ fn add_missing(root: &Path, report: &mut Report) -> Result<usize, String> {
     Ok(added)
 }
 
-fn print_report(report: &Report) {
+fn print_report(report: &Report, labels: bool) {
     for (locale, missing) in &report.missing {
         println!("i18n: {locale} is missing {} English message(s):", missing.len());
         for id in missing {
@@ -243,7 +248,11 @@ fn print_report(report: &Report) {
         println!("i18n: run `cargo xtask i18n --add-missing` to add them to en.json, then translate them.");
     }
     if report.problems() == 0 {
-        println!("i18n: catalogs complete; every command label is translatable");
+        if labels {
+            println!("i18n: catalogs complete; every command label is translatable");
+        } else {
+            println!("i18n: catalog coverage ok (command labels not checked here)");
+        }
     }
 }
 
