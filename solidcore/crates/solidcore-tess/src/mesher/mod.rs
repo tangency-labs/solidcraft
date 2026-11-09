@@ -111,6 +111,11 @@ const PARALLEL_EDGES: usize = 256;
 /// turns a coil's or a thread's wall winds (the grid as a whole stays within
 /// [`grid::MAX_FACE_GRID`]).
 const MAX_LINES: usize = 8192;
+/// The smallest angle the triangles of a flat face with no size keep, where its boundary
+/// allows. Its boundary nodes alone make slivers (a disc's rim fanned to one node); at 15 degrees
+/// the p99 aspect of such faces is below 2.6 for about a quarter more triangles (10 degrees
+/// leaves it above 3, 20 adds a third), measured on the bake-off corpus.
+const FLAT_MIN_ANGLE_DEG: f64 = 15.0;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
@@ -417,6 +422,12 @@ fn boundary(
     let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()), reach };
     // Each vertex's parameters, from the first edge use of the face to start there.
     let mut at_vertex: HashMap<u32, [f64; 2]> = HashMap::new();
+    // The face's vertices placed so far, by cell of a grid as fine as the chord tolerance: the
+    // nearness below is never farther than that, so the vertex's own cell and its neighbours hold
+    // every candidate (a face of 100,000 vertices is not searched once per vertex).
+    let cell = if rules.tol.is_finite() && rules.tol > 0.0 { rules.tol } else { f64::INFINITY };
+    let key = |p: Vec3| [p.x, p.y, p.z].map(|x| if cell.is_finite() { (x / cell).floor() as i64 } else { 0 });
+    let mut placed: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
     // The vertex pairs an edge of the face joins.
     let joined: std::collections::HashSet<(u32, u32)> = face_edges(face)
         .filter_map(|oe| b.edges.get(oe.edge as usize))
@@ -491,10 +502,18 @@ fn boundary(
                         // corner touches another loop's corner) are one point of the face, so its
                         // loops touch there instead of crossing.
                         let same = vertex_point(v).and_then(|(p, tv)| {
-                            at_vertex.iter().filter(|(w, _)| **w != v && !joined.contains(&(v.min(**w), v.max(**w)))).find_map(|(w, wq)| {
-                                let (pw, tw) = vertex_point(*w)?;
-                                (p.dist(pw) <= tv.max(tw).min(rules.tol)).then_some(*wq)
-                            })
+                            let [x, y, z] = key(p);
+                            let near = (-1..=1).flat_map(|i| (-1..=1).flat_map(move |j| (-1..=1).map(move |k| [x + i, y + j, z + k])));
+                            near.filter_map(|c| placed.get(&c))
+                                .flatten()
+                                .filter(|w| **w != v && !joined.contains(&(v.min(**w), v.max(**w))))
+                                .filter_map(|w| {
+                                    let (pw, tw) = vertex_point(*w)?;
+                                    let d = p.dist(pw);
+                                    (d <= tv.max(tw).min(rules.tol)).then_some((d, *w))
+                                })
+                                .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+                                .and_then(|(_, w)| at_vertex.get(&w).copied())
                         });
                         if let Some(mut w) = same.filter(|w| !(0..2).any(|d| pole_along(*w, d) || pole_along(*q, d))) {
                             for (d, per) in dom.period.into_iter().enumerate() {
@@ -505,6 +524,9 @@ fn boundary(
                             *q = w;
                         }
                         at_vertex.insert(v, *q);
+                        if let Some((p, _)) = vertex_point(v) {
+                            placed.entry(key(p)).or_default().push(v);
+                        }
                     }
                 }
             }
@@ -1226,6 +1248,7 @@ fn plan_face(
             refine: if bare { None } else { Some((sag, MAX_REFINE)) },
             shape: !matches!(**s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
+            flat: (bare && lenient == Lenient::No).then(|| cdt::Flat { min_angle: FLAT_MIN_ANGLE_DEG, max_points: uvs.len(), min_area: if tol.is_finite() { tol * tol } else { 0.0 } }),
         };
         cdt::triangulate(&uvs, &ranges, fill).ok_or_else(|| fail("boundary crosses itself"))
     };
@@ -1482,7 +1505,7 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
                 let seeds = cdt::lattice(bbox, [f.h / f.speed[0], f.h / f.speed[1]], &polys, f.speed);
                 let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
                 let sag = cdt::Sag { eval: &eval, tol: f.rules.tol, h: f.h, turn: f.rules.turn, scale: f.speed };
-                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false })
+                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false, flat: None })
             })?;
         let (lextra, ltris) = local;
         let base = u32::try_from(n + extra.len()).ok()?;

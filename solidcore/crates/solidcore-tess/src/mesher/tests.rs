@@ -41,7 +41,7 @@ fn loops_touching_at_a_shared_vertex_bound_the_face() {
     let uvs: Vec<[f64; 2]> = outer.iter().chain(&left).chain(&right).copied().collect();
     let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
     let ranges = vec![0..4, 4..7, 7..10];
-    let fill = cdt::Fill { seeds: &[], refine: None, shape: false, lenient: false };
+    let fill = cdt::Fill { seeds: &[], refine: None, shape: false, lenient: false, flat: None };
     let Some((_, triangles)) = cdt::triangulate(&uvs, &ranges, fill) else { panic!("triangulates") };
     assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow both holes through their shared vertex");
 }
@@ -271,12 +271,13 @@ fn a_box_is_two_triangles_a_face() {
 }
 
 /// SolidCraft's coil from SMLib, its lower half: the counts the bake-off recorded for
-/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances.
+/// `793-coil-split-by-a-plane-across-its-axis` at the display and export tolerances, plus the
+/// 18 triangles its flat cut face gains from shaping.
 #[test]
 fn the_spline_coil_keeps_its_triangles() {
     let name = "smlib_coil_lower_half";
     let (b, size) = (crate::fixtures::fixture(name), crate::fixtures::size_of(name));
-    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_630), (crate::MeshTolerance::export_of(size), 30_662)] {
+    for (t, want) in [(crate::MeshTolerance::display_of(size), 30_648), (crate::MeshTolerance::export_of(size), 30_680)] {
         let Ok((p, _)) = plan(&b, &t, size) else { panic!("plans") };
         assert_eq!(p.evaluate().0.triangles.len(), want);
     }
