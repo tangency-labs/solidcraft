@@ -705,9 +705,15 @@ fn rim_edges(b: &Brep, set: &[FaceId]) -> solidcore::Result<Result<Vec<EdgeId>>>
                 continue;
             }
             seen.push(e);
-            // not built yet: the rim rule comes in the next commit; every edge of the faces
-            let _ = (&outward, eu1::is_loop_edgeuse);
-            rims.push(e);
+            let mut on_set = 0;
+            for u in edge::edgeuses(b, e, None, None)? {
+                if eu1::faceuse(b, u)?.is_some_and(|fu| outward.contains(&fu)) {
+                    on_set += 1;
+                }
+            }
+            if on_set == 1 {
+                rims.push(e);
+            }
         }
     }
     Ok(Ok(rims))
