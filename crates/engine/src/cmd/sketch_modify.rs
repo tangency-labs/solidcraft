@@ -2486,8 +2486,10 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
         let mut seen = std::collections::BTreeSet::new();
         for q in &corners {
             prepare_corner(sk, q, cmd)?;
+            // Keyed on the corner's lines as an unordered pair: the same corner named by its
+            // point and by its two lines the other way round is one corner, not two.
             if let Ok(c) = corner(sk, q, cmd)
-                && !seen.insert((c.clone(), c.la.min(c.lb), c.la.max(c.lb)))
+                && !seen.insert((c.la.min(c.lb), c.la.max(c.lb)))
             {
                 return Err(bad(cmd, "a corner is listed twice"));
             }

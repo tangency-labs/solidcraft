@@ -204,6 +204,13 @@ pub(crate) fn rows(sk: &Sketch, picks: &[Sel], extra: &Map<String, Value>) -> Ve
             _ => {}
         }
     }
+    // A point picked before the two lines that meet at it gets a row of its own, and once those
+    // lines pair up both rows name one corner: the command would refuse that as listed twice, or
+    // cut the corner twice when the two sides come in the other order. The corner keeps the row
+    // of its two lines, which is where its own Flip and X live.
+    let pair = |row: &Row| sides(sk, row, &sites).map(|(a, b)| if a <= b { (a, b) } else { (b, a) });
+    let corners: Vec<(String, String)> = found.iter().filter(|row| row.lines.len() == 2).filter_map(pair).collect();
+    found.retain(|row| row.lines.len() == 2 || pair(row).is_none_or(|corner| !corners.contains(&corner)));
     for row in &mut found {
         row.enabled = !listed(extra, OFF, &row.key);
         row.flip = listed(extra, FLIP, &row.key);

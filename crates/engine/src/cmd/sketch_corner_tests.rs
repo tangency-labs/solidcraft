@@ -465,3 +465,15 @@ fn a_fillet_joins_two_profiles_that_have_a_corner_point_each_at_one_place() {
     assert_eq!(s.model.state().sketch(s.active_sketch.unwrap()).unwrap().profiles.len(), 1);
     assert!((area(&s) - (union + 8.0)).abs() < 1e-6, "{} != {}", area(&s), union + 8.0);
 }
+
+#[test]
+fn a_corner_named_by_its_point_and_by_its_lines_the_other_way_round_is_refused() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 40]], "ids": ["l2"]}));
+    // One corner, named once by the point where the lines meet and once by the same two lines
+    // in the other order: cut twice, the second cut would land on what the first one left.
+    let e = s.execute("sketch.chamfer.equal_distance", &json!({"points": [{"point": "origin"}, {"a": "l2", "b": "l1"}], "distance": 5})).unwrap_err();
+    assert!(e.to_string().contains("listed twice"), "{e}");
+    assert_eq!(sk(&s).curves.len(), 2, "the corner is not cut");
+}

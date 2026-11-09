@@ -836,7 +836,14 @@ fn signature(sketch: &solidcraft_engine::sketch::Sketch, curve: &solidcraft_engi
         CurveKind::Circle { r, .. } => vec![r.to_bits().to_string()],
         CurveKind::Ellipse { r, .. } => vec![r.to_bits().to_string()],
         CurveKind::Conic { rho, .. } => vec![rho.to_bits().to_string()],
-        CurveKind::Spline { control, degree, periodic, .. } => vec![control.to_string(), degree.to_string(), periodic.to_string()],
+        // A control spline's own knots and weights shape it as much as its points do (a projected
+        // free-form edge keeps its exact curve there), so a change to them is a change to paint.
+        CurveKind::Spline { control, degree, periodic, nurbs, .. } => vec![
+            control.to_string(),
+            degree.to_string(),
+            periodic.to_string(),
+            nurbs.as_ref().map(|n| format!("{:?}{:?}", n.knots, n.weights)).unwrap_or_default(),
+        ],
         _ => Vec::new(),
     };
     (kind, points, shape)
@@ -1804,6 +1811,33 @@ mod tests {
         assert_ne!(pv.key, key, "a new key: the viewport takes the slot again");
         assert!(slot.lock().unwrap().as_ref().is_some_and(|s| s.xray.is_empty() && s.blocks.is_empty()));
         assert!(!pv.active && pv.replaced.is_empty());
+    }
+
+    #[test]
+    fn a_control_splines_knots_and_weights_are_part_of_its_signature() {
+        let sketch = |weights: Vec<f64>| -> solidcraft_engine::sketch::Sketch {
+            serde_json::from_value(json!({
+                "points": [
+                    {"id": "p1", "pos": [0.0, 0.0]},
+                    {"id": "p2", "pos": [10.0, 0.0]},
+                    {"id": "p3", "pos": [20.0, 10.0]},
+                ],
+                "curves": [{
+                    "id": "s1", "type": "spline", "pts": [0, 1, 2], "control": true, "degree": 2,
+                    "nurbs": {"knots": [0.0, 0.0, 0.0, 1.0, 1.0, 1.0], "weights": weights},
+                }],
+                "constraints": [],
+                "counters": {"k": 0, "l": 1, "p": 3},
+            }))
+            .unwrap()
+        };
+        let uniform = sketch(Vec::new());
+        let weighted = sketch(vec![1.0, 2.0, 1.0]);
+        assert_ne!(
+            signature(&uniform, &uniform.curves[0]),
+            signature(&weighted, &weighted.curves[0]),
+            "weights that change the curve are a change to paint"
+        );
     }
 }
 

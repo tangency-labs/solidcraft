@@ -3287,7 +3287,9 @@ pub(crate) fn input_rows_range(
                 // egui lays the window out more than once in a frame (a scroll bar
                 // appears, a field keeps its focus), and every pass sees the same
                 // click: count it once, or the cut turns off and straight back on.
-                let first = first_click(ui, &row.key);
+                // Only a click spends this frame's marker: a pass that draws the row without one
+                // leaves the next pass free to report it.
+                let first = !(toggle.clicked() || flip.is_some()) || first_click(ui, &row.key);
                 if let (Some(flip), true) = (flip, first) {
                     corner_changes.push((row.key.clone(), crate::sketch_corner_rows::Change::Flip(flip)));
                 }

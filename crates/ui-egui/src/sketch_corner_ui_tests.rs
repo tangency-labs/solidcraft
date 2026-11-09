@@ -1447,3 +1447,16 @@ fn a_hidden_corner_stays_hidden_when_its_lines_leave_the_list_and_come_back() {
     assert_eq!(back.len(), 1);
     assert!(!back[0].enabled, "a corner the user hid stays hidden");
 }
+
+#[test]
+fn a_corner_picked_by_its_point_then_by_its_lines_is_one_row() {
+    let h = square();
+    // The point first, then the two lines that meet there. The point makes a row of its own
+    // before the lines arrive; once they pair there, they are the same corner, and a second row
+    // would have the command cut it twice (or refuse it as listed twice).
+    let rows = corner_rows(&h, &["a.end", "a", "b"]);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    // The other order never made the extra row, and still makes one.
+    let rows = corner_rows(&h, &["a", "b", "a.end"]);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+}
