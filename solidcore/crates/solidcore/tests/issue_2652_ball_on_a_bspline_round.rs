@@ -15,9 +15,12 @@
 //!   1001 before; now it is the ball's piece about (8, 8, -2), and the part is the box's
 //!   whose upright round is an exact cylinder, to 1e-12 of the volume removed.
 //! - **Along part of the edge.** The same block with a corner of radius 2 for half its turn
-//!   and 2.5 for the rest: refused (`OffsetCollapses`), naming 2 less the fit margin. The
-//!   twisted disc's side rounds, two of which miss 2 mm by up to 1.8e-3, are refused the same
-//!   way, before the trace that failed with 1001.
+//!   and 2.5 for the rest: refused (`OffsetCollapses`), naming 2 less the fit margin.
+//! - **The twisted disc (#13774).** Its 4 twisted side rounds R2 are their definitions, the
+//!   walls' 2 mm round between their sections as at them (they were the trace's skinned
+//!   B-splines, two of them off 2 mm by up to 1.9e-3, so the disc's top round R2 was
+//!   refused as wide as the ball along part of the edge only). Its top round R2 is the
+//!   ball's piece over each side round.
 //! - **Nowhere.** The B-spline block at R1.5 rounds as the exact cylinder's box does.
 #![allow(
     clippy::unwrap_used,
@@ -357,36 +360,63 @@ fn a_ball_as_wide_as_the_bspline_along_part_of_the_edge_is_refused_with_its_fit(
     }
 }
 
+/// The centre of the ball of radius `r` that `s` lies on, if it does: over a 5 x 5 grid
+/// inside its domain, every point x with unit normal n has the same x + r n (or x - r n)
+/// to 1e-6.
+fn ball_centre(k: &Kernel, s: &Surface, r: f64) -> Option<Point3> {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut sides: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+    for i in 1..=5 {
+        for j in 1..=5 {
+            let uv = Point2::new(
+                d.min().x + (d.max().x - d.min().x) * f64::from(i) / 6.0,
+                d.min().y + (d.max().y - d.min().y) * f64::from(j) / 6.0,
+            );
+            let x = s.evaluate_point(k, uv).unwrap();
+            let n = s.evaluate_normal(k, uv, Side::Left, Side::Left).ok()?;
+            sides[0].push(x + n * r);
+            sides[1].push(x - n * r);
+        }
+    }
+    sides.into_iter().find_map(|c| {
+        let first = *c.first()?;
+        c.iter().all(|p| p.distance(first) <= 1e-6).then_some(first)
+    })
+}
+
 /// The twisted disc of solidcraft#11848 (2 slots), its side edges rounded 2 mm, then its
-/// top outline 2 mm: over each side round's top edge the ball is as wide as the side round,
-/// but two of the four side rounds miss 2 mm by up to 1.8e-3 between their traced sections
-/// (`plan/findings/general--twisted-disc-side-round-fit-and-vertex-gaps.md`), so there the
-/// face is as wide as the ball along part of the edge only. Refused (`OffsetCollapses`)
-/// before the trace, naming the side round's least radius of curvature along the edge less
-/// the fit margin, on a side round's top edge. Before, it failed with 1001 in the trace.
+/// top outline 2 mm: over each side round's top edge the ball is as wide as the side round.
+/// With the side rounds their definitions, the walls' 2 mm rounds everywhere (#13774), the
+/// ball is as wide as the side round along the whole edge: its offset of the side round
+/// collapses onto the side round's centre line, which the top's offset crosses at one
+/// point, and the top round over each side round is a piece of that one ball (#2403's
+/// ball triangle). The part is a clean manifold solid. Before, two of the side rounds
+/// missed 2 mm by up to 1.9e-3 between their traced sections, so the ball was as wide as
+/// them along part of the edge only, and the round was refused (`OffsetCollapses`, naming
+/// 1.9586, the side round's least radius of curvature along the edge, 1.9988, less the
+/// fit margin; before that, 1001 in the trace).
 #[test]
-fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_refused_with_its_fit() {
+fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_the_ball_s_piece() {
     let mut k = kernel();
     let mut b = side_rounded_disc(&mut k, 2);
     let top = top_edges(&b);
     assert_eq!(top.len(), 12);
-    match fillet_edges(&mut k, &mut b, &top, 2.0, 1, 1, 1.0) {
-        Err(SolidError::FilletRefused {
-            reason: Some(NoRoomReason::OffsetCollapses),
-            fit,
-            ..
-        }) => {
-            assert_eq!(fit.kind, FitKind::Radius);
-            // the side round's least radius along its top edge, 1.9988, less the margin
-            assert!(
-                (fit.size - 1.958_612_597_062_46).abs() <= 1e-9,
-                "fit {}",
-                fit.size
-            );
-            let e = fit.edge.unwrap();
-            assert!(top.contains(&e));
-        }
-        other => panic!("expected OffsetCollapses, got {other:?}"),
+    fillet_edges(&mut k, &mut b, &top, 2.0, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+    // a piece of a 2 mm ball over each of the 4 side rounds, its centre 2 below the top
+    let balls: Vec<Point3> = b
+        .faces()
+        .ids()
+        .filter_map(|f| ball_centre(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 2.0))
+        .collect();
+    assert_eq!(balls.len(), 4, "{balls:?}");
+    for c in &balls {
+        assert!((c.z - (HEIGHT - 2.0)).abs() <= 1e-6, "{c:?}");
     }
 }
 
