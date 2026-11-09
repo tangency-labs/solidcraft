@@ -356,14 +356,14 @@ fn violations(source: &str) -> Result<Vec<String>, String> {
 /// Scan current and future crates/apps, including nested source and examples.
 /// The implementation module is the sole exception; feature-specific allowances are forbidden.
 pub fn run(root: &Path) -> Result<(), String> {
-    fn scan(root: &Path, dir: &Path, failures: &mut Vec<String>) -> Result<(), String> {
+    fn scan(root: &Path, dir: &Path, failures: &mut Vec<String>, warnings: &mut Vec<String>) -> Result<(), String> {
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             let kind = entry.file_type().map_err(|e| e.to_string())?;
             if kind.is_dir() {
                 if !matches!(entry.file_name().to_str(), Some("target" | ".git")) {
-                    scan(root, &path, failures)?;
+                    scan(root, &path, failures, warnings)?;
                 }
             } else if path.extension().is_some_and(|e| e == "rs")
                 && path.components().any(|c| c.as_os_str() == "src" || c.as_os_str() == "examples")
@@ -371,23 +371,34 @@ pub fn run(root: &Path) -> Result<(), String> {
             {
                 let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 let found = violations(&source).map_err(|e| format!("{}: {e}", path.display()))?;
-                if !found.is_empty() {
-                    let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                    failures.push(format!("{relative}: {}", found.join(", ")));
+                let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                let (tooltips, hosts): (Vec<String>, Vec<String>) = found.into_iter().partition(|f| f.starts_with("raw tooltip"));
+                if !hosts.is_empty() {
+                    failures.push(format!("{relative}: {}", hosts.join(", ")));
+                }
+                if !tooltips.is_empty() {
+                    warnings.push(format!("{relative}: {}", tooltips.join(", ")));
                 }
             }
         }
         Ok(())
     }
     let mut failures = Vec::new();
+    let mut warnings = Vec::new();
     for dir in ["crates", "apps"] {
-        scan(root, &root.join(dir), &mut failures)?;
+        scan(root, &root.join(dir), &mut failures, &mut warnings)?;
     }
     failures.sort();
-    if !failures.is_empty() {
-        return Err(format!("Use ui_kit::Container for outer hosts and ui_kit::BackingTooltipExt for tooltips:\n{}", failures.join("\n")));
+    warnings.sort();
+    // Raw tooltips only warn for now, so PRs in the merge queue that add one still pass; this
+    // half becomes an error in a follow-up once the queue has no raw tooltips.
+    if !warnings.is_empty() {
+        eprintln!("warning: use ui_kit::BackingTooltipExt for tooltips:\n{}", warnings.join("\n"));
     }
-    println!("ui-containers: all outer hosts and tooltips use the shared API");
+    if !failures.is_empty() {
+        return Err(format!("Use ui_kit::Container for outer hosts:\n{}", failures.join("\n")));
+    }
+    println!("ui-containers: all outer hosts use the shared API");
     Ok(())
 }
 
@@ -586,6 +597,9 @@ mod tests {
         for path in [&source, &example] {
             std::fs::write(path, "fn show() { Container::new(ctx, Surface::Panel).area(id); }").unwrap();
         }
+        run(&root).unwrap();
+        // A raw tooltip warns but does not fail the run (yet).
+        std::fs::write(&source, "fn show() { response.on_hover_text(tip); }").unwrap();
         run(&root).unwrap();
         std::fs::write(&source, "invalid Rust {{").unwrap();
         assert!(run(&root).unwrap_err().contains("cannot parse Rust source"));
