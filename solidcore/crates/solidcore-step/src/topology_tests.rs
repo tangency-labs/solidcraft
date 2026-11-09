@@ -594,6 +594,34 @@ fn a_ball_bounded_by_vertex_loops_at_its_poles() {
     faces_away(&s.brep, 0, |_| [0.0; 3]);
 }
 
+/// A disk bounded by a closed quadratic B-spline written unclamped (uniform knots from −2 to 6,
+/// its first two points repeated at the end, as cadmpeg's N04 recipes and periodic writers do):
+/// the curve is clamped to its domain [0, 4] exactly, so its pcurve on the plane is the closed
+/// form and the face reads.
+#[test]
+fn a_face_bounded_by_an_unclamped_periodic_spline_reads() {
+    let mut w = W::default();
+    let corners = [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]];
+    let p: Vec<u64> = corners.iter().map(|c| w.pt(*c)).collect();
+    let curve = w.add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',2,(#{},#{},#{},#{},#{},#{}),.UNSPECIFIED.,.T.,.U.,(1,1,1,1,1,1,1,1,1),(-2.,-1.,0.,1.,2.,3.,4.,5.,6.),.UNSPECIFIED.)",
+        p[0], p[1], p[2], p[3], p[0], p[1]
+    ));
+    // The curve at its domain's start: the middle of its first two corners.
+    let v = w.vertex([0.0, -10.0, 0.0]);
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{v},#{curve},.T.)"));
+    let oe = w.oe(e, true);
+    let bound = w.bound(&[oe], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&[bound], plane, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('disk',(#{shell}))"));
+    let s = one_solid(&w.file(&[model]));
+    let edge = s.brep.edges.first().unwrap();
+    let solidcore_record::brep::Curve::Spline { knots, .. } = edge.parameters() else { panic!("{:?}", edge.curve) };
+    assert_eq!((knots[..3].to_vec(), knots[knots.len() - 3..].to_vec()), (vec![0.0; 3], vec![4.0; 3]));
+}
+
 /// A FACETED_BREP: a tetrahedron of four FACE_SURFACEs on planes, each bounded by a POLY_LOOP of
 /// three of its four points. Each point is one vertex and each side one edge, shared by the two
 /// faces it bounds, so the shell closes.

@@ -1594,6 +1594,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+
         // Without a kernel, a use with neither is refused below with why.
         let made = match self.trims {
             Some(trims) if exact.iter().flatten().any(Option::is_none) => {
@@ -1934,14 +1935,31 @@ fn full_knots(knots: &[f64], mults: &[usize], count: usize, degree: usize) -> R<
 
 fn map_bspline_curve(b: &BSplineCurve) -> R<BCurve> {
     let knots = full_knots(&b.knots, &b.multiplicities, b.points.len(), b.degree)?;
-    Ok(match &b.weights {
-        None => BCurve::Spline { knots, points: b.points.clone() },
+    let homogeneous: Vec<[f64; 4]> = match &b.weights {
+        None => b.points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
         Some(w) => {
             if w.len() != b.points.len() {
                 return Err("B-spline weights and points differ in number".into());
             }
-            BCurve::RationalSpline { knots, homogeneous: b.points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect() }
+            b.points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()
         }
+    };
+    // An unclamped knot vector (a periodic curve written with uniform knots, its first points
+    // repeated at its end) is the same curve over [knots[p], knots[n]] clamped there, exactly
+    // (knot insertion): its parameters unchanged, its ends its own points, as every evaluator
+    // and pcurve takes a spline.
+    let (p, n) = (b.degree, homogeneous.len());
+    let (lo, hi) = (knots.get(p).copied(), knots.get(n).copied());
+    let clamped = |at: &[f64], x: Option<f64>| x.is_some_and(|x| at.iter().all(|k| *k == x));
+    let (knots, homogeneous) = match (knots.get(..=p), knots.get(n..), lo, hi) {
+        (Some(head), Some(tail), Some(a), Some(z)) if !(clamped(head, lo) && clamped(tail, hi)) => {
+            solidcore::eval::pcurve::segment(p, &knots, &homogeneous, a, z).map_err(|e| format!("an unclamped B-spline curve: {e}"))?
+        }
+        _ => (knots, homogeneous),
+    };
+    Ok(match &b.weights {
+        None => BCurve::Spline { knots, points: homogeneous.iter().map(|h| [h[0], h[1], h[2]]).collect() },
+        Some(_) => BCurve::RationalSpline { knots, homogeneous },
     })
 }
 
