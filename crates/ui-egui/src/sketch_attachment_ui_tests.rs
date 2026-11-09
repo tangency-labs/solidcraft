@@ -513,7 +513,7 @@ fn redefine_panel_current_plane_row_grows_for_a_long_plane_name() {
     h.frames(5);
     let row = scenario::rect_of("dialog:row:Current plane").expect("the panel names the current plane");
     let control = scenario::rect_of("dialog:control:Current plane").unwrap();
-    assert!(row.height() > crate::theme::Tokens::get().control_height, "the long name wraps and the row grows: {row:?}");
+    assert!(row.height() > solidcraft_theme::Tokens::get().control_height, "the long name wraps and the row grows: {row:?}");
     assert!(row.contains_rect(control));
     assert!(scenario::rect_of("dialog:field:Plane").unwrap().top() >= row.bottom(), "the Plane field sits below the grown row");
 }
