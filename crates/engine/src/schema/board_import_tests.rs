@@ -8,7 +8,7 @@ use crate::schema::{input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<InsertGerberParams>(),
-        &["drills", "drills_text", "finish", "layers", "layers_text", "name", "origin", "outline", "outline_text", "thickness"],
+        &["drills", "drills_text", "finish", "layers", "layers_text", "name", "origin", "outline", "outline_text", "set", "thickness"],
     );
 }
 
