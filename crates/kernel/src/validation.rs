@@ -149,6 +149,11 @@ impl Unchecked {
         Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)) }
     }
 
+    /// Whether this still holds the step's result for `record`.
+    fn holds(&self, record: &Arc<solidcore_record::brep::Brep>) -> bool {
+        std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) && self.result.lock().is_ok_and(|r| r.is_some())
+    }
+
     /// The step's result, taken (once), when this is `record`'s.
     fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
         if !std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) {
@@ -171,6 +176,13 @@ pub(crate) fn check_result(r: &solidcraft_smlib::Brep, how: Checked) -> std::res
         }
         _ => r.check(solidcraft_smlib::CheckLevel::All).map_err(|e| failed("check")(&e)),
     }
+}
+
+/// Whether [`check_kept`] of `body` reads only what it keeps apart for the check (the step's own
+/// result, or nothing for a mesh body), never the body's SMLib form the operations after it use:
+/// such a check can run on another thread beside them.
+pub fn check_kept_apart(body: &Body) -> bool {
+    body.is_mesh() || body.unchecked.as_deref().is_some_and(|u| u.holds(&body.record))
 }
 
 /// SMLib's full check of a body a feature keeps, once a step of the feature left its check to
