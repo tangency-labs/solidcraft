@@ -464,8 +464,47 @@ pub(crate) fn split_body(body: &Body, spec: &Spec) -> Result<Option<(Body, Body)
     if body.0.is_poisoned() {
         return Err(Error::Internal("smlib_split_body: the body was left unfinished by an earlier panic".to_owned()));
     }
-    let r = super::run_on("smlib_split_body", &[("brep", body)], |k| both_sides(k, body, false, |k, flip| side(k, body, spec, flip)))??;
+    let r = super::run_on("smlib_split_body", &[("brep", body)], |k| {
+        match by_closed_tool(k, body, spec)? {
+            Ok(Some(parts)) => return Ok(Ok(parts)),
+            Ok(None) => {}
+            Err(e) => return Ok(Err(e)),
+        }
+        both_sides(k, body, false, |k, flip| side(k, body, spec, flip))
+    })??;
     Ok(r.map(|(b, f)| (Body::new(b), Body::new(f))))
+}
+
+/// `smlib_split_body` by a tool whose surface closes on itself both ways (a sphere, a whole
+/// torus): its one-face sheet is then a closed shell, the solid the surface bounds, and
+/// `SM_BO_SLICE` with it fails (`SM_ERR`); the part behind the surface (inside it, its normal
+/// pointing out) is the body's intersection with that solid and the part in front their
+/// difference. `None` for a tool whose sheet is open, which [`both_sides`] slices; a side left
+/// empty is `Some(None)`.
+fn by_closed_tool(k: &mut Kernel, body: &Body, spec: &Spec) -> solidcore::Result<Out<Option<Option<(Brep, Brep)>>>> {
+    let sheet = match side(k, body, spec, false)? {
+        Ok(s) => s,
+        Err(e) => return Ok(Err(e)),
+    };
+    if !is_manifold_solid(&sheet)? {
+        return Ok(Ok(None));
+    }
+    let mut parts = [None, None];
+    for (part, op) in parts.iter_mut().zip([BooleanOperation::Intersection, BooleanOperation::Difference]) {
+        let a = {
+            let g = body.0.lock().unwrap_or_else(PoisonError::into_inner);
+            brep_copy(k, &g)?
+        };
+        let tool = brep_copy(k, &sheet)?;
+        let options = MergeOptions::new(false, false, false, false, false);
+        let r = match boolean_with_options(k, a, tool, op, options) {
+            Ok(r) => r.result,
+            Err(e) => return Ok(Err(status(e))),
+        };
+        *part = (!r.face_list().is_empty()).then_some(r);
+    }
+    let [Some(back), Some(front)] = parts else { return Ok(Ok(Some(None))) };
+    Ok(Ok(Some(Some((back, front)))))
 }
 
 /// `smlib_split_body_by_sheet`: the manifold solid `body` cut in two by `sheet` as it is (one or
