@@ -794,13 +794,41 @@ impl Session {
     /// number of a later body, every later counted body shifted, and a combine that names them
     /// failed or joined another body. The names are the ones the whole timeline gives, which is
     /// what the design called those bodies when it was saved. The design stays rolled back.
+    ///
+    /// The whole timeline is evaluated on a scratch copy, and only the names it pins come back:
+    /// refreshing this session there would also work out what the design reads from the later
+    /// geometry (a gear's ratio from a face after the marker, joint placements) and keep it.
     fn pin_rolled_back_body_names(&mut self) {
-        let Some(marker) = self.doc.marker.filter(|m| *m < self.doc.features.len()) else { return };
-        self.doc_mut().marker = None;
-        self.refresh();
-        self.pin_body_names();
-        self.doc_mut().marker = Some(marker);
-        self.refresh();
+        if !self.doc.marker.is_some_and(|m| m < self.doc.features.len()) {
+            return;
+        }
+        let mut whole = self.scratch();
+        whole.doc_mut().marker = None;
+        whole.model.evaluate_shared(&whole.doc);
+        whole.pin_body_names();
+        let pins: Vec<(u64, Vec<String>)> = whole
+            .doc
+            .features
+            .iter()
+            .filter(|f| self.doc.feature(f.id).is_some_and(|mine| mine.body_names != f.body_names))
+            .map(|f| (f.id, f.body_names.clone()))
+            .collect();
+        let reserve: Vec<String> = whole.doc.reserved_body_names.difference(&self.doc.reserved_body_names).cloned().collect();
+        if pins.is_empty() && reserve.is_empty() {
+            return;
+        }
+        // As `pin_body_names` stores names: the bodies keep the names they have, so no result
+        // changes and none is evaluated again.
+        let renamed: Vec<u64> = pins.iter().map(|(id, _)| *id).collect();
+        let keep = self.model.pinned_prefix(&self.doc, &renamed);
+        let doc = self.doc_mut();
+        for (id, names) in pins {
+            if let Some(f) = doc.feature_mut(id) {
+                f.body_names = names;
+            }
+        }
+        doc.reserved_body_names.extend(reserve);
+        self.model.refingerprint_shared(&self.doc, keep);
     }
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
