@@ -1229,10 +1229,15 @@ pub fn check_nx1_degeneracy_status(
                 | SolidError::Cancelled { .. }
                 | SolidError::NotFound { .. }),
             ) => Err(e),
-            Err(
-                e @ (SolidError::InvalidInput { reason, .. }
-                | SolidError::PortInvariant { reason, .. }),
-            ) if reason == NULL_DEREF => Err(e),
+            Err(e)
+                if matches!(
+                    &e,
+                    SolidError::InvalidInput { reason, .. }
+                    | SolidError::PortInvariant { reason, .. } if *reason == NULL_DEREF
+                ) =>
+            {
+                Err(e)
+            }
             Err(e) => Ok(Err(e)),
         }
     };
