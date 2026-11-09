@@ -129,12 +129,14 @@ pub(crate) mod form {
         };
         Some((curve_out(label)?, i, form))
     }
-    /// The parameter box of a face on `label` over its boundary ([`k::form::extent`], poles
-    /// exact).
+    /// The parameter box of a face on `label` over its boundary ([`k::form::extent_by`]), its
+    /// boundary points on a pole by the pcurves' speed rule, as the reader has always bounded its
+    /// faces: with the kernel's exact collapse test 7 STEP Tools parts get a loop of no (u, v)
+    /// area and are refused.
     pub(crate) fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Option<[[f64; 2]; 2]> {
         let converted: Vec<Vec<(k::Curve, [f64; 2], bool)>> =
             loops.iter().map(|l| l.iter().map(|(cv, i, f)| Some((curve_in(cv)?, *i, *f))).collect::<Option<_>>()).collect::<Option<_>>()?;
         let borrowed: Vec<Vec<(&k::Curve, [f64; 2], bool)>> = converted.iter().map(|l| l.iter().map(|(cv, i, f)| (cv, *i, *f)).collect()).collect();
-        k::form::extent(&surface_in(label)?, &borrowed, 0.0).ok().flatten()
+        k::form::extent_by(&surface_in(label)?, &borrowed, &|eval, q| Ok(k::pcurve::pole_by_speed(eval, &eval.domain(), q, 0.0))).ok().flatten()
     }
 }
