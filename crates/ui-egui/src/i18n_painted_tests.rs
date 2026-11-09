@@ -185,6 +185,7 @@ fn the_sweep_reports_english_only_where_a_translation_exists() {
 
 #[test]
 fn lao_catalog_has_no_leaks() {
-    let lo = crate::i18n::Locale::for_language("lo");
-    assert!(english_leaks("lo", &english_ids(), &design_names(&Harness::new().app)).is_empty());
+    let mut h = sample();
+    let names = design_names(&h.app);
+    assert!(english_leaks("lo", &english_ids(), &names, &mut h).is_empty());
 }
