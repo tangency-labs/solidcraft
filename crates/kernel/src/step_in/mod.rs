@@ -1,7 +1,7 @@
 //! STEP import (ISO 10303-21 files, AP203/AP214/AP242 geometry).
 //!
 //! Our own reader, written from the public standards: [`p21`] parses the exchange structure,
-//! [`solidcraft_step::topology`] reads each solid into its schema 4 record, which SMLib takes
+//! [`solidcore_step::topology`] reads each solid into its schema 4 record, which SMLib takes
 //! as the body ([`parallel`]), and this module walks the product structure (products, shape
 //! representations, assemblies with their placements, units, colours). STEP files are
 //! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_step::read::R;
+use solidcore_step::read::R;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
@@ -175,13 +175,13 @@ struct Batch {
 
 /// The units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT) and its distance
 /// uncertainty (mm) as the file states it.
-type Units = solidcraft_step::units::Context;
+type Units = solidcore_step::units::Context;
 
-/// Units of a representation context, read by [`solidcraft_step::units::context`] (millimetres
+/// Units of a representation context, read by [`solidcore_step::units::context`] (millimetres
 /// and radians when the file names none).
 fn context_units(ex: &Exchange, ctx: Option<u64>, cache: &mut HashMap<u64, Units>) -> Units {
     let Some(id) = ctx else { return Units::default() };
-    *cache.entry(id).or_insert_with(|| solidcraft_step::units::context(ex, id))
+    *cache.entry(id).or_insert_with(|| solidcore_step::units::context(ex, id))
 }
 
 /// Items and context of a representation entity.
@@ -251,7 +251,7 @@ fn translation(t: [f64; 3]) -> M4 {
 }
 
 /// The matrix of an AXIS2_PLACEMENT: its frame's axes and origin.
-fn frame_matrix(p: &solidcraft_step::geom::Placement) -> M4 {
+fn frame_matrix(p: &solidcore_step::geom::Placement) -> M4 {
     let (x, y, z, o) = (p.ref_direction, p.y(), p.axis, p.origin);
     [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
 }
@@ -600,7 +600,7 @@ impl Reader {
     /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
     /// first).
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
-        let reader = solidcraft_step::read::Reader::new(&self.ex, u.units);
+        let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
             let p = e.params();
@@ -718,7 +718,7 @@ impl Reader {
                         // The node lists the planned solids (a surface model's closed shells
                         // beside its sheet are solids of their own, in the model's colour); each
                         // becomes a body index once converted.
-                        for piece in solidcraft_step::topology::items(&self.ex, item) {
+                        for piece in solidcore_step::topology::items(&self.ex, item) {
                             if piece != item {
                                 if let Some(c) = self.colors.get(&item).copied() {
                                     self.colors.entry(piece).or_insert(c);
@@ -1079,12 +1079,12 @@ impl Reader {
 /// Faces whose boundary runs the wrong way round their normal, as a strict reader sees them:
 /// each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO 10303-42),
 /// reversed when `same_sense` is false, and the outer loop must run counter-clockwise seen from
-/// that side. These are the faces the STEP reader turns over ([`solidcraft_step::topology`]),
+/// that side. These are the faces the STEP reader turns over ([`solidcore_step::topology`]),
 /// numbered as the solid's body numbers them. Returns one message per bad face; an error when
 /// the file does not parse or has no solid the reader can read.
 pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
     let ex = p21::parse(text)?;
-    let read = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let read = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
     if read.solids.is_empty() {
         return Err(read.failures.first().map_or_else(|| "the file has no solids".into(), |f| format!("solid #{}: {}", f.item, f.message)));
     }

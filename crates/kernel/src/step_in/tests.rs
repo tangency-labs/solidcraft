@@ -218,7 +218,7 @@ fn benchmark_independent_step_solids() {
     let mut items: Vec<_> = ex.entities.iter().filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| *id).collect();
     items.sort();
     let start = std::time::Instant::now();
-    let solids: Vec<_> = items.iter().map(|id| solidcraft_step::topology::read_solid(&ex, *id, Units::default()).unwrap()).collect();
+    let solids: Vec<_> = items.iter().map(|id| solidcore_step::topology::read_solid(&ex, *id, Units::default()).unwrap()).collect();
     let read = start.elapsed();
     let start = std::time::Instant::now();
     for solid in solids {
@@ -1612,7 +1612,7 @@ fn knot_multiplicities_are_checked_before_they_are_expanded() {
     };
     let read = |text: &str| {
         let ex = p21::parse(text).unwrap();
-        solidcraft_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
+        solidcore_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
     };
     // These diagnostics come from the checks before expansion; wall-clock time depends on CI load.
     let error = read(&curve(1_000_000, 64)).unwrap_err();
@@ -2057,11 +2057,11 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
-/// The volume of the one solid `solidcraft_step::topology` reads from `text` into schema 4,
+/// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
-    let ex = solidcraft_step::p21::parse(text).unwrap();
-    let r = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let ex = solidcore_step::p21::parse(text).unwrap();
+    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
@@ -2086,7 +2086,7 @@ fn step_conformance_parts_read_into_smlib() {
     ];
     for (name, volume, faces) in parts {
         let text = std::fs::read_to_string(dir.join(format!("{name}.step"))).unwrap();
-        let ex = solidcraft_step::p21::parse(&text).unwrap();
+        let ex = solidcore_step::p21::parse(&text).unwrap();
         // The file's one representation context, as the import reads it.
         let ctx = ex.entities.iter().find(|(_, e)| e.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").is_some()).map(|(id, _)| *id);
         let units = context_units(&ex, ctx, &mut HashMap::new());

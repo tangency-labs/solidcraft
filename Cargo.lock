@@ -4216,6 +4216,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-step"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcraft"
 version = "0.40.0-rc.3"
 dependencies = [
@@ -4433,10 +4443,10 @@ dependencies = [
  "serde_json",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-step",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",
- "solidcraft-step",
  "spade",
  "thiserror 2.0.21",
  "web-time",
@@ -4521,16 +4531,6 @@ name = "solidcraft-space-mouse"
 version = "0.40.0-rc.3"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "solidcraft-step"
-version = "0.40.0-rc.3"
-dependencies = [
- "solidcore-ops",
- "solidcore-record",
- "solidcraft-geom",
- "solidcraft-profile",
 ]
 
 [[package]]
