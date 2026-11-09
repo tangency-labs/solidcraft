@@ -455,10 +455,10 @@ evidence description, and clear the fixture before checking real capabilities.
 | Launch | What listens |
 |---|---|
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |
-| neither, and Preferences > Assistant > "Let AI agents connect (control channel / MCP)" on (the default) | the default port **27878**, or the next free one up to 27893 when it is taken (a second window, another program) |
+| neither, and Preferences > Assistant > Agents through MCP > "Let AI agents connect" on (the default) | the setting's port: the default **27878**, or the next free one up to 27893 when it is taken (a second window, another program); any other port exactly, or nothing when it is taken (the panel says so) |
 | neither, and the setting off | nothing |
 
-The setting is read at start-up. Old preference files, which don't have it, load with it on. A
+Turning the setting on or off, or changing its port, takes effect at once: the channel closes (with its connections, token file and discovery file) and opens again where the setting asks. A launch with `--control` or the variable keeps its port for that run, and the setting waits for the next launch. Old preference files, which don't have it, load with it on. A
 launch with `--control` or the variable behaves as it always did (the start page stays hidden,
 the window doesn't ask for the foreground), because a scripted launch expects that; the default
 channel changes neither for a normal launch.

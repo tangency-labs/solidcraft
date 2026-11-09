@@ -931,7 +931,7 @@
   "ai.http.confirm": "Allow for this endpoint",
   "ai.http.warning": "The API key and conversation will be sent unencrypted. Anyone with access to the network may read or change them. Use this only on a network you trust.",
   "ai.prefs.allow_control": "Let AI agents connect",
-  "ai.prefs.allow_control_note": "A local channel (MCP). Nothing leaves this computer.\n\nOpens a control channel on this computer only (127.0.0.1, port 27878 or the next free one). A program that connects must also show a secret token that only your user account can read, made fresh at every start. Takes effect the next time SolidCraft starts. Off: nothing listens unless you start SolidCraft with --control.",
+  "ai.prefs.allow_control_note": "A local channel (MCP). Nothing leaves this computer.\n\nOpens a control channel on this computer only (127.0.0.1, on the port below; 27878 takes the next free one when it is in use). A program that connects must also show a secret token that only your user account can read, made fresh at every start. Takes effect at once. Off: nothing listens unless you start SolidCraft with --control.",
   "ai.prefs.availability": "Availability",
   "ai.prefs.background_commands": "Run slow commands in the background",
   "ai.prefs.connect_apps": "Add SolidCraft to AI apps",

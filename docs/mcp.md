@@ -36,8 +36,8 @@ solidcraft-cli mcp --connect 127.0.0.1:7878
 ### The app listens by default
 
 The desktop app opens its control channel at start-up on `127.0.0.1:27878` (or the next free port
-when that one is taken), unless Preferences > Assistant > "Let AI agents connect (control
-channel / MCP)" is off; the setting takes effect at the next start. It is reachable from this
+when that one is taken), unless Preferences > Assistant > Agents through MCP > "Let AI agents connect" is off; the
+setting and its port take effect at once. It is reachable from this
 computer only, and every connection must show the token made fresh for that launch, readable only
 by your user account ([control-protocol.md](control-protocol.md#token)). The app writes the port to
 `control/current.port` in the same folder as its token file; `solidcraft-cli mcp` with no
