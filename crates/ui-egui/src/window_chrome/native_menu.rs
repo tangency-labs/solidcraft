@@ -5,7 +5,8 @@
 //! Hide Others, Show All, Quit), then the app's menus. The menu whose id is [`WINDOW`] also gets
 //! the system's window entries (Minimize, Zoom, Enter Full Screen, Bring All to Front). An entry's
 //! `shortcut` is a menu accelerator (`Cmd+Shift+S`, `Cmd+,`). A menu's own id (`menu.file`, ...)
-//! names it for [`MenuTable::replace`] and is never dispatched. The layout ([`MenuTable`]) is the
+//! names it for [`MenuTable::replace`] and is never dispatched, so an item with such an id is a
+//! submenu even with no children yet. The layout ([`MenuTable`]) is the
 //! same everywhere; only macOS turns it into native menus ([`NativeMenu`]); Windows and Linux keep
 //! their default (no menu bar).
 
@@ -138,7 +139,7 @@ impl MenuTable {
                     Row::Separator
                 } else if item.is_heading() {
                     Row::Heading(&item.label)
-                } else if !item.children.is_empty() {
+                } else if !item.children.is_empty() || item.id.starts_with("menu.") {
                     self.submenus.push((item.id.clone(), within.to_vec()));
                     let mut inner = within.to_vec();
                     inner.push(item.id.clone());
@@ -423,5 +424,26 @@ mod tests {
             assert!(table.replace(menu, &fresh).is_err(), "{menu} is a menu of the bar, built once");
         }
         assert_eq!(table.entries().count(), 5, "a refused replace forgets nothing");
+    }
+
+    #[test]
+    fn a_submenu_empty_at_build_time_stays_a_submenu_and_can_be_filled_later() {
+        let mut bar = bar();
+        bar.menus[0].children.push(submenu("menu.file.empty", "Nothing yet", vec![submenu("menu.file.empty.inner", "Nor here", vec![])]));
+        let mut table = MenuTable::default();
+        table.layout(&bar);
+        for id in ["menu.file.empty", "menu.file.empty.inner"] {
+            assert!(table.within(id).is_some(), "{id} is a submenu");
+            assert!(table.entries().all(|(_, entry, _)| entry != id), "{id} is never dispatched");
+        }
+        let before = table.entries().count();
+
+        let fresh = vec![entry("ui.file.open_recent", "/b.solidcraft")];
+        let rows = table.replace("menu.file.empty", &fresh).unwrap_or_default();
+        let mut new = vec![];
+        keys(&rows, &mut new);
+        assert_eq!(new.len(), 1);
+        assert_eq!(table.find(new[0]), Some(("ui.file.open_recent", None)));
+        assert_eq!(table.entries().count(), before + 1);
     }
 }

@@ -27,6 +27,7 @@
 //! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
 //! | [`ErrorKind`], [`SolidError::kind`] | none: solidcore's stable error codes (#2615) |
 //! | [`offset::OffsetFailure`]   | none: the offset subsystem's refusals (#2615)    |
+//! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -72,6 +73,7 @@
 //! `sm_status` and the status numbers here move to a comparison-only module (or to
 //! difftest and the FFI), since nothing but the comparison needs them.
 
+pub mod nurbs;
 pub mod offset;
 
 use crate::topology::{
@@ -705,6 +707,8 @@ pub enum Reason {
     Failed(&'static str),
     /// An offset, shell, thicken or local operation refused.
     Offset(offset::OffsetFailure),
+    /// A NURBS routine failed.
+    Nurbs(nurbs::NurbsFailure),
 }
 
 impl Reason {
@@ -712,7 +716,7 @@ impl Reason {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::Failed(_) => None,
+            Self::Failed(_) | Self::Nurbs(_) => None,
             Self::Offset(o) => o.entity(),
         }
     }
@@ -723,6 +727,7 @@ impl Reason {
         match self {
             Self::Failed(_) => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
+            Self::Nurbs(_) => nurbs::NurbsFailure::COMPARISON_STATUS,
         }
     }
 
@@ -732,6 +737,7 @@ impl Reason {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
             Self::Offset(o) => o.kind(),
+            Self::Nurbs(n) => n.kind(),
         }
     }
 }
@@ -741,7 +747,14 @@ impl core::fmt::Display for Reason {
         match self {
             Self::Failed(what) => f.write_str(what),
             Self::Offset(o) => o.fmt(f),
+            Self::Nurbs(n) => n.fmt(f),
         }
+    }
+}
+
+impl From<nurbs::NurbsFailure> for Reason {
+    fn from(n: nurbs::NurbsFailure) -> Self {
+        Self::Nurbs(n)
     }
 }
 
@@ -1174,7 +1187,7 @@ mod tests {
                 operation: "ray",
                 entity: None,
             },
-            SolidError::nlib("ray", NlibCode::Numerical),
+            SolidError::nurbs("ray", nurbs::NurbsFailure::Numerical),
         ];
         for e in native {
             assert_eq!(native_failure::<()>(Err(e)), Ok(None));
@@ -1228,8 +1241,14 @@ mod tests {
                 },
                 Some(1023),
             ),
-            (SolidError::nlib("op", NlibCode::Knot), Some(SM_ERR)),
-            (SolidError::nlib("op", NlibCode::Convergence), Some(SM_ERR)),
+            (
+                SolidError::nurbs("op", nurbs::NurbsFailure::Knots),
+                Some(SM_ERR),
+            ),
+            (
+                SolidError::nurbs("op", nurbs::NurbsFailure::NotConverged),
+                Some(SM_ERR),
+            ),
             (SolidError::invalid_input("op", "bad"), None),
             (
                 SolidError::NotFound {
@@ -1428,9 +1447,13 @@ mod tests {
                 ErrorKind::OffsetEdgeVanishes,
                 203,
             ),
-            (SolidError::nlib("op", NlibCode::Knot), ErrorKind::Failed, 6),
             (
-                SolidError::nlib("op", NlibCode::Convergence),
+                SolidError::nurbs("op", nurbs::NurbsFailure::Knots),
+                ErrorKind::Failed,
+                6,
+            ),
+            (
+                SolidError::nurbs("op", nurbs::NurbsFailure::NotConverged),
                 ErrorKind::NotConverged,
                 4,
             ),
@@ -1481,6 +1504,222 @@ mod tests {
         assert_eq!(e.sm_status(), Some(SM_ERR_OFFSET_EDGE_VANISHES));
         assert!(up(SM_ERR_OFFSET_EDGE_VANISHES).is_offset_edge_vanishes());
         assert!(!walls_touch(None).is_offset_edge_vanishes());
+    }
+
+    #[test]
+    fn nurbs_failures_describe_the_routine_in_solidcore_terms() {
+        use nurbs::NurbsFailure as N;
+
+        // (failure, message, kind, the NL number difftest compares)
+        let cases = [
+            (
+                N::CurveDefinition,
+                "the curve's control point, knot and degree counts do not agree",
+                ErrorKind::Failed,
+                1,
+            ),
+            (
+                N::SurfaceDefinition,
+                "the surface's control net, knot and degree counts do not agree",
+                ErrorKind::Failed,
+                2,
+            ),
+            (
+                N::Degree,
+                "the degree is not allowed here",
+                ErrorKind::Failed,
+                3,
+            ),
+            (
+                N::DegreeTooHigh { given: 21, max: 16 },
+                "degree 21 is above the largest degree, 16",
+                ErrorKind::Failed,
+                3,
+            ),
+            (
+                N::Knots,
+                "the knot vector is not valid here",
+                ErrorKind::Failed,
+                4,
+            ),
+            (
+                N::KnotsDecrease { index: 4 },
+                "the knot vector decreases at knot 4",
+                ErrorKind::Failed,
+                4,
+            ),
+            (
+                N::Weight,
+                "a weight is not valid here",
+                ErrorKind::Failed,
+                5,
+            ),
+            (
+                N::WeightOutOfRange {
+                    index: 1,
+                    weight: -2.0,
+                    min: 0.5,
+                    max: 8.0,
+                },
+                "the weight of control point 1 is -2, outside [0.5, 8]",
+                ErrorKind::Failed,
+                5,
+            ),
+            (
+                N::Parameter,
+                "a parameter is outside the domain",
+                ErrorKind::OutsideDomain,
+                6,
+            ),
+            (
+                N::ParameterOutside {
+                    parameter: 2.5,
+                    lo: 0.0,
+                    hi: 1.0,
+                },
+                "parameter 2.5 is outside the domain [0, 1]",
+                ErrorKind::OutsideDomain,
+                6,
+            ),
+            (N::Index, "an index is out of range", ErrorKind::Failed, 7),
+            (
+                N::IndexOutOfRange { index: 9, len: 4 },
+                "index 9 is out of range for 4 items",
+                ErrorKind::Failed,
+                7,
+            ),
+            (
+                N::ZeroDerivative,
+                "a derivative is zero where a direction is needed",
+                ErrorKind::Failed,
+                8,
+            ),
+            (
+                N::Storage,
+                "a buffer supplied by the caller is too small",
+                ErrorKind::Failed,
+                9,
+            ),
+            (
+                N::Numerical,
+                "a numerical failure (a division by zero or overflow)",
+                ErrorKind::Failed,
+                11,
+            ),
+            (
+                N::NotConverged,
+                "the iteration did not converge",
+                ErrorKind::NotConverged,
+                12,
+            ),
+            (
+                N::CallFailed,
+                "a routine it calls rejected its arguments, or the direction is not handled",
+                ErrorKind::Failed,
+                13,
+            ),
+            (
+                N::Input,
+                "the input data is not valid",
+                ErrorKind::Failed,
+                14,
+            ),
+            (
+                N::Memory,
+                "the memory for the result cannot be allocated",
+                ErrorKind::Failed,
+                15,
+            ),
+            (
+                N::Singular,
+                "the system of equations is singular",
+                ErrorKind::Failed,
+                16,
+            ),
+            (
+                N::Geometry,
+                "the geometry does not allow the operation",
+                ErrorKind::Failed,
+                17,
+            ),
+            (
+                N::NoDerivativeRows,
+                "the output has no row for the point itself",
+                ErrorKind::Failed,
+                20,
+            ),
+            (
+                N::DerivativeOrder { given: 7, max: 4 },
+                "derivative order 7 is above the largest order, 4",
+                ErrorKind::Failed,
+                20,
+            ),
+        ];
+        for (failure, message, kind, number) in cases {
+            let error = SolidError::nurbs("nurbs::knots::insert", failure);
+            assert_eq!(
+                error.to_string(),
+                format!("nurbs::knots::insert: {message}")
+            );
+            assert_eq!(error.kind(), kind, "{error}");
+            assert_eq!(error.operation(), "nurbs::knots::insert");
+            assert_eq!(error.nurbs_failure(), Some(&failure));
+            assert!(error.is_nurbs_failure());
+            assert!(!error.is_port_failure());
+            // the comparison hooks: the status the Sm* callers report, never the NL number
+            assert_eq!(error.sm_status(), Some(SM_ERR), "{error}");
+            assert_eq!(nurbs::nlib_number(&error), Some(number), "{error}");
+            // no status number, NLib name or SMLib name in the message
+            let text = error.to_string();
+            for forbidden in ["NL_", "Nlib", "NLib", "Sm", "SM_ERR", "status"] {
+                assert!(!text.contains(forbidden), "{forbidden} in {text}");
+            }
+        }
+        // a failure that is not a NURBS one has no NL number
+        assert_eq!(nurbs::nlib_number(&SolidError::sm_err("op")), None);
+        assert!(!SolidError::sm_err("op").is_nurbs_failure());
+        // a NURBS failure collapsed to a generic one keeps the NURBS failure as the cause
+        let collapsed = SolidError::failed_after(
+            "op",
+            "a stage failed",
+            SolidError::nurbs("inner", N::Singular),
+        );
+        assert!(!collapsed.is_nurbs_failure());
+        assert_eq!(collapsed.root_cause().nurbs_failure(), Some(&N::Singular));
+    }
+
+    /// The NURBS routines report their failures as `NurbsFailure`s: no source file of
+    /// `src/nurbs` builds or names an NLib error number any more. (`crv_common.rs` is
+    /// the one file left, until the change that edits it lands.)
+    #[test]
+    fn the_nurbs_sources_construct_no_nlib_errors() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let mut entries: Vec<_> = std::fs::read_dir(dir)
+                .expect("read_dir")
+                .map(|e| e.expect("entry").path())
+                .collect();
+            entries.sort();
+            for path in entries {
+                if path.is_dir() {
+                    walk(&path, out);
+                } else if path.extension().is_some_and(|x| x == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/nurbs");
+        let mut files = Vec::new();
+        walk(&root, &mut files);
+        assert!(files.len() > 40, "{} files under {root:?}", files.len());
+        for path in files {
+            if path.file_name().is_some_and(|n| n == "crv_common.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("read");
+            for needle in ["SolidError::Nlib", "NlibCode", "SolidError::nlib("] {
+                assert!(!text.contains(needle), "{needle} in {path:?}");
+            }
+        }
     }
 
     #[test]

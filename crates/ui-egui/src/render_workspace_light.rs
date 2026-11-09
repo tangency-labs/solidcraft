@@ -544,7 +544,7 @@ pub(super) fn preview(app: &SolveApp) -> Result<Vec<[f32; 16]>, String> {
             Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } => {
                 let normal = solidcore_record::Vec3::new(ux, uy, uz).cross(solidcore_record::Vec3::new(vx, vy, vz));
                 let area = normal.len();
-                let n = solidcraft_engine::render::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
+                let n = solidcraft_viewport::surface::unit_direction(normal).unwrap_or(-solidcore_record::Vec3::Z);
                 ([n.x, n.y, n.z], 0.0, 0.0, area, 0.001)
             }
             _ => ([0.0; 3], 0.0, 0.0, 1.0, 0.001),

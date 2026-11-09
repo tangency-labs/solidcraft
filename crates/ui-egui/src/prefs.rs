@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use solidcore_record::Vec3;
 pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
 pub const STORAGE_KEY: &str = "solidcraft.prefs";
@@ -532,7 +532,7 @@ pub enum HistorySketches {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionHatch {
-    /// Each body in its own hatch (`solidcraft_render::hatch`): 45 or 135 degrees in one of the
+    /// Each body in its own hatch (`solidcraft_viewport::hatch`): 45 or 135 degrees in one of the
     /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
     /// know reads as (`lenient`).
     #[default]
@@ -1067,6 +1067,9 @@ preference_settings! {
     /// and automatic result opening; retain the previous result/cancel viewing behavior.
     /// GPU sample edits round to powers of two.
     render_legacy_image_defaults: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_image_defaults");
+    /// Restore native software-pool admission without refusing an available-RAM shortage.
+    /// Shared/host software limits and device/allocation checks remain in force.
+    render_legacy_memory_admission: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_memory_admission");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
     /// `ultra` (#1287). Only the display plan the viewport draws; never the design or exports.
     display_quality: String = "normal".into(), PAGE_GRAPHICS;
@@ -1821,6 +1824,7 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         app.preferences = self.prefs;
         sync_surface_analysis(app);
+        crate::render_workspace::apply_memory_policy(app);
         app.preferences.update = update;
         if units_changed {
             default_units_changed(app);
@@ -2096,6 +2100,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
     sync_surface_analysis(app);
+    crate::render_workspace::apply_memory_policy(app);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -2691,7 +2696,7 @@ impl prefs_window::Host for SolveApp {
 
 /// The default orientation changed: the view turns to match.
 fn up_axis_changed(app: &mut SolveApp) {
-    use solidcraft_engine::render::UpAxis;
+    use solidcraft_viewport::UpAxis;
     app.prefs_window.applied_up = Some(app.preferences.up_axis.clone());
     let up = if app.preferences.up_axis.eq_ignore_ascii_case("y") { UpAxis::Y } else { UpAxis::Z };
     if app.ui.up_axis != up || app.cam.up != up {
@@ -4057,6 +4062,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     app.preferences = new;
     sync_surface_analysis(app);
+    crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
     if units_changed {
         default_units_changed(app);
@@ -6883,7 +6889,7 @@ mod tests {
             assert_eq!((t.viewport_top, t.viewport_bottom, Tokens::view().viewport_top), (white, white, white), "{theme}");
             assert_eq!(t.panel, Tokens::themed(view_dark, ColorVision::Off).panel, "{theme}: the window");
             let scene = crate::control::view_scene(&h.app, solidcraft_engine::view::Guides::default()).unwrap();
-            let white = solidcraft_engine::render::Rgb(255, 255, 255);
+            let white = solidcraft_viewport::Rgb(255, 255, 255);
             assert_eq!(scene.background, Some((white, white)), "{theme}: a picture of the view");
         }
 
@@ -8355,7 +8361,7 @@ mod tests {
         assert_eq!(Tokens::get().panel, hard.panel);
         assert_eq!(
             crate::viewport::scene_palette(true, ColorVision::Off).background.0,
-            solidcraft_engine::render::Rgb(hard.viewport_top.r(), hard.viewport_top.g(), hard.viewport_top.b())
+            solidcraft_viewport::Rgb(hard.viewport_top.r(), hard.viewport_top.g(), hard.viewport_top.b())
         );
 
         let file = json!({"format": "solidcraft-theme/1", "name": "Paper", "base": "light", "colors": {"panel": "#fffdf0", "accent": "#aa3300"}, "borders":{"primary":{"width":2,"color":"#ffffff"},"tertiary":{"width":0,"color":"#000000"}}, "radii": {"radius_sm": 0, "control_radius": 0, "radius_xl": 16}});
@@ -8585,6 +8591,43 @@ mod tests {
         assert!(restored.preferences.render_legacy_image_defaults);
         super::defaults(&mut restored, super::PAGE_GRAPHICS);
         assert!(!restored.preferences.render_legacy_image_defaults);
+    }
+
+    #[test]
+    fn render_legacy_memory_admission_applies_to_both_hosts_and_roundtrips() {
+        use serde_json::json;
+        use solidcraft_engine::render::job::{CpuHost, NativeMemoryPolicy};
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        let cpu = app.session.render_job_host().unwrap().clone();
+        let gpu = CpuHost::cooperative();
+        app.render_workspace.path_host = crate::render_workspace::PathHost::Ready(gpu.clone());
+        assert!(!app.preferences.render_legacy_memory_admission);
+        assert_eq!(cpu.native_memory_policy(), NativeMemoryPolicy::AvailableRam);
+        assert_eq!(gpu.native_memory_policy(), NativeMemoryPolicy::AvailableRam);
+        super::control(&mut app, &json!({"open":"Graphics"})).unwrap();
+        assert!(app.prefs_window.shell.open && app.prefs_window.shell.snapshot().is_some());
+        let out = super::set(&mut app, &json!({"render_legacy_memory_admission":true})).unwrap();
+        assert_eq!(out["render_legacy_memory_admission"], true);
+        assert_eq!(cpu.native_memory_policy(), NativeMemoryPolicy::SoftwarePoolOnly);
+        assert_eq!(gpu.native_memory_policy(), NativeMemoryPolicy::SoftwarePoolOnly);
+        assert!(super::set(&mut app, &json!({"render_legacy_memory_admission":"yes"})).is_err());
+        assert!(app.preferences.render_legacy_memory_admission);
+        crate::prefs_window::close(&mut app, true);
+        assert!(!app.prefs_window.shell.open && app.prefs_window.shell.snapshot().is_none());
+        assert!(!app.preferences.render_legacy_memory_admission);
+        // Cancel must restore both reused hosts before any frame/backend sync.
+        assert_eq!(cpu.native_memory_policy(), NativeMemoryPolicy::AvailableRam);
+        assert_eq!(gpu.native_memory_policy(), NativeMemoryPolicy::AvailableRam);
+
+        super::set(&mut app, &json!({"render_legacy_memory_admission":true})).unwrap();
+        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.render_legacy_memory_admission);
+        let restored_host = restored.session.render_job_host().unwrap().clone();
+        assert_eq!(restored_host.native_memory_policy(), NativeMemoryPolicy::SoftwarePoolOnly);
+        super::defaults(&mut restored, super::PAGE_GRAPHICS);
+        assert!(!restored.preferences.render_legacy_memory_admission);
+        assert_eq!(restored_host.native_memory_policy(), NativeMemoryPolicy::AvailableRam);
     }
 
     #[test]
@@ -10776,7 +10819,7 @@ mod tests {
         assert_eq!(app.preferences.nav, "alias", "Cancel goes back to the last Apply");
         let to = {
             let mut c = app.cam;
-            c.set_view(solidcraft_engine::render::StandardView::Top);
+            c.set_view(solidcraft_viewport::StandardView::Top);
             c
         };
         app.animate_to(to);
@@ -11059,7 +11102,7 @@ mod tests {
     /// The Y up preference turns the view: the camera's up axis follows it, startup included.
     #[test]
     fn up_axis_preference_turns_the_view() {
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let ctx = crate::fonts::test_context();
         apply(&mut app, &ctx);
@@ -11173,7 +11216,7 @@ mod ambient_occlusion_tests {
     /// up direction; Restore Defaults turns it off again.
     #[test]
     fn dark_parts_shading_is_optional_persistent_and_follows_the_up_axis() {
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         let old: Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
         assert!(!old.dark_parts_shading && !Prefs::default().dark_parts_shading);
         assert_eq!(crate::viewport::sky_uniform(false, UpAxis::Z), [0.0; 4], "off: shaded as before");
@@ -11719,8 +11762,8 @@ mod perspective_fov_tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"perspective": true}));
         h.frames(2);
-        let to = solidcraft_engine::render::Camera { distance: 300.0, ..h.app.cam };
-        h.app.cam_anim = Some(solidcraft_engine::render::CameraAnim::new(h.app.cam, to, h.app.now));
+        let to = solidcraft_viewport::Camera { distance: 300.0, ..h.app.cam };
+        h.app.cam_anim = Some(solidcraft_viewport::CameraAnim::new(h.app.cam, to, h.app.now));
         let from = h.app.cam;
         set(&mut h.app, &json!({"perspective_fov": 1.0})).unwrap();
         let k = (0.6f64 * 0.5).tan() / 0.5f64.tan();

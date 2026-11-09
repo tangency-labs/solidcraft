@@ -370,6 +370,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 window_system_row(app, ui, help_label_width);
                 setting::render_previous_geometry_budget(app, ui).backing_on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
                 setting::render_legacy_image_defaults(app, ui).backing_on_hover_text(app.tr("prefs.render_legacy_image_defaults_help"));
+                let memory =
+                    setting::render_legacy_memory_admission(app, ui).backing_on_hover_text(app.tr("prefs.render_legacy_memory_admission_help"));
+                crate::scenario::publish_target("prefs:render_legacy_memory_admission", memory.rect);
+                if memory.changed() {
+                    crate::render_workspace::apply_memory_policy(app);
+                }
             });
         });
     });

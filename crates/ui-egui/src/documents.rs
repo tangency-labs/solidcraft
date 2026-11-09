@@ -9,7 +9,7 @@ use crate::i18n::LocaleNames as _;
 use egui::Rect;
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::ui_kit;
