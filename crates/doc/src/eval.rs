@@ -6746,20 +6746,14 @@ fn sheet_hole_cut(
     Ok(handled)
 }
 
-/// The cutting tools of one hole at `position`, drilling along `dir` (`kept_inside`: see
-/// [`hole_tools_and_prisms`]).
-#[allow(clippy::too_many_arguments)]
-fn hole_tools(
-    vals: &BTreeMap<String, Value>,
-    st: &ModelState,
-    position: &Vec3,
+/// A pattern copy's hole tools ([`hole_tools_reaching`]) at `at`, kept for the next copy drilled
+/// the same way: along `dir`, `depth` deep, with a `reach` that [`HoleReach::moves_to`] its own.
+struct HoleBuilt {
+    at: Vec3,
     dir: Vec3,
-    diameter: &str,
-    depth: &Option<crate::Expr>,
-    hole: &HoleKind,
-    kept_inside: bool,
-) -> Result<Vec<Traced>> {
-    Ok(hole_tools_and_prisms(vals, st, position, dir, diameter, depth, hole, kept_inside)?.into_iter().map(|(tool, _)| tool).collect())
+    depth: Option<crate::Expr>,
+    reach: HoleReach,
+    tools: Vec<Traced>,
 }
 
 /// The scale a hole's tools are sized by: the largest body the hole's axis meets (#2904), so a
@@ -6873,9 +6867,10 @@ fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Ve
     (if lowest.is_finite() { top.min(lowest / 2.0) } else { top }, near)
 }
 
-/// [`hole_tools`], each with its exact geometry when it is a straight cylinder along the axis
-/// (a plain hole, a counterbore, a drill point left in the air past a through hole), so sheet
-/// metal can keep it as a flat cut-out or pocket. Each tool's faces are named by the part of the
+/// The cutting tools of one hole at `position`, drilling along `dir` (`kept_inside`: see
+/// [`hole_reach`]), each with its exact geometry when it is a straight cylinder along the axis (a
+/// plain hole, a counterbore, a drill point left in the air past a through hole), so sheet metal
+/// can keep it as a flat cut-out or pocket. Each tool's faces are named by the part of the
 /// hole it cuts (`bore`, `cbore`, `csink`: `F7:cbore:base` is a counterbore's floor).
 #[allow(clippy::too_many_arguments)]
 fn hole_tools_and_prisms(
@@ -6888,6 +6883,51 @@ fn hole_tools_and_prisms(
     hole: &HoleKind,
     kept_inside: bool,
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+    let reach = hole_reach(vals, st, position, dir, diameter, depth, hole, kept_inside)?;
+    hole_tools_reaching(vals, st, position, dir, diameter, depth, hole, &reach)
+}
+
+/// What a hole's tools at one spot take from the model there, not from the hole's numbers: the
+/// reach `size` ([`hole_axis_size`]), how far the tools run on above the face (`top`) and the
+/// material nearer than that (`above`, cut out of them), whether the hole exits the material at
+/// its depth (`exits`) and where its bore ends (`bore_end`, past an exit face).
+#[derive(Clone, Debug)]
+struct HoleReach {
+    size: f64,
+    top: f64,
+    above: Vec<Body>,
+    exits: bool,
+    bore_end: f64,
+}
+
+impl HoleReach {
+    /// Whether a hole's tools built with this reach, moved, are those built with `other` at the
+    /// spot it is moved to (drilled the same way, a hole kind that looks at nothing else there):
+    /// the same reach, and no material above either spot, which would be cut out of the tools
+    /// where it lies.
+    fn moves_to(&self, other: &HoleReach) -> bool {
+        self.above.is_empty()
+            && other.above.is_empty()
+            && self.size == other.size
+            && self.top == other.top
+            && self.exits == other.exits
+            && self.bore_end == other.bore_end
+    }
+}
+
+/// The [`HoleReach`] of a hole at `position`, drilling along `dir`; `kept_inside` when the spot
+/// may stay inside the part (a sketch on a plane through it, #11538), which then starts there.
+#[allow(clippy::too_many_arguments)]
+fn hole_reach(
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    position: &Vec3,
+    dir: Vec3,
+    diameter: &str,
+    depth: &Option<crate::Expr>,
+    hole: &HoleKind,
+    kept_inside: bool,
+) -> Result<HoleReach> {
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     if !(r > 1e-6) {
         return Err(DocError::Invalid("hole diameter must be positive".into()));
@@ -6939,6 +6979,30 @@ fn hole_tools_and_prisms(
             _ => bottom,
         },
         None => bottom,
+    };
+    Ok(HoleReach { size, top, above, exits, bore_end })
+}
+
+/// [`hole_tools_and_prisms`] with the hole's [`HoleReach`] at `position` already found.
+#[allow(clippy::too_many_arguments)]
+fn hole_tools_reaching(
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    position: &Vec3,
+    dir: Vec3,
+    diameter: &str,
+    depth: &Option<crate::Expr>,
+    hole: &HoleKind,
+    reach: &HoleReach,
+) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.hole_tools += 1);
+    let HoleReach { size, top, ref above, exits, bore_end } = *reach;
+    let r = val(vals, diameter, Kind::Length)? / 2.0;
+    let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+    let bottom = match depth {
+        Some(d) => -val(vals, d, Kind::Length)?,
+        None => -(size * 2.0 + 1.0),
     };
     // Each tool's circle seam at its own angle, so seams don't line up between tools.
     let seam = std::cell::Cell::new(0.0);
@@ -7043,7 +7107,7 @@ fn hole_tools_and_prisms(
     // a tool is no longer a plain cylinder.
     let mut kept = Vec::with_capacity(tools.len());
     for (mut tool, mut prism) in tools {
-        for piece in &above {
+        for piece in above {
             // Best effort: where the kernel cannot answer, the tool stays as it was before.
             if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
                 continue;
@@ -8609,7 +8673,9 @@ fn mirror_matrix(pl: &Plane) -> Mat {
     ]
 }
 
-const MAX_INSTANCES: usize = 1000;
+/// The most copies one pattern makes (the original included), and so one mirror or pattern step
+/// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
+const MAX_INSTANCES: usize = 10_000;
 
 /// Where a mirrored body was picked and where its copy goes, for a mirror in component `own`: the
 /// component the copy joins and that component's frame, and the frame the body's own geometry is
@@ -8752,7 +8818,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
                 _ => (1, 0.0, Vec3::Y),
             };
-            if n1 * n2 > MAX_INSTANCES {
+            if n1.saturating_mul(n2) > MAX_INSTANCES {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
             for i in 0..n1 {
@@ -8940,7 +9006,9 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
 /// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
 /// shows takes material from a target ([`shares_material`]) is not a miss, and skips it; only
 /// copies the test cannot place (in an earlier hole, on the edge, thinner than its samples) are
-/// intersected.
+/// intersected. The targets don't change while their copies are counted, so each one's exact box
+/// is worked out once, not once for every copy, and each copy's tool box once, not once for every
+/// target (#7942).
 fn count_copy_misses(
     st: &ModelState,
     f: &Feature,
@@ -8949,12 +9017,16 @@ fn count_copy_misses(
     instances: &[std::ops::Range<usize>],
     axes: &[Vec<(Vec3, Vec3)>],
 ) -> (usize, usize) {
-    let scope: Vec<&ModelBody> = miss_scope(st, f, targets).collect();
+    let scope: Vec<(&ModelBody, Option<solidcraft_geom::Aabb3>)> =
+        miss_scope(st, f, targets).map(|b| (b, (!b.body.is_mesh()).then(|| more::exact_box(&b.body)).flatten())).collect();
     let (mut missed, mut total) = (0, 0);
     for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
         total += 1;
         let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
-        let takes = tools.iter().any(|t| scope.iter().any(|b| shares_material(&b.body, &t.body, lines)));
+        let takes = tools.iter().any(|t| {
+            let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
+            scope.iter().any(|(b, target_box)| shares_material(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines))
+        });
         if !takes && copy_misses(st, f, targets, tools) {
             missed += 1;
         }
@@ -8967,13 +9039,21 @@ fn count_copy_misses(
 /// `lines` (a hole's axis: through the wall it drills into, however thin and slanted), along the
 /// axes of the tool's round faces (a cylinder's axis, the middle of a slot's ends) and along the
 /// three lines parallel to the axes through the middle of the box both exact boxes hold (the
-/// axis of a straight hole through a plate), within that box. `false` says nothing.
-fn shares_material(target: &Body, tool: &Body, lines: &[(Vec3, Vec3)]) -> bool {
+/// axis of a straight hole through a plate), within that box. `target_box` is `target`'s exact
+/// box and `tool_box` `tool`'s ([`more::exact_box`]), each worked out once by the caller; none,
+/// as when it can't be worked out, is no answer. `false` says nothing.
+fn shares_material(
+    target: &Body,
+    target_box: Option<&solidcraft_geom::Aabb3>,
+    tool: &Body,
+    tool_box: Option<&solidcraft_geom::Aabb3>,
+    lines: &[(Vec3, Vec3)],
+) -> bool {
     if target.is_mesh() || tool.is_mesh() {
         return false;
     }
-    let (Some(a), Some(b)) = (more::exact_box(target), more::exact_box(tool)) else { return false };
-    let both = a.intersection(&b);
+    let (Some(a), Some(b)) = (target_box, tool_box) else { return false };
+    let both = a.intersection(b);
     if both.is_empty() {
         return false;
     }
@@ -9203,10 +9283,12 @@ fn copy_plan<'a>(
             if depth >= MAX_NESTING {
                 return Err(DocError::Invalid(format!("patterns and mirrors of patterns and mirrors nest at most {MAX_NESTING} deep")));
             }
-            let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
-            if moved.len() > MAX_INSTANCES || next.saturating_add(moved.len()) > MAX_INSTANCES * MAX_NESTING {
+            // Counted before they are made: a pattern of a pattern multiplies the two counts.
+            let count = mats.len().saturating_mul(inner_mats.len());
+            if count > MAX_INSTANCES || next.saturating_add(count) > MAX_INSTANCES * MAX_NESTING {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
+            let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
             let block = *next;
             *next += moved.len();
             walk(doc, vals, st, &inner, &moved, block, next, depth + 1, out)?;
@@ -9429,6 +9511,15 @@ fn replay(
                 FeatureKind::Hole { points: Some(sp), .. } if !sp.single => st.sketch(sp.sketch.0).map(|ss| (ss.plane.normal(), sp.flip)),
                 _ => None,
             };
+            // A hole whose tools take nothing from the model at its spot beyond its direction,
+            // depth and [`HoleReach`] (no drill point or bridge, which look at the material there)
+            // has the same tools at every copy with those, moved: they are built once and moved
+            // to the next copy, not built again for each one (#7942).
+            let movable = matches!(
+                hole,
+                HoleKind::Simple | HoleKind::Counterbore { tip_angle: None, bridge: None, .. } | HoleKind::Countersink { tip_angle: None, .. }
+            );
+            let mut built: Option<HoleBuilt> = None;
             for (k, m) in mats.iter().enumerate() {
                 let d = match sketch_side {
                     Some((n, flip)) => {
@@ -9446,8 +9537,26 @@ fn replay(
                     on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
+                    let reach = hole_reach(vals, st, &at, d, diameter, &depth, hole, !from_inside)?;
+                    let tools = match built.as_ref().filter(|b| movable && b.dir == d && b.depth == depth && b.reach.moves_to(&reach)) {
+                        Some(b) => {
+                            let to_here = translation(at - b.at);
+                            b.tools
+                                .iter()
+                                .map(|t| Ok(Traced { lineage: t.lineage.clone(), body: kernel::transform_matrix(&t.body, to_here)?, recipe: None }))
+                                .collect::<Result<Vec<_>>>()?
+                        }
+                        None => {
+                            let tools: Vec<Traced> =
+                                hole_tools_reaching(vals, st, &at, d, diameter, &depth, hole, &reach)?.into_iter().map(|(tool, _)| tool).collect();
+                            if movable {
+                                built = Some(HoleBuilt { at, dir: d, depth: depth.clone(), reach, tools: tools.clone() });
+                            }
+                            tools
+                        }
+                    };
                     // Each copy's faces are named as the hole's, with the instance.
-                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole, !from_inside)?.into_iter().map(|t| Traced {
+                    copies.extend(tools.into_iter().map(|t| Traced {
                         lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)),
                         body: t.body,
                         recipe: None,
