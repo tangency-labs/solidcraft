@@ -217,6 +217,16 @@ Before you raise them:
 The control channel sets the same preference with `ui.prefs {"max_step_file_mb": 2048,
 "max_design_file_mb": 1024}`.
 
+## Export file names
+
+**Preferences → Design → Export file name** sets the name that **File → Export** and **Save As
+Mesh** offer in the save dialog. `{design}` stands for the design's name and `{body}` for the
+exported body's name. When an export holds several bodies, `{body}` is the first one. With
+`{design}-{body}`, the body Base of the design Bracket is offered as `Bracket-Base.step` or
+`Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. Left
+empty, STEP, OBJ and URDF offer the design's name, and a mesh offers its body's name. The control
+channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
+
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the

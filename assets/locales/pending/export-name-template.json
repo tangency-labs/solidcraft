@@ -1,0 +1,58 @@
+{
+  "en": {
+    "prefs.export": "Export",
+    "prefs.export_name": "Export file name",
+    "prefs.export_name_hint": "e.g. {design}-{body}",
+    "prefs.export_name_sample": "Exporting this design offers: {name}",
+    "prefs.export_name_tip": "The file name File › Export and Save As Mesh offer. {design} is the design's name and {body} the exported body's (the first one when there are several). Leave it empty to offer the design's name, or the body's for a mesh."
+  },
+  "ar": {
+    "prefs.export": "التصدير",
+    "prefs.export_name": "اسم ملف التصدير",
+    "prefs.export_name_hint": "مثلاً {design}-{body}",
+    "prefs.export_name_sample": "تصدير هذا التصميم يقترح: {name}",
+    "prefs.export_name_tip": "اسم الملف الذي يقترحه ملف › تصدير وحفظ كشبكة. {design} هو اسم التصميم و{body} اسم الجسم المُصدَّر (الأول إن تعددت الأجسام). اتركه فارغاً لاقتراح اسم التصميم، أو اسم الجسم للشبكة."
+  },
+  "de": {
+    "prefs.export": "Export",
+    "prefs.export_name": "Dateiname beim Export",
+    "prefs.export_name_hint": "z. B. {design}-{body}",
+    "prefs.export_name_sample": "Beim Export dieses Designs vorgeschlagen: {name}",
+    "prefs.export_name_tip": "Der Dateiname, den Datei › Exportieren und Als Netz speichern vorschlagen. {design} ist der Name des Designs, {body} der des exportierten Körpers (des ersten, wenn es mehrere sind). Leer lassen, um den Namen des Designs vorzuschlagen, bei einem Netz den des Körpers."
+  },
+  "he": {
+    "prefs.export": "ייצוא",
+    "prefs.export_name": "שם קובץ הייצוא",
+    "prefs.export_name_hint": "לדוגמה {design}-{body}",
+    "prefs.export_name_sample": "ייצוא התכן הזה מציע: {name}",
+    "prefs.export_name_tip": "שם הקובץ שמציעים קובץ › ייצוא ושמירה כרשת משולשים. {design} הוא שם התכן ו-{body} שם הגוף המיוצא (הראשון כשיש כמה). השאירו ריק כדי להציע את שם התכן, או את שם הגוף לרשת."
+  },
+  "ja": {
+    "prefs.export": "エクスポート",
+    "prefs.export_name": "エクスポートのファイル名",
+    "prefs.export_name_hint": "例: {design}-{body}",
+    "prefs.export_name_sample": "このデザインのエクスポート時の名前: {name}",
+    "prefs.export_name_tip": "ファイル › エクスポートとメッシュとして保存が提案するファイル名です。{design} はデザイン名、{body} はエクスポートするボディ名です（複数ある場合は最初のボディ）。空のままにすると、デザイン名（メッシュではボディ名）を提案します。"
+  },
+  "ko": {
+    "prefs.export": "내보내기",
+    "prefs.export_name": "내보내기 파일 이름",
+    "prefs.export_name_hint": "예: {design}-{body}",
+    "prefs.export_name_sample": "이 디자인을 내보낼 때 제안되는 이름: {name}",
+    "prefs.export_name_tip": "파일 › 내보내기와 메쉬로 저장이 제안하는 파일 이름입니다. {design}은 디자인 이름, {body}는 내보내는 바디 이름입니다(여러 개면 첫 번째 바디). 비워 두면 디자인 이름(메쉬의 경우 바디 이름)을 제안합니다."
+  },
+  "vi": {
+    "prefs.export": "Xuất",
+    "prefs.export_name": "Tên tệp khi xuất",
+    "prefs.export_name_hint": "vd. {design}-{body}",
+    "prefs.export_name_sample": "Xuất thiết kế này sẽ đề xuất: {name}",
+    "prefs.export_name_tip": "Tên tệp mà Tệp › Xuất tệp và Lưu dưới dạng lưới đa giác đề xuất. {design} là tên thiết kế và {body} là tên khối được xuất (khối đầu tiên nếu có nhiều). Để trống để đề xuất tên thiết kế, hoặc tên khối với lưới."
+  },
+  "zh": {
+    "prefs.export": "导出",
+    "prefs.export_name": "导出文件名",
+    "prefs.export_name_hint": "例如 {design}-{body}",
+    "prefs.export_name_sample": "导出此设计时建议的名称：{name}",
+    "prefs.export_name_tip": "文件 › 导出和另存为网格时建议的文件名。{design} 是设计名称，{body} 是导出实体的名称（有多个时取第一个）。留空则建议设计名称，网格则建议实体名称。"
+  }
+}
