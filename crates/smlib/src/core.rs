@@ -153,7 +153,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
     f.fillet_3x2_mixed_concave_side_edge = true;
-    f.offset_closed_curve_trim_arc = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
@@ -247,10 +246,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_face_curve_halves = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
-    f.offset_tangent_gap_statuses = true;
-    f.ssi_alignment_statuses = true;
-    f.fillet_corner_statuses = true;
-    f.fillet_edge_curve_domain_statuses = true;
     f.query_statuses_pass_on = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;

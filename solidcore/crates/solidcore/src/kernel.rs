@@ -902,32 +902,6 @@ pub struct UpstreamFixes {
     /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib
     /// c8f6a31; changed by #2009 group C, WR-662). Off by default for pinned compatibility.
     pub planar_path_sweep_statuses: bool,
-    /// No longer read: fillet corners always do this, so the field goes when SolidCraft's set drops it.
-    /// Fillet corners fail softly where a status upstream ignores would leave an unset
-    /// value, as the fork does (tangency-labs/smlib 66b02de; #483, changed by #2009):
-    /// `sm_TestG1Continuity` finds no tangency when an end tangent cannot be evaluated,
-    /// and `CheckAndFixDegeneracy` refines a vertex's UV point only with a computed one.
-    /// The binormal evaluations, the G1 angle and the Nx1 degeneracy test keep upstream's
-    /// handling, as the fork does.
-    pub fillet_corner_statuses: bool,
-    /// No longer read: `sm_CheckEdgeCurveDomains` always does this, so the field goes when SolidCraft's set drops it.
-    /// `sm_CheckEdgeCurveDomains` returns no trimmed curve (the edge's own curve is
-    /// used) when the copy cannot be made or trimmed, as the fork does
-    /// (tangency-labs/smlib 66b02de; #483, changed by #2009), instead of returning an
-    /// untrimmed copy as the requested domain.
-    pub fillet_edge_curve_domain_statuses: bool,
-    /// No longer read: `HaveTangentGaps` always does this, so the field goes when SolidCraft's set drops it.
-    /// Offset tangent-gap checks skip a sample they cannot evaluate instead of
-    /// measuring an unset point, as the fork does (`HaveTangentGaps`, tangency-labs/smlib
-    /// 4803d6d; #483, changed by #2009); `ClosestPoint`'s status stays dropped and a
-    /// successful query without a solution keeps its existing meaning.
-    pub offset_tangent_gap_statuses: bool,
-    /// No longer read: the alignment always does this, so the field goes when SolidCraft's set drops it.
-    /// Surface-intersection singularity alignment aligns nothing when the direction
-    /// angle cannot be computed, as the fork does (`ALIGN_DIR_WITH_PREVIOUS_POINT`,
-    /// tangency-labs/smlib e7ebc8d; #483, changed by #2009) instead of comparing an angle
-    /// read as zero.
-    pub ssi_alignment_statuses: bool,
     /// The B-rep's own edits, its `StitchAndOrient`, the offset and shell stitches and the
     /// Boolean merge, stitch and topology-intersection passes pass on the statuses SMLib
     /// drops: a failed list edit, evaluation, trim, stitch or orientation returns its error
@@ -1247,9 +1221,6 @@ pub struct UpstreamFixes {
     pub fillet_mitre_gap_patch: bool,
     /// Each fan of faces at a vertex where the body touches itself is a corner of its own: `SmFilletExecutive::SetFilletParameters` splits each filleted edge's vertex whose edge uses form several fans sharing no edge (two cubes sharing a corner; the up and down halves of squares drawn edge to edge, touching at the origin) into one vertex per fan at its point (`SmBrep::SplitVertexByFans`, `crate::topology::brep::vertex_fans`), `DoFilleting` joins the target's vertices still at a split point after the blends, whether they built or not (`SmBrep::JoinVertexFans`), and `SmFilletCorner::Create` builds no two-edge corner where an edge not blended there is a knife edge (its faces tangent and folded back on each other, `SmFilletSolver::IsKnifeEdge`). Upstream `SmFilletCorner::Create` walked one fan's faces, found the blended edges of both fans and built an Nx2 corner of edges sharing no face, failing with status 1001 ("unable to make topology") (WR-665; the fork's tangency-labs/smlib@4ecfbab and @e418750).
     pub fillet_corner_per_vertex_fan: bool,
-    /// No longer read: `TrimExtendedEdge` always does this, so the field goes when SolidCraft's set drops it.
-    /// `TrimExtendedEdge` takes, on a closed curve, the arc that runs where its base edge does, not always the interval between its two trim points: a hemisphere's rim, two arcs of one circle, no longer becomes one arc twice (WR-463, #403; the fork's tangency-labs/smlib@34eaa6b (was fa7ff4a)).
-    pub offset_closed_curve_trim_arc: bool,
     /// `TrimExtendedEdge` never takes an open edge's first trim point again as its second, by point as well as by parameter: on the closed curve a rim half of a sphere cap lifts onto (the whole offset circle), the first point's twin across the curve's seam (another parameter, the same point, often the far end of the coincident range the other rim half's offset gives) is refused, so the half no longer gets the whole circle (or nothing) and its offset loop no gap. Thickening the cap above z = 5 of a sphere whose rim is two half circles placed against its seam (the sphere cut by a turned box) failed with `SM_ERR_OFFSET_EDGE_VANISHES` (1043) with loop-gap closure, and gave a non-manifold body when closure could still be disabled (WR-673, #2174; the fork's tangency-labs/smlib@7ee0876, for #1502).
     pub offset_open_edge_second_trim_point: bool,
     /// `SmCone::CreateCanonical` (`Cone::create_canonical_with_semi_angle` and `Cone::create_canonical`) passes `inside_out` as the bounded cone constructor's `bInsideOut` and `false` as `bMakeNurbGenCurve` when `height` is `Some` (where upstream passes `FALSE` for `bInsideOut` and the caller's `bInsideOut` for `bMakeNurbGenCurve`, dropping an inside-out request), and rejects `height <= 0.0` in the two-radius overload with `SolidError::InvalidInput` (`SM_ERR_INVALID_INPUT`) instead of forwarding `top_radius` as the semi-angle in degrees of an unbounded cone (WR-63, #2207; see `plan/upstream-issues/WR-63--addendum-2026-11-01-cone-create-canonical-args.md`).

@@ -262,7 +262,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_clip_right_side_out = true;
-    k.fixes.offset_closed_curve_trim_arc = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_extended_edges_mated = true;
