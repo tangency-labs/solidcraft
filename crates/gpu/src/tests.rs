@@ -139,7 +139,7 @@ fn no_shader_mixes_shifts_and_bitwise_operators_without_parentheses() {
             }
         }
     }
-    assert!(shaders.iter().any(|p| p.ends_with("assets/shaders/viewport.wgsl")), "{shaders:?}");
+    assert!(shaders.iter().any(|p| p.ends_with("crates/viewport/shaders/viewport.wgsl")), "{shaders:?}");
     let mut found = Vec::new();
     for path in &shaders {
         for (n, line) in ok(std::fs::read_to_string(path)).lines().enumerate() {

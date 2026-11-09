@@ -32,7 +32,7 @@ pub mod select;
 pub mod view;
 
 /// The tessellation compute shader (WGSL).
-pub const SHADER: &str = include_str!("tess.wgsl");
+pub const SHADER: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../viewport/shaders/tess.wgsl"));
 
 /// The device feature for a 32-bit float depth buffer with a stencil, which the viewport draws
 /// with reversed depth ([`view::reversed_depth`]) where the device has it. A device is opened

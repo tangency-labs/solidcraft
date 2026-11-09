@@ -2472,7 +2472,7 @@ fn access_texture(device: &wgpu::Device, queue: Option<&wgpu::Queue>, bgl: &wgpu
     })
 }
 
-pub const SHADER: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/shaders/viewport.wgsl"));
+pub const SHADER: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../viewport/shaders/viewport.wgsl"));
 
 fn tri_layout() -> wgpu::VertexBufferLayout<'static> {
     const A: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];

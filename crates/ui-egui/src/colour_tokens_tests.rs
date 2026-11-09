@@ -237,7 +237,7 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
 /// zebra and environment map neutrals and direction vectors stay as literals.
 #[test]
 fn analysis_shader_colours_come_from_the_uniform() {
-    let src = include_str!("../../../assets/shaders/viewport.wgsl");
+    let src = include_str!("../../viewport/shaders/viewport.wgsl");
     let start = src.find("fn analysis(").unwrap_or(0);
     let end = src.find("fn stripe(").unwrap_or(src.len());
     let body = &src[start..end];
