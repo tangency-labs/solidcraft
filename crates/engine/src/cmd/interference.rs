@@ -10,6 +10,7 @@
 //! rather than holding the call. The shared part is measured as `solidcraft_kernel::measure`
 //! measures it (its mass properties alone).
 
+use solidcraft_geom::MeshGeom;
 use std::collections::HashSet;
 use std::sync::Arc;
 

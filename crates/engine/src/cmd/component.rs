@@ -244,7 +244,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("move")
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)
-        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
+        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
     CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag))
         .icon("move")
         .contract(&DRAG_CONTRACT)
@@ -795,7 +795,10 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
-    let delta = if let Some(m) = p.get("matrix") {
+    let target = absolute_target(s, p, cmd)?;
+    let delta = if target.is_some() {
+        solidcraft_doc::IDENTITY
+    } else if let Some(m) = p.get("matrix") {
         if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, format!("give either matrix or {k}, not both")));
         }
@@ -826,6 +829,16 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "space must be local or world"));
     }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
+    if let Some(target) = target {
+        let local = if space == "world" {
+            let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
+            let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
+            solidcraft_doc::mat_mul(&inverse, &target)
+        } else {
+            target
+        };
+        return place_occurrence(s, p, id, local, cmd);
+    }
     let delta = if space == "world" {
         let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
         let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
@@ -839,6 +852,53 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
+    place_occurrence(s, p, id, next, cmd)
+}
+
+/// `occurrence.move`'s target pose in `space` (#12150): `to: {position, axis?, angle?}` or
+/// `to_matrix`, or `None` for a relative move. Refused together with the relative keys.
+fn absolute_target(s: &Session, p: &Value, cmd: &str) -> Result<Option<Mat>> {
+    let (to, to_matrix) = (p.get("to"), p.get("to_matrix"));
+    if to.is_none() && to_matrix.is_none() {
+        return Ok(None);
+    }
+    if to.is_some() && to_matrix.is_some() {
+        return Err(bad(cmd, "give either to or to_matrix, not both"));
+    }
+    let key = if to.is_some() { "to" } else { "to_matrix" };
+    if let Some(k) = ["translate", "axis", "angle", "origin", "matrix", "base_transform"].into_iter().find(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, format!("give either {key} or {k}, not both")));
+    }
+    if let Some(m) = to_matrix {
+        return matrix::rigid(m, matrix::tolerance(p, cmd)?, cmd).map(Some);
+    }
+    let to = to.and_then(Value::as_object).ok_or_else(|| bad(cmd, "to must be {position, axis?, angle?}"))?;
+    if let Some(k) = to.keys().find(|k| !matches!(k.as_str(), "position" | "axis" | "angle")) {
+        return Err(bad(cmd, format!("to: unknown key `{k}` (position, axis, angle)")));
+    }
+    let to = Value::Object(to.clone());
+    if to.get("position").is_none() {
+        return Err(bad(cmd, "to needs a position: [x, y, z]"));
+    }
+    let position = move_vector(&to, "position", Vec3::ZERO, true, cmd)?;
+    let axis = move_vector(&to, "axis", Vec3::Z, false, cmd)?;
+    let angle = match to.get("angle") {
+        Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
+        None => 0.0,
+        Some(value) => value.as_f64().ok_or_else(|| bad(cmd, "to.angle must be a number or angle expression"))?,
+    };
+    if !angle.is_finite() {
+        return Err(bad(cmd, "to.angle must be finite"));
+    }
+    if angle != 0.0 && axis.normalized().is_none() {
+        return Err(bad(cmd, "to.axis must have a finite nonzero length"));
+    }
+    Ok(Some(solidcraft_doc::rigid(position, Vec3::ZERO, axis, angle)))
+}
+
+/// Make `next` the occurrence's placement in its parent: captured (and the joints solved) or
+/// pending, as `capture` says.
+fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, cmd: &str) -> Result<Value> {
     if !valid_position(&next) {
         return Err(bad(cmd, "move transform exceeds supported numeric range"));
     }

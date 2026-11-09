@@ -1,6 +1,7 @@
 //! Cases found by the robustness runs (`solidcraft-cli fuzz`, docs/robustness.md), cut down to
 //! the steps that matter, and a fixed set of seeds that must keep running clean.
 
+use solidcraft_geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};

@@ -467,7 +467,10 @@ pub fn create_coons_srf(
         &lr[0], &lr[1], &bt[0], &bt[1], &lr[2], &lr[3], &bt[2], &bt[3],
     ] {
         if c.is_rational() {
-            return Err(SolidError::nlib(OP, crate::error::NlibCode::Input));
+            return Err(SolidError::nurbs(
+                OP,
+                crate::error::nurbs::NurbsFailure::Input,
+            ));
         }
     }
 

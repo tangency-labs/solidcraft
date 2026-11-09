@@ -486,7 +486,8 @@ mod tests {
         let frame = |time| {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
                 publish_tab("SKETCH", false, false, ui.ctx());
-                crate::gpu::paint_background(ui.painter(), ui.max_rect(), &Tokens::get());
+                let t = Tokens::get();
+                solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
             });
             let colors: Vec<_> = out
                 .shapes

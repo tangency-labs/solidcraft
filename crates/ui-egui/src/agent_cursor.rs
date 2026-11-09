@@ -157,7 +157,7 @@ pub struct AgentCursor {
     /// Click ripples: where and when.
     ripples: Vec<(Pos2, f64)>,
     /// The view before a followed sketch (restored when it finishes).
-    saved_view: Option<solidcraft_engine::render::Camera>,
+    saved_view: Option<solidcraft_viewport::Camera>,
 }
 
 impl AgentCursor {

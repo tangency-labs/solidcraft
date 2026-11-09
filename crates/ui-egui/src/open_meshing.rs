@@ -84,7 +84,7 @@ impl Meshing {
                                 crate::viewport::warm_shared_tris(&mesh);
                             }
                             if plans {
-                                let _ = b.display_plan();
+                                let _ = b.gpu_plan_at(solidcraft_engine::doc::display_quality::current());
                                 let _ = b.plan_mesh_in_place_at(solidcraft_engine::doc::display_quality::current());
                             }
                         }

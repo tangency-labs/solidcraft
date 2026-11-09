@@ -380,7 +380,7 @@ fn segments_cross(p: Pos2, q: Pos2, r: Pos2, s: Pos2) -> bool {
 mod tests {
     use super::*;
     use egui::pos2;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     #[test]
     fn origin_widget_keeps_its_screen_size() {

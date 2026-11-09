@@ -6,7 +6,7 @@ use solidcraft_geom::Aabb3;
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 use solidcraft_io::{DxfEntity, DxfShape};
-use solidcraft_render::Camera;
+use solidcraft_viewport::Camera;
 use std::collections::BTreeMap;
 
 #[path = "view_dxf_scene.rs"]

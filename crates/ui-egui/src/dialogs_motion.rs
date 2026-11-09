@@ -1270,7 +1270,7 @@ mod tests {
         #[cfg(not(target_arch = "wasm32"))]
         if solidcraft_engine::capture::installed().is_none() {
             solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                 Ok(solidcraft_engine::capture::Picture { rgba, renderer })
             }));
         }

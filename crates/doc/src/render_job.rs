@@ -4,13 +4,13 @@ use std::{fmt, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use solidcraft_render::{
-    Camera,
     job::{
         CpuBudget, CpuProgressiveOptions, DenoiseSettings, DirectionalLightOptions, JobOptions, LightingPreset, PunctualLightOptions,
         RaytraceEnvironmentOptions, RaytraceOptions, RectangleLightOptions, StudioLighting, Sun, ThinLens, ToneMap,
     },
     lighting::environment::SkyGradient,
 };
+use solidcraft_viewport::Camera;
 
 use crate::{
     DocError, Result,

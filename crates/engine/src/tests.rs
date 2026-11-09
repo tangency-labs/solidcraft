@@ -1,3 +1,4 @@
+use solidcraft_geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
@@ -3058,6 +3059,7 @@ fn fillet_follows_its_edge_after_an_upstream_resize() {
 
 mod naming {
     use serde_json::{Value, json};
+    use solidcraft_geom::MeshGeom;
 
     use super::run;
     use crate::Session;

@@ -31,6 +31,11 @@
 //!   double-cross metric, including its non-unit-normal scale, and retain answers
 //!   within the query tolerance. Upstream compared an unscaled sphere distance
 //!   with scaled answers and no tolerance (WR-766).
+//! - **Directed tree bounds.** A branch is kept unless no pair of box points can
+//!   satisfy the local solver's 2-degree direction test, or every admitted value is
+//!   more than the query tolerance worse than the best. Upstream measured the
+//!   in-plane offset instead of the distance to the direction plane, which culls
+//!   every directed answer farther than the two bounding radii (WR-772).
 //! - **Objects.** Tree objects and solution objects are a caller-chosen handle `O`
 //!   (upstream `SmObject*`; a null pointer is `None`). Everything the solvers read
 //!   through those pointers (the curve behind a tree object, a vertex's point and
@@ -97,7 +102,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::{Extent3d, LineHit};
-use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
+use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::{
     Branch, GlobalSolve, GlobalSolver, ObjectZoneTol, OperationCategory, PreferredSolution,
     SolutionPairType, SolutionRequested, SolverOperation, MAX_SOLVER_TREES,
@@ -112,7 +117,7 @@ use crate::geom::vector2d::Vec2;
 use crate::geom::vector3d::sqrt;
 use crate::intersect::point_class::PointClassification;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::query::face::p2::{
     point_classify_prepared, point_classify_requested, PointClassifyOptions,
 };
@@ -609,56 +614,51 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
                 Ok(!excluded)
             }
 
-            // If we are doing a directed minimization we can use the bounding
-            // box information to eliminate additional comparisons
+            // A directed answer is a difference whose projection Q = N x d x N
+            // lies within the local solver's 2 degrees of the direction; its value
+            // is |Q| (signed by Q . direction). Keep a branch unless no pair of box
+            // points can be admitted, or every admitted value is more than the query
+            // tolerance worse than the best answer.
             SolverOperation::DirectedMinimize
             | SolverOperation::SignedDirectedMinimize
             | SolverOperation::DirectedMaximize => {
-                // This optimization can be done by creating a plane through the
-                // center of one bounding box whose normal is perpendicular to the
-                // direction vector and seeing if the distance to the
-                // center of the other bounding box is greater than the sum of
-                // the two radii.
-                let v0 = opt_vector(s, 0)?;
-                let v1 = opt_vector(s, 1)?;
-                let plane_norm = v1.cross(v0);
-                let s1 = box1.sphere_bound();
-                let s2 = box2.sphere_bound();
-                let proj_pnt = point_project_to_plane(s2.center, s1.center, plane_norm);
-                let sum_radius = s1.radius + s2.radius;
-                if proj_pnt.distance_squared(s1.center) > sum_radius * sum_radius + EFF_ZERO_SQRT {
-                    return Ok(false); // These two nodes can not solve this directed minimization
+                let Some(range) = super::projected_metric::directed_box_range(
+                    box1,
+                    box2,
+                    opt_vector(s, 0)?,
+                    opt_vector(s, 1)?,
+                    2.0,
+                ) else {
+                    return Ok(true);
+                };
+                if !range.admissible {
+                    return Ok(false);
                 }
-
-                if s.operation == SolverOperation::SignedDirectedMinimize {
-                    let vec = proj_pnt - s1.center;
-                    let mut dist = vec.length();
-                    if vec.dot(v1) < 0.0 {
-                        dist = -dist;
+                let budget = Ivl::from(tol);
+                let excluded = match s.operation {
+                    SolverOperation::DirectedMinimize => {
+                        let best = Ivl::from(s.best_answer_so_far_sq).sqrt();
+                        range.distance.lo > (best + budget).hi
                     }
-                    let min_proj_dist = dist - s1.radius - s2.radius;
-                    if min_proj_dist * min_proj_dist.abs() > s.best_answer_so_far_sq {
-                        return Ok(false);
+                    SolverOperation::DirectedMaximize => {
+                        let best = Ivl::from(s.best_answer_so_far_sq).sqrt();
+                        range.distance.hi < (best - budget).lo
                     }
-                }
-
-                if s.operation == SolverOperation::DirectedMinimize {
-                    let min_proj_dist = proj_pnt.distance(s1.center) - s1.radius - s2.radius;
-                    if min_proj_dist > 0.0
-                        && min_proj_dist * min_proj_dist > s.best_answer_so_far_sq
-                    {
-                        return Ok(false);
+                    _ => {
+                        // The best is stored as value * |value|. The sign of a
+                        // value also flips with the operand order, so its lower
+                        // bound is -|Q| at most.
+                        let best_sq = s.best_answer_so_far_sq;
+                        let best = Ivl::from(best_sq.abs()).sqrt();
+                        let best = if best_sq < 0.0 {
+                            Ivl::new(-best.hi, -best.lo)
+                        } else {
+                            best
+                        };
+                        -range.distance.hi > (best + budget).hi
                     }
-                }
-
-                if s.operation == SolverOperation::DirectedMaximize {
-                    let max_proj_dist = proj_pnt.distance(s1.center) + s1.radius + s2.radius;
-                    if max_proj_dist * max_proj_dist < s.best_answer_so_far_sq {
-                        return Ok(false);
-                    }
-                }
-
-                Ok(true)
+                };
+                Ok(!excluded)
             }
 
             // Doing a ray firing - minimization of intersections along a vector.
@@ -2596,6 +2596,74 @@ pub(crate) mod tests {
                 assert_eq!(ts.may_contain_answer(&origin, &point).unwrap(), retained);
             }
         }
+    }
+
+    #[test]
+    fn directed_culling_keeps_admissible_answers_and_culls_the_rest() {
+        // View normal Z, direction Y.
+        let k = Kernel::default();
+        let sc = scene();
+        let solver = |operation, best| -> TopologySolver<'_, '_, Obj> {
+            TopologySolver::new(
+                &k,
+                &sc,
+                operation,
+                SolutionRequested::All,
+                1e-5,
+                best,
+                &[Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 1.0, 0.0)],
+            )
+        };
+        let point = |x: f64, y: f64, z: f64| Extent3d::from_bounds(x, y, z, x, y, z);
+        let origin = point(0.0, 0.0, 0.0);
+        let ops = [
+            SolverOperation::DirectedMinimize,
+            SolverOperation::SignedDirectedMinimize,
+            SolverOperation::DirectedMaximize,
+        ];
+        for op in ops {
+            let best = if op == SolverOperation::DirectedMaximize {
+                0.0
+            } else {
+                1e6
+            };
+            let ts = solver(op, best);
+            // A directed answer at distance 10, along and against the direction,
+            // and one with a view-direction offset (z is projected away).
+            for target in [
+                point(0.0, 10.0, 0.0),
+                point(0.0, -10.0, 0.0),
+                point(0.0, 10.0, 5.0),
+            ] {
+                assert!(
+                    ts.may_contain_answer(&origin, &target).unwrap(),
+                    "{op:?} {target:?}"
+                );
+            }
+            // 1 degree off the direction is admitted; 45 degrees is not.
+            let one = 10.0 * 1.0_f64.to_radians().tan();
+            assert!(ts
+                .may_contain_answer(&origin, &point(one, 10.0, 0.0))
+                .unwrap());
+            assert!(!ts
+                .may_contain_answer(&origin, &point(10.0, 10.0, 0.0))
+                .unwrap());
+        }
+        // Value bounds keep answers within tolerance and cull the rest.
+        let min = solver(SolverOperation::DirectedMinimize, 1.0);
+        assert!(min
+            .may_contain_answer(&origin, &point(0.0, 1.0 + 5e-6, 0.0))
+            .unwrap());
+        assert!(!min
+            .may_contain_answer(&origin, &point(0.0, 1.0 + 2e-5, 0.0))
+            .unwrap());
+        let max = solver(SolverOperation::DirectedMaximize, 1.0);
+        assert!(max
+            .may_contain_answer(&origin, &point(0.0, 1.0 - 5e-6, 0.0))
+            .unwrap());
+        assert!(!max
+            .may_contain_answer(&origin, &point(0.0, 1.0 - 2e-5, 0.0))
+            .unwrap());
     }
 
     #[test]
