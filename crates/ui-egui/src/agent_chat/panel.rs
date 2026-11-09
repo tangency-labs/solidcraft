@@ -61,6 +61,115 @@ impl AgentPanelPrefs {
     }
 }
 
+/// What the person asked of the chat while the panel was drawn. The panel only records these;
+/// the host runs them after the frame's panel ([`run`]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PanelAction {
+    /// New chat, asking first when something would be lost.
+    RequestNewChat,
+    /// New chat, confirmed.
+    NewChat,
+    /// Look for installed agents again.
+    Refresh,
+    Connect,
+    Disconnect,
+    /// Talk to another agent (the current one is disconnected).
+    SwitchAgent(String),
+    /// Send a message; `steer` stops the agent first and sends the queue with it.
+    Send {
+        text: String,
+        steer: bool,
+    },
+    /// Stop the agent and send the queued messages now.
+    SendNow,
+    Cancel,
+    RemovePending(usize),
+    /// Undo the changes of the message at this index.
+    UndoChanges(usize),
+    SetMode(String),
+    SetModel(String),
+    SetCustomModel(String),
+    SetConfigOption {
+        id: String,
+        value: String,
+    },
+    /// Pick things in the model to attach.
+    StartPick,
+    RemovePicked(usize),
+    AttachDropped(Vec<std::path::PathBuf>),
+    /// Choose a file to attach.
+    ChooseAttachment,
+    PastePicture,
+    /// Answer the permission request at this index with an option (none: cancel).
+    AnswerPermission(usize, Option<String>),
+    /// Allow (or refuse) a held request once.
+    Approve(u64, bool),
+    /// Allow a held request and its kind from now on.
+    ApproveAlways(u64),
+    /// The assistant's page in Preferences.
+    OpenSettings,
+    /// Preferences, adding an agent.
+    AddAgent,
+}
+
+/// Run one thing the panel recorded.
+pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
+    match action {
+        PanelAction::RequestNewChat => request_new_chat(app),
+        PanelAction::NewChat => new_chat(app),
+        PanelAction::Refresh => refresh(app, ctx),
+        PanelAction::Connect => connect(app, ctx),
+        PanelAction::Disconnect => disconnect(app),
+        PanelAction::SwitchAgent(id) => {
+            disconnect(app);
+            app.agent_chat.agent_id = Some(id);
+        }
+        PanelAction::Send { text, steer } => {
+            send(app, ctx, text);
+            if steer {
+                send_now(app, ctx);
+            }
+        }
+        PanelAction::SendNow => send_now(app, ctx),
+        PanelAction::Cancel => cancel(app),
+        PanelAction::RemovePending(n) => remove_pending(app, n),
+        PanelAction::UndoChanges(n) => undo_changes(app, n),
+        PanelAction::SetMode(m) => set_mode(app, &m),
+        PanelAction::SetModel(m) => set_model(app, &m),
+        PanelAction::SetCustomModel(m) => {
+            set_custom_model(app, &m);
+        }
+        PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
+        PanelAction::StartPick => start_pick(app),
+        PanelAction::RemovePicked(at) => remove_picked(app, at),
+        PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
+        PanelAction::ChooseAttachment => app.pick_file(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, path| {
+            if let Some(path) = path
+                && let Err(e) = attach_path(app, &path)
+            {
+                app.agent_chat.notice(e, true);
+            }
+        }),
+        PanelAction::PastePicture => {
+            if let Err(e) = paste_picture(app) {
+                app.agent_chat.notice(e, true);
+            }
+        }
+        PanelAction::AnswerPermission(n, option) => answer_permission(app, n, option.as_deref()),
+        PanelAction::Approve(id, allow) => approve(app, id, allow),
+        PanelAction::ApproveAlways(id) => approve_always(app, id),
+        PanelAction::OpenSettings => crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT),
+        PanelAction::AddAgent => super::settings::open_add(app),
+    }
+}
+
+/// Run what the panel recorded, in the order it was asked.
+fn run_actions(app: &mut SolveApp, ctx: &egui::Context) {
+    for action in std::mem::take(&mut app.agent_chat.actions) {
+        run(app, ctx, action);
+    }
+}
+
 /// Consume the configured toggle before CAD shortcuts, including in the chat's own window.
 /// Bare character keys remain text while a field owns the keyboard; chords still hide chat.
 pub fn toggle_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
@@ -191,6 +300,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut prefs = AgentPanelPrefs::read(&app.preferences);
     show_panel(app, ui, &mut prefs);
     prefs.write(&mut app.preferences);
+    run_actions(app, &ui.ctx().clone());
 }
 
 fn show_panel(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs) {
@@ -217,7 +327,7 @@ fn show_panel(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs
     // Look for installed agents the first time the panel opens (in the background).
     #[cfg(not(target_arch = "wasm32"))]
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
-        refresh(app, &ctx);
+        app.agent_chat.actions.push(PanelAction::Refresh);
     }
     #[cfg(not(target_arch = "wasm32"))]
     if prefs.popped {
@@ -278,6 +388,7 @@ fn show_panel(app: &mut SolveApp, ui: &mut egui::Ui, prefs: &mut AgentPanelPrefs
 pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
     if shown(app) {
         new_chat_shortcut(app, ctx);
+        run_actions(app, ctx);
         #[cfg(not(target_arch = "wasm32"))]
         if app.agent_chat.open && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
             refresh(app, ctx);
@@ -314,6 +425,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
     solidcraft_ui_registry::publish_rect("agent_chat:panel", rect);
     let prefs = AgentPanelPrefs::read(&app.preferences);
     ui_kit::scope(ui, |ui| content(app, ui, flow, &prefs));
+    run_actions(app, &ui.ctx().clone());
 }
 
 /// Horizontal room reserved before the history and browser when Assistant is on the left.
@@ -676,7 +788,7 @@ fn new_chat_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
     let in_chat = ctx.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")))
         || ctx.pointer_hover_pos().is_some_and(|p| app.agent_chat.panel_rect.is_some_and(|r| r.contains(p)));
     if app.agent_chat.open && in_chat && ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-        request_new_chat(app);
+        app.agent_chat.actions.push(PanelAction::RequestNewChat);
     }
 }
 
@@ -748,14 +860,14 @@ fn window(app: &mut SolveApp, ctx: &egui::Context, prefs: &mut AgentPanelPrefs) 
         // is no pointer to ask about (the main window's handling never sees them).
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         if !dropped.is_empty() {
-            attach_dropped(app, dropped.iter().map(|f| f.path().to_path_buf()));
+            app.agent_chat.actions.push(PanelAction::AttachDropped(dropped.iter().map(|f| f.path().to_path_buf()).collect()));
         }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_hint(&ctx, r.response.rect);
         }
         // The whole window is the chat, so New chat works anywhere in it.
         if ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
-            request_new_chat(app);
+            app.agent_chat.actions.push(PanelAction::RequestNewChat);
         }
         let (outer, inner, close) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
         if let (Some(o), Some(n)) = (outer, inner) {
@@ -913,7 +1025,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool, prefs: &mut AgentPa
                 )
                 .clicked()
                 {
-                    request_new_chat(app);
+                    app.agent_chat.actions.push(PanelAction::RequestNewChat);
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -992,7 +1104,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &Agent
     let top = ui.cursor().top();
     let shared = crate::panel_runtime::shared_content_measurement(ui.ctx());
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
-        refresh(app, ui.ctx());
+        app.agent_chat.actions.push(PanelAction::Refresh);
     }
     let state = app.agent_chat.state();
     let bounds = ui.available_rect_before_wrap();
@@ -1034,7 +1146,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow, prefs: &Agent
     let interaction_height = top_height + outcome.height;
     let height = if wide { interaction_height.max(transcript_height) } else { interaction_height + transcript_height };
     crate::panel_runtime::report_content_extent(ui, top, height, false);
-    finish_composer(app, ui.ctx(), outcome);
+    finish_composer(app, outcome);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1048,7 +1160,7 @@ fn new_chat_confirmation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
                     solidcraft_ui_registry::publish_target("agent_chat:new_confirm", yes.rect);
                     if yes.clicked() {
-                        new_chat(app);
+                        app.agent_chat.actions.push(PanelAction::NewChat);
                     }
                     if ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal).clicked() {
                         app.agent_chat.confirm_new = false;
@@ -1288,10 +1400,10 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State, prefs: &AgentPa
     });
     crate::panel_runtime::report_content_composer_height(ui.ctx(), composer.inner);
     if let Some(at) = remove_picked_at {
-        remove_picked(app, at);
+        app.agent_chat.actions.push(PanelAction::RemovePicked(at));
     }
     if pick_clicked {
-        start_pick(app);
+        app.agent_chat.actions.push(PanelAction::StartPick);
     }
     ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
 }
@@ -1317,10 +1429,10 @@ fn transcript_body(app: &mut SolveApp, ui: &mut egui::Ui) -> f32 {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn finish_composer(app: &mut SolveApp, ctx: &egui::Context, outcome: ComposerOutcome) {
+fn finish_composer(app: &mut SolveApp, outcome: ComposerOutcome) {
     let ComposerOutcome { send_clicked, stop_clicked, enter, steer, esc, .. } = outcome;
     if esc || stop_clicked {
-        cancel(app);
+        app.agent_chat.actions.push(PanelAction::Cancel);
     }
     // A message waits for files still being read, and files alone make a message.
     let reading = !app.agent_chat.loading.is_empty();
@@ -1329,13 +1441,10 @@ fn finish_composer(app: &mut SolveApp, ctx: &egui::Context, outcome: ComposerOut
         // Enter waits with the button.
     } else if (send_clicked || enter || steer) && something {
         let text = std::mem::take(&mut app.agent_chat.input).trim_end_matches('\n').to_string();
-        send(app, ctx, text);
-        if steer {
-            send_now(app, ctx);
-        }
+        app.agent_chat.actions.push(PanelAction::Send { text, steer });
     } else if steer {
         // Nothing typed: Ctrl+Enter sends what is already queued.
-        send_now(app, ctx);
+        app.agent_chat.actions.push(PanelAction::SendNow);
     }
 }
 
@@ -1376,7 +1485,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                         add = true;
                     }
                     if ui_kit::list_picker(ui, "settings", tr("ui.ai_settings"), false).clicked() {
-                        crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
+                        app.agent_chat.actions.push(PanelAction::OpenSettings);
                     }
                 })
             })
@@ -1385,13 +1494,12 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         solidcraft_ui_registry::publish_handle("agent_chat:switcher", combo.rect.center());
         combo.backing_on_hover_text(tr("ui.ai_switch_tip"));
         if add {
-            super::settings::open_add(app);
+            app.agent_chat.actions.push(PanelAction::AddAgent);
         }
         if let Some(id) = picked
             && current.as_ref().is_none_or(|c| c.id != id)
         {
-            disconnect(app);
-            app.agent_chat.agent_id = Some(id);
+            app.agent_chat.actions.push(PanelAction::SwitchAgent(id));
         }
         // The agent's own modes (ACP `modes`): its own tools follow them.
         if !modern && !app.agent_chat.modes.is_empty() {
@@ -1414,7 +1522,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             solidcraft_ui_registry::publish_handle("agent_chat:mode", r.rect.center());
             r.backing_on_hover_text(tr("ui.ai_agent_mode_tip"));
             if let Some(m) = pick {
-                set_mode(app, &m);
+                app.agent_chat.actions.push(PanelAction::SetMode(m));
             }
         }
         // The agent's models (ACP `models`, or an endpoint's list): shown only when it reports some.
@@ -1453,10 +1561,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .inner;
             picker.response.backing_on_hover_text(tr("ui.agent_chat_model_tip"));
             match picker.inner {
-                Some(ui_kit::Picked::Listed(m)) => set_model(app, &m),
-                Some(ui_kit::Picked::Custom(m)) => {
-                    set_custom_model(app, &m);
-                }
+                Some(ui_kit::Picked::Listed(m)) => app.agent_chat.actions.push(PanelAction::SetModel(m)),
+                Some(ui_kit::Picked::Custom(m)) => app.agent_chat.actions.push(PanelAction::SetCustomModel(m)),
                 None => {}
             }
         }
@@ -1476,11 +1582,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
         solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
         if b.clicked() {
-            if app.agent_chat.state().running() {
-                disconnect(app);
-            } else {
-                connect(app, ui.ctx());
-            }
+            app.agent_chat.actions.push(if app.agent_chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
         }
     });
     if let Some(a) = &app.agent_chat.auth_status {
@@ -1666,10 +1768,8 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, enabled, format!("{name}: {selected}")));
     response.backing_on_hover_text(tip);
     match picked {
-        Some(ui_kit::Picked::Listed(value)) => super::set_config_option(app, &option.id, &value),
-        Some(ui_kit::Picked::Custom(value)) => {
-            super::set_custom_model(app, &value);
-        }
+        Some(ui_kit::Picked::Listed(value)) => app.agent_chat.actions.push(PanelAction::SetConfigOption { id: option.id.clone(), value }),
+        Some(ui_kit::Picked::Custom(value)) => app.agent_chat.actions.push(PanelAction::SetCustomModel(value)),
         None => {}
     }
 }
@@ -1810,10 +1910,10 @@ fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let refreshing = app.agent_chat.detecting.is_some();
             if ui_kit::button(ui, tr("ui.agent_chat_refresh"), ui_kit::Button::Enabled(!refreshing)).clicked() {
-                refresh(app, ui.ctx());
+                app.agent_chat.actions.push(PanelAction::Refresh);
             }
             if ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Small).clicked() {
-                super::settings::open_add(app);
+                app.agent_chat.actions.push(PanelAction::AddAgent);
             }
         });
     });
@@ -1894,7 +1994,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         ui.add_space(solidcraft_theme::Tokens::get().space_4);
         if ui_kit::button(ui, tr("ui.agent_chat_auth_retry"), ui_kit::Button::Normal).clicked() {
-            connect(app, ui.ctx());
+            app.agent_chat.actions.push(PanelAction::Connect);
         }
     });
 }
@@ -2245,7 +2345,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
             ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
                 if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
-                    crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
+                    app.agent_chat.actions.push(PanelAction::OpenSettings);
                 }
             });
         } else {
@@ -2262,27 +2362,27 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.agent_chat.pending_edit = None;
     }
     if let Some(n) = remove {
-        remove_pending(app, n);
+        app.agent_chat.actions.push(PanelAction::RemovePending(n));
     }
     if send_now_clicked {
-        send_now(app, ui.ctx());
+        app.agent_chat.actions.push(PanelAction::SendNow);
     }
     if send_queue_clicked {
-        send_now(app, ui.ctx());
+        app.agent_chat.actions.push(PanelAction::SendNow);
     }
     if open_gallery.is_some() {
         app.agent_chat.gallery = open_gallery;
     }
     if let Some((n, o)) = answer {
-        answer_permission(app, n, o.as_deref());
+        app.agent_chat.actions.push(PanelAction::AnswerPermission(n, o));
     }
     match approval {
-        Some((id, Some(allow))) => approve(app, id, allow),
-        Some((id, None)) => approve_always(app, id),
+        Some((id, Some(allow))) => app.agent_chat.actions.push(PanelAction::Approve(id, allow)),
+        Some((id, None)) => app.agent_chat.actions.push(PanelAction::ApproveAlways(id)),
         None => {}
     }
     if let Some(n) = undo {
-        undo_changes(app, n);
+        app.agent_chat.actions.push(PanelAction::UndoChanges(n));
     }
 }
 
@@ -2478,16 +2578,10 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
     r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
     if choose {
-        app.pick_file(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, path| {
-            if let Some(path) = path
-                && let Err(e) = attach_path(app, &path)
-            {
-                app.agent_chat.notice(e, true);
-            }
-        });
+        app.agent_chat.actions.push(PanelAction::ChooseAttachment);
     }
-    if paste && let Err(e) = paste_picture(app) {
-        app.agent_chat.notice(e, true);
+    if paste {
+        app.agent_chat.actions.push(PanelAction::PastePicture);
     }
 }
 
@@ -2673,7 +2767,39 @@ mod tests {
         assert!(short_command(&"x".repeat(100)).ends_with('…'));
     }
 
+    /// The panel records what was asked and sends nothing itself: the host runs it after the frame.
+    #[test]
+    fn the_send_button_records_the_message_for_the_host_to_send() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.detection = Some(discover::Detection::default());
+        app.agent_chat.picking = Some(false);
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.input = "Make a plate".to_string();
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
+        let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+            solidcraft_ui_registry::clear_handles();
+            let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+            let mut output = ctx.run_ui(input, |ui| {
+                let prefs = AgentPanelPrefs::read(&app.preferences);
+                ui_kit::scope(ui, |ui| desktop_body(app, ui, Flow::Tall, &prefs));
+            });
+            output.textures_delta.clear();
+        };
+        // The composer settles its height over the first frames.
+        for _ in 0..3 {
+            frame(&mut app, Vec::new());
+        }
+        let at = solidcraft_ui_registry::handle_at("agent_chat:send").expect("the send button is drawn");
+        for pressed in [true, false] {
+            frame(&mut app, crate::test_support::pointer(at, pressed));
+        }
+        assert_eq!(app.agent_chat.actions, [PanelAction::Send { text: "Make a plate".into(), steer: false }]);
+        assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
+    }
+
     /// The panel's place and fold are its own state: toggled and stored without the app.
+
     #[test]
     fn the_panel_prefs_toggle_and_round_trip_without_the_app() {
         let mut prefs = AgentPanelPrefs { left: false, width: 420.0, minimized: true, popped: false, window: None };

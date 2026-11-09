@@ -373,6 +373,8 @@ pub struct AgentChat {
     restore_mode: Option<String>,
     /// New chat is waiting for the user's yes (a message is running or queued).
     pub confirm_new: bool,
+    /// What the panel recorded this frame, run after it is drawn (`panel::run`).
+    pub actions: Vec<panel::PanelAction>,
     /// Where the panel was drawn last (for its shortcuts).
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
