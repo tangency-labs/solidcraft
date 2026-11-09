@@ -339,7 +339,8 @@ argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
 
 With Preferences › Sketch › **Line up with other sketch points while drawing** turned on (it's
 off by default), the pointer also **lines up** while drawing with the sketch's points on screen:
-line ends, centres, standalone points and the origin, and the shape's own earlier points. It
+line ends, centres, standalone points and the origin, and the shape's own earlier points. It also
+lines up with the midpoint of a line you just hovered, whose dotted guide is showing. It
 lines up on both axes at once, level with one point and plumb with another, so a rectangle drawn
 beside another can take its height from one and its width from a point below. A line kept
 horizontal or vertical from its start can still end under or beside another point. A dotted guide
