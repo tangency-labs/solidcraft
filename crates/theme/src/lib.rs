@@ -432,6 +432,11 @@ pub fn set_accent(accent: Option<Color32>) -> bool {
     ACCENT.with(|c| c.replace(accent) != accent)
 }
 
+/// The accent [`set_accent`] last chose on this thread (`None`: the theme's own).
+pub fn accent() -> Option<Color32> {
+    ACCENT.get()
+}
+
 /// `#rrggbb` as an opaque accent; anything else (an empty preference: the theme's) is `None`.
 pub fn parse_accent(s: &str) -> Option<Color32> {
     let hex = s.trim().strip_prefix('#').filter(|h| h.len() == 6)?;
@@ -1521,8 +1526,8 @@ impl Tokens {
 
     /// These tokens with `accent` in place of the theme's: the accent and its soft tint, the
     /// selected row, ink on the accent, chips, the primary form button, the selection in the view,
-    /// the File view's rail and primary action, and the icons' base colour. The tabs' own accents
-    /// (Sketch, Surface, …) stay the theme's.
+    /// and the File view's rail and primary action. The tabs' own accents (Sketch, Surface, …)
+    /// stay the theme's. The icons take it in `icon_svg::theme_palette` (ui-egui), from [`accent`].
     pub fn with_accent(self, accent: Color32, dark: bool) -> Tokens {
         let mut t = self;
         let accent = accent.to_opaque();
@@ -1553,12 +1558,6 @@ impl Tokens {
         t.form_primary_fill = accent;
         t.sel_face = accent;
         t.sel_edge = accent;
-        // The icons' own colour (the base ramp, which the Model tab's icons use) in shades of the
-        // accent; the tabs' own ramps (Sketch, Surface, …) stay the theme's.
-        let rgb = |c: Color32| [c.r(), c.g(), c.b()];
-        let mut palette = t.icon_palette.unwrap_or_default();
-        palette.accents[0] = Some([rgb(accent.lerp_to_gamma(Color32::WHITE, 0.15)), rgb(accent), rgb(accent.lerp_to_gamma(Color32::BLACK, 0.25))]);
-        t.icon_palette = Some(palette);
         // The File view's rail and primary action follow the new accent, as they follow a theme's.
         file_view_from_theme(&mut t, dark, |k| {
             !matches!(k, "file_rail" | "file_rail_hover" | "file_rail_ink" | "file_primary" | "file_primary_ink" | "file_primary_border")

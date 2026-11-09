@@ -652,7 +652,10 @@ mod tests {
                     );
                 }
                 // The icons' base ramp is the accent's shades; the tabs' ramps and roles stay.
-                let (icons, own) = (t.icon_palette.expect("an accent gives the icons a palette"), base.icon_palette.unwrap_or_default());
+                let own = crate::icon_svg::theme_palette(*dark).unwrap_or_default();
+                solidcraft_theme::set_accent(Some(*a));
+                let icons = crate::icon_svg::theme_palette(*dark).expect("an accent gives the icons a palette");
+                solidcraft_theme::set_accent(None);
                 let ramp = icons.accents[0].expect("base ramp");
                 assert_eq!(ramp[1], [a.r(), a.g(), a.b()], "{id} {a:?}: the icons take the accent");
                 assert_eq!((&icons.accents[1..], icons.roles), (&own.accents[1..], own.roles), "{id} {a:?}");
