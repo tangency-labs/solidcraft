@@ -164,7 +164,7 @@ fn labels_needing_translation(known: &[&str], commands: Vec<Value>) -> BTreeMap<
 
 fn registry() -> Result<Vec<Value>, String> {
     let out = crate::cargo()
-        .args(["run", "-q", "--release", "-p", "solidcraft-cli", "--", "commands"])
+        .args(["run", "-q", "--profile", "ci", "-p", "solidcraft-cli", "--", "commands"])
         .output()
         .map_err(|e| format!("solidcraft-cli: {e}"))?;
     if !out.status.success() {
