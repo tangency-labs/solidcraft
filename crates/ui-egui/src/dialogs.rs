@@ -98,8 +98,17 @@ const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
-const PROJECT_GEOMETRY: Accept =
-    EDGES | FACES | selection::VERTICES | PLANES | AXES | selection::SKETCH_LINES | selection::EXTERNAL_POINTS | selection::ORIGIN;
+/// What Project picks: model geometry, planes, axes, the origin, the curves and points of other
+/// sketches, and named construction points (#12075).
+const PROJECT_GEOMETRY: Accept = EDGES
+    | FACES
+    | selection::VERTICES
+    | PLANES
+    | AXES
+    | selection::SKETCH_LINES
+    | selection::EXTERNAL_POINTS
+    | selection::ORIGIN
+    | selection::CONSTRUCTION_POINTS;
 /// What Intersect cuts with the sketch plane, picked one by one: faces, model edges and the
 /// curves of other sketches (#10484); an edge or a sketch line gives the points where it crosses.
 const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
