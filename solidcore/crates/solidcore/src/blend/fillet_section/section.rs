@@ -17,7 +17,9 @@
 //! the solver's stations by t is the stable `sort_by` with `<`'s order (they differ only
 //! for equal t).
 
-use super::certificate::{arc_rows, gn_certify_span, law_series, GnLaw, GnVarying, NurbsCurve};
+use super::certificate::{
+    arc_rows, gn_certify_span_reusing, law_series, CertifiedLevel, GnLaw, GnVarying, NurbsCurve,
+};
 use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
 use super::series::{Ser, Trunc, VSer};
@@ -1896,15 +1898,19 @@ impl GnSectionFsg {
         }
         let mut vary = varying(n, r, &stations, equal_area);
         let mut bounds = vec![-1.0_f64; stations.len().saturating_sub(1)];
+        // a span's finest proved level, kept while it is over the target: its halves start
+        // from its pieces (not the fork's, which certifies each half afresh)
+        let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
         loop {
             let mut all = true;
-            for (j, bj) in bounds.iter_mut().enumerate() {
+            for (j, (bj, lj)) in bounds.iter_mut().zip(levels.iter_mut()).enumerate() {
                 k.check_cancelled(OP_CERTIFY)?;
                 if *bj < 0.0 {
                     let (Some(a), Some(b)) = (stations.get(j), stations.get(j + 1)) else {
                         return Err(SolidError::sm_err(OP));
                     };
-                    *bj = gn_certify_span(
+                    let mut kept = None;
+                    *bj = gn_certify_span_reusing(
                         k,
                         face_n,
                         &leader,
@@ -1919,7 +1925,11 @@ impl GnSectionFsg {
                         if equal_area { Some(&mut vary) } else { None },
                         law,
                         if any_defs { Some(&mut defs) } else { None },
+                        lj.as_deref(),
+                        &mut kept,
                     )?;
+                    let within = *bj <= target;
+                    *lj = if within { None } else { kept.map(Arc::new) };
                 }
                 let within = *bj <= target;
                 if !within {
@@ -1935,12 +1945,14 @@ impl GnSectionFsg {
             }
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
-            for (pair, &bj) in stations.windows(2).zip(&bounds) {
+            let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
+            for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
                 next.push(*a);
                 if bj <= target {
                     next_bounds.push(bj);
+                    next_levels.push(None);
                     continue;
                 }
                 let mid = 0.5 * (a.s + b.s);
@@ -1975,12 +1987,15 @@ impl GnSectionFsg {
                 next.push(st);
                 next_bounds.push(-1.0);
                 next_bounds.push(-1.0);
+                next_levels.push(lj.clone());
+                next_levels.push(lj.clone());
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
             }
             stations = next;
             bounds = next_bounds;
+            levels = next_levels;
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {
