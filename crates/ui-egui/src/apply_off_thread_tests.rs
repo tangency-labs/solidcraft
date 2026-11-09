@@ -351,7 +351,7 @@ fn an_edit_without_a_preview_adopts_its_suffix_without_window_evaluation() {
     h.call("ui.editFeature", json!({"feature":plane}));
     h.frames(2);
     assert!(h.app.dialog.as_ref().is_some_and(|d| !d.previews()), "Offset Plane has no live preview");
-    if let Some(crate::dialogs::Kind::OffsetPlane { offset }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+    if let Some(crate::dialogs::Kind::OffsetPlane { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
         *offset = "15".into();
     }
     // The worker's result is held until OK has been seen computing: the click settles over a few
