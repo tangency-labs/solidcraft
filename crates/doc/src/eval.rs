@@ -455,7 +455,7 @@ fn fillet_fitted(
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => {
-            Err(with_largest_fit(why, "radius", || kernel::fillet_max(body, edges, r, turn)))
+            Err(with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn)))
         }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
@@ -495,27 +495,36 @@ impl Drop for EvalValidationGuard {
 }
 
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
-/// as `search` finds it by building candidates ([`kernel::fillet_max`]): the refusal as it is
-/// when none fits or the search itself fails (a candidate failing for another reason says
-/// nothing about the size).
+/// as `search` finds it by building candidates ([`kernel::fillet_max_why`]). A size is named only
+/// when a candidate built at it: solidcore's own estimate (in `why`) is replaced by the size the
+/// search built, or, when nothing smaller builds, removed and replaced by what the search met
+/// (the smallest candidate's own failure). An estimate no build
+/// confirmed sent ladders the wrong way: it could name a size that is itself refused.
 fn with_largest_fit(
     why: String,
     size: &str,
-    search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
+    search: impl FnOnce() -> std::result::Result<kernel::FitSearch, kernel::KernelError>,
 ) -> kernel::KernelError {
     if EVAL_VALIDATION.get() == kernel::Validation::Off {
         return kernel::KernelError::TooLarge(why);
     }
-    // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
-    // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
-    // search finds none.
     match search() {
-        Ok(Some((largest, _))) if kernel::names_largest_fit(&why) => kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest)),
-        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest))),
-        Ok(None) => kernel::KernelError::TooLarge(why),
+        Ok(kernel::FitSearch { found: Some((largest, _)), .. }) if kernel::names_largest_fit(&why) => {
+            kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest))
+        }
+        Ok(kernel::FitSearch { found: Some((largest, _)), .. }) => {
+            kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest)))
+        }
+        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)) }) => kernel::KernelError::TooLarge(format!(
+            "{}; no smaller {size} builds either (down to {} mm: {})",
+            kernel::without_fit_note(&why),
+            show_mm(at),
+            kernel::without_fit_note(&e.to_string())
+        )),
+        Ok(kernel::FitSearch { found: None, smallest_refused: None }) => kernel::KernelError::TooLarge(kernel::without_fit_note(&why)),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");
-            kernel::KernelError::TooLarge(why)
+            kernel::KernelError::TooLarge(format!("{}; a smaller {size} fails otherwise: {e}", kernel::without_fit_note(&why)))
         }
     }
 }
@@ -2918,6 +2927,38 @@ pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f6
         return expr::eval_with_defaults(e, &look, defaults)?.to_kind_in(k, defaults);
     }
     Document::eval_in(vals, e, k)
+}
+
+#[cfg(test)]
+mod largest_fit_tests {
+    use super::*;
+
+    const WHY: &str = "the fillet is larger than the faces beside its edges allow; the largest radius that fits is 1.6 mm";
+
+    /// Nothing smaller builds: the unverified estimate is gone, and the message says what the
+    /// smallest candidate met.
+    #[test]
+    fn a_size_nothing_built_is_not_named() {
+        let e = with_largest_fit(WHY.into(), "radius", || {
+            Ok(kernel::FitSearch {
+                found: None,
+                smallest_refused: Some((0.001, kernel::KernelError::TooLarge("the trim leaks; the largest radius that fits is 0.0004 mm".into()))),
+            })
+        })
+        .to_string();
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.contains("no smaller radius builds either (down to 0.001 mm: "), "{e}");
+        assert!(e.contains("the trim leaks"), "{e}");
+    }
+
+    /// A candidate failing for another reason stops the search: that reason is said, not the
+    /// estimate.
+    #[test]
+    fn a_search_stopped_by_another_failure_says_it() {
+        let e = with_largest_fit(WHY.into(), "radius", || Err(kernel::KernelError::Failed("the corner".into()))).to_string();
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.contains("a smaller radius fails otherwise: "), "{e}");
+    }
 }
 
 #[cfg(test)]
@@ -7594,7 +7635,7 @@ fn chamfer_with(
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
         None => match kernel::chamfer(b, edges, d) {
-            Err(kernel::KernelError::TooLarge(why)) => return Err(with_largest_fit(why, "distance", || kernel::chamfer_max(b, edges, d)).into()),
+            Err(kernel::KernelError::TooLarge(why)) => return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d)).into()),
             other => other?,
         },
     })
