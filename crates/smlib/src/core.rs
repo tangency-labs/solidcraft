@@ -201,7 +201,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.offset_closes_loop_gaps = true;
     f.cylinder_plane_tangent_within_tolerance = true;
     f.boolean_wire_edge_keeps_faceuse_shell = true;
     f.fillet_nx1_tangent_corner_edge = true;
@@ -259,9 +258,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_splits_corner_vertices = true;
     f.offset_keep_cavity_regions = true;
-    f.offset_four_face_vertex_split = true;
     f.gap_samples_non_bspline_v_stride = true;
     f.imprint_skips_collapsed_definition = true;
     f.fillet_blend_curve_revolved_on_arc = true;
