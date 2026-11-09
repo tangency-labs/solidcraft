@@ -3048,7 +3048,14 @@ fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
 /// line of the frame lies `angle` before one.
 fn cone_frames_turned(text: &str, angle: f64) -> String {
     // the references a record makes (after its own `#id=`)
-    let refs = |s: &str| -> Vec<u64> { s.split_once('=').map_or("", |(_, r)| r).split('#').skip(1).filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()).collect() };
+    let refs = |s: &str| -> Vec<u64> {
+        s.split_once('=')
+            .map_or("", |(_, r)| r)
+            .split('#')
+            .skip(1)
+            .filter_map(|t| t.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok())
+            .collect()
+    };
     let lines: HashMap<u64, &str> = text
         .lines()
         .filter_map(|l| {
@@ -3056,7 +3063,11 @@ fn cone_frames_turned(text: &str, angle: f64) -> String {
             Some((id.trim().parse().ok()?, l))
         })
         .collect();
-    let numbers = |l: &str| -> Vec<f64> { l.rsplit_once("((").or_else(|| l.rsplit_once(",(")).map_or(vec![], |(_, r)| r.trim_end_matches([')', ';']).split(',').filter_map(|x| x.trim().parse().ok()).collect()) };
+    let numbers = |l: &str| -> Vec<f64> {
+        l.rsplit_once("((")
+            .or_else(|| l.rsplit_once(",("))
+            .map_or(vec![], |(_, r)| r.trim_end_matches([')', ';']).split(',').filter_map(|x| x.trim().parse().ok()).collect())
+    };
     let mut out = text.to_string();
     for l in lines.values().filter(|l| l.contains("=CONICAL_SURFACE(")) {
         let placement = refs(l)[0];
