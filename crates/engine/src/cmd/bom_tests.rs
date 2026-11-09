@@ -2179,15 +2179,8 @@ fn hostile_quantities_are_refused_without_a_change() {
 /// once, a screw placed four times on it, and a holder placed twice, each holding one block and two
 /// of the screws. Returns the session and the two holders.
 fn assembly_sheet() -> (Session, [u64; 2]) {
-    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
-    let mut s = Session::default();
-    let made = s.run_script(&script).unwrap();
-    let placed = |name: &str| {
-        let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == name).unwrap();
-        made[step]["occurrence"].as_u64().unwrap()
-    };
-    let holders = [placed("first_holder"), placed("second_holder")];
-    (s, holders)
+    let (session, named) = crate::tests::w23_assembly_sheet();
+    (session, [named["first_holder"], named["second_holder"]])
 }
 
 /// The assembly sheet's parts list against the hand counts: parts only, the first level, all levels
