@@ -502,6 +502,34 @@ fn a_face_with_a_thin_arm_follows_its_body_made_smaller() {
     assert!(sk.points[free].pos.dist(Vec2::new(56.0, -6.0)) < 1e-7, "{:?}", sk.points[free].pos);
 }
 
+/// #13471: a face taken with `Intersect` is the face's section with the sketch plane: an open
+/// chain of segments, which no closed boundary describes. The refresh that follows closing the
+/// sketcher must not read that chain as an ambiguous projected boundary and lose the link.
+#[test]
+fn an_intersected_face_section_keeps_its_link_across_a_refresh() {
+    let section = vec![LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)), LinkGeom::Line(Vec2::new(10.0, 0.0), Vec2::new(10.0, 6.0))];
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section).unwrap();
+    assert_eq!(sk.update_link(&link, &section).map_err(|e| e.to_string()), Ok(false), "the same section keeps the link");
+    assert!(!sk.link(&link).unwrap().lost, "the link is not lost");
+}
+
+/// #13471: the same section, bigger, as the body it comes from grows: the link follows it.
+#[test]
+fn an_intersected_face_section_follows_a_resized_body() {
+    let section = |size: f64| -> Vec<LinkGeom> {
+        vec![LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(size, 0.0)), LinkGeom::Line(Vec2::new(size, 0.0), Vec2::new(size, size * 0.6))]
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Intersect, face(), &section(10.0)).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos.dist(Vec2::new(10.0, 0.0)) < 1e-9).unwrap();
+    assert_eq!(sk.update_link(&link, &section(12.0)).map_err(|e| e.to_string()), Ok(false), "the grown section keeps the link");
+    assert!(!sk.link(&link).unwrap().lost, "the link is not lost");
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>(), "the curves keep their ids");
+    assert!(sk.points[corner].pos.dist(Vec2::new(12.0, 0.0)) < 1e-9, "{:?}", sk.points[corner].pos);
+}
+
 /// The lines at a point leave it the same ways only when each direction matches a different
 /// one: two nearly parallel lines at a sharp corner don't both match one line while the other
 /// line turned round.
