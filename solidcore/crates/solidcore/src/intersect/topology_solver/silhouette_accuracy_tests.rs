@@ -420,7 +420,7 @@ fn projected_sphere_band_original_maximum_is_not_certified() {
 }
 
 #[test]
-fn projected_brep_maximum_is_certified_against_the_final_candidate_in_either_order() {
+fn projected_brep_maximum_is_certified_in_either_face_order() {
     for (specs, query_x, expected) in [
         (vec![(0.0, 0.5), (0.1, 0.6)], 1e-6, 0.7 - 1e-6),
         (vec![(0.1, 0.6), (0.0, 0.5)], 1e-6, 0.7 - 1e-6),
@@ -428,97 +428,112 @@ fn projected_brep_maximum_is_certified_against_the_final_candidate_in_either_ord
         // must not terminate a maximum query before its edges and face.
         (vec![(0.0, 0.5)], 0.25, 0.75),
     ] {
-        let mut k = Kernel::default();
-        let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
-        let mut faces = Vec::new();
-        for &(x, radius) in &specs {
-            let mut sphere = Sphere::new(
-                &k,
-                Vec3::new(x, 0.0, -1.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                Extent2d::from_bounds(0.0, -60.0, 360.0, 60.0),
-                radius,
-                SphereOptions::default(),
-            )
-            .unwrap();
-            sphere.make_nurb(&k).unwrap();
-            let surface = Surface::from(sphere);
-            let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
-            let mut state = ArenaNotifyState::new(&b);
-            let mut env = state.env(None);
-            let mut marks = Marks::default();
-            let keys = |f| arena_identity(CacheObject::Face(f));
-            let mut fenv = FaceBuildEnv {
-                env: &mut env,
-                marks: &mut marks,
-                this_face: &keys,
-            };
-            faces.push(
-                create_face_from_surface(&mut k, &mut b, Some(surface), &domain, &mut fenv)
-                    .unwrap(),
-            );
-        }
-        let mut preparation = crate::query::brep::RayPreparation::default();
-        for face in faces {
-            {
-                let objects = BrepObjects {
-                    preparation: Some(&preparation),
-                    brep: &b,
-                    brep_id: BrepId::from_index(0),
-                    cache: None,
-                    keys: &arena_identity,
-                    owner_of: &|_| None,
-                };
-                let mut context = objects.surface_solve_context().unwrap();
-                assert!(matches!(
-                    context.build_surface_cache(
-                        &k,
-                        b.face(face).unwrap().surface.as_ref().unwrap(),
-                        Some(CacheObject::Surface(face))
-                    ),
-                    Err(crate::SolidError::PreparationRequired { .. })
-                ));
-            }
-            let request = preparation.take_request().unwrap();
-            preparation.prepare(&k, &mut b, request).unwrap();
-        }
-        let mut cache =
-            crate::topology::brep_cache::BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
-        cache
-            .build_trees(
-                &k,
-                crate::topology::brep_cache::CacheSource::Brep(&b),
-                |o| o,
-                &arena_identity,
-            )
-            .unwrap();
-        let objects = BrepObjects {
-            preparation: Some(&preparation),
-            brep: &b,
-            brep_id: BrepId::from_index(0),
-            cache: Some(&cache),
-            keys: &arena_identity,
-            owner_of: &|_| None,
-        };
+        let k = Kernel::default();
+        let surfaces = specs
+            .iter()
+            .map(|&(x, radius)| {
+                let mut sphere = Sphere::new(
+                    &k,
+                    Vec3::new(x, 0.0, -1.0),
+                    Vec3::new(1.0, 0.0, 0.0),
+                    Vec3::new(0.0, 1.0, 0.0),
+                    Extent2d::from_bounds(0.0, -60.0, 360.0, 60.0),
+                    radius,
+                    SphereOptions::default(),
+                )
+                .unwrap();
+                sphere.make_nurb(&k).unwrap();
+                Surface::from(sphere)
+            })
+            .collect();
         let tol = 1e-8;
-        let answer = TopologySolver::brep_point_solve(
-            &k,
-            &objects,
-            Some(CacheObject::Brep),
-            Vec3::new(query_x, 0.0, 2.0),
-            crate::intersect::topology_solver::p2::TopologySolveOptions {
-                operation: SolverOperation::ProjectedMaximize,
-                requested: SolutionRequested::Single,
-                tolerance_3d: tol,
-                best_answer_so_far_sq: 0.0,
-                opt_vectors: &[Vec3::new(0.0, 0.0, 1.0)],
-            },
-        )
-        .unwrap_or_else(|error| panic!("specs={specs:?}, query_x={query_x}: {error:?}"));
+        let answer = brep_projected_maximum(k, surfaces, Vec3::new(query_x, 0.0, 2.0), tol)
+            .unwrap_or_else(|error| panic!("specs={specs:?}, query_x={query_x}: {error:?}"));
         assert_eq!(answer.len(), 1);
         assert!((answer.as_slice()[0].start.solution_value - expected).abs() <= tol);
     }
+}
+
+/// Builds one face per surface in a new B-rep and asks its tree for the single
+/// projected maximum from `query`, viewed along Z.
+fn brep_projected_maximum(
+    mut k: Kernel,
+    surfaces: Vec<Surface>,
+    query: Vec3,
+    tol: f64,
+) -> crate::Result<crate::geom::solution_array::SolutionArray<CacheObject>> {
+    let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+    let mut faces = Vec::new();
+    for surface in surfaces {
+        let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let mut marks = Marks::default();
+        let keys = |f| arena_identity(CacheObject::Face(f));
+        let mut fenv = FaceBuildEnv {
+            env: &mut env,
+            marks: &mut marks,
+            this_face: &keys,
+        };
+        faces.push(
+            create_face_from_surface(&mut k, &mut b, Some(surface), &domain, &mut fenv).unwrap(),
+        );
+    }
+    let mut preparation = crate::query::brep::RayPreparation::default();
+    for face in faces {
+        {
+            let objects = BrepObjects {
+                preparation: Some(&preparation),
+                brep: &b,
+                brep_id: BrepId::from_index(0),
+                cache: None,
+                keys: &arena_identity,
+                owner_of: &|_| None,
+            };
+            let mut context = objects.surface_solve_context().unwrap();
+            assert!(matches!(
+                context.build_surface_cache(
+                    &k,
+                    b.face(face).unwrap().surface.as_ref().unwrap(),
+                    Some(CacheObject::Surface(face))
+                ),
+                Err(crate::SolidError::PreparationRequired { .. })
+            ));
+        }
+        let request = preparation.take_request().unwrap();
+        preparation.prepare(&k, &mut b, request).unwrap();
+    }
+    let mut cache =
+        crate::topology::brep_cache::BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
+    cache
+        .build_trees(
+            &k,
+            crate::topology::brep_cache::CacheSource::Brep(&b),
+            |o| o,
+            &arena_identity,
+        )
+        .unwrap();
+    let objects = BrepObjects {
+        preparation: Some(&preparation),
+        brep: &b,
+        brep_id: BrepId::from_index(0),
+        cache: Some(&cache),
+        keys: &arena_identity,
+        owner_of: &|_| None,
+    };
+    TopologySolver::brep_point_solve(
+        &k,
+        &objects,
+        Some(CacheObject::Brep),
+        query,
+        crate::intersect::topology_solver::p2::TopologySolveOptions {
+            operation: SolverOperation::ProjectedMaximize,
+            requested: SolutionRequested::Single,
+            tolerance_3d: tol,
+            best_answer_so_far_sq: 0.0,
+            opt_vectors: &[Vec3::new(0.0, 0.0, 1.0)],
+        },
+    )
 }
 
 #[test]
