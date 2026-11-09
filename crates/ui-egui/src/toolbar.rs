@@ -1225,7 +1225,7 @@ impl RibbonPanels {
     }
 
     /// The panel button the component drew as `drawn`.
-    fn button(&self, drawn: &ribbon::Drawn) -> Option<&PanelButton> {
+    fn panel_button(&self, drawn: &ribbon::Drawn) -> Option<&PanelButton> {
         let panel = self.panels.get(drawn.group)?;
         if drawn.cell { panel.gallery.get(drawn.index) } else { panel.large.get(drawn.index) }
     }
@@ -1404,7 +1404,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         // persistent paint and a family's variants menu.
         for d in &mut out.buttons {
             let deferred = d.deferred.take();
-            let Some(b) = panels.button(d) else { continue };
+            let Some(b) = panels.panel_button(d) else { continue };
             let resp = &d.response;
             if let Some(r) = reveal.as_ref().filter(|r| r.preview) {
                 if d.cell {
