@@ -20,6 +20,7 @@ const MAX_DEPTH: u32 = 24;
 pub(crate) const QUARTER_TURN: f64 = std::f64::consts::FRAC_PI_2 * (1.0 + 1e-9);
 
 /// An edge's nodes, from its start vertex (interval min) to its end vertex (interval max).
+#[derive(Default)]
 pub(crate) struct Nodes {
     pub points: Vec<Vec3>,
     /// The curve's parameter at each node (the edge's interval, ends included): where each

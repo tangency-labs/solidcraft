@@ -107,6 +107,13 @@ const MAX_REFINE: usize = 20_000;
 /// each round halves them, so their chords sag a quarter as far.
 const MAX_UNTANGLE: u32 = 16;
 
+/// An error's own words, without its kind's prefix, for a message that names where it happened.
+fn detail(e: &TessError) -> &str {
+    match e {
+        TessError::Invalid(m) | TessError::Failed(m) | TessError::Internal(m) => m,
+    }
+}
+
 fn unsupported(what: impl std::fmt::Display) -> TessError {
     TessError::Failed(format!("not supported yet: tessellation: {what}"))
 }
@@ -183,11 +190,25 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
     // its faces; faces then read their nodes. A planar face costs microseconds and a curved
     // one about a hundred, so the pool is used only where curved faces (or intersection
     // curves) make up the work.
+    // Why each face is left out of the plan, where one is: its surface does not evaluate, an
+    // edge of it cannot be sampled, or its boundary cannot be read. The rest of the body is
+    // meshed; each such face is named in the stats with why.
+    let mut why: Vec<Option<TessError>> = vec![None; faces.len()];
+    // A face left out keeps a plane in its place, so the plan's surfaces stay one per face.
+    let stand_in = || (EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }, surface::Params::Same);
     let evals: Vec<(EvalSurface, surface::Params)> = faces
         .iter()
         .enumerate()
-        .map(|(fi, f)| surface::eval_surface(f.parameters(), f.domain).map_err(|e| unsupported(format!("face {fi} ({}): {e}", kind(&f.surface)))))
-        .collect::<Result<_>>()?;
+        .map(|(fi, f)| match surface::eval_surface(f.parameters(), f.domain) {
+            Ok(e) => e,
+            Err(e) => {
+                if let Some(slot) = why.get_mut(fi) {
+                    *slot = Some(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(&e))));
+                }
+                stand_in()
+            }
+        })
+        .collect();
     let (evals, params): (Vec<EvalSurface>, Vec<surface::Params>) = evals.into_iter().unzip();
     // Each face's surface with the kernel's form of it, whose classifier decides its poles.
     // A face's tolerance: the largest of its edges' and their vertices', as the record carries
@@ -212,13 +233,40 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         edge_faces.iter().map(|fs| if fs.is_empty() { rules.max_len } else { fs.iter().map(|&f| face_h(f)).fold(f64::INFINITY, f64::min) }).collect();
     let jobs: Vec<(usize, f64)> = edge_h.into_iter().enumerate().collect();
     let solved = b.edges.iter().filter(|e| matches!(e.curve, Curve::SurfaceIntersection { .. })).count();
-    let mut nodes: Vec<edges::Nodes> = crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
+    // An edge that cannot be sampled leaves out every face it bounds, each naming it, and has no
+    // nodes in the plan; one that bounds no face is named in the stats on its own.
+    let mut unsampled_edges: Vec<crate::RefusedEdge> = Vec::new();
+    let mut nodes: Vec<edges::Nodes> = Vec::with_capacity(jobs.len());
+    for (ei, r) in crate::par::map("edge nodes", &jobs, solved >= PARALLEL_CURVES || jobs.len() >= PARALLEL_EDGES, |(e, h)| {
         edges::sample_edge(b, *e, &rules, *h)
     })
     .into_iter()
-    .collect::<Result<_>>()?;
-    relax_crowded_faces(b, &jobs, &rules, &mut nodes)?;
-    split_thin_loops(b, &mut nodes)?;
+    .enumerate()
+    {
+        nodes.push(match r {
+            Ok(n) => n,
+            Err(e) => {
+                let fs = edge_faces.get(ei).map_or(&[][..], Vec::as_slice);
+                if fs.is_empty() {
+                    unsampled_edges.push(crate::RefusedEdge { edge: ei, reason: e.to_string() });
+                }
+                for &fi in fs {
+                    if let (Some(slot @ None), Some(f)) = (why.get_mut(fi), faces.get(fi)) {
+                        *slot = Some(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(&e))));
+                    }
+                }
+                edges::Nodes::default()
+            }
+        });
+    }
+    let kept_strict = relax_crowded_faces(b, &jobs, &rules, &mut nodes);
+    for (ei, e) in split_thin_loops(b, &mut nodes) {
+        for &fi in edge_faces.get(ei).map_or(&[][..], Vec::as_slice) {
+            if let (Some(slot @ None), Some(f)) = (why.get_mut(fi), faces.get(fi)) {
+                *slot = Some(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(&e))));
+            }
+        }
+    }
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let face_boundary = |fi: usize, nodes: &[edges::Nodes]| {
         let (Some(face), Some(eval), Some(map)) = (faces.get(fi), evals.get(fi), params.get(fi)) else {
@@ -226,10 +274,32 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         };
         boundary(b, fi, face, eval, map, nodes, &rules)
     };
-    let mut boundaries: Vec<Boundary> =
-        crate::par::map("face boundaries", &indexed, curved >= PARALLEL_FACES, |&fi| face_boundary(fi, &nodes)).into_iter().collect::<Result<_>>()?;
-    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary)?;
+    let skip: Vec<bool> = why.iter().map(Option::is_some).collect();
+    let mut boundaries: Vec<Boundary> = Vec::with_capacity(faces.len());
+    for (fi, r) in crate::par::map("face boundaries", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        if skip.get(fi).copied().unwrap_or(true) {
+            return Ok(Boundary::default());
+        }
+        face_boundary(fi, &nodes)
+    })
+    .into_iter()
+    .enumerate()
+    {
+        boundaries.push(match r {
+            Ok(fb) => fb,
+            Err(e) => {
+                if let Some(slot @ None) = why.get_mut(fi) {
+                    *slot = Some(e);
+                }
+                Boundary::default()
+            }
+        });
+    }
+    let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
     let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        if let Some(Some(e)) = why.get(fi) {
+            return Err(e.clone());
+        }
         let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
             return Err(unsupported(format!("face {fi}: missing")));
         };
@@ -251,7 +321,7 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         Ok((FacePlan { poles, ..fp }, stats))
     });
     let mut plan = TessPlan::default();
-    let mut stats = PlanStats::default();
+    let mut stats = PlanStats { unsampled_edges, kept_strict, ..PlanStats::default() };
     // A face no method plans is left out, named in the stats, and the rest of the body is
     // meshed; a body none of whose faces plan is the first face's error.
     let mut first_error: Option<TessError> = None;
@@ -482,6 +552,7 @@ fn boundary(
 /// edge, and the segment's place along it from its start vertex. `reach`: how near a pole a
 /// point of the face is taken as one (see [`poles::Face::pole`]): the tolerance of a vertex
 /// of it on a patch side collapsed to within that tolerance, else 0.
+#[derive(Default)]
 struct Boundary {
     loops: Vec<seam::Loop>,
     segments: Vec<Vec<(u32, u32)>>,
@@ -505,14 +576,26 @@ fn untangle(
     nodes: &mut [edges::Nodes],
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
+    why: &mut [Option<TessError>],
 ) -> Result<Vec<(usize, String)>> {
+    // An edge that cannot be split further (it has all the nodes an edge may have) leaves out
+    // the faces it bounds, each naming it; so does a face whose boundary cannot then be read.
+    let refuse = |fi: usize, e: &TessError, why: &mut [Option<TessError>]| {
+        if let (Some(slot @ None), Some(f)) = (why.get_mut(fi), b.faces.get(fi)) {
+            *slot = Some(unsupported(format!("face {fi} ({}): {}", kind(&f.surface), detail(e))));
+        }
+    };
     let crossing = |fi: usize, fb: &Boundary| -> Vec<(u32, u32)> {
         let Some(s) = evals.get(fi) else { return Vec::new() };
         tangle::crossing(s, fb.reach, &fb.loops).into_iter().filter_map(|(l, k)| fb.segments.get(l)?.get(k).copied()).collect()
     };
     let indexed: Vec<usize> = (0..boundaries.len()).collect();
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
+    let left_out: Vec<bool> = why.iter().map(Option::is_some).collect();
     let found: Vec<Vec<(u32, u32)>> = crate::par::map("boundary crossings", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        if left_out.get(fi).copied().unwrap_or(false) {
+            return Ok(Vec::new());
+        }
         Ok(boundaries.get(fi).map_or_else(Vec::new, |fb| crossing(fi, fb)))
     })
     .into_iter()
@@ -547,14 +630,30 @@ fn untangle(
             let Some(&(e, _)) = run.first() else { continue };
             let segs: Vec<u32> = run.iter().map(|(_, k)| *k).collect();
             let Some(slot) = nodes.get_mut(e as usize) else { continue };
-            edges::split_segments(b, e as usize, slot, &segs)?;
+            if let Err(err) = edges::split_segments(b, e as usize, slot, &segs) {
+                for &fi in edge_faces.get(e as usize).into_iter().flatten() {
+                    refuse(fi, &err, why);
+                }
+                continue;
+            }
             redo.extend(edge_faces.get(e as usize).into_iter().flatten().copied());
         }
         redo.sort_unstable();
         redo.dedup();
         tangled.clear();
         for fi in redo {
-            let fb = face_boundary(fi, nodes)?;
+            if why.get(fi).is_some_and(Option::is_some) {
+                continue;
+            }
+            let fb = match face_boundary(fi, nodes) {
+                Ok(fb) => fb,
+                Err(err) => {
+                    if let Some(slot @ None) = why.get_mut(fi) {
+                        *slot = Some(err);
+                    }
+                    continue;
+                }
+            };
             let c = crossing(fi, &fb);
             if let Some(slot) = boundaries.get_mut(fi) {
                 *slot = fb;
@@ -734,7 +833,8 @@ const MIN_LOOP_SEGMENTS: usize = 3;
 /// until it has them: two short arcs (a lens), each within the chord tolerance and so one
 /// segment, would otherwise be two chords on one line, a boundary of no area. The new nodes are
 /// on the edges' curves and shared by every face that runs them, as all edge nodes are.
-fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Result<()> {
+fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Vec<(usize, TessError)> {
+    let mut failed: Vec<(usize, TessError)> = Vec::new();
     for f in &b.faces {
         for l in &f.loops {
             let Loop::Edges { edges: uses } = l else { continue };
@@ -750,19 +850,26 @@ fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Result<()> {
                     break;
                 }
                 for &e in &es {
+                    if failed.iter().any(|(f, _)| *f == e) {
+                        continue;
+                    }
                     let Some(slot) = nodes.get_mut(e) else { continue };
                     let segs: Vec<u32> = (0..slot.points.len().saturating_sub(1)).filter_map(|k| u32::try_from(k).ok()).collect();
-                    edges::split_segments(b, e, slot, &segs)?;
+                    // An edge that cannot be split further leaves out the faces it bounds.
+                    if let Err(why) = edges::split_segments(b, e, slot, &segs) {
+                        failed.push((e, why));
+                    }
                 }
             }
         }
     }
-    Ok(())
+    failed
 }
 
 /// same share whatever the order of the faces.
-fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rules, nodes: &mut [edges::Nodes]) -> Result<()> {
-    let Some(turn) = rules.turn else { return Ok(()) };
+fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rules, nodes: &mut [edges::Nodes]) -> Vec<crate::RefusedEdge> {
+    let mut kept = Vec::new();
+    let Some(turn) = rules.turn else { return kept };
     let boundaries: Vec<Vec<usize>> = b.faces.iter().map(|f| face_edges(f).map(|oe| oe.edge as usize).collect()).collect();
     let curved = |e: usize| b.edges.get(e).is_some_and(|e| !matches!(e.curve, Curve::Line { .. }));
     let mut level: Vec<u8> = vec![0; nodes.len()];
@@ -783,15 +890,20 @@ fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rule
         let relaxed = size::Rules { turn: turn.relaxed(l), ..*rules };
         for e in crowded {
             let Some(&(_, h)) = jobs.get(e) else { continue };
+            // An edge whose coarser sampling fails keeps the nodes it has (valid, only finer),
+            // named with why.
             if let Some(slot) = nodes.get_mut(e) {
-                *slot = edges::sample_edge(b, e, &relaxed, h)?;
+                match edges::sample_edge(b, e, &relaxed, h) {
+                    Ok(n) => *slot = n,
+                    Err(why) => kept.push(crate::RefusedEdge { edge: e, reason: why.to_string() }),
+                }
             }
             if let Some(slot) = level.get_mut(e) {
                 *slot = l;
             }
         }
     }
-    Ok(())
+    kept
 }
 
 /// Twice the signed area of a parameter polygon.
