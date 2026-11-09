@@ -1084,17 +1084,9 @@ crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	
 crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	2	proven	found_index % 2	constant non-zero divisor
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	1	proven	insert(idx + 1, new_curve)	idx is position() in self.curves, so idx + 1 <= len()
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	2	proven	insert(idx + 1, o)	returns Err when idx + 1 > self.orients.len()
-crates/step-brep/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
-crates/step-brep/src/constructor.rs	remove_face	Vec::remove	1	proven	remove(slot)	slot is enumerate() over the same shell's faces
-crates/step-brep/src/constructor.rs	skip_limit	int-div	1	proven	faces / 100	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	Piece::trim_curve	windows	1	proven	windows(2)	constant non-zero size
-crates/step-brep/src/pcurves.rs	chain	int-div	1	proven	piece.samples.len() / 2	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	chain	rotate	1	proven	rotate_right(anchor)	anchor < pieces.len() == shifts.len()
-crates/step-brep/src/pcurves.rs	clamp	f64::clamp	1	proven	clamp(low, low + period)	period is 360; low a periodic STEP domain low: 0, or finite from script::axis_range
-crates/step-brep/src/pcurves.rs	edge_use	windows	1	proven	windows(2)	constant non-zero size
-crates/step-brep/src/pcurves.rs	edge_use	windows	2	proven	windows(2)	constant non-zero size
+crates/step-export/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
+crates/step-export/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
+crates/step-export/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
 crates/step-export/src/lib.rs	faceted_shell	int-rem	1	open	(index + 1) % len	
 crates/step-export/src/lib.rs	faceted_shell	with_capacity	1	open	Vec::with_capacity(face_indices.len())	
 crates/step-export/src/lib.rs	faceted_shell	with_capacity	2	open	Vec::with_capacity(face.loops.len())	

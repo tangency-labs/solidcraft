@@ -1433,3 +1433,17 @@ fn parabola_and_hyperbola_edges_bound_faces() {
         }
     }
 }
+
+/// SolidCraft's own export of a cross-bored rod whose bore rim is a B-spline of 1 399 control
+/// points running back and forth across the bore (tests/step-regressions in SolidCraft, #4598):
+/// the rim's faces have no closed-form pcurves there, and the refusal names the face rather
+/// than build the folded rim. Ported from step-brep's `tests/issue_2583_topology_first.rs` with
+/// its fixture; step-brep built the rim as written.
+#[test]
+fn rod_doubled_edge_names_the_face_of_its_folded_rim() {
+    let text = include_str!("../tests/fixtures/rod_doubled_edge.step");
+    let r = read_solids(&p21::parse(text).unwrap());
+    assert!(r.solids.is_empty());
+    let why = &r.failures.first().expect("a refusal").message;
+    assert!(super::named_face(why).is_some(), "{why}");
+}

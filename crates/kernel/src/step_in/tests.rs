@@ -2399,6 +2399,48 @@ fn a_file_whose_only_face_cannot_be_made_names_it_and_how_far_off() {
     assert!(err.contains("only face, #15") && err.contains("1.5") && err.contains("off the face's surface"), "{err}");
 }
 
+/// solidcore's step-brep read this Discord fillet operand (a reported part, its fillet the
+/// subject of #2595) as one closed solid; SolidCraft's reader does too, its spline faces trimmed
+/// by SMLib. Ported from step-brep's `tests/discord_fillet.rs`, with its fixture, now
+/// solidcore-step's.
+#[test]
+fn discord_fillet_operand_reads_as_one_closed_solid() {
+    let text = include_str!("../../../../solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step");
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.closed && b.refused.is_none(), "{:?}", imp.warnings);
+    assert_eq!(b.body.face_count(), b.file_faces, "{:?}", imp.warnings);
+}
+
+/// A face no shell lists (a file of a bare face, as cadmpeg's root fixtures and STEP Tools'
+/// faceted samples hold) is a one-face sheet. Ported from step-brep's
+/// `tests/issue_2581_faceted_brep.rs` (`standalone_face_without_shell_is_single_face_sheet`).
+#[test]
+fn a_face_no_shell_lists_is_a_one_face_sheet() {
+    let text = format!(
+        "{HEAD}
+#1=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#2=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#1)) REPRESENTATION_CONTEXT('model','3D'));
+#3=CARTESIAN_POINT('',(0.,0.,0.));
+#4=CARTESIAN_POINT('',(9.,0.,0.));
+#5=CARTESIAN_POINT('',(0.,7.,0.));
+#6=POLY_LOOP('',(#3,#4,#5));
+#7=FACE_OUTER_BOUND('',#6,.T.);
+#8=DIRECTION('',(0.,0.,1.));
+#9=DIRECTION('',(1.,0.,0.));
+#10=AXIS2_PLACEMENT_3D('',#3,#8,#9);
+#11=PLANE('',#10);
+#12=FACE_SURFACE('',(#7),#11,.T.);
+{TAIL}"
+    );
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(!b.closed && b.body.face_count() == 1, "{:?}", imp.warnings);
+    assert!(rel(measure(&b.body).unwrap().area, 31.5) < 1e-9, "{}", measure(&b.body).unwrap().area);
+}
+
 /// SMLib's refusal of a face by its index in the record (NIST CTC 02's face whose NURBS form is
 /// not its analytic surface, which SMLib numbers 90) names the file's face, so the face is left
 /// out and the import's warning says which: "face #1202".
