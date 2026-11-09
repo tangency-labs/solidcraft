@@ -3103,6 +3103,20 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_theme_with_colour_keys_this_version_lacks_loads_with_them_ignored() {
+        let saved = json!({
+            "id": "old", "name": "Old", "base": "dark",
+            "colors": {"panel": "#102030", "zigzag_face": "#abcdef", "zigzag_border": "#123456"},
+        });
+        let theme: ThemeFile = serde_json::from_value(saved).expect("an unknown colour key never fails a saved theme");
+        let resolved = resolve(&theme);
+        assert_eq!(resolved.panel, Color32::from_rgb(0x10, 0x20, 0x30), "the valid key is applied");
+        let plain = resolve(&ThemeFile { colors: BTreeMap::new(), ..theme.clone() });
+        assert_eq!(resolved.navigator_face, plain.navigator_face, "the unknown keys change nothing");
+        assert_eq!(resolved.navigator_border, plain.navigator_border);
+    }
+
+    #[test]
     fn imported_ids_never_take_a_built_in_or_mode_id_and_replace_their_own() {
         let mut custom = Vec::new();
         let mk = |name: &str| ThemeFile { id: slug(name), name: name.into(), ..Default::default() };

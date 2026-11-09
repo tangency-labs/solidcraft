@@ -2089,7 +2089,6 @@
   "prefs.navigation.turntable": "턴테이블",
   "prefs.navigation_note": "마우스, 트랙패드, 3D 마우스로 뷰를 움직이는 방식입니다.",
   "prefs.navigator_fit": "뷰 탐색기로 뷰를 바꾼 뒤 모델 맞춤",
-  "prefs.navigator_fit_note": "큐브의 면, 모서리, 화살표나 기즈모의 축을 클릭하면 어느 방향에서든 전체가 들어가는 한 거리(경계 구)에서 모델의 중심을 바라봅니다. 켜져 있는 동안 홈 뷰도 같은 확대/축소와 중심을 쓰므로 그 뒤에 고른 뷰는 방향만 바뀝니다. 끄면 뷰가 제자리에서 회전하며 대상과 확대/축소를 유지합니다.",
   "prefs.network_locations_note": "파일 서버에 디자인을 보관하는 조직용입니다. 끄면 허용한 서버만 사용합니다.",
   "prefs.not_on_gpu": "이 GPU에서는 사용할 수 없음",
   "prefs.on": "켜짐",
