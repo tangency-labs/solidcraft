@@ -5241,6 +5241,12 @@ fn names_an_edit_gives_a_pattern_of_two_bodies_name_its_copies_in_order() {
     assert_eq!(shape(&mut s, "Right"), ("box", 60.0), "{:?}", names(&s));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(names(&reopened), names(&s));
+
+    // Names given with a change to the bodies are the new copies' names, in order, even when one
+    // source is left: they are not moved by source as the stored names are.
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"], "body_names": ["Left", "Right"]}}));
+    assert_eq!(shape(&mut s, "Left"), ("post", 30.0), "{:?}", names(&s));
+    assert_eq!(shape(&mut s, "Right"), ("post", 60.0), "{:?}", names(&s));
 }
 
 /// A sketch side drawn as two collinear lines extrudes into one flat face, not two with an edge
