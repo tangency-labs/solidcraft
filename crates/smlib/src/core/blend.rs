@@ -735,10 +735,16 @@ fn corners(
 }
 
 /// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
-pub(super) fn finish(b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
+/// Before refusing a non-manifold result, grows tolerances to cover marginal gaps (SolidCraft
+/// issue #10: fuzzer seeds 178 and others). Tolerances only grow.
+pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
     if b.face_list().is_empty() {
         return Ok(Err(Error::Empty));
     }
+    // Always try growing tolerances first: covers marginal edge/vertex gaps where the gap
+    // exceeds the recorded tolerance. Tolerances only grow: a body that already passes is
+    // unchanged; a marginal failure becomes sound.
+    let _ = validate_and_update_tolerances(k, &mut b, false, None, CheckLevel::Level2 as u8);
     if solid_in && !brep_p2::is_manifold_solid(&b)? {
         return Ok(Err(Error::NotSolid));
     }
@@ -1063,7 +1069,7 @@ fn blend_call(
                 let chamfers: Vec<ChamferSize> = each.iter().map(|&d| ChamferSize::Distances([d, d])).collect();
                 let section = Section::Chamfer { sizes: &chamfers, along: &[] };
                 return Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
-                    Ok(()) => finish(w, solid_in)?,
+                    Ok(()) => finish(k, w, solid_in)?,
                     Err(Ok(_)) => Err(Error::Unsupported),
                     Err(Err(e)) => Err(e),
                 });
@@ -1082,7 +1088,7 @@ fn blend_call(
         let done = blend_edges_stopping(k, &mut w, &picked, &each, section, None, &back, (open == Corners::Open).then_some(&mut patches), first)?;
         if stopped.is_some() {
             return Ok(match overflow_first(k, body, points, tolerance, section, &picked, &mitred, &each, &mut w, dropped)? {
-                Ok(fresh) => finish(fresh, solid_in)?,
+                Ok(fresh) => finish(k, fresh, solid_in)?,
                 Err(e) => Err(e),
             });
         }
@@ -1097,7 +1103,7 @@ fn blend_call(
                 Ok(_) => {}
                 Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
             }
-            return finish(w, solid_in);
+            return finish(k, w, solid_in);
         }
         // Each corner opened: its patch removed, the edges round its hole in the result's
         // orders, once per corner point (a vertex picked twice gives its hole twice).
@@ -1133,7 +1139,7 @@ fn blend_call(
             Ok(_) => {}
             Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
         }
-        finish(w, false)
+        finish(k, w, false)
     })?;
     Ok((made, holes))
 }
@@ -1325,7 +1331,7 @@ pub(crate) fn chamfer_sides(body: &Body, points: &[[f64; 3]], tolerance: f64, di
         };
         let section = Section::Chamfer { sizes: std::slice::from_ref(&size), along: &along };
         Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
-            Ok(()) => finish(w, solid_in)?,
+            Ok(()) => finish(k, w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
         })
@@ -1507,7 +1513,7 @@ pub(crate) fn fillet_variable(
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let (r0, r1) = (radii.first().copied().unwrap_or(0.0), radii.last().copied().unwrap_or(0.0));
         Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round(Turn::Mitre), Some(law), &[], None)? {
-            Ok(()) => finish(w, solid_in)?,
+            Ok(()) => finish(k, w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
         })
