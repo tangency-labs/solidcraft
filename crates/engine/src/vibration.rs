@@ -84,12 +84,16 @@ pub struct Shape {
     /// Peak magnitude during one cycle, in the same units as the displacement.
     pub amplitude: Vec<f64>,
     pub maximum: usize,
+    /// Phase in radians at which the maximum vertex reaches its peak displacement.
+    pub peak_phase: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SweepResult {
     pub bodies: Vec<String>,
     pub vertices_mm: Vec<[f64; 3]>,
+    /// Diagonal of the undeformed surface bounds, used to scale normalized modes.
+    pub diagonal_mm: f64,
     pub vertex_body: Vec<usize>,
     pub triangles: Vec<SurfaceTriangle>,
     pub curve: Vec<SweepPoint>,
@@ -400,7 +404,8 @@ fn response(modes: &[Mode], count: usize, hz: f64) -> Shape {
     let (real, imaginary) = displacement(modes, count, hz);
     let amplitude: Vec<_> = real.iter().zip(&imaginary).map(|(&r, &i)| cycle_peak(r, i)).collect();
     let maximum = max_index(&amplitude);
-    Shape { hz, real: real.into_iter().map(coords).collect(), imaginary: imaginary.into_iter().map(coords).collect(), amplitude, maximum }
+    let peak_phase = real.get(maximum).zip(imaginary.get(maximum)).map_or(0.0, |(&r, &i)| (2.0 * r.dot(i)).atan2(r.dot(r) - i.dot(i)) * 0.5);
+    Shape { hz, real: real.into_iter().map(coords).collect(), imaginary: imaginary.into_iter().map(coords).collect(), amplitude, maximum, peak_phase }
 }
 
 fn refine_peak(modes: &[Mode], count: usize, mut left: f64, mut right: f64) -> SweepPoint {
@@ -427,7 +432,7 @@ fn normalized(mode: &Mode) -> Shape {
     let max = amplitude.get(maximum).copied().filter(|v| *v > 0.0).unwrap_or(1.0);
     amplitude.iter_mut().for_each(|v| *v /= max);
     let real = mode.shape.iter().map(|v| v.map(|x| x / max)).collect();
-    Shape { hz: mode.hz, real, imaginary: vec![[0.0; 3]; amplitude.len()], amplitude, maximum }
+    Shape { hz: mode.hz, real, imaginary: vec![[0.0; 3]; amplitude.len()], amplitude, maximum, peak_phase: 0.0 }
 }
 
 pub fn solve(s: &Session, p: &SweepParams) -> Result<SweepResult> {
@@ -523,9 +528,18 @@ pub fn solve(s: &Session, p: &SweepParams) -> Result<SweepResult> {
             "The extracted modes do not extend to twice the end frequency. The upper part of the sweep can be sensitive to mode truncation.".into(),
         );
     }
+    let diagonal_mm = surface
+        .vertices
+        .iter()
+        .fold(Aabb3::EMPTY, |mut bounds, &p| {
+            bounds.add(point(p));
+            bounds
+        })
+        .diagonal();
     Ok(SweepResult {
         bodies: names,
         vertices_mm: surface.vertices,
+        diagonal_mm,
         vertex_body: surface.owners,
         triangles: surface.facets,
         curve,

@@ -160,6 +160,7 @@ pub struct ViewportState {
     pub(crate) adapter: String,
     pub(crate) slot: SceneSlot,
     pub(crate) key: u64,
+    pub(crate) vibration_scene_key: u64,
     /// Ground geometry is reused independently of the camera-dependent sketch/grid scene.
     shadow: std::sync::Mutex<Option<ShadowGeometry>>,
     pub(crate) sketch_slot: SceneSlot,
@@ -572,6 +573,7 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
+    crate::vibration::shown_bodies(app).hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
     app.preferences.cosmetic_threads.hash(&mut h);
     app.preferences.section_hatch.hash(&mut h);
@@ -1494,13 +1496,15 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let st = crate::open_meshing::shown_world(app);
     // The blocks the last scene built, reused when their bodies come back as they were.
     let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-    let (mut sc, made) = body_scene(app, &st, |_| true, true, &mut kept);
+    let replaced = crate::vibration::shown_bodies(app);
+    let keep = |i| st.bodies.get(i).is_some_and(|b: &solidcraft_engine::doc::ModelBody| !replaced.contains(&b.name));
+    let (mut sc, made) = body_scene(app, &st, keep, true, &mut kept);
     keep_body_tris(app, &made);
     if let Ok(mut b) = app.viewport.blocks.lock() {
         *b = made;
     }
     sc.ground_ao = ground_ao(app, ground_bounds(app, &st));
-    section_outlines(&mut sc, app, &st);
+    section_outlines(&mut sc, app, &st, replaced);
     continuity_seams(&mut sc, app);
     isocurves(&mut sc, app);
     crate::edit_in_place::draw_context(app, &mut sc);
@@ -1509,7 +1513,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
 
 /// Section: the outline of each body where the plane cuts it, in the view's text colour (#4146),
 /// and the cut solid bodies' hatches by part on their palette entries.
-fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::doc::ModelState) {
+fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::doc::ModelState, replaced: &[String]) {
     let Some((o, n)) = section_plane(app) else { return };
     let s = &app.session;
     let active_bodies = active_body_names(app);
@@ -1519,7 +1523,7 @@ fn section_outlines(sc: &mut GpuScene, app: &SolveApp, st: &solidcraft_engine::d
     // The closed solid bodies the plane cuts and where it cuts them: their hatches by part.
     let by_part = app.preferences.section_hatch == crate::prefs::SectionHatch::ByPart;
     let mut cuts: Vec<(&str, Vec<(Vec3, Vec3)>)> = Vec::new();
-    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name) && !replaced.contains(&b.name)) {
         let mesh = b.mesh();
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let index = match kept.remove(&key).filter(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)) {
@@ -4220,7 +4224,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let moving = |name: &str| dragging && chain_of(live.as_ref(), name).is_some();
     let chained = live.as_ref().filter(|_| !dragging);
     let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
-    let replaced = |name: &str| moving(name) || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none());
+    let vibration_bodies = crate::vibration::shown_bodies(app);
+    let replaced = |name: &str| {
+        moving(name)
+            || vibration_bodies.iter().any(|n| n == name)
+            || (app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none())
+    };
     let shown = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), if product { b.mesh() } else { shown_mesh(app, b, &active_bodies) });
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), drawn_mesh(app, b));
     let items = app.highlighted();
@@ -4946,6 +4955,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let size_px = [rect.width() * ppp, rect.height() * ppp];
         let ssaa = supersampling(app, ui.ctx(), proj.vp.to_f32(), size_px);
         let ao_samples = ao_samples(app, ui.ctx(), proj.vp.to_f32(), size_px);
+        let (pv_key, pv_slot, pv_hide) = match crate::vibration::scene(app, ui.ctx(), &proj) {
+            Some((key, slot)) => (key, slot, false),
+            // The renderer keeps its previous buffers when the slot has no new scene.
+            None => (app.preview.key, app.preview.slot.clone(), !app.preview.active || app.preview.rolled_back),
+        };
         let cb = ViewportCallback(Frame {
             product_lights: None,
             ssaa,
@@ -4958,9 +4972,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             sketch_slot: app.viewport.sketch_slot.clone(),
             hl_key: app.viewport.hl_key,
             hl_slot: app.viewport.hl_slot.clone(),
-            pv_key: app.preview.key,
-            pv_slot: app.preview.slot.clone(),
-            pv_hide: app.preview.rolled_back,
+            pv_key,
+            pv_slot,
+            pv_hide,
             preview_bounds: (app.preview.active && !app.preview.rolled_back).then_some(solidcraft_engine::render::view_bounds(&app.preview.bounds)),
             clip: section_clip(app),
             cap: {
@@ -5583,7 +5597,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
     }
     crate::joint_handles::show(app, ui, &painter, &proj);
-    crate::vibration::draw(app, &painter, &proj);
+    crate::vibration::draw_anchors(app, &painter, &proj);
     overlays(app, &painter, &proj);
     paint_device_pivot(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);

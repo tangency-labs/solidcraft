@@ -6,7 +6,7 @@ use egui::{Align2, Color32, Id, Rect, Sense, Stroke, pos2, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{Document, Mat};
-use solidcraft_engine::geom::{Aabb3, prelude::*};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::vibration::{COMMAND, Shape, Support, SweepResult};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::vibration::{Progress, SweepParams, with_progress};
@@ -15,6 +15,7 @@ use solidcraft_theme::Tokens;
 use solidcraft_ui_text::tr;
 
 use crate::SolveApp;
+use crate::gpu::{BlockBuilder, GpuScene, SceneSlot};
 use crate::ui_kit as kit;
 use crate::viewport::Proj;
 
@@ -40,6 +41,22 @@ impl Drop for Job {
     }
 }
 
+#[derive(PartialEq)]
+struct SceneInputs {
+    mode: bool,
+    selected: usize,
+    phase: f64,
+    scale: f64,
+    outline_eye: Option<Vec3>,
+    colors: [Color32; 5],
+}
+
+struct RenderedScene {
+    inputs: SceneInputs,
+    key: u64,
+    slot: SceneSlot,
+}
+
 pub(crate) struct Study {
     document: Arc<Document>,
     pending_moves: BTreeMap<u64, Mat>,
@@ -56,6 +73,7 @@ pub(crate) struct Study {
     playing: bool,
     scale: f64,
     mode_scale: f64,
+    rendered: Option<RenderedScene>,
 }
 
 impl Study {
@@ -86,6 +104,7 @@ impl Study {
             Ok(result) => {
                 self.selected = result.peaks.iter().enumerate().max_by(|(_, a), (_, b)| maximum(a).total_cmp(&maximum(b))).map_or(0, |(i, _)| i);
                 self.result = Some(result);
+                self.rendered = None;
             }
             Err(message) => self.error = Some(message),
         }
@@ -113,6 +132,7 @@ pub(crate) fn open(app: &mut SolveApp) {
         playing: false,
         scale: 25.0,
         mode_scale: 3.0,
+        rendered: None,
     };
     add_anchors(&mut study, &selection);
     app.vibration = Some(study);
@@ -390,9 +410,8 @@ fn vector(v: [f64; 3]) -> Vec3 {
     Vec3::new(v[0], v[1], v[2])
 }
 
-fn undeformed_outline(r: &SweepResult, painter: &egui::Painter, proj: &Proj) {
-    let mut edges = std::collections::BTreeMap::new();
-    let eye = proj.cam.eye();
+fn undeformed_outline(r: &SweepResult, scene: &mut GpuScene, eye: Vec3, color: Color32) {
+    let mut edges = BTreeMap::new();
     for tri in &r.triangles {
         let [a, b, c] = tri.vertices;
         let Some((&x, (&y, &z))) = r.vertices_mm.get(a).zip(r.vertices_mm.get(b).zip(r.vertices_mm.get(c))) else { continue };
@@ -403,100 +422,109 @@ fn undeformed_outline(r: &SweepResult, painter: &egui::Painter, proj: &Proj) {
             }
         }
     }
-    let stroke = Stroke::new(1.25, Tokens::get().figure_reference);
+    let color = scene.color(color.to_array());
     for ((a, b), count) in edges {
-        if count == 1 {
-            let to_screen = |i| proj.to_screen(vector(*r.vertices_mm.get(i)?));
-            if let Some((a, b)) = to_screen(a).zip(to_screen(b)) {
-                painter.extend(kit::dashed_line(&[a, b], painter.clip_rect(), stroke, 4.0, 4.0));
-            }
+        if count == 1
+            && let Some((&a, &b)) = r.vertices_mm.get(a).zip(r.vertices_mm.get(b))
+        {
+            scene.line(vector(a).to_f32(), vector(b).to_f32(), color, 1.25, false);
         }
     }
 }
 
-pub(crate) fn draw(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+fn display_study(app: &SolveApp) -> Option<&Study> {
+    app.vibration.as_ref().filter(|study| !app.preview.active && study.current(app))
+}
+
+pub(crate) fn shown_bodies(app: &SolveApp) -> &[String] {
+    display_study(app).and_then(Study::shape).map_or(&[], |(r, _)| &r.bodies)
+}
+
+/// Build only the small analysis scene when the phase or display settings change. The model,
+/// including any foreground bodies, stays in its own cached scene.
+pub(crate) fn scene(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) -> Option<(u64, SceneSlot)> {
+    if display_study(app).and_then(Study::shape).is_none() {
+        if let Some(study) = &mut app.vibration {
+            study.rendered = None;
+        }
+        return None;
+    }
+    let study = app.vibration.as_mut()?;
+    let (r, shape) = study.shape()?;
+    let phase = if study.playing {
+        const FRAME_SECONDS: f64 = 0.03;
+        ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        let tick = (ctx.input(|i| i.time) / FRAME_SECONDS).floor() * FRAME_SECONDS;
+        tick.rem_euclid(1.25) * std::f64::consts::TAU / 1.25
+    } else {
+        shape.peak_phase
+    };
+    let scale = if study.mode { r.diagonal_mm * study.mode_scale / 100.0 } else { study.scale };
+    let t = Tokens::get();
+    let colors = [t.figure_axis_z, t.figure_ok, t.figure_conflict, t.figure_reference, t.figure_warn];
+    let inputs = SceneInputs { mode: study.mode, selected: study.selected, phase, scale, outline_eye: (scale > 0.0).then(|| proj.cam.eye()), colors };
+    if let Some(cached) = study.rendered.as_ref().filter(|cached| cached.inputs == inputs) {
+        return Some((cached.key, cached.slot.clone()));
+    }
+    let scene = build_scene(r, shape, &inputs);
+    // Separate analysis keys from the command preview's small sequential keys. The preview
+    // renderer consumes the slot when it uploads it.
+    let generation = &mut app.viewport.vibration_scene_key;
+    *generation = generation.wrapping_add(1);
+    let key = *generation | (1 << 63);
+    let slot = Arc::new(std::sync::Mutex::new(Some(scene)));
+    study.rendered = Some(RenderedScene { inputs, key, slot: slot.clone() });
+    Some((key, slot))
+}
+
+fn build_scene(r: &SweepResult, shape: &Shape, inputs: &SceneInputs) -> GpuScene {
+    let mut scene = GpuScene::default();
+    let max = maximum(shape).max(f64::MIN_POSITIVE);
+    let (sin, cos) = inputs.phase.sin_cos();
+    let vertices: Vec<_> = r
+        .vertices_mm
+        .iter()
+        .zip(&shape.real)
+        .zip(&shape.imaginary)
+        .zip(&shape.amplitude)
+        .map(|(((&p, &a), &b), &m)| {
+            let p = vector(p) + (vector(a) * cos + vector(b) * sin) * inputs.scale;
+            (p.to_f32(), scene.color(heat(m / max).to_array()))
+        })
+        .collect();
+    for tri in &r.triangles {
+        let [a, b, c] = tri.vertices;
+        if let Some((&a, (&b, &c))) = vertices.get(a).zip(vertices.get(b).zip(vertices.get(c))) {
+            for (p, color) in [a, b, c] {
+                // Clip and depth-test the FE surface like the other geometry without adding
+                // it to the CAD section cap stencil.
+                scene.open_tri(p, [0.0; 3], color);
+            }
+        }
+    }
+    if let Some(eye) = inputs.outline_eye {
+        undeformed_outline(r, &mut scene, eye, inputs.colors[3]);
+    }
+    if let Some(&(p, _)) = vertices.get(shape.maximum) {
+        let mut marker = BlockBuilder::default();
+        marker.marker(p, scene.color(inputs.colors[4].to_array()), 9.0, false);
+        scene.lines.extend_from_slice(&marker.freeze().lines);
+    }
+    scene
+}
+
+pub(crate) fn draw_anchors(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some(study) = &app.vibration else { return };
     if !study.current(app) {
         return;
     }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_body);
-    if let Some((r, shape)) = study.shape() {
-        let max = maximum(shape).max(f64::MIN_POSITIVE);
-        let (real, imag) = shape
-            .real
-            .get(shape.maximum)
-            .copied()
-            .zip(shape.imaginary.get(shape.maximum).copied())
-            .map(|(a, b)| (vector(a), vector(b)))
-            .unwrap_or((Vec3::ZERO, Vec3::ZERO));
-        let peak_phase = (2.0 * real.dot(imag)).atan2(real.dot(real) - imag.dot(imag)) * 0.5;
-        let phase = if study.playing {
-            painter.ctx().request_repaint_after(std::time::Duration::from_millis(30));
-            painter.ctx().input(|i| i.time).rem_euclid(1.25) * std::f64::consts::TAU / 1.25
-        } else {
-            peak_phase
-        };
-        let (sin, cos) = phase.sin_cos();
-        let scale = if study.mode {
-            let size = r
-                .vertices_mm
-                .iter()
-                .copied()
-                .map(vector)
-                .fold(Aabb3::EMPTY, |mut b, p| {
-                    b.add(p);
-                    b
-                })
-                .diagonal();
-            size * study.mode_scale / 100.0
-        } else {
-            study.scale
-        };
-        let vertices: Vec<_> = r
-            .vertices_mm
-            .iter()
-            .zip(&shape.real)
-            .zip(&shape.imaginary)
-            .zip(&shape.amplitude)
-            .map(|(((&p, &a), &b), &m)| {
-                let xyz = vector(p) + (vector(a) * cos + vector(b) * sin) * scale;
-                (xyz, proj.to_screen(xyz), heat(m / max))
-            })
-            .collect();
-        let eye = proj.cam.eye();
-        let mut triangles = Vec::with_capacity(r.triangles.len());
-        for tri in &r.triangles {
-            let [a, b, c] = tri.vertices;
-            let Some((&(p, Some(x), ca), (&(q, Some(y), cb), &(s, Some(z), cc)))) = vertices.get(a).zip(vertices.get(b).zip(vertices.get(c))) else {
-                continue;
-            };
-            let centre = (p + q + s) * (1.0 / 3.0);
-            if (q - p).cross(s - p).dot(eye - centre) > 0.0 {
-                triangles.push(((centre - eye).len(), [(x, ca), (y, cb), (z, cc)]));
-            }
-        }
-        triangles.sort_by(|a, b| b.0.total_cmp(&a.0));
-        let mut mesh = egui::Mesh::default();
-        for (_, vertices) in triangles {
-            let Ok(i) = u32::try_from(mesh.vertices.len()) else { break };
-            for (pos, color) in vertices {
-                mesh.colored_vertex(pos, color);
-            }
-            mesh.add_triangle(i, i + 1, i + 2);
-        }
-        painter.add(egui::Shape::mesh(mesh));
-        if scale > 0.0 {
-            undeformed_outline(r, painter, proj);
-        }
-        if let Some((_, Some(at), _)) = vertices.get(shape.maximum) {
-            let label = if study.mode { "100%".to_owned() } else { format!("{:.4} mm", maximum(shape)) };
-            painter.circle_filled(*at, 5.0, t.figure_warn);
-            painter.text(*at + vec2(9.0, -8.0), Align2::LEFT_BOTTOM, label, font.clone(), t.figure_warn);
-        }
-    }
+    let cut = crate::viewport::section_plane(app);
     for (i, a) in study.anchors.iter().enumerate() {
-        if let Some(at) = proj.to_screen(a.point) {
+        if cut.is_none_or(|(origin, normal)| normal.dot(a.point - origin) <= 0.0)
+            && let Some(at) = proj.to_screen(a.point)
+        {
             painter.circle_filled(at, 9.0, t.selected_bg);
             painter.circle_stroke(at, 9.0, Stroke::new(1.0, t.figure_accent));
             painter.text(at, Align2::CENTER_CENTER, (i + 1).to_string(), font.clone(), t.selected_ink);
@@ -531,6 +559,73 @@ mod tests {
         assert!(h.app.dialog.is_none());
         assert!(h.app.session.doc.marker.is_none());
         assert!(h.app.vibration.as_ref().is_some_and(|study| study.current(&h.app)));
+    }
+
+    #[test]
+    fn vibration_gpu_surface_respects_foreground_bodies_and_sections() {
+        use solidcraft_engine::vibration::SurfaceTriangle;
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"body_name":"Beam","length":60,"width":8,"height":12,"corner":[-30,0,-6]})).unwrap();
+        h.app.run("solid.box", json!({"body_name":"Foreground","length":16,"width":8,"height":8,"corner":[-8,-20,-4]})).unwrap();
+        h.app.cam.yaw = 0.0;
+        h.app.cam.pitch = 0.0;
+        h.app.cam.fov = 0.0;
+        h.app.cam.target = Vec3::ZERO;
+        h.app.cam.distance = 90.0;
+        h.app.cam_anim = None;
+        h.app.session.selection.clear();
+        let Some(mut gpu) = crate::gpu::EguiFixture::new(&mut h.app, [256, 256]) else { return };
+        let draw = |gpu: &mut crate::gpu::EguiFixture, h: &mut crate::scenario::Harness| {
+            let pixels = gpu.frame(&h.ctx, vec![egui::Event::PointerGone], |ui| crate::viewport::show(&mut h.app, ui));
+            assert_eq!(gpu.viewport_callbacks, 1);
+            pixels
+        };
+        let plain = draw(&mut gpu, &mut h);
+        open(&mut h.app);
+        let study = h.app.vibration.as_mut().unwrap();
+        study.complete(Ok(SweepResult {
+            bodies: vec!["Beam".into()],
+            vertices_mm: vec![[-30.0, 0.0, -6.0], [30.0, 0.0, -6.0], [30.0, 0.0, 6.0], [-30.0, 0.0, 6.0], [0.0; 3]],
+            diagonal_mm: 62.0,
+            vertex_body: vec![0; 5],
+            triangles: [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]].map(|vertices| SurfaceTriangle { vertices, body: 0, support: false }).to_vec(),
+            curve: Vec::new(),
+            peaks: vec![Shape {
+                hz: 200.0,
+                real: vec![[0.0, -0.08, 0.0]; 5],
+                imaginary: vec![[0.0; 3]; 5],
+                amplitude: vec![0.08; 5],
+                maximum: 4,
+                peak_phase: 0.0,
+            }],
+            has_resonance: true,
+            modes: Vec::new(),
+            damping_ratio: 0.02,
+            base_acceleration_m_s2: 9.80665,
+            highest_mode_hz: 500.0,
+            element_count: 1,
+            warnings: Vec::new(),
+        }));
+        let painted = draw(&mut gpu, &mut h);
+        let projection = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let patch = |pixels: &[u8], x| {
+            let at = projection.to_screen(Vec3::new(x, -2.0, 0.0)).unwrap();
+            let (x, y) = (at.x.round() as usize, at.y.round() as usize);
+            assert!((3..253).contains(&x) && (3..253).contains(&y), "{at:?}");
+            (y - 2..=y + 2).flat_map(|row| (x - 2..=x + 2).flat_map(move |col| &pixels[(row * 256 + col) * 4..][..4])).copied().collect::<Vec<_>>()
+        };
+        assert_ne!(patch(&plain, -20.0), patch(&painted, -20.0), "unobstructed surface shows the response");
+        assert_eq!(patch(&plain, 0.0), patch(&painted, 0.0), "the foreground hides the response and its peak marker");
+        assert_ne!(patch(&plain, 20.0), patch(&painted, 20.0), "the other end of the response starts out visible");
+
+        h.app.session.execute("inspect.section", &json!({"plane":{"origin":[12,0,0],"normal":[1,0,0]},"hatch":false})).unwrap();
+        let clipped = draw(&mut gpu, &mut h);
+        h.app.vibration = None;
+        let plain_cut = draw(&mut gpu, &mut h);
+        assert_ne!(patch(&plain_cut, -20.0), patch(&clipped, -20.0), "the cut keeps the response on its near side");
+        assert_eq!(patch(&plain_cut, 20.0), patch(&clipped, 20.0), "the cut removes the response on its far side");
     }
 
     #[test]
