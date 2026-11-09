@@ -1,3 +1,7 @@
+use crate::schema::render_jobs::{
+    ExportFormat, ImageCopied, ImageExported, Job, JobProgressReply, JobState, PreparationCancelled, QueueReply, RenderCancelled, RenderProgress,
+    ResultPinned,
+};
 use crate::{Result, Session, params::bad, render_jobs::job_error};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -868,10 +872,19 @@ struct Regrade {
     presentation: solidcraft_render::job::presentation::Presentation,
 }
 pub(super) fn regrade(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Regrade = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.regrade", e.to_string()))?;
+    let cmd = "render.result.regrade";
+    let input: Regrade = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     input.presentation.validate().map_err(job_error)?;
-    let job = result_source(s, input.job, "render.result.regrade")?;
-    Ok(json!(s.render_jobs.regrade(job, input.presentation).map_err(job_error)?))
+    let job = result_source(s, input.job, cmd)?;
+    let status = s.render_jobs.regrade(job, input.presentation).map_err(job_error)?;
+    super::typed_reply(cmd, retyped::<JobState>(cmd, &status)?)
+}
+
+/// `value`, a render crate type without a schema, as the reply type `T` that describes the same
+/// JSON (`schema::render_jobs`). The JSON doesn't change; a value `T` can't read back is refused
+/// rather than sent out unlike its schema.
+fn retyped<T: serde::de::DeserializeOwned>(cmd: &str, value: &impl serde::Serialize) -> Result<T> {
+    serde_json::to_value(value).and_then(serde_json::from_value).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn result_source(s: &mut Session, job: Option<JobId>, command: &str) -> Result<JobId> {
@@ -880,16 +893,15 @@ fn result_source(s: &mut Session, job: Option<JobId>, command: &str) -> Result<J
 }
 
 pub(super) fn status(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad("render.status", e.to_string()))?;
+    let cmd = "render.status";
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     s.advance_render_batch()?;
     let Some(job) = input.job else {
-        return Ok(json!({"queue":s.render_queue_state()}));
+        return super::typed_reply(cmd, RenderProgress::Queue(QueueReply { queue: s.render_queue_state(), param_warnings: Vec::new() }));
     };
-    let mut reply = json!(s.render_jobs.status(job).map_err(job_error)?);
-    if let Some(object) = reply.as_object_mut() {
-        object.insert("queue".into(), json!(s.render_queue_state()));
-    }
-    Ok(reply)
+    // The job's status first: reading it collects finished jobs, which the queue then counts.
+    let state = retyped(cmd, &s.render_jobs.status(job).map_err(job_error)?)?;
+    super::typed_reply(cmd, RenderProgress::Job(Box::new(JobProgressReply { state, queue: s.render_queue_state() })))
 }
 
 #[derive(Deserialize)]
@@ -898,9 +910,11 @@ struct Pin {
     job: Option<JobId>,
 }
 pub(super) fn pin(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Pin = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.pin", e.to_string()))?;
-    let job = if params.get("job").is_some_and(Value::is_null) { None } else { Some(result_source(s, input.job, "render.result.pin")?) };
-    Ok(json!({"frame":s.render_jobs.pin(job).map_err(job_error)?}))
+    let cmd = "render.result.pin";
+    let input: Pin = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    let job = if params.get("job").is_some_and(Value::is_null) { None } else { Some(result_source(s, input.job, cmd)?) };
+    let frame = s.render_jobs.pin(job).map_err(job_error)?.map(|info| retyped(cmd, &info)).transpose()?;
+    super::typed_reply(cmd, ResultPinned { frame, param_warnings: Vec::new() })
 }
 
 #[derive(Deserialize)]
@@ -923,7 +937,7 @@ pub(super) fn copy(s: &mut Session, params: &Value) -> Result<Value> {
     if solidcraft_render::RenderLimits::default().fit(size.0, size.1, None) != Some(size) {
         return Err(bad("render.result.copy", "clipboard image exceeds 4096 per side or 4194304 pixels; export the PNG instead"));
     }
-    Ok(json!({"frame":frame.info}))
+    super::typed_reply("render.result.copy", ImageCopied { frame: retyped("render.result.copy", &frame.info)?, param_warnings: Vec::new() })
 }
 
 pub(crate) fn cancel_params(params: &Value) -> Result<Option<JobId>> {
@@ -933,34 +947,19 @@ pub(crate) fn cancel_params(params: &Value) -> Result<Option<JobId>> {
     Ok(input.job)
 }
 pub(super) fn cancel(s: &mut Session, params: &Value) -> Result<Value> {
+    let cmd = "render.cancel";
     let requested = cancel_params(params)?;
     if requested.is_none() && s.cancel_native_preparation() {
-        return Ok(json!({"preparing":true,"cancel_requested":true,"queue":s.render_queue_state()}));
+        let stopped = PreparationCancelled { preparing: true, cancel_requested: true, queue: s.render_queue_state(), param_warnings: Vec::new() };
+        return super::typed_reply(cmd, RenderCancelled::Preparation(stopped));
     }
-    let job = requested.or(s.render_queue_state().job).ok_or_else(|| bad("render.cancel", "job is required without an active shot queue"))?;
+    let job = requested.or(s.render_queue_state().job).ok_or_else(|| bad(cmd, "job is required without an active shot queue"))?;
     let status = s.render_jobs.status(job).map_err(job_error)?;
     s.cancel_render_batch(job);
-    if status.progress.phase.terminal() {
-        return Ok(json!(status));
-    }
-    Ok(json!(s.render_jobs.handle(job).map_err(job_error)?.cancel().map_err(job_error)?))
+    let status = if status.progress.phase.terminal() { status } else { s.render_jobs.handle(job).map_err(job_error)?.cancel().map_err(job_error)? };
+    super::typed_reply(cmd, RenderCancelled::Job(Box::new(retyped(cmd, &status)?)))
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ExportFormat {
-    #[default]
-    Png,
-    Exr,
-}
-impl ExportFormat {
-    fn extension(self) -> &'static str {
-        match self {
-            Self::Png => "png",
-            Self::Exr => "exr",
-        }
-    }
-}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Export {
@@ -992,14 +991,29 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
             .linear_exr()
             .ok_or_else(|| bad("render.export", "this completed job has no raw linear master; enable retention before rendering"))?,
     };
+    // Typed before the write: a conversion that fails then leaves no file behind.
+    let frame_info = retyped("render.export", &frame.info)?;
+    let linear_master = frame.linear_master_info().map(|info| retyped("render.export", info)).transpose()?;
+    let presentation = frame.presentation().map(|info| retyped("render.export", info)).transpose()?;
     // Replace atomically without reading an arbitrarily large previous target into memory.
     // Design saves retain their independent backup policy.
     let result =
         if input.overwrite { solidcraft_io::write_atomic(path, bytes, false) } else { solidcraft_io::safe_write::create_atomic(path, bytes) };
     result.map_err(|e| bad("render.export", format!("could not export completed {}: {e}", input.format.extension())))?;
-    Ok(
-        json!({"job":job,"path":input.path,"bytes":bytes.len(),"format":input.format.extension(),"encoding":if input.format==ExportFormat::Exr {"scene_linear_srgb_d65"} else {"srgb"},"alpha":if input.format==ExportFormat::Exr {"coverage_premultiplied"} else {"straight"},"frame":frame.info,"linear_master":frame.linear_master_info(),"presentation":frame.presentation()}),
-    )
+    let exr = input.format == ExportFormat::Exr;
+    let reply = ImageExported {
+        job: Job(job),
+        bytes: bytes.len(),
+        path: input.path,
+        format: input.format,
+        encoding: if exr { "scene_linear_srgb_d65" } else { "srgb" },
+        alpha: if exr { "coverage_premultiplied" } else { "straight" },
+        frame: frame_info,
+        linear_master,
+        presentation,
+        param_warnings: Vec::new(),
+    };
+    super::typed_reply("render.export", reply)
 }
 
 fn validate_studio_weights(weights: Option<[f64; 3]>, command: &str) -> Result<Option<[f64; 3]>> {

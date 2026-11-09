@@ -571,9 +571,12 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
     if descends(current, name) {
         return Some(Match::Piece);
     }
-    // The named piece, told apart by the faces around it: they still bound this piece.
+    // The named piece, told apart by the faces around it: they still bound this piece. Or the
+    // face it was a piece of, whole again since, which they still bound: the piece is all of it
+    // (#11731). Only a piece told apart by faces: a numbered one (`#2`, nothing told it apart)
+    // says nothing about which part of the whole face it was.
     if let Some((stem, around)) = crate::piece_names::piece_parts(name)
-        && crate::naming::parent_piece(current) == Some(stem)
+        && (crate::naming::parent_piece(current) == Some(stem) || (current == stem && !around.is_empty() && name.ends_with(']')))
         && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f)))
     {
         return Some(Match::Piece);

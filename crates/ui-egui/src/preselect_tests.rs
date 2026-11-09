@@ -401,7 +401,7 @@ fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let history = h.app.session.undo.len();
     let count = h.app.session.doc.features.len();
     let preview = h.app.session.preview_visible_world(&commands).unwrap();
-    let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
+    let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark())).unwrap();
     assert!(!built.scene.xray.is_empty(), "construction preview must contain visible geometry");
     let plane = preview.after.construct.last().unwrap();
     let solidcraft_engine::doc::construct::ConstructGeom::Plane(pl) = plane.geom else { panic!("plane") };
@@ -593,7 +593,7 @@ fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles(
     let preview = h.app.session.preview_world(&commands).unwrap();
     let volume = preview.after.body(&target).unwrap().mesh().measure().volume;
     assert!(volume > preview.before.body(&target).unwrap().mesh().measure().volume + 10.0);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
     let built = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
     assert!(built.replaced.contains(&target) && !built.scene.tris.is_empty(), "{:?}", built.replaced);
     let source_first = h.app.session.doc.occurrence_of(source).unwrap().id;
@@ -930,6 +930,58 @@ fn press_pull_then_curved_face_offsets_it() {
     };
     crate::viewport::dialog_pick(&mut app, &hit, top);
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
+}
+
+/// Whether an accessibility node labeled `text` is drawn inside the published rect
+/// `rect_handle` ("dialog:header" is the dialog's heading band), so a same-named widget
+/// elsewhere on screen cannot satisfy the check.
+fn label_in(h: &crate::scenario::Harness, rect_handle: &str, text: &str) -> bool {
+    let Some(rect) = crate::scenario::rect_of(rect_handle) else { return false };
+    let Some(tree) = h.output.accesskit_update.as_ref() else { return false };
+    tree.nodes.iter().any(|(_, n)| {
+        (n.label() == Some(text) || n.value() == Some(text))
+            && n.bounds().is_some_and(|b| rect.contains(egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
+    })
+}
+
+/// The dialog the Q shortcut opens says Press Pull, not Extrude (#11705), with a planar face
+/// picked first or nothing at all; a plain Extrude still says Extrude.
+#[test]
+fn press_pull_dialog_is_titled_press_pull() {
+    let mut app = boxed();
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let d = start(&mut app, vec![top], "solid.press_pull");
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "PRESS PULL");
+
+    let mut app = boxed();
+    app.start("solid.press_pull");
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "PRESS PULL");
+
+    let mut app = boxed();
+    app.start("solid.extrude");
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(!d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "EXTRUDE");
+
+    // The heading drawn in the panel says it too, found by role and place in its band.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"start": "solid.press_pull"})).unwrap();
+    h.frames(2);
+    assert!(label_in(&h, "dialog:header", "Press Pull"), "the drawn header is Press Pull");
+    assert!(!label_in(&h, "dialog:header", "Extrude"), "the drawn header is not Extrude");
+
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.frames(2);
+    assert!(label_in(&h, "dialog:header", "Extrude"), "a plain Extrude header is Extrude");
 }
 
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
@@ -1373,8 +1425,9 @@ fn fillet_radius_fit_reduces_and_shows_the_applied_radius() {
     d.extra.insert("fit".into(), json!("reduce"));
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(p["fit"], json!("reduce"));
-    let job = crate::preview::compute(&app.session, &[(id.clone(), p.clone())], crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark()))
-        .unwrap();
+    let job =
+        crate::preview::compute(&app.session, &[(id.clone(), p.clone())], crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark()))
+            .unwrap();
     assert_eq!(job.applied, Some((3.0, 3.0)));
     // Applied and edited again, the fillet keeps its fit.
     app.session.execute(&id, &p).unwrap();
@@ -1383,7 +1436,7 @@ fn fillet_radius_fit_reduces_and_shows_the_applied_radius() {
     assert_eq!(e.extra.get("fit"), Some(&json!("reduce")));
     // Its edit preview shows the radius it uses too.
     let cmds = apply_commands(&app, &e).unwrap();
-    let job = crate::preview::compute(&app.session, &cmds, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
+    let job = crate::preview::compute(&app.session, &cmds, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark())).unwrap();
     assert_eq!(job.applied, Some((3.0, 3.0)));
 }
 

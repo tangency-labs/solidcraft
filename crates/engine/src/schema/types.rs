@@ -210,6 +210,12 @@ target_point!(
     "must be a point [x, y, z] on the face or point to start from"
 );
 
+target_point!(
+    /// Revolve's `to`: a [`Point3`], with the handler's message.
+    RevolveToPoint,
+    "must be a point [x, y, z] to turn to"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -974,6 +980,42 @@ pick_list!(
     "The edges, 1 to 1000."
 );
 
+/// A face of a body whose surface, extended, cuts like a plane: the `tool` of `solid.split_body`,
+/// `solid.split_face` and `surface.trim`, which read `tool.body` and then `tool.point` with these
+/// messages. Other keys in it are ignored, as the handlers ignore them. Whether the body exists
+/// and the point is on one of its faces is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolFace {
+    pub body: String,
+    pub point: Vec3,
+}
+
+impl<'de> Deserialize<'de> for ToolFace {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        // In the handlers' order: the body (anything but an object has none), then the point.
+        let body = v.get("body").and_then(Value::as_str).ok_or_else(|| D::Error::custom(whole("`tool.body` must name a body")))?;
+        let point =
+            v.get("point").and_then(params::vec3).ok_or_else(|| D::Error::custom(whole("`tool.point` must be [x, y, z] on the tool face")))?;
+        Ok(ToolFace { body: body.to_string(), point })
+    }
+}
+
+impl JsonSchema for ToolFace {
+    fn schema_name() -> Cow<'static, str> {
+        "ToolFace".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A face of a body, its surface extended: the body's name and a point in mm on the face.",
+            "type": "object",
+            "properties": {"body": {"type": "string"}, "point": point},
+            "required": ["body", "point"]
+        })
+    }
+}
+
 /// A sketch referred to by its feature id (a number) or its name, as `features::sketch_id` reads
 /// it, with its message for a top-level key (`path_sketch`, `solid.split_face`'s `sketch`…);
 /// for a nested one (a section's `sketch`) the message names the key as `sections[0].sketch`
@@ -996,6 +1038,140 @@ impl JsonSchema for SketchRef {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "A sketch's feature id (a number) or its name.", "type": ["number", "string"]})
+    }
+}
+
+/// A sweep's `orientation`, as `features::sweep_orientation` reads it, with its messages.
+/// `null` is the default, as the handler reads it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SweepOrientationParam(pub solidcraft_doc::SweepOrientation);
+
+impl<'de> Deserialize<'de> for SweepOrientationParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::sweep_orientation(&Value::deserialize(d)?).map(SweepOrientationParam).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for SweepOrientationParam {
+    fn schema_name() -> Cow<'static, str> {
+        "SweepOrientation".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "How the profile turns as it follows the path: perpendicular (the default), square to the path and turning with it; parallel, as drawn, moving without turning (the path must keep crossing the profile's plane); or a direction, [x, y, z], {\"x\", \"y\", \"z\"} or {\"direction\": [x, y, z]}, not zero: square to the path, its turn about the path fixed so that the direction's projection onto the profile stays where it was at the start. Matching ignores case.",
+            "anyOf": [
+                {"type": "string", "enum": ["perpendicular", "parallel"]},
+                point,
+                {"type": "object", "properties": {"direction": point}, "required": ["direction"]}
+            ]
+        })
+    }
+}
+
+/// A sweep's `twist`: an expression as [`AngleExpr`] reads one, with the handler's message for
+/// anything else. Whether it evaluates, and to within four turns, is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweepTwist(pub Expr);
+
+impl<'de> Deserialize<'de> for SweepTwist {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        params::expr(&wrap(Value::deserialize(d)?), "v")
+            .map(SweepTwist)
+            .ok_or_else(|| D::Error::custom(whole("`twist` must be an angle or an expression")))
+    }
+}
+
+/// Guide rails' `rail_fit`, as `features::rail_fit_form` reads it, with its message.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RailFitParam(pub solidcraft_doc::RailFit);
+
+impl<'de> Deserialize<'de> for RailFitParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::rail_fit_form(&Value::deserialize(d)?).map(RailFitParam).map_err(|e| D::Error::custom(whole(e)))
+    }
+}
+
+impl JsonSchema for RailFitParam {
+    fn schema_name() -> Cow<'static, str> {
+        "RailFit".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["scale", "stretch"],
+            "How guide rails reshape the profile: scale (the default) grows and shrinks it evenly with the distance from the path to the rail (between the rails); stretch only across to the rail (between the rails). Matching ignores case.",
+        )
+    }
+}
+
+/// What `features::guide_rails` says about a sweep's or a loft's (`what`) `rails`, as given (not
+/// `null`), before it looks a sketch up: its message, or `None`. `default_sketch`: a rail may
+/// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
+fn guide_rails_problem(v: &Value, what: &str, default_sketch: bool) -> Option<String> {
+    let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
+    if !(1..=2).contains(&given.len()) {
+        return Some(whole(format!("a {what} takes one or two guide rails")));
+    }
+    for (i, rail) in given.iter().enumerate() {
+        match rail.get("sketch").filter(|v| !v.is_null()) {
+            None if !default_sketch => return Some(whole("each rail needs the `sketch` its curves are in")),
+            Some(sketch) if crate::cmd::sketch_key(Some(sketch)).is_none() => return Some(whole("`rails[].sketch` must be a sketch id or name")),
+            _ => {}
+        }
+        let curves = match params::string_list(params::UNKNOWN_COMMAND, rail, "curves") {
+            Ok(curves) => curves,
+            Err(crate::EngineError::BadParams { msg, .. }) => return Some(whole(msg)),
+            Err(e) => return Some(whole(e)),
+        };
+        if curves.is_empty() || curves.len() > 1000 {
+            return Some(whole("each rail's `curves` must list 1…1000 curve ids in order"));
+        }
+        if let Some(key) = rail.as_object().and_then(|o| o.keys().find(|k| !matches!(k.as_str(), "sketch" | "curves"))) {
+            let key = super::check::truncate(key, 64);
+            return Some(whole(format!("unknown key `{key}` in `rails[{i}]`: a rail takes `sketch` and `curves`")));
+        }
+    }
+    None
+}
+
+/// A sweep's guide `rails`, as `features::guide_rails` reads them before it looks the sketches up,
+/// with its messages: one or two `{sketch?, curves}`, each rail's sketch the path's when it
+/// names none. Kept as given, for the handler. Whether the sketches and curves exist, and that
+/// `orientation`, `twist` and `scale` are left out, is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SweepRails(pub Value);
+
+impl<'de> Deserialize<'de> for SweepRails {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match guide_rails_problem(&v, "sweep", true) {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(SweepRails(v)),
+        }
+    }
+}
+
+impl JsonSchema for SweepRails {
+    fn schema_name() -> Cow<'static, str> {
+        "SweepRails".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let sketch = generator.subschema_for::<SketchRef>();
+        json_schema!({
+            "description": "One or two guide rails, each {\"sketch\"?: the sketch its curves are in (default: the path's sketch), \"curves\": its curve ids in order, 1 to 1000 (one id may be given as text)}.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sketch": {"anyOf": [sketch, {"type": "null"}]},
+                    "curves": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1000}]}
+                },
+                "required": ["curves"],
+                "additionalProperties": false
+            }
+        })
     }
 }
 
@@ -1190,6 +1366,17 @@ impl JsonSchema for PlaneOrFace {
     }
 }
 
+/// What `construct::model_axis_param` finds wrong with an edge or face axis before it looks
+/// anything up in the design: a reference that isn't a picked or saved face or edge.
+fn model_axis_problem(v: &Value) -> Option<String> {
+    use crate::cmd::GeoForm;
+    use solidcraft_doc::construct::GeoRef;
+    geo_problem(v).or_else(|| match crate::cmd::geo_form(v) {
+        Ok(GeoForm::Face(_) | GeoForm::Edge(_) | GeoForm::Saved(GeoRef::Face { .. } | GeoRef::Edge { .. })) => None,
+        _ => Some(solidcraft_doc::construct::MODEL_AXIS_REFS.to_string()),
+    })
+}
+
 /// The line `construct.plane.at_angle` turns about, as `features::axis_line` reads it: an edge or
 /// face of the model (as `construct::model_axis_param` reads it), else X, Y, Z, a construction
 /// axis's name or `{origin?, dir}`. Kept as given, for the handler. Whether a picked edge or face
@@ -1199,14 +1386,9 @@ pub struct AxisLine(pub Value);
 
 impl<'de> Deserialize<'de> for AxisLine {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use crate::cmd::GeoForm;
-        use solidcraft_doc::construct::GeoRef;
         let v = Value::deserialize(d)?;
         let problem = if crate::cmd::is_model_axis(&v) {
-            geo_problem(&v).or_else(|| match crate::cmd::geo_form(&v) {
-                Ok(GeoForm::Face(_) | GeoForm::Edge(_) | GeoForm::Saved(GeoRef::Face { .. } | GeoRef::Edge { .. })) => None,
-                _ => Some(solidcraft_doc::construct::MODEL_AXIS_REFS.to_string()),
-            })
+            model_axis_problem(&v)
         } else {
             match &v {
                 Value::String(_) => None,
@@ -1243,6 +1425,132 @@ impl JsonSchema for AxisLine {
                 {"type": "object", "properties": {"type": {"enum": ["edge", "face"]}}, "required": ["type"]}
             ]
         })
+    }
+}
+
+/// What `features::axis_param` says to an `axis` that is none of its forms.
+const REVOLVE_AXIS_MESSAGE: &str =
+    "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}";
+
+/// What `features::axis_param` finds wrong with an object axis that isn't an edge or face of the
+/// model, before it looks anything up in the design.
+fn revolve_axis_object_problem(o: &Value) -> Option<String> {
+    if o.get("type").and_then(Value::as_str) == Some("world") {
+        let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"));
+        return (!ok).then(|| whole("world axis requires `axis` to be X, Y or Z"));
+    }
+    if let Some(origin) = o.get("origin")
+        && serde_json::from_value::<PointExpr3>(origin.clone()).is_err()
+    {
+        return Some(whole("`origin` must be a point [x, y, z] of numbers or length expressions"));
+    }
+    match o.get("dir") {
+        None => Some(whole("axis needs `dir`")),
+        Some(dir) => params::vec3(dir).is_none().then(|| whole("axis `dir` must be a direction [x, y, z] of numbers")),
+    }
+}
+
+/// Revolve's `axis`, as `features::axis_param` reads it before it looks anything up: a sketch
+/// line's id or name, `x` or `y`, X, Y or Z, a construction axis's name (any text), `{type: "world",
+/// axis}`, `{origin?, dir}`, or an edge or face of the model (as `construct::model_axis_param`
+/// reads it). Kept as given, for the handler. Whether a line or axis exists, and whether a picked
+/// edge or face gives an axis, is checked by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RevolveAxis(pub Value);
+
+impl<'de> Deserialize<'de> for RevolveAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let problem = if crate::cmd::is_model_axis(&v) {
+            model_axis_problem(&v)
+        } else {
+            match &v {
+                Value::String(_) => None,
+                Value::Object(_) => revolve_axis_object_problem(&v),
+                _ => Some(whole(REVOLVE_AXIS_MESSAGE)),
+            }
+        };
+        match problem {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(RevolveAxis(v)),
+        }
+    }
+}
+
+impl JsonSchema for RevolveAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "RevolveAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        let origin = generator.subschema_for::<PointExpr3>();
+        let model = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, {"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}}]});
+        json_schema!({
+            "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
+            "anyOf": [
+                {"type": "string"},
+                {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"]},
+                {
+                    "type": "object",
+                    "properties": {"origin": origin, "dir": point},
+                    "required": ["dir"],
+                    "not": {"anyOf": [model, {"required": ["type"], "properties": {"type": {"enum": ["world"]}}}]}
+                },
+                picked_at("face", &point),
+                picked_at("edge", &point),
+                {"type": "object", "properties": {"type": {"enum": ["edge", "face"]}}, "required": ["type"]}
+            ]
+        })
+    }
+}
+
+/// Revolve's `direction`: only `symmetric` (any case, not trimmed) does anything; the handler
+/// ignores every other value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RevolveDirection;
+
+impl<'de> Deserialize<'de> for RevolveDirection {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) if s.eq_ignore_ascii_case("symmetric") => Ok(RevolveDirection),
+            _ => Err(D::Error::custom("must be symmetric")),
+        }
+    }
+}
+
+impl JsonSchema for RevolveDirection {
+    fn schema_name() -> Cow<'static, str> {
+        "RevolveDirection".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["symmetric"],
+            "symmetric: the angle is split either side of the sketch plane, whichever way the axis points. The same as `symmetric: true`. Matching ignores case.",
+        )
+    }
+}
+
+/// Revolve's angular start, as the handler reads `convention` (serde, case-sensitive).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RevolveConventionParam(pub solidcraft_doc::RevolveConvention);
+
+impl<'de> Deserialize<'de> for RevolveConventionParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?)
+            .map(RevolveConventionParam)
+            .map_err(|_| D::Error::custom("must be sketch_normal or legacy_axis_start"))
+    }
+}
+
+impl JsonSchema for RevolveConventionParam {
+    fn schema_name() -> Cow<'static, str> {
+        "RevolveConvention".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["sketch_normal", "legacy_axis_start"],
+            "sketch_normal (the default): the angle is measured from the sketch plane, turning about the axis as the sketch's normal sweeps. legacy_axis_start keeps the angular start older designs had.",
+        )
     }
 }
 

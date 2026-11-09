@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
+solidcraft-mcp-server = { workspace = true }
 serde_json = { workspace = true }
 # Script mode (src/scx): runs model-written Python with no access to the host.
 monty = { workspace = true }

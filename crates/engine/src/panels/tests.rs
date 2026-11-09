@@ -1,3 +1,4 @@
+use super::commands::LayoutCatalogue;
 use super::*;
 
 fn id(value: &str) -> InstanceId {
@@ -20,6 +21,172 @@ fn reject(service: &mut LayoutService, mutations: Vec<Mutation>, rule: Rule) {
     let before = service.inspect();
     assert_eq!(service.dispatch(transaction(mutations)).unwrap_err().rule, rule);
     assert_eq!(service.inspect(), before, "failed action must preserve layout/revision/interaction");
+}
+
+#[test]
+fn fixed_bottom_height_is_validated_without_weakening_other_zone_bounds() {
+    let base = synthetic_registry().unwrap().get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    for height in [f32::NAN, f32::INFINITY, 0.0, 119.0, 1201.0] {
+        let mut spec = base.clone();
+        spec.fixed_bottom_height = Some(height);
+        assert_eq!(PanelRegistry::default().register(spec).unwrap_err().rule, Rule::Bounds);
+    }
+    let mut spec = base;
+    spec.fixed_bottom_height = Some(160.0);
+    assert_eq!(spec.size_bounds(Zone::Bottom), (size(160.0, 160.0), size(1200.0, 160.0)));
+    assert_eq!(spec.size_bounds(Zone::Left), (spec.min_size, spec.max_size));
+    assert!(!spec.collapsible_in(Zone::Bottom));
+    assert!(spec.collapsible_in(Zone::Left));
+    PanelRegistry::default().register(spec).unwrap();
+}
+
+#[test]
+fn fixed_bottom_rows_normalize_placement_but_reject_collapse_and_height_commands_atomically() {
+    use serde_json::json;
+    let mut registry = synthetic_registry().unwrap();
+    let mut spec = registry.get(&PanelKind::new("fixture.log").unwrap()).unwrap().clone();
+    spec.kind = PanelKind::new("fixture.rigid-row").unwrap();
+    spec.fixed_bottom_height = Some(160.0);
+    registry.register(spec).unwrap();
+    let mut service =
+        LayoutService::new(registry.clone(), Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()), HostCapabilities::default()).unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.rigid-row", "row", "side", Zone::Left, 0).unwrap()])).unwrap();
+    service.dispatch(transaction(vec![Mutation::Collapse { section: section("side"), collapsed: true }])).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("row"),
+            destination: Destination::NewSection {
+                section: section("bottom"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Bottom },
+                size: size(500.0, 300.0),
+            },
+        }]))
+        .unwrap();
+    let bottom = service.layout().section(&section("bottom")).unwrap();
+    assert_eq!(bottom.size.height, 160.0);
+    assert!(!bottom.collapsed);
+    assert!(!section_collapsible(service.layout(), &registry, bottom).unwrap());
+    reject(&mut service, vec![Mutation::Collapse { section: section("bottom"), collapsed: true }], Rule::FeatureDisabled);
+    reject(&mut service, vec![Mutation::SetSize { section: section("bottom"), size: size(500.0, 161.0) }], Rule::Bounds);
+    reject(&mut service, vec![Mutation::SetBottomHeight { section: section("bottom"), height: 161.0 }], Rule::Bounds);
+
+    let mut backend = commands::InMemoryPanelBackend::new(service, fixture_command_catalogue(&registry).unwrap());
+    for (command, params, rule) in [
+        ("panel.collapse", json!({"target":command_target("row"),"collapsed":true}), Rule::FeatureDisabled),
+        ("panel.resize", json!({"target":command_target("row"),"size":{"width":500,"height":161}}), Rule::Bounds),
+        ("panel.resize", json!({"target":command_target("row"),"size":{"width":1,"height":161},"thickness_only":true}), Rule::Bounds),
+    ] {
+        let before = backend.service.inspect();
+        let catalogue = backend.catalogue.state().clone();
+        assert_eq!(backend.execute(command, &params).unwrap_err().rule, rule);
+        assert_eq!(backend.service.inspect(), before);
+        assert_eq!(backend.catalogue.state(), &catalogue);
+    }
+    backend.service.dispatch(transaction(vec![Mutation::Close { instance: id("row") }])).unwrap();
+    backend
+        .service
+        .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.rigid-row").unwrap(), instance: id("row"), destination: None }]))
+        .unwrap();
+    assert_eq!(backend.service.layout().containing(&id("row")).unwrap().size.height, 160.0);
+    backend
+        .service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("row"),
+            destination: Destination::NewSection {
+                section: section("right"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Right },
+                size: size(500.0, 300.0),
+            },
+        }]))
+        .unwrap();
+    backend.service.dispatch(transaction(vec![Mutation::Collapse { section: section("right"), collapsed: true }])).unwrap();
+    assert_eq!(backend.service.layout().section(&section("right")).unwrap().size.height, 300.0);
+
+    backend.service.dispatch(transaction(vec![fixture_open("fixture.log", "ordinary", "ordinary", Zone::Bottom, 1).unwrap()])).unwrap();
+    backend
+        .service
+        .dispatch(transaction(vec![Mutation::Open {
+            kind: PanelKind::new("fixture.rigid-row").unwrap(),
+            instance: id("inactive"),
+            destination: Some(Destination::JoinTab { section: section("ordinary"), index: 1 }),
+        }]))
+        .unwrap();
+    let ordinary = backend.service.layout().section(&section("ordinary")).unwrap();
+    assert_eq!(ordinary.active, id("ordinary"));
+    assert_eq!(ordinary.size.height, 160.0, "inactive fixed-row metadata still constrains its group");
+    reject(&mut backend.service, vec![Mutation::Collapse { section: section("ordinary"), collapsed: true }], Rule::FeatureDisabled);
+}
+
+#[test]
+fn new_column_moves_preserve_source_column_width_or_use_the_registered_default() {
+    for source_zone in [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating] {
+        for relative in [true, false] {
+            let mut service = fixture_service(false).unwrap();
+            let target_zone = if source_zone == Zone::Right { Zone::Left } else { Zone::Right };
+            service
+                .dispatch(transaction(vec![
+                    fixture_open("fixture.log", "source", "source", source_zone, 0).unwrap(),
+                    fixture_open("fixture.log", "anchor", "anchor", target_zone, 1).unwrap(),
+                ]))
+                .unwrap();
+            let target_column = service.layout().containing(&id("anchor")).unwrap().column.clone().unwrap();
+            service.dispatch(transaction(vec![Mutation::SetColumnWidth { column: target_column.clone(), width: 330.0 }])).unwrap();
+            if source_zone.side() {
+                let source_column = service.layout().containing(&id("source")).unwrap().column.clone().unwrap();
+                service.dispatch(transaction(vec![Mutation::SetColumnWidth { column: source_column, width: 410.0 }])).unwrap();
+            } else {
+                service.dispatch(transaction(vec![Mutation::SetSize { section: section("source"), size: size(700.0, 240.0) }])).unwrap();
+            }
+            let destination = if relative {
+                Destination::Relative {
+                    section: section("anchor"),
+                    placement: RelativePlacement::BeforeColumn,
+                    new_section: section("moved"),
+                    new_column: Some(ColumnId::new("moved-column").unwrap()),
+                    size: size(999.0, 240.0),
+                }
+            } else {
+                Destination::NewSection {
+                    section: section("moved"),
+                    index: 0,
+                    location: SectionLocation::Dock { zone: target_zone },
+                    size: size(999.0, 240.0),
+                }
+            };
+            service.dispatch(transaction(vec![Mutation::Move { instance: id("source"), destination }])).unwrap();
+            let moved = service.layout().containing(&id("source")).unwrap();
+            let column = service.layout().column(moved.column.as_ref().unwrap()).unwrap();
+            let expected = if relative { if source_zone.side() { 410.0 } else { 280.0 } } else { 330.0 };
+            assert_eq!(column.width, expected);
+            assert_eq!(moved.size.width, if relative { expected } else { 999.0 });
+            assert_eq!(service.layout().column(&target_column).unwrap().width, 330.0, "joining an existing column never resizes it");
+        }
+    }
+
+    let mut service = fixture_service(false).unwrap();
+    service.dispatch(transaction(vec![fixture_open("fixture.log", "source", "source", Zone::Floating, 0).unwrap()])).unwrap();
+    service.dispatch(transaction(vec![Mutation::SetSize { section: section("source"), size: size(700.0, 240.0) }])).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Move {
+            instance: id("source"),
+            destination: Destination::NewSection {
+                section: section("moved"),
+                index: 0,
+                location: SectionLocation::Dock { zone: Zone::Left },
+                size: size(999.0, 240.0),
+            },
+        }]))
+        .unwrap();
+    let column = service.layout().containing(&id("source")).unwrap().column.clone().unwrap();
+    assert_eq!(service.layout().column(&column).unwrap().width, 280.0);
+    service.dispatch(transaction(vec![Mutation::SetColumnWidth { column: column.clone(), width: 730.0 }])).unwrap();
+    service.dispatch(transaction(vec![Mutation::Close { instance: id("source") }])).unwrap();
+    service
+        .dispatch(transaction(vec![Mutation::Open { kind: PanelKind::new("fixture.log").unwrap(), instance: id("source"), destination: None }]))
+        .unwrap();
+    assert_eq!(service.layout().column(&column).unwrap().width, 730.0, "reopen restores the saved column width");
 }
 
 #[test]
@@ -1430,7 +1597,7 @@ fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
     floating["location"] = json!({"type":"floating","origin":{"x":20,"y":30}});
     let mut native = floating.clone();
     native["location"] = json!({"type":"window","host":"native","origin":{"x":20,"y":30},"return_to":{"zone":"left","index":0,"size":{"width":280,"height":240},"collapsed":false}});
-    vec![
+    let mut inputs = vec![
         ("layout.apply", json!({"name":"Fixture default"})),
         ("layout.get", json!({})),
         ("layout.reset", json!({})),
@@ -1458,7 +1625,9 @@ fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
             "panel.resize_pair",
             json!({"first":"s-one","second":"s-two","first_size":{"width":280,"height":260},"second_size":{"width":280,"height":220}}),
         ),
-    ]
+    ];
+    inputs.extend(ContextualPanelAction::ALL.into_iter().map(|action| (action.command_id(), json!({}))));
+    inputs
 }
 
 #[test]
@@ -1510,6 +1679,10 @@ fn panel_command_success_replies_describe_committed_state_for_every_executable_o
             backend.execute("panel.collapse", &serde_json::json!({"target":command_target("one"),"collapsed":true})).unwrap();
         }
         let result = backend.execute(id, &input);
+        if ContextualPanelAction::from_command_id(id).is_some() {
+            assert_eq!(result.unwrap_err().rule, Rule::Availability, "headless cannot infer shared-control focus");
+            continue;
+        }
         if id == "panel.action" {
             assert_eq!(result.unwrap_err().rule, Rule::Capability, "headless cannot invoke an unbound controller");
             continue;
@@ -2062,6 +2235,73 @@ fn command_sidecar_collisions_and_aggregate_catalogue_growth_are_rejected_atomic
         }
     }
     assert!(rejected, "aggregate bytes reject before count cap");
+}
+
+#[test]
+fn contextual_panel_commands_resolve_once_and_commit_through_the_registered_sink() {
+    use commands::LayoutCatalogue;
+    struct FocusSink {
+        service: LayoutService,
+        resolutions: std::cell::Cell<usize>,
+    }
+    impl ActionSink for FocusSink {
+        fn resolve_contextual(&self, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+            assert_eq!(action, ContextualPanelAction::FocusNext);
+            self.resolutions.set(self.resolutions.get() + 1);
+            Ok(LayoutAction::Apply {
+                expected_revision: Some(self.service.inspect().revision),
+                mutations: vec![Mutation::Focus { instance: InstanceId::new("two").unwrap() }],
+            })
+        }
+        fn inspect(&self) -> LayoutReply {
+            self.service.inspect()
+        }
+        fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+            self.service.project(action)
+        }
+        fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+            self.service.dispatch(action)
+        }
+    }
+    let backend = command_ready_backend();
+    let mut sink = FocusSink { service: backend.service, resolutions: std::cell::Cell::new(0) };
+    let mut catalogue = backend.catalogue;
+    let registry = sink.service.registry().clone();
+    let before = sink.inspect();
+    let original_catalogue = catalogue.state().clone();
+    let mut context = commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false };
+    assert_eq!(
+        commands::execute("panel.focus.next", &serde_json::json!({"expected_revision":u64::MAX}), &mut context).unwrap_err().rule,
+        Rule::Revision
+    );
+    assert_eq!(context.sink.inspect(), before);
+    let result = commands::execute("panel.focus.next", &serde_json::json!({"expected_revision":before.revision}), &mut context).unwrap();
+    let reply: LayoutReply = serde_json::from_value(result).unwrap();
+    assert_eq!(reply.layout, context.sink.inspect().layout);
+    assert_eq!(reply.revision, context.sink.inspect().revision);
+    assert_eq!(reply.interaction, context.sink.inspect().interaction);
+    assert_eq!(reply.interaction.focused, Some(InstanceId::new("two").unwrap()));
+    assert_eq!(sink.resolutions.get(), 1, "revision rejection precedes live focus resolution");
+    assert_eq!(catalogue.state(), &original_catalogue, "focus does not change the saved arrangement");
+}
+
+#[test]
+fn contextual_panel_commands_without_live_focus_refuse_without_effects_including_batches() {
+    use commands::LayoutCatalogue;
+    for action in ContextualPanelAction::ALL {
+        let mut backend = command_ready_backend();
+        let before = backend.service.inspect();
+        let catalogue = backend.catalogue.state().clone();
+        let reason = backend.execute(action.command_id(), &serde_json::json!({})).unwrap_err();
+        assert_eq!(reason.rule, Rule::Availability);
+        assert!(reason.detail.contains("live panel host keyboard context"));
+        let reason = backend.batch(&[serde_json::json!({"command":action.command_id()})]).unwrap_err();
+        assert_eq!(reason.rule, Rule::Availability);
+        let reason = backend.batch(&[serde_json::json!({"command":action.command_id()}), serde_json::json!({"command":"layout.get"})]).unwrap_err();
+        assert_eq!(reason.rule, Rule::Capability);
+        assert_eq!(backend.service.inspect(), before);
+        assert_eq!(backend.catalogue.state(), &catalogue);
+    }
 }
 
 #[test]
@@ -3846,7 +4086,11 @@ fn closed_panel_reopens_with_column_identity_width_rank_and_saved_weight() {
         }]))
         .unwrap();
     service
-        .dispatch(transaction(vec![Mutation::Collapse { section: section("inner"), collapsed: true }, Mutation::Close { instance: id("two") }]))
+        .dispatch(transaction(vec![
+            Mutation::SetColumnWidth { column: column.clone(), width: 310.0 },
+            Mutation::Collapse { section: section("inner"), collapsed: true },
+            Mutation::Close { instance: id("two") },
+        ]))
         .unwrap();
     let memory = service.layout().instance(&id("two")).unwrap().memory.clone();
     assert_eq!(memory.column, Some(column.clone()));

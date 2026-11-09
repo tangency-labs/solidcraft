@@ -6,7 +6,7 @@ use solidcraft_engine::{Session, doc, kernel};
 
 #[test]
 fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
-    use crate::theme::{self, ColorVision, Tokens};
+    use solidcraft_theme::{ColorVision, Tokens};
 
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -15,16 +15,16 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
     app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
     app.run("sketch.line", json!({"points":[[-4,0],[4,0]]})).unwrap();
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-    let original_dark = theme::is_dark();
-    let original_vision = theme::vision();
+    let original_dark = solidcraft_theme::is_dark();
+    let original_vision = solidcraft_theme::vision();
     for finished in [false, true] {
         if finished {
             app.run("sketch.finish", json!({})).unwrap();
         }
         for dark in [false, true] {
             for vision in ColorVision::ALL {
-                theme::set_dark(dark);
-                theme::set_vision(vision);
+                solidcraft_theme::set_dark(dark);
+                solidcraft_theme::set_vision(vision);
                 let tokens = Tokens::get();
                 crate::prefs::set(&mut app, &json!({"sketch_halo": true})).unwrap();
                 let projection = super::projection(&app, rect);
@@ -74,8 +74,8 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
             }
         }
     }
-    theme::set_dark(original_dark);
-    theme::set_vision(original_vision);
+    solidcraft_theme::set_dark(original_dark);
+    solidcraft_theme::set_vision(original_vision);
 }
 
 #[test]
@@ -243,9 +243,8 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     assert!(block.bytes.opaque.is_empty() && !block.bytes.glass.is_empty(), "the triangles moved to the glass runs");
     let triangles: u32 = block.bytes.glass.iter().map(|r| r.len() as u32).sum::<u32>() / 3;
     assert_eq!(block.bytes.glass.len(), 1, "one body of one class is one run, drawn with no index buffer");
-    // The planner's grids, no side longer than a fifth of the box's 26.9 mm diagonal: edges in
-    // 4, 3 and 2 pieces, faces of 4 × 3, 4 × 2 and 3 × 2 cells, 2 · (12 + 8 + 6) · 2 triangles.
-    assert_eq!(triangles, 104, "every triangle of the box");
+    // Flat faces are their outline alone: two triangles a face.
+    assert_eq!(triangles, 12, "every triangle of the box");
     let vertex = block.bytes.glass.first().map_or(0, |r| r.start) as usize;
     let at = vertex * crate::gpu::TRI_SIZE;
     let colour = first_vertex(&second, block.bytes.vertices.get(at..).unwrap_or_default()).1;
@@ -367,7 +366,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
         let scene = h.app.viewport.slot.lock().unwrap().take().expect("new model colours uploaded").merged();
         let (vertices, remainder) = scene.tris.as_chunks::<{ crate::gpu::TRI_SIZE }>();
         assert!(remainder.is_empty() && !vertices.is_empty());
-        let colour = super::c4(crate::theme::Tokens::get().body);
+        let colour = super::c4(solidcraft_theme::Tokens::get().body);
         assert!(vertices.iter().all(|v| vertex_color(&scene, v) == colour), "{theme}: stale body colour");
         assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
         assert!(std::sync::Arc::ptr_eq(&mesh, &crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap()));
@@ -479,7 +478,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
         json!({"theme_import": {"format":"solidcraft-theme/1","name":"Conflict marker","base":"light","colors":{"sketch_conflict":"#12ab34"}}}),
     );
     h.frame();
-    assert_eq!(crate::theme::Tokens::get().sketch_conflict, marker);
+    assert_eq!(solidcraft_theme::Tokens::get().sketch_conflict, marker);
     // `w` places a guide line; a second sketch ends a 12 mm line on it. Moving the guide out of
     // reach makes the second sketch's constraints conflict (#7244).
     let app = &mut h.app;
@@ -548,7 +547,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
             assert_eq!((lines, shapes), (0, 0), "w = {w}, preference {preference}: nothing in the conflict colour");
         }
         if conflicting && !preference {
-            let error = crate::theme::Tokens::get().error;
+            let error = solidcraft_theme::Tokens::get().error;
             assert!(painted_in(&h.shapes, error) > 0, "the failing glyphs and dimensions stay red");
         }
     }

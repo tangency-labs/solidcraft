@@ -1,0 +1,171 @@
+{
+  "area": "crashes",
+  "bodies": {
+    "b27": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b28": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b32"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b33"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b33",
+        "b34"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b35"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3540-cut-with-coincident-cylinder-face",
+  "expected": {
+    "body_count": 1,
+    "method": "tube r28..33, z -5..10: V = pi*(33^2-28^2)*15. Slots (3 sectors, 26 deg each, r29.5..33, z -3..8): each removes theta/2*(R^2-r^2)*h. Grooves (3 sectors, 69 deg, r30..33, z 4.7..8.3). Each groove overlaps its slot in 25 deg x r30..33 x z 4.7..8 (3.3), counted once. V = 14372.79 - 1637.88 - 1229.09 + 408.21 = 11914.03",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3540"
+    ],
+    "volume_mm3": 11914.03,
+    "what": "a groove cut whose r33 arcs lie exactly on the r33 cylinder of an earlier slot cut and overlap it in Z: minutes of CPU"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 87,
+      "faces": 34,
+      "vertices": 58
+    }
+  },
+  "records": "3540-cut-with-coincident-cylinder-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Oberteil",
+      "made": "b35"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8556.635871721943,
+      "body_count": 1,
+      "edges": 87,
+      "faces": 34,
+      "vertices": 58,
+      "volume_mm3": 11914.029372150655
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3540"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a groove cut whose r33 arcs lie exactly on the r33 cylinder of an earlier slot cut and overlap it in Z: minutes of CPU",
+  "why_not": []
+}

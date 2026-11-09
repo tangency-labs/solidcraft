@@ -1,0 +1,12 @@
+id = "surface.volume_p1"
+upstream = ["source/SMLib/inc/SmVolume.h", "source/SMLib/src/SmVolume.cpp"]
+rust_module = "surface::volume::p1"
+depends_on = ["geom.a_object", "geom.extent3d", "geom.matrix", "geom.object", "geom.transform", "geom.vector3d"]
+soft_depends_on = ["curve.crv_in_volume", "curve.line", "geom.axis2_placement", "geom.context", "geom.geom_utility_p1"]
+est_lines = 2014
+layer = 15
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-surface.volume_p1-a1"
+claimed_at = "2026-10-13T02:16:42Z"
+notes = "63 fns; largest: smvol_LiftThirdDerivative, SmFindPVIntersectENFO::Evaluate, SmVolume::Map, SmVolume::Evaluate; cycle back-edges (call into later units; stub or co-port): surface.b_spline_volume(2), surface.bend_volume(2), surface.twist_volume(2), surface.unbend_volume(2); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit; difftest partial: 2886 cases (886 fixtures + 2000 generated), 2884 pass, 2 deferred (surface.surface_p8 2: the unbend IsCurveInParamDomainSimple; twist and unbend wired by their units), max_rel_err 0; 20k-seed run clean; --perturb SENSITIVE; wired: curve.crv_in_volume (deferred 604 -> 208), geom.transform (256 -> 3), geom.tol GetScaledZero(SmVolume); geom.solution_array volume stub stays (opaque handle) Re-run after wiring PR #118 (surface.surface_p8 and its back-edges, GlobalPointSolve_0 included): 2886 cases, 2886 pass, 0 deferred, 0 failed, max_rel_err 0; green."

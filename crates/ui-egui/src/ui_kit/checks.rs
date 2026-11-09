@@ -1,7 +1,7 @@
 //! The only checkbox box and check glyph, shared by inline, palette, grid and menu rows.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Response, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// Fixed logical size and pixel-aligned origin, independent of a caller's fonts or spacing.
 pub(super) fn box_at(ui: &Ui, center: egui::Pos2) -> Rect {
@@ -59,9 +59,9 @@ pub(crate) fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
 /// Mixed values become checked when activated; the caller owns whether selection is mixed.
 /// Tokens: space_14/3/2/6, radius_sm, control_fill/border, form_primary/ink, hover, on_accent.
 pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool, mixed: bool) -> Response {
-    crate::prefs_search::note_unlabelled(ui, &[label]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[label]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[label]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_label);
@@ -75,8 +75,8 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     let width = (t.space_14 + gap + galley.size().x).max(ui.spacing().interact_size.y).min(super::metrics::dimension(ui.available_width()));
     let height = ui.spacing().interact_size.y.max(t.space_14).max(galley.size().y);
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
-    crate::prefs_search::remember(ui, label, rect);
-    crate::prefs_search::follow(ui, label, rect);
+    super::settings_search::remember(ui, label, rect);
+    super::settings_search::follow(ui, label, rect);
     if response.clicked() {
         *value = mixed || !*value;
         response.mark_changed();
@@ -92,7 +92,7 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
         super::text::paint_text(ui, text_rect, label, font, t.form_ink, false);
     }
     response.widget_info(|| {
-        let accessible = if label.is_empty() { crate::i18n::tr_label(super::row_label(ui)) } else { label };
+        let accessible = if label.is_empty() { solidcraft_ui_text::tr_label(super::row_label(ui)) } else { label };
         let mut info = egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, accessible);
         if mixed && !response.changed() {
             info.selected = None;

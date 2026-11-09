@@ -500,7 +500,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
         lens.validate_camera(&app.cam).map_err(|error| error.to_string())?;
     }
     if options.area_samples.is_some_and(|n| !matches!(n, 1 | 4 | 16 | 64)) {
-        return Err(crate::i18n::tr("render.error_area_samples").into());
+        return Err(solidcraft_ui_text::tr("render.error_area_samples").into());
     }
     if options.area_lights.as_ref().is_none_or(Vec::is_empty) {
         options.area_samples = None;

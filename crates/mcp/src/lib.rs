@@ -1,7 +1,8 @@
 //! SolidCraft MCP server.
 //!
-//! JSON-RPC 2.0 over stdio (newline-delimited), implementing the MCP lifecycle, tools and
-//! resources. Tools map onto the control-channel methods (`engine.execute`, `document.inspect`,
+//! SolidCraft's tools, instructions and resources, served over JSON-RPC 2.0 on stdio by the
+//! shared MCP server (`solidcraft-mcp-server`: the lifecycle, tool schemas and argument checks).
+//! Tools map onto the control-channel methods (`engine.execute`, `document.inspect`,
 //! `ui.render`…, see `docs/control-protocol.md`), served either by an in-process headless
 //! [`Headless`] session or by a running app through its loopback control port ([`Remote`]), so a
 //! person can watch the agent model. Every modelling step is an engine command; tools never open
@@ -18,7 +19,8 @@ mod tools;
 
 pub use backend::{Auto, Backend, Headless, Remote};
 pub use options::{COMPACT_ENV, COMPACT_FLAG, Options, SCX_ENV, SCX_FLAG};
-pub use server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
+pub use server::Server;
+pub use solidcraft_mcp_server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS};
 pub use tools::{call_tool, call_tool_with, tool_definitions, tool_definitions_with};
 
 use std::path::PathBuf;

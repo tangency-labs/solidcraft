@@ -1896,6 +1896,7 @@
   "material.editor.preserved_appearance": "Aspetto conservato",
   "material.editor.public_reference": "Riferimento pubblico",
   "material.editor.reference": "Riferimento",
+  "material.editor.remove": "Rimuovi",
   "material.editor.save_or_discard": "Salva o scarta la bozza del materiale prima di assegnare un materiale.",
   "material.editor.saved": "Materiale salvato. Le assegnazioni ai corpi non sono cambiate.",
   "material.editor.scope": "Salva memorizza questo materiale senza assegnarlo ai corpi. Le proprietà e le condizioni lasciate vuote restano sconosciute. La densità della scheda non cambia la densità assegnata né la massa.",
