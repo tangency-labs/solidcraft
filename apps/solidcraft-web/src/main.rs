@@ -216,7 +216,7 @@ mod web {
             .and_then(|c| c.get_context("webgl2").ok().flatten())
             .is_some();
         let webgpu = web_sys::window().is_some_and(|w| js_sys::Reflect::has(&w.navigator(), &"gpu".into()).unwrap_or(false));
-        let _language = solidcraft_ui_egui::i18n::scope(solidcraft_ui_egui::i18n::system_language());
+        let _language = solidcraft_ui_text::scope(solidcraft_ui_text::system_language());
         let notice = crate::start_failure::notice(error, webgl2, webgpu);
         let append = |parent: &web_sys::Element, tag: &str, text: &str| {
             let child = document.create_element(tag).ok()?;
