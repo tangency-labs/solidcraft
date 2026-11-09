@@ -1046,20 +1046,105 @@ pub enum PlaneCrossing {
 /// Where edge `id`, over its own interval, meets the plane through `point` with normal
 /// `normal` (not upstream), in order along the edge. No crossing is an empty list.
 ///
+/// The edge's curve is solved against the plane by the kernel's own curve/plane solve,
+/// over the edge's interval and within the edge's tolerance (the tube that holds the exact
+/// edge), so a stretch within that tube of the plane is [`PlaneCrossing::Along`]. The
+/// points are the curve's at the solve's parameters. A crossing within the edge's
+/// tolerance of one of its vertices names that vertex and takes the interval's end as its
+/// parameter, so two edges meeting at a vertex on the plane name the same vertex.
+///
 /// # Errors
 ///
-/// Not built yet: every call is refused ([`SolidError::Unsupported`]).
+/// [`SolidError::InvalidInput`] for a point or normal that isn't finite, a normal of no
+/// direction (the plane's axes are undefined for it) or an edge without a curve;
+/// [`SolidError::NotFound`] for a dangling edge; the solve's own errors, including
+/// [`SolidError::Unported`] for a curve type it doesn't solve.
 pub fn edge_plane_crossings(
-    _k: &Kernel,
-    _brep: &Brep,
-    _id: EdgeId,
-    _point: Point3,
-    _normal: Vec3,
+    k: &Kernel,
+    brep: &Brep,
+    id: EdgeId,
+    point: Point3,
+    normal: Vec3,
 ) -> Result<Vec<PlaneCrossing>> {
-    Err(SolidError::Unsupported {
-        operation: OP,
-        reason: "edge_plane_crossings is not built yet",
-    })
+    if point.is_undef() || normal.is_undef() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the plane's point and normal must be finite",
+        ));
+    }
+    // The plane's axes come from this step; it fails for a normal of no direction.
+    if normal.make_unit_ortho_vectors(None).is_err() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the plane's normal has no direction",
+        ));
+    }
+    let edge = brep.edge(id)?;
+    let curve = edge
+        .curve
+        .as_ref()
+        .ok_or(SolidError::invalid_input(OP, "the edge has no curve"))?;
+    // An edge made without a tolerance is solved to the kernel's zero.
+    let tol = edge.tolerance.max(EFF_ZERO);
+    let ends = [
+        (edge.interval.min(), edge.vertices[0]),
+        (edge.interval.max(), edge.vertices[1]),
+    ];
+    let end = |parameter: f64| -> Result<CrossingEnd> {
+        let at = curve.evaluate_point(k, parameter)?;
+        for (end_parameter, vertex) in ends {
+            if brep.vertex(vertex)?.point.distance(at) <= tol {
+                return Ok(CrossingEnd {
+                    parameter: end_parameter,
+                    point: curve.evaluate_point(k, end_parameter)?,
+                    vertex: Some(vertex),
+                });
+            }
+        }
+        Ok(CrossingEnd {
+            parameter,
+            point: at,
+            vertex: None,
+        })
+    };
+    let plane = crate::surface::plane::p1::Plane::from_normal(point, normal);
+    let solutions = crate::curve::curve::p4::plane_global_curve_intersect(
+        k,
+        &plane,
+        curve,
+        &edge.interval,
+        tol,
+    )?;
+    let mut crossings = Vec::with_capacity(solutions.len());
+    for (solution_type, start, finish) in solutions {
+        let first = start.parameters.first().copied().unwrap_or(0.0);
+        match solution_type {
+            SolutionType::SingleValue => crossings.push(PlaneCrossing::Point(end(first)?)),
+            SolutionType::RangeOfValues => {
+                let last = finish.parameters.first().copied().unwrap_or(first);
+                let (start, end) = (end(first.min(last))?, end(first.max(last))?);
+                crossings.push(if start.parameter == end.parameter {
+                    PlaneCrossing::Point(start)
+                } else {
+                    PlaneCrossing::Along { start, end }
+                });
+            }
+            // The plane solve reports points and ranges only; anything else is not a crossing.
+            _ => {}
+        }
+    }
+    crossings.sort_by(|a, b| first_parameter(a).total_cmp(&first_parameter(b)));
+    // A closed edge's two ends are one vertex: a crossing there can come from both.
+    crossings.dedup();
+    Ok(crossings)
+}
+
+/// Where a crossing starts along its edge.
+fn first_parameter(crossing: &PlaneCrossing) -> f64 {
+    match crossing {
+        PlaneCrossing::Point(p) => p.parameter,
+        PlaneCrossing::Along { start, .. } => start.parameter,
+    }
 }
 
 /// Parameter interval (`SmApiEdgeParameterRange`); dangling ids are errors.
