@@ -1258,6 +1258,8 @@ fn counted_body_names_after_the_marker_stay_in_a_design_saved_before_pinning() {
     // Opening changed nothing the user can see: the design is still rolled back, and not dirty.
     assert_eq!(s.doc.marker, Some(1));
     assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(!s.is_dirty());
+    assert!(s.undo.is_empty());
 
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "name": "N"}));
     run(&mut s, "timeline.roll_to", json!({"position": "end"}));
