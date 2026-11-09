@@ -351,6 +351,62 @@ pub struct VertexList {
     pub min_unstitched_vert_gap: f64,
 }
 
+/// What the stitcher closed, as the entities it glued (solidcore#2975).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClosedGapKind {
+    /// A vertex pair glued into the kept vertex.
+    Vertex {
+        /// The vertex the glue kept.
+        kept: VertexId,
+        /// The vertex the glue deleted.
+        deleted: VertexId,
+    },
+    /// An edge pair glued into the kept edge.
+    Edge {
+        /// The edge the glue kept.
+        kept: EdgeId,
+        /// The edge the glue deleted.
+        deleted: EdgeId,
+    },
+    /// A vertex pair one edge was squeezed into (the kept vertex stays).
+    Squeezed {
+        /// The vertex the squeeze kept.
+        kept: VertexId,
+        /// The vertex the squeeze closed over.
+        deleted: VertexId,
+    },
+    /// A vertex dropped onto an edge and split there, with the vertex its split created.
+    Split {
+        /// The edge the vertex was dropped onto and split.
+        edge: EdgeId,
+        /// The vertex the split created.
+        created: VertexId,
+    },
+}
+
+/// A closure's certified geometry bound and tolerance accounting (solidcore#2975).
+/// The bound includes floating-point rounding. For edges it bounds both directed
+/// Hausdorff distances via an endpoint-to-endpoint parameter correspondence; it
+/// need not be the tightest Hausdorff bound. Unsupported enclosures return an
+/// error from the reporting operation, never a sampled estimate as a certificate.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClosedGap {
+    /// What the stitcher closed.
+    pub kind: ClosedGapKind,
+    /// Certified upper bound on the gap, in model units. A squeeze bounds the
+    /// whole removed curve's distance to the kept point; a split bounds the source
+    /// point's distance to the original curve at the split parameter.
+    pub gap: f64,
+    /// Upper bound on `max(tolerance_after - tolerance_before, 0)`, rounded up.
+    /// Exactly zero when the surviving entity's stored tolerance did not grow.
+    pub growth: f64,
+    /// The surviving entity's own stored tolerance before this closure. For a
+    /// split this is the new vertex's tolerance before its explicit adjustment.
+    pub tolerance_before: f64,
+    /// The surviving entity's stored tolerance after this closure.
+    pub tolerance_after: f64,
+}
+
 /// The result of [`Stitch::split_edges_with_vertices`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SplitEdges {
@@ -479,9 +535,36 @@ impl Stitch<'_> {
                     }
 
                     let surv_v = surv_v.ok_or_else(|| deref("edge without vertex"))?;
+                    let deleted_report = del_v.unwrap_or(surv_v);
+                    // Bound all the removed geometry, not its sampled length or
+                    // merely the distance between its endpoints.
+                    let squeeze_report = if self.report_gaps.is_some() {
+                        Some((
+                            vertex::tolerance(b, surv_v)?,
+                            super::bounds::curve_to_point(
+                                curve_of(b, e)?,
+                                &edge::interval(b, e)?,
+                                vertex::point(b, surv_v)?,
+                            )?,
+                        ))
+                    } else {
+                        None
+                    };
                     // remove and delete edge from topology graph by squeezing
                     // [vertex-edge-vertex] into [vertex]
                     self.edit_squeeze_edge(k, b, Some(e), surv_v)?;
+                    if let Some((pre, gap)) = squeeze_report {
+                        let after = vertex::tolerance(b, surv_v)?;
+                        self.record_gap(
+                            ClosedGapKind::Squeezed {
+                                kept: surv_v,
+                                deleted: deleted_report,
+                            },
+                            gap,
+                            pre,
+                            after,
+                        )?;
+                    }
 
                     if candidate_vertices.is_some() {
                         add_unique(&mut cand_vertices, surv_v); // This becomes a candidate.
@@ -570,7 +653,42 @@ impl Stitch<'_> {
                             // candidates
                             let new_tol =
                                 smos_max(vertex::tolerance(b, v)?, vertex::tolerance(b, new_v)?);
+                            let split_report = if self.report_gaps.is_some() {
+                                let range = edge::interval(b, e)?;
+                                let parameter = if edge::start_vertex(b, e)? == Some(new_v) {
+                                    range.min()
+                                } else if edge::end_vertex(b, e)? == Some(new_v) {
+                                    range.max()
+                                } else {
+                                    return Err(SolidError::invalid_input(
+                                        "heal::stitch::bounds",
+                                        "split vertex is not on either resulting edge end",
+                                    ));
+                                };
+                                Some((
+                                    vertex::tolerance(b, new_v)?,
+                                    super::bounds::point_at_curve(
+                                        vertex::point(b, v)?,
+                                        curve_of(b, e)?,
+                                        parameter,
+                                    )?,
+                                ))
+                            } else {
+                                None
+                            };
                             vertex::set_tolerance(b, new_v, zone_tol3d(k, new_tol), true, true)?;
+                            if let Some((pre, bound)) = split_report {
+                                let after = vertex::tolerance(b, new_v)?;
+                                self.record_gap(
+                                    ClosedGapKind::Split {
+                                        edge: e,
+                                        created: new_v,
+                                    },
+                                    bound,
+                                    pre,
+                                    after,
+                                )?;
+                            }
                             more_work_needed = true;
 
                             cand_vertices.push(new_v);
@@ -734,6 +852,43 @@ impl Stitch<'_> {
                         continue;
                     }
 
+                    // (not upstream, #2975) capture the closure record's operands
+                    // before nothing else deflects them, and read the surviving
+                    // entity's tolerance after.
+                    let kept = if choice.keep_first { v } else { cv };
+                    let deleted = if choice.keep_first { cv } else { v };
+                    let pair_report = if self.report_gaps.is_some() && (do_glue || do_squeeze) {
+                        Some((
+                            vertex::tolerance(b, kept)?,
+                            if do_squeeze {
+                                if let Some(e) = squeeze_edge {
+                                    super::bounds::curve_to_point(
+                                        curve_of(b, e)?,
+                                        &edge::interval(b, e)?,
+                                        vertex::point(b, kept)?,
+                                    )?
+                                } else {
+                                    super::bounds::points(
+                                        vertex::point(b, kept)?,
+                                        vertex::point(b, deleted)?,
+                                    )?
+                                }
+                            } else {
+                                super::bounds::points(
+                                    vertex::point(b, kept)?,
+                                    vertex::point(b, deleted)?,
+                                )?
+                            },
+                            if do_glue {
+                                ClosedGapKind::Vertex { kept, deleted }
+                            } else {
+                                ClosedGapKind::Squeezed { kept, deleted }
+                            },
+                        ))
+                    } else {
+                        None
+                    };
+
                     // squeeze or glue vertices together (make pV the retained vertex)
                     if choice.keep_first {
                         if do_squeeze {
@@ -748,6 +903,10 @@ impl Stitch<'_> {
                             self.edit_glue_vertices(k, b, cv, v, Some(&wire_edges))?;
                         }
                         v = cv;
+                    }
+                    if let Some((pre, bound, kind)) = pair_report {
+                        let after = vertex::tolerance(b, v)?;
+                        self.record_gap(kind, bound, pre, after)?;
                     }
 
                     // The surviving vertex (which is pV) should be a candidate.
@@ -1057,6 +1216,21 @@ impl Stitch<'_> {
                     for f in edge::faces(b, delete, None)? {
                         add_unique(modified_faces, f);
                     }
+                    // (not upstream, #2975) capture the closure's operands before the
+                    // glue, and the kept edge's tolerance after.
+                    let edge_report = if self.report_gaps.is_some() {
+                        Some((
+                            edge::tolerance(b, keep)?,
+                            super::bounds::curves(
+                                curve_of(b, e)?,
+                                [e_ivl.min(), e_ivl.max()],
+                                curve_of(b, test_e)?,
+                                [t_start, t_end],
+                            )?,
+                        ))
+                    } else {
+                        None
+                    };
                     match self.edit_glue_edges(
                         k,
                         b,
@@ -1076,6 +1250,18 @@ impl Stitch<'_> {
                             }
                             set_none(&mut v_edges, kk)?;
                             done_with_vertex = false;
+                            if let Some((pre, bound)) = edge_report {
+                                let after = edge::tolerance(b, e)?;
+                                self.record_gap(
+                                    ClosedGapKind::Edge {
+                                        kept: e,
+                                        deleted: delete,
+                                    },
+                                    bound,
+                                    pre,
+                                    after,
+                                )?;
+                            }
                         }
                         Err(err) if err.is_unported_or_cancelled() => return Err(err),
                         Err(_) if !self.ignore_problems => return Err(sm_err()),
