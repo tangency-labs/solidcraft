@@ -4,6 +4,14 @@ use solidcraft_kernel::{Body, BoolOp};
 
 use super::*;
 
+/// The kernel's plan; the GPU evaluates it in solidcore-tess's form, made by the model.
+type GeomPlan = solidcraft_geom::tess::TessPlan;
+
+/// `plan` as the model hands it to the GPU ([`solidcraft_engine::doc::gpu_plan`]).
+fn gpu_form(plan: &GeomPlan) -> TessPlan {
+    solidcraft_engine::doc::gpu_plan::gpu_plan(plan)
+}
+
 /// The GPU, or `None` with a note when the machine has no adapter (CI runners without a GPU).
 /// A device that cannot build the pipeline fails the test: that is a shader the device rejects
 /// (as D3D12's FXC once did), not a missing GPU. `SOLIDCRAFT_REQUIRE_GPU=1` (the Windows CI job,
@@ -59,7 +67,7 @@ fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
     let gpu = ok(TessGpu::new(name, device, queue));
     let body = ok(solidcraft_kernel::torus(Vec3::ZERO, 6.0, 1.5));
     let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
-    assert_eq!(ok(gpu.evaluate(&plan)).positions.len(), plan.evaluate().positions.len());
+    assert_eq!(ok(gpu.evaluate(&gpu_form(&plan))).positions.len(), plan.evaluate().positions.len());
 }
 
 /// The shader as the D3D12 backend translates it (naga's HLSL for shader model 5.1, the FXC
@@ -228,7 +236,7 @@ fn gpu_evaluation_matches_the_cpu() {
     for (name, body) in bodies() {
         let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.01)));
         let cpu = plan.evaluate();
-        let got = ok(gpu.evaluate(&plan));
+        let got = ok(gpu.evaluate(&gpu_form(&plan)));
         assert_eq!(got.triangles, cpu.triangles, "{name}");
         assert_eq!(got.tri_face, cpu.tri_face, "{name}");
         assert_eq!(got.positions.len(), cpu.positions.len(), "{name}");
@@ -258,7 +266,7 @@ fn a_resident_mesh_matches_the_cpu() {
     for (name, body) in bodies() {
         let plan = ok(body.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) }));
         let cpu = plan.evaluate();
-        let mesh = ok(gpu.prepare(&plan));
+        let mesh = ok(gpu.prepare(&gpu_form(&plan)));
         assert_eq!(mesh.vertex_count as usize, cpu.positions.len(), "{name}");
         assert_eq!(mesh.index_count as usize, cpu.triangles.len() * 3, "{name}");
         assert_eq!(mesh.vertex_face.len(), cpu.positions.len(), "{name}");
@@ -297,11 +305,12 @@ fn a_resident_mesh_matches_the_cpu() {
 #[test]
 fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     let Some(gpu) = gpu() else { return };
-    let plans: Vec<TessPlan> = bodies()
+    let plans: Vec<GeomPlan> = bodies()
         .iter()
         .map(|(_, b)| ok(b.mesh_plan(&solidcraft_kernel::MeshTolerance { chord: 0.01, angle: Some(std::f64::consts::PI / 9.0) })))
         .collect();
-    let refs: Vec<&TessPlan> = plans.iter().collect();
+    let gpu_plans: Vec<TessPlan> = plans.iter().map(gpu_form).collect();
+    let refs: Vec<&TessPlan> = gpu_plans.iter().collect();
     let mesh = ok(gpu.prepare_many(&refs));
     assert_eq!(mesh.parts.len(), plans.len());
     let d = &gpu.device;
@@ -357,8 +366,12 @@ fn check_empty_tessellation(gpu: &TessGpu, plan: &TessPlan) {
 fn tessellation_without_vertices_does_not_dispatch() {
     let Some(gpu) = gpu() else { return };
     let plan = TessPlan {
-        surfaces: vec![EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }],
-        faces: vec![solidcraft_geom::tess::FacePlan { surface: Some(0), ..Default::default() }],
+        surfaces: vec![EvalSurface::Plane {
+            origin: solidcore_convert::vec3(Vec3::ZERO),
+            du: solidcore_convert::vec3(Vec3::X),
+            dv: solidcore_convert::vec3(Vec3::Y),
+        }],
+        faces: vec![solidcore_tess::FacePlan { surface: Some(0), ..Default::default() }],
         ..Default::default()
     };
     check_empty_tessellation(&gpu, &plan);
@@ -416,7 +429,7 @@ fn bench_plate() {
             np = m.triangles.len();
             if let Some(gpu) = &gpu {
                 let t = std::time::Instant::now();
-                let _ = ok(gpu.evaluate(&plan));
+                let _ = ok(gpu.evaluate(&gpu_form(&plan)));
                 g.push(ms(t));
             }
         }
@@ -427,7 +440,7 @@ fn bench_plate() {
 
 /// Plans that use every packed field: a plane face with a pinned node, a flipped rational NURBS
 /// face closed along u, and a revolved face with its parameters swapped under a mirroring transform.
-fn synthetic_plans() -> Vec<TessPlan> {
+fn synthetic_plans() -> Vec<GeomPlan> {
     use solidcraft_geom::tess::{EvalCurve, EvalSurface, FacePlan};
     let plane = EvalSurface::Plane { origin: Vec3::new(1.0, 2.0, 3.0), du: Vec3::new(0.5, 0.0, 0.0), dv: Vec3::new(0.0, 0.25, 0.0) };
     let w = std::f64::consts::FRAC_1_SQRT_2;
@@ -457,13 +470,13 @@ fn synthetic_plans() -> Vec<TessPlan> {
         triangles: vec![[0, 1, 2], [1, 3, 2]],
     };
     vec![
-        TessPlan {
+        GeomPlan {
             surfaces: vec![plane, nurbs],
             faces: vec![face(0, 0, false, vec![Vec3::new(1.0, 2.0, 3.0)]), face(1, 1, true, Vec::new())],
             edges: vec![vec![Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.5, 2.0, 3.0)]],
             edge_faces: vec![vec![0]],
         },
-        TessPlan { surfaces: vec![revolved], faces: vec![face(0, 0, false, Vec::new())], edges: Vec::new(), edge_faces: Vec::new() },
+        GeomPlan { surfaces: vec![revolved], faces: vec![face(0, 0, false, Vec::new())], edges: Vec::new(), edge_faces: Vec::new() },
     ]
 }
 
@@ -500,16 +513,14 @@ fn packed_digest(plans: &[&TessPlan]) -> u64 {
 #[test]
 fn plans_pack_to_the_same_bytes() {
     let tol = solidcraft_kernel::MeshTolerance::chord(0.05);
-    let real: Vec<TessPlan> = bodies().into_iter().map(|(_, b)| ok(b.mesh_plan(&tol))).collect();
-    let synthetic = synthetic_plans();
+    let real: Vec<TessPlan> = bodies().into_iter().map(|(_, b)| gpu_form(&ok(b.mesh_plan(&tol)))).collect();
+    let synthetic: Vec<TessPlan> = synthetic_plans().iter().map(gpu_form).collect();
     let digests: Vec<u64> = real.iter().chain(&synthetic).map(|p| packed_digest(&[p])).collect();
     let all: Vec<&TessPlan> = real.iter().chain(&synthetic).collect();
     let together = packed_digest(&all);
-    let kinds = |k: fn(&solidcraft_geom::tess::EvalSurface) -> bool| all.iter().flat_map(|p| &p.surfaces).filter(|s| k(s)).count();
-    use solidcraft_geom::tess::EvalSurface as S;
-    assert!(
-        kinds(|s| matches!(s, S::Plane { .. })) > 0 && kinds(|s| matches!(s, S::Nurbs { .. })) > 0 && kinds(|s| matches!(s, S::Revolved { .. })) > 0
-    );
+    let kinds = |k: fn(&EvalSurface) -> bool| all.iter().flat_map(|p| &p.surfaces).filter(|s| k(s)).count();
+    assert!(kinds(|s| matches!(s, EvalSurface::Plane { .. })) > 0);
+    assert!(kinds(|s| matches!(s, EvalSurface::Nurbs(_))) > 0 && kinds(|s| matches!(s, EvalSurface::Revolved { .. })) > 0);
     let want = [
         15190797810663928423,
         9314125828510912321,
@@ -520,4 +531,20 @@ fn plans_pack_to_the_same_bytes() {
         16919141291401223349,
     ];
     assert_eq!((digests, together), (want.to_vec(), 13252508492477263825));
+}
+
+/// A plan with pole nodes (one vertex per incident triangle, its own normal) is refused by name:
+/// the shader has no rule for them, so the body is drawn from its CPU mesh as any refused plan is.
+#[test]
+fn a_plan_with_pole_nodes_is_refused_by_name() {
+    let mut plan = gpu_form(&synthetic_plans()[0]);
+    let face = plan.faces.get_mut(1).map(|f| {
+        f.poles.push(solidcore_tess::PoleNode { node: 0, rule: solidcore_tess::PoleRule::Averaged });
+        f.face
+    });
+    assert_eq!(face, Some(1));
+    assert!(matches!(pack(&[&plan]), Err(GpuError::PoleNodes { face: 1 })));
+    let Some(gpu) = gpu() else { return };
+    assert!(matches!(gpu.prepare(&plan), Err(GpuError::PoleNodes { face: 1 })));
+    assert!(matches!(gpu.evaluate(&plan), Err(GpuError::PoleNodes { face: 1 })));
 }

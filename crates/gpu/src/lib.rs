@@ -13,10 +13,11 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+use solidcore::eval::{EvalCurve, EvalSurface};
 use solidcore_record::Vec3;
 #[cfg(not(target_arch = "wasm32"))]
 use solidcore_tess::Mesh;
-use solidcraft_geom::tess::{EvalCurve, EvalSurface, TessPlan};
+use solidcore_tess::TessPlan;
 use wgpu::util::DeviceExt;
 
 pub mod capture;
@@ -162,6 +163,10 @@ pub enum GpuError {
     Pipeline(String),
     #[error("not supported yet: {0}")]
     Unsupported(String),
+    /// The GPU evaluation has no rule for a plan's pole nodes (a node emitted once per incident
+    /// triangle, [`solidcore_tess::PoleNode`]): such a plan is drawn from its CPU mesh.
+    #[error("face {face} has pole nodes, which the GPU evaluation does not support yet")]
+    PoleNodes { face: u32 },
     #[error("the GPU device was lost (the graphics driver was reset); it can't draw again")]
     DeviceLost,
 }
@@ -518,9 +523,9 @@ fn push3(data: &mut Vec<f32>, v: Vec3) {
 
 fn push_curve(data: &mut Vec<f32>, c: &EvalCurve) -> Result<(u32, u32)> {
     let knots = word(data.len())?;
-    data.extend(c.knots.iter().map(|k| *k as f32));
+    data.extend(c.knots().iter().map(|k| *k as f32));
     let ctrl = word(data.len())?;
-    data.extend(c.ctrl.iter().flat_map(|h| h.map(|x| x as f32)));
+    data.extend(c.ctrl().iter().flat_map(|h| h.map(|x| x as f32)));
     Ok((knots, ctrl))
 }
 
@@ -535,11 +540,12 @@ fn pack(plans: &[&TessPlan]) -> Result<Packed> {
             EvalSurface::Plane { origin, du, dv } => {
                 head[0] = 0;
                 head[8] = word(data.len())?;
-                push3(&mut data, *origin);
-                push3(&mut data, *du);
-                push3(&mut data, *dv);
+                push3(&mut data, solidcore_convert::record_vec3(*origin));
+                push3(&mut data, solidcore_convert::record_vec3(*du));
+                push3(&mut data, solidcore_convert::record_vec3(*dv));
             }
-            EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => {
+            EvalSurface::Nurbs(n) => {
+                let (degree, knots, count, ctrl, closed) = (n.degree(), n.knots(), n.count(), n.ctrl(), n.closed());
                 head[0] = 1;
                 head[11] = u32::from(closed[0]) | (u32::from(closed[1]) << 1);
                 head[1] = word(degree[0])?;
@@ -555,14 +561,14 @@ fn pack(plans: &[&TessPlan]) -> Result<Packed> {
             }
             EvalSurface::Revolved { profile, origin, axis, transform, swap } => {
                 head[0] = 2;
-                head[1] = word(profile.degree)?;
-                head[3] = word(profile.ctrl.len())?;
+                head[1] = word(profile.degree())?;
+                head[3] = word(profile.ctrl().len())?;
                 let (k, c) = push_curve(&mut data, profile)?;
                 head[5] = k;
                 head[7] = c;
                 head[8] = word(data.len())?;
-                push3(&mut data, *origin);
-                push3(&mut data, *axis);
+                push3(&mut data, solidcore_convert::record_vec3(*origin));
+                push3(&mut data, solidcore_convert::record_vec3(*axis));
                 data.extend(transform.iter().flatten().map(|x| *x as f32));
                 head[9] = u32::from(*swap);
                 let m = transform;
@@ -580,6 +586,9 @@ fn pack(plans: &[&TessPlan]) -> Result<Packed> {
     let mut base = 0u32;
     for plan in plans {
         for f in &plan.faces {
+            if !f.poles.is_empty() {
+                return Err(GpuError::PoleNodes { face: f.face });
+            }
             let Some(surface) = f.surface else {
                 return Err(GpuError::Unsupported("a face without an evaluable surface".into()));
             };

@@ -20,9 +20,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use solidcore_record::Vec3;
+use solidcore_tess::TessPlan;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
-use solidcraft_engine::geom::tess::TessPlan;
 use solidcraft_engine::geom::{Aabb3, Mesh};
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).

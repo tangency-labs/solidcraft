@@ -198,7 +198,7 @@ const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.
 /// face (the plan's face numbering; faces past the end take the last index).
 #[derive(Clone)]
 pub struct PlannedBody {
-    pub plan: Arc<solidcraft_geom::tess::TessPlan>,
+    pub plan: Arc<solidcore_tess::TessPlan>,
     pub face_colors: Vec<PaletteIndex>,
     /// How the whole body is drawn: opaque with the model, or faded or see-through blended
     /// order-independently (only on a renderer that does that: [`GpuTarget::oit`]).
@@ -543,9 +543,9 @@ pub struct GpuScene {
     /// Whole hovered bodies the model draws from their plans on the GPU: lit again over the
     /// model in the hover colour from the model's own evaluated triangles, so a whole assembly
     /// under the pointer costs a draw per body, not a copy of every triangle on the CPU.
-    pub hover_planned: Vec<Arc<solidcraft_geom::tess::TessPlan>>,
+    pub hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     /// Whole selected bodies, as `hover_planned`, in the selection colour.
-    pub selected_planned: Vec<Arc<solidcraft_geom::tess::TessPlan>>,
+    pub selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     /// Whole hovered bodies the model builds on the CPU (no display plan): their triangles in
     /// the model scene's own blocks, drawn again tinted.
     pub hover_blocks: Vec<BlockTris>,
@@ -1748,8 +1748,8 @@ struct Batches {
     planned: Vec<PlannedDraw>,
     instanced: Vec<InstancedDraw>,
     /// Whole highlighted bodies redrawn from `planned` (the scene's own plans are not used).
-    hover_planned: Vec<Arc<solidcraft_geom::tess::TessPlan>>,
-    selected_planned: Vec<Arc<solidcraft_geom::tess::TessPlan>>,
+    hover_planned: Vec<Arc<solidcore_tess::TessPlan>>,
+    selected_planned: Vec<Arc<solidcore_tess::TessPlan>>,
     /// Whole highlighted bodies redrawn from the scene's blocks, by block key and vertex range.
     hover_blocks: Vec<BlockTris>,
     selected_blocks: Vec<BlockTris>,
@@ -1763,7 +1763,7 @@ struct Batches {
     instanced_tris: std::collections::HashMap<usize, (Arc<SharedTris>, Arc<SharedGpu>)>,
     /// Evaluated chunks by their plans' addresses, holding the plans so the addresses stay
     /// theirs: a chunk whose plans are unchanged is not evaluated again when the scene is rebuilt.
-    resident: std::collections::HashMap<Vec<usize>, (Vec<Arc<solidcraft_geom::tess::TessPlan>>, Arc<crate::GpuMesh>)>,
+    resident: std::collections::HashMap<Vec<usize>, (Vec<Arc<solidcore_tess::TessPlan>>, Arc<crate::GpuMesh>)>,
     /// Each resident chunk's colour buffer by the same key, with what it was built from (the
     /// chunk's mesh and its bodies' face colours): a scene rebuilt for a change that leaves the
     /// colours alone keeps it, instead of filling a colour for every vertex of every chunk again.
@@ -2080,7 +2080,7 @@ impl Batches {
             let mesh = match self.resident.get(&key(chunk)) {
                 Some((_, m)) => m.clone(),
                 None => {
-                    let plans: Vec<&solidcraft_geom::tess::TessPlan> = chunk.iter().map(|b| &*b.plan).collect();
+                    let plans: Vec<&solidcore_tess::TessPlan> = chunk.iter().map(|b| &*b.plan).collect();
                     match tess.prepare_many(&plans) {
                         Ok(m) => {
                             self.uploads.evaluated += plans.iter().map(|p| p.vertex_count() as u64).sum::<u64>();
@@ -3886,7 +3886,7 @@ impl Renderer {
             };
         // Whole highlighted bodies: the model's own evaluated plan triangles, drawn again in a
         // highlight colour (the pipeline adds or replaces the vertex colour).
-        let tinted = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, plans: &[Arc<solidcraft_geom::tess::TessPlan>]| {
+        let tinted = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, plans: &[Arc<solidcore_tess::TessPlan>]| {
             for plan in plans {
                 let address = Arc::as_ptr(plan) as usize;
                 for d in &m.planned {

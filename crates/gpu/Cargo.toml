@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcore = { workspace = true }
+solidcore-convert = { workspace = true }
 solidcore-record = { workspace = true }
 solidcore-tess = { workspace = true }
 robust = "1.2"

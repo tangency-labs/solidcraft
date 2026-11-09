@@ -52,6 +52,9 @@ solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "
 # Geometry made drawable (solidcore's layers §3): the display mesh and its levels of detail, the
 # types SolidCraft's meshes are. Pinned like solidcore; for a local checkout, patch it as above.
 solidcore-tess = { git = "https://github.com/tangency-labs/solidcore", rev = "a445bdaac60a980b0e9d1dba3ee28eb7ada44f50" }
+# The one conversion between the record's vectors and the kernel evaluator's, which solidcore-tess
+# uses too. Pinned like solidcore; for a local checkout, patch it as above.
+solidcore-convert = { git = "https://github.com/tangency-labs/solidcore", rev = "a445bdaac60a980b0e9d1dba3ee28eb7ada44f50" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 
