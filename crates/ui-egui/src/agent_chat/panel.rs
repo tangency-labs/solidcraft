@@ -198,7 +198,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         host.edge_frame(t.dialog_body),
         |ui| ui_kit::scope(ui, |ui| body(app, ui, left)),
     );
-    crate::scenario::publish_rect("agent_chat:panel", r.response.rect);
+    solidcraft_ui_registry::publish_rect("agent_chat:panel", r.response.rect);
     app.agent_chat.panel_rect = Some(r.response.rect);
     #[cfg(not(target_arch = "wasm32"))]
     gallery_window(app, &ctx);
@@ -248,7 +248,7 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
     }
     app.agent_chat.panel_rect = Some(rect);
     app.agent_chat.drop_rect = Some(rect);
-    crate::scenario::publish_rect("agent_chat:panel", rect);
+    solidcraft_ui_registry::publish_rect("agent_chat:panel", rect);
     ui_kit::scope(ui, |ui| content(app, ui, flow));
 }
 
@@ -340,7 +340,7 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui) {
                 Rect::from_x_y_ranges(rect.left()..=rect.left() + t.space_4, rect.y_range())
             };
             let response = ui.interact(rail, Id::unique("sc_agent_chat_resize"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
-            crate::scenario::publish_handle("agent_chat:resize", rail.center());
+            solidcraft_ui_registry::publish_handle("agent_chat:resize", rail.center());
             if response.dragged() {
                 let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
                 if delta.is_finite() {
@@ -352,7 +352,7 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui) {
         let rect = card.response.rect;
         app.agent_chat.panel_rect = Some(rect);
         app.agent_chat.drop_rect = Some(rect);
-        crate::scenario::publish_rect("agent_chat:panel", rect);
+        solidcraft_ui_registry::publish_rect("agent_chat:panel", rect);
     }
     #[cfg(not(target_arch = "wasm32"))]
     gallery_window(app, &ctx);
@@ -441,7 +441,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
                                         );
                                         if removable {
                                             let cross = ui_kit::button(ui, "×", ui_kit::Button::Small);
-                                            crate::scenario::publish_handle(&format!("agent_chat:picked_remove:{place}"), cross.rect.center());
+                                            solidcraft_ui_registry::publish_handle(&format!("agent_chat:picked_remove:{place}"), cross.rect.center());
                                             if cross.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                                 removed = Some(*place);
                                             }
@@ -496,7 +496,7 @@ fn picture_strip(ui: &mut egui::Ui, n: usize, pictures: &[Picture]) -> Option<us
             };
             let size = fit(texture.size_vec2(), vec2(THUMB_MAX.0, THUMB_MAX.1));
             let thumb = ui.add(egui::Image::new((texture.id(), size)).corner_radius(t.radius_sm).sense(Sense::click()));
-            crate::scenario::publish_handle(&format!("agent_chat:picture:{n}:{i}"), thumb.rect.center());
+            solidcraft_ui_registry::publish_handle(&format!("agent_chat:picture:{n}:{i}"), thumb.rect.center());
             let hover_max = (ui.ctx().content_rect().size() * 0.5).min(vec2(PREVIEW_MAX.0, PREVIEW_MAX.1));
             let thumb = thumb.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_ui(|ui| {
                 ui.add(egui::Image::new((texture.id(), fit(texture.size_vec2(), hover_max))).corner_radius(t.radius_sm));
@@ -535,9 +535,9 @@ fn gallery_window(app: &mut SolveApp, ctx: &egui::Context) {
         ui.set_max_width(max.x);
         ui.horizontal(|ui| {
             let prev = ui_kit::button(ui, tr("ui.agent_chat_previous_picture"), ui_kit::Button::Enabled(count > 1));
-            crate::scenario::publish_handle("agent_chat:gallery_prev", prev.rect.center());
+            solidcraft_ui_registry::publish_handle("agent_chat:gallery_prev", prev.rect.center());
             let next = ui_kit::button(ui, tr("ui.agent_chat_next_picture"), ui_kit::Button::Enabled(count > 1));
-            crate::scenario::publish_handle("agent_chat:gallery_next", next.rect.center());
+            solidcraft_ui_registry::publish_handle("agent_chat:gallery_next", next.rect.center());
             if prev.clicked() {
                 step = -1;
             }
@@ -550,7 +550,7 @@ fn gallery_window(app: &mut SolveApp, ctx: &egui::Context) {
             match picture.texture(ui.ctx()) {
                 Shown::Ready(texture) => {
                     let resp = ui.add(egui::Image::new((texture.id(), fit(texture.size_vec2(), max))).corner_radius(t.radius_sm));
-                    crate::scenario::publish_rect("agent_chat:gallery_picture", resp.rect);
+                    solidcraft_ui_registry::publish_rect("agent_chat:gallery_picture", resp.rect);
                 }
                 Shown::Loading => {
                     ui.add(egui::Spinner::new().size(t.space_24));
@@ -596,7 +596,7 @@ fn drop_hint(ctx: &egui::Context, area: Rect) {
     let text = painter.layout(tr("ui.agent_chat_drop_hint").to_string(), font, t.text, (zone.width() - 24.0).max(40.0));
     let at = zone.center() - text.size() / 2.0;
     painter.galley(at, text, t.text);
-    crate::scenario::publish_rect("agent_chat:drop_hint", zone);
+    solidcraft_ui_registry::publish_rect("agent_chat:drop_hint", zone);
 }
 
 /// New chat (when the chat has focus).
@@ -672,7 +672,7 @@ fn window(app: &mut SolveApp, ctx: &egui::Context) {
             // Floating inside the app: its handles are the main window's, as the panel's are. The
             // app's own drop handling sees the drops, so the window counts as the chat's place
             // (the hint is drawn by the caller).
-            crate::scenario::publish_rect("agent_chat:window", r.response.rect);
+            solidcraft_ui_registry::publish_rect("agent_chat:window", r.response.rect);
             app.agent_chat.panel_rect = Some(r.response.rect);
             app.agent_chat.drop_rect = Some(r.response.rect);
             return;
@@ -752,8 +752,8 @@ fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
         }
         _ => {}
     }
-    crate::scenario::publish_rect(&format!("agent_chat:{kind}"), r);
-    crate::scenario::publish_handle(&format!("agent_chat:{kind}"), r.center());
+    solidcraft_ui_registry::publish_rect(&format!("agent_chat:{kind}"), r);
+    solidcraft_ui_registry::publish_handle(&format!("agent_chat:{kind}"), r.center());
     resp.backing_on_hover_text(tip)
 }
 
@@ -773,7 +773,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
     let r = ui.max_rect();
     let button = Rect::from_center_size(pos2(r.center().x, r.top() + 22.0), vec2(26.0, 26.0));
     let resp = ui.interact(button, Id::unique("sc_agent_chat_unfold"), Sense::click());
-    crate::scenario::publish_handle("agent_chat:unfold", button.center());
+    solidcraft_ui_registry::publish_handle("agent_chat:unfold", button.center());
     if resp.hovered() {
         ui.painter().rect_filled(button, t.radius_sm, t.hover);
     }
@@ -831,7 +831,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
             // Drag the header across the window to dock on the other side.
             if !popped {
                 let drag = ui.interact(title, Id::unique("sc_agent_chat_grip"), Sense::drag());
-                crate::scenario::publish_handle("agent_chat:grip", title.center());
+                solidcraft_ui_registry::publish_handle("agent_chat:grip", title.center());
                 dock_drag(app, ui, &drag, left);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -883,7 +883,7 @@ fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: boo
             let w = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH).min(available.width());
             Rect::from_min_size(pos2(if to_left { available.left() } else { available.right() - w }, available.top()), vec2(w, available.height()))
         };
-        crate::scenario::publish_rect("agent_chat:dock_hint", zone);
+        solidcraft_ui_registry::publish_rect("agent_chat:dock_hint", zone);
         let t = Tokens::get();
         let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, Id::unique("sc_agent_chat_dock_hint")));
         painter.rect(zone, t.radius_xl, t.accent.gamma_multiply(0.18), Stroke::new(2.0, t.accent), egui::StrokeKind::Inside);
@@ -982,7 +982,7 @@ fn new_chat_confirmation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::text(ui, tr("ui.agent_chat_new_confirm"), ui_kit::Text::Report("new_chat", false));
                 ui.horizontal(|ui| {
                     let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
-                    crate::scenario::publish_target("agent_chat:new_confirm", yes.rect);
+                    solidcraft_ui_registry::publish_target("agent_chat:new_confirm", yes.rect);
                     if yes.clicked() {
                         new_chat(app);
                     }
@@ -1027,7 +1027,7 @@ fn top_controls(app: &mut SolveApp, ui: &mut egui::Ui, state: State, shared: boo
         .auto_shrink([false, true]);
     let provider_scroll = if reveal_confirmation { provider_scroll.vertical_scroll_offset(0.0) } else { provider_scroll };
     let picker = provider_scroll.show(ui, |ui| {
-        crate::scenario::publish_rect("agent_chat:providers", ui.clip_rect());
+        solidcraft_ui_registry::publish_rect("agent_chat:providers", ui.clip_rect());
         if shared {
             new_chat_confirmation(app, ui);
             ui_kit::assistant_controls(ui, |ui| switcher(app, ui));
@@ -1104,7 +1104,7 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutc
                         )
                     })
                     .inner;
-                crate::scenario::publish_rect("agent_chat:input", r.rect);
+                solidcraft_ui_registry::publish_rect("agent_chat:input", r.rect);
                 crate::panel_runtime::register_content_focus(ui.ctx(), &r);
                 // macOS shows a window's cursors only while it is the active window: over the text box of a
                 // chat window that isn't, the pointer stays an arrow. Coming from the main window, the chat
@@ -1149,8 +1149,8 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutc
                             })
                             .inner;
                         let permissions = permissions.backing_on_hover_text(mode.label());
-                        crate::scenario::publish_rect("agent_chat:permissions", permissions.rect);
-                        crate::scenario::publish_handle("agent_chat:permissions", permissions.rect.center());
+                        solidcraft_ui_registry::publish_rect("agent_chat:permissions", permissions.rect);
+                        solidcraft_ui_registry::publish_handle("agent_chat:permissions", permissions.rect.center());
                         // A message waits for files still being read.
                         let reading = !app.agent_chat.loading.is_empty();
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1161,15 +1161,15 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutc
                                 tr(if busy { "ui.agent_chat_stop_turn_tip" } else { "ui.agent_chat_send" }),
                             );
                             if busy {
-                                crate::scenario::publish_handle("agent_chat:stopturn", action.rect.center());
+                                solidcraft_ui_registry::publish_handle("agent_chat:stopturn", action.rect.center());
                                 stop_clicked = action.clicked();
                                 let queued = ui_kit::button(ui, tr("ui.agent_chat_queue"), ui_kit::Button::Enabled(!reading));
-                                crate::scenario::publish_rect("agent_chat:send", queued.rect);
-                                crate::scenario::publish_handle("agent_chat:send", queued.rect.center());
+                                solidcraft_ui_registry::publish_rect("agent_chat:send", queued.rect);
+                                solidcraft_ui_registry::publish_handle("agent_chat:send", queued.rect.center());
                                 send_clicked = queued.clicked();
                             } else {
-                                crate::scenario::publish_rect("agent_chat:send", action.rect);
-                                crate::scenario::publish_handle("agent_chat:send", action.rect.center());
+                                solidcraft_ui_registry::publish_rect("agent_chat:send", action.rect);
+                                solidcraft_ui_registry::publish_handle("agent_chat:send", action.rect.center());
                                 send_clicked = action.clicked();
                             }
                         });
@@ -1187,7 +1187,7 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutc
                             .inner
                             .backing_on_hover_text(tr("ui.agent_chat_attach_view_tip"))
                             .backing_on_disabled_hover_text(tr("ui.agent_chat_no_images"));
-                        crate::scenario::publish_handle("agent_chat:attach", attach.rect.center());
+                        solidcraft_ui_registry::publish_handle("agent_chat:attach", attach.rect.center());
                         // What is selected in the model goes with the message: text for the agent,
                         // chips in the conversation.
                         let selected = selected_count(app);
@@ -1198,11 +1198,11 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutc
                         };
                         let pick = ui_kit::checkbox(ui, &label, &mut app.agent_chat.attach_selection)
                             .backing_on_hover_text(tr("ui.agent_chat_attach_selection_tip"));
-                        crate::scenario::publish_handle("agent_chat:attach_selection", pick.rect.center());
+                        solidcraft_ui_registry::publish_handle("agent_chat:attach_selection", pick.rect.center());
                         // Choose faces, edges, features and bodies on purpose, then OK.
                         let picker = ui_kit::button(ui, tr("ui.agent_chat_pick_context"), ui_kit::Button::Enabled(app.dialog.is_none()))
                             .backing_on_hover_text(tr("ui.agent_chat_pick_context_tip"));
-                        crate::scenario::publish_handle("agent_chat:pick_context", picker.rect.center());
+                        solidcraft_ui_registry::publish_handle("agent_chat:pick_context", picker.rect.center());
                         pick_clicked = picker.clicked();
                         if let Some(turn) = &app.agent_chat.turn {
                             let n = turn.changes.to_string();
@@ -1215,9 +1215,9 @@ fn composer(app: &mut SolveApp, ui: &mut egui::Ui, state: State) -> ComposerOutc
                     },
                 );
             });
-            crate::scenario::publish_rect("agent_chat:composer_box", boxed.response.rect);
+            solidcraft_ui_registry::publish_rect("agent_chat:composer_box", boxed.response.rect);
         });
-        crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
+        solidcraft_ui_registry::publish_rect("agent_chat:composer_footer", footer.response.rect);
         // The enclosing bottom panel can clamp its response to the remaining
         // viewport. Reserve the actual footer content on the next frame.
         footer.response.rect.height()
@@ -1248,7 +1248,7 @@ fn transcript_body(app: &mut SolveApp, ui: &mut egui::Ui) -> f32 {
             // Last, so the scroll goes to this area and not to one nested in the conversation.
             scroll_while_selecting(ui);
         });
-    crate::scenario::publish_rect("agent_chat:conversation", conversation.inner_rect);
+    solidcraft_ui_registry::publish_rect("agent_chat:conversation", conversation.inner_rect);
     conversation.content_size.y
 }
 
@@ -1302,7 +1302,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                     for e in &all {
                         let sel = current.as_ref().is_some_and(|c| c.id == e.id);
                         let r = ui_kit::list_picker(ui, &e.id, &e.name, sel).backing_on_hover_text(format!("{} {}", e.detail(), e.login));
-                        crate::scenario::publish_handle(&format!("agent_chat:agent:{}", e.id), r.rect.center());
+                        solidcraft_ui_registry::publish_handle(&format!("agent_chat:agent:{}", e.id), r.rect.center());
                         if r.clicked() {
                             picked = Some(e.id.clone());
                         }
@@ -1317,8 +1317,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 })
             })
             .inner;
-        crate::scenario::publish_rect("agent_chat:switcher", combo.rect);
-        crate::scenario::publish_handle("agent_chat:switcher", combo.rect.center());
+        solidcraft_ui_registry::publish_rect("agent_chat:switcher", combo.rect);
+        solidcraft_ui_registry::publish_handle("agent_chat:switcher", combo.rect.center());
         combo.backing_on_hover_text(tr("ui.ai_switch_tip"));
         if add {
             super::settings::open_add(app);
@@ -1346,8 +1346,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                     })
                 })
                 .inner;
-            crate::scenario::publish_rect("agent_chat:mode", r.rect);
-            crate::scenario::publish_handle("agent_chat:mode", r.rect.center());
+            solidcraft_ui_registry::publish_rect("agent_chat:mode", r.rect);
+            solidcraft_ui_registry::publish_handle("agent_chat:mode", r.rect.center());
             r.backing_on_hover_text(tr("ui.ai_agent_mode_tip"));
             if let Some(m) = pick {
                 set_mode(app, &m);
@@ -1410,7 +1410,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             let label = if app.agent_chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
             ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
         };
-        crate::scenario::publish_handle("agent_chat:connect", b.rect.center());
+        solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
         if b.clicked() {
             if app.agent_chat.state().running() {
                 disconnect(app);
@@ -1440,7 +1440,7 @@ pub(super) fn no_agents(ui: &mut egui::Ui) {
     if flatpak {
         // The Copy button comes before the long command so it shows without scrolling.
         let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small);
-        crate::scenario::publish_handle("agent_chat:flatpak_override", copy.rect.center());
+        solidcraft_ui_registry::publish_handle("agent_chat:flatpak_override", copy.rect.center());
         if copy.clicked() {
             ui.ctx().copy_text(FLATPAK_OVERRIDE.to_string());
         }
@@ -1554,12 +1554,12 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
         picked = picker.inner;
         // Under the names every kind of agent's model picker goes by.
         let rows = format!("{handles}:");
-        for (name, at) in crate::scenario::handles(&rows) {
+        for (name, at) in solidcraft_ui_registry::handles(&rows) {
             if let Some(row) = name.strip_prefix(&rows) {
-                crate::scenario::publish_handle(&format!("agent_chat:model:{row}"), at);
+                solidcraft_ui_registry::publish_handle(&format!("agent_chat:model:{row}"), at);
             }
         }
-        crate::scenario::publish_target("agent_chat:model", picker.response.rect);
+        solidcraft_ui_registry::publish_target("agent_chat:model", picker.response.rect);
         picker.response
     } else {
         let response = ui
@@ -1583,7 +1583,7 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
                                     .collect::<Vec<_>>()
                                     .join("\n"),
                             );
-                            crate::scenario::publish_handle(&format!("{handles}:{}", choice.value), row.rect.center());
+                            solidcraft_ui_registry::publish_handle(&format!("{handles}:{}", choice.value), row.rect.center());
                             if row.clicked() {
                                 picked = Some(ui_kit::Picked::Listed(choice.value.clone()));
                             }
@@ -1593,9 +1593,9 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
                 .inner
             })
             .inner;
-        crate::scenario::publish_target(&handles, response.rect);
+        solidcraft_ui_registry::publish_target(&handles, response.rect);
         if option.category == "mode" {
-            crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
+            solidcraft_ui_registry::publish_handle("agent_chat:mode", response.rect.center());
         }
         response
     };
@@ -1641,7 +1641,7 @@ mod config_ui_tests {
     }
 
     fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
-        crate::scenario::clear_handles();
+        solidcraft_ui_registry::clear_handles();
         let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
         ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
@@ -1676,7 +1676,7 @@ mod config_ui_tests {
         ]);
         let ctx = crate::fonts::test_context();
         draw_switcher(&mut app, &ctx, 760.0);
-        let at = |name| crate::scenario::handle_at(name).expect("config picker handle");
+        let at = |name| solidcraft_ui_registry::handle_at(name).expect("config picker handle");
         let agent = at("agent_chat:switcher");
         let model = at("agent_chat:config:engine");
         let effort = at("agent_chat:config:thought");
@@ -1685,11 +1685,11 @@ mod config_ui_tests {
         assert!(model.x < effort.x && effort.x < mode.x && mode.x < 760.0);
         assert_eq!(at("agent_chat:model"), model);
         assert_eq!(at("agent_chat:mode"), mode);
-        assert_eq!(crate::scenario::handles("agent_chat:mode").iter().filter(|(name, _)| name == "agent_chat:mode").count(), 1);
-        assert_eq!(crate::scenario::handles("agent_chat:model").iter().filter(|(name, _)| name == "agent_chat:model").count(), 1);
-        assert!(crate::scenario::handle_at("agent_chat:provider").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:model:old").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:model:other").is_none());
+        assert_eq!(solidcraft_ui_registry::handles("agent_chat:mode").iter().filter(|(name, _)| name == "agent_chat:mode").count(), 1);
+        assert_eq!(solidcraft_ui_registry::handles("agent_chat:model").iter().filter(|(name, _)| name == "agent_chat:model").count(), 1);
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:provider").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:model:old").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:model:other").is_none());
 
         draw_switcher(&mut app, &ctx, 280.0);
         let model = at("agent_chat:config:engine");
@@ -1697,25 +1697,25 @@ mod config_ui_tests {
         let mode = at("agent_chat:config:workflow");
         assert!(model.y < effort.y && (effort.y - mode.y).abs() < 2.0, "only the long model needs its own line: {model:?}, {effort:?}, {mode:?}");
         for id in ["engine", "thought", "workflow"] {
-            let rect = crate::scenario::rect_of(&format!("agent_chat:config:{id}")).expect("config control bounds");
+            let rect = solidcraft_ui_registry::rect_of(&format!("agent_chat:config:{id}")).expect("config control bounds");
             assert!(rect.left() >= 0.0 && rect.right() <= 280.0, "{id} exceeds the narrow panel: {rect:?}");
         }
 
         app.agent_chat.config_options = Some(vec![option("engine", "model", &[("fast", "Fast", None)])]);
         app.agent_chat.config_pending = true;
         draw_switcher(&mut app, &ctx, 280.0);
-        assert!(crate::scenario::handle_at("agent_chat:config:engine").is_some());
-        assert!(crate::scenario::handle_at("agent_chat:config:thought").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:config:workflow").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:switcher").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:config:engine").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:config:thought").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:config:workflow").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:switcher").is_some());
 
         app.agent_chat.config_options = Some(vec![]);
         draw_switcher(&mut app, &ctx, 280.0);
-        assert!(crate::scenario::handle_at("agent_chat:switcher").is_some());
-        assert!(crate::scenario::handle_at("agent_chat:config:engine").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:mode").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:provider").is_none());
-        assert!(crate::scenario::handle_at("agent_chat:model").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:switcher").is_some());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:config:engine").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:mode").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:provider").is_none());
+        assert!(solidcraft_ui_registry::handle_at("agent_chat:model").is_none());
     }
 }
 
@@ -1759,7 +1759,7 @@ fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
     for e in &all {
         let selected = current.as_ref().is_some_and(|c| c.id == e.id);
         let resp = ui_kit::list_picker(ui, &e.id, &e.name, selected).backing_on_hover_text(format!("{} {}", e.detail(), e.login));
-        crate::scenario::publish_handle(&format!("agent_chat:pick:{}", e.id), resp.rect.center());
+        solidcraft_ui_registry::publish_handle(&format!("agent_chat:pick:{}", e.id), resp.rect.center());
         if resp.clicked() {
             app.agent_chat.agent_id = Some(e.id.clone());
         }
@@ -1818,7 +1818,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 acp::AuthKind::Agent => {
                     let b = ui_kit::button(ui, trf("ui.agent_chat_auth_agent", &[("name", &m.name)]), ui_kit::Button::Normal);
-                    crate::scenario::publish_handle(&format!("agent_chat:auth:{}", m.id), b.rect.center());
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:auth:{}", m.id), b.rect.center());
                     if b.clicked() {
                         app.agent_chat.authenticate(&m.id);
                     }
@@ -1841,7 +1841,7 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
     let b = ui_kit::button(ui, tr("ui.agent_chat_copy_message"), ui_kit::Button::Small);
-    crate::scenario::publish_handle(&format!("agent_chat:copy:{n}"), b.rect.center());
+    solidcraft_ui_registry::publish_handle(&format!("agent_chat:copy:{n}"), b.rect.center());
     if b.clicked() {
         ui.ctx().copy_text(text.to_owned());
     }
@@ -1853,7 +1853,7 @@ fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
 /// right-click released over it rather than on a click the response itself would report.
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
-    crate::scenario::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
     let opened = ui
         .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
     let mut copy = false;
@@ -1866,7 +1866,7 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
             ui_kit::Menu::show(ui, crate::ui_kit::LIST_W, |ui| {
                 let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
                 let row = item.show(ui);
-                crate::scenario::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
+                solidcraft_ui_registry::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
                 if row.clicked() {
                     copy = true;
                     ui.close();
@@ -2016,7 +2016,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 } else {
                                     ui_kit::button(ui, &o.name, ui_kit::Button::Normal)
                                 };
-                                crate::scenario::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
+                                solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
                                 if r.clicked() {
                                     answer = Some((n, Some(o.id.clone())));
                                 }
@@ -2024,7 +2024,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui.with_layout(Layout::left_to_right(Align::Center).with_main_wrap(true), |ui| {
                                 for o in options.iter().filter(|o| !matches!(o.kind.as_str(), "allow_once" | "allow_always")) {
                                     let r = ui_kit::button(ui, &o.name, ui_kit::Button::Normal);
-                                    crate::scenario::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
+                                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:permission:{}", o.id), r.rect.center());
                                     if r.clicked() {
                                         answer = Some((n, Some(o.id.clone())));
                                     }
@@ -2056,9 +2056,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         ui_kit::button(ui, tr("ui.agent_chat_deny"), ui_kit::Button::Normal)
                                     })
                                     .inner;
-                                crate::scenario::publish_handle("agent_chat:allow", allow.rect.center());
-                                crate::scenario::publish_handle("agent_chat:always", always.rect.center());
-                                crate::scenario::publish_handle("agent_chat:deny", deny.rect.center());
+                                solidcraft_ui_registry::publish_handle("agent_chat:allow", allow.rect.center());
+                                solidcraft_ui_registry::publish_handle("agent_chat:always", always.rect.center());
+                                solidcraft_ui_registry::publish_handle("agent_chat:deny", deny.rect.center());
                                 if allow.clicked() {
                                     approval = Some((*id, Some(true)));
                                 }
@@ -2082,7 +2082,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     } else if Arc::ptr_eq(doc, &current_doc) {
                         let b =
                             ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        crate::scenario::publish_handle("agent_chat:undo", b.rect.center());
+                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
                         if b.clicked() {
                             undo = Some(n);
                         }
@@ -2118,13 +2118,13 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui.label(RichText::new(tr(tag)).color(t.accent).semibold().size(solidcraft_theme::Tokens::get().font_small));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let x = ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("ui.agent_chat_remove"));
-                    crate::scenario::publish_handle(&format!("agent_chat:pending_remove:{n}"), x.rect.center());
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:pending_remove:{n}"), x.rect.center());
                     if x.clicked() {
                         remove = Some(n);
                     }
                     if editing.as_ref().is_none_or(|(i, _)| *i != n) {
                         let e = ui_kit::button(ui, tr("ui.agent_chat_edit"), ui_kit::Button::Small);
-                        crate::scenario::publish_handle(&format!("agent_chat:pending_edit:{n}"), e.rect.center());
+                        solidcraft_ui_registry::publish_handle(&format!("agent_chat:pending_edit:{n}"), e.rect.center());
                         if e.clicked() {
                             start_edit = Some((n, p.text.clone()));
                         }
@@ -2134,7 +2134,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             match (&editing, edit_buf.as_mut()) {
                 (Some((i, _)), Some(buf)) if *i == n => {
                     let te = ui_kit::message_field(ui, Id::unique(("sc_agent_pending_input", n)), buf, "");
-                    crate::scenario::publish_rect("agent_chat:pending_input", te.rect);
+                    solidcraft_ui_registry::publish_rect("agent_chat:pending_input", te.rect);
                     crate::panel_runtime::register_content_focus(ui.ctx(), &te);
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, tr("ui.agent_chat_save"), ui_kit::Button::Normal).clicked() {
@@ -2163,11 +2163,11 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             if busy {
                 let b =
                     ui_kit::button(ui, tr("ui.agent_chat_send_now"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_send_now_tip"));
-                crate::scenario::publish_handle("agent_chat:send_now", b.rect.center());
+                solidcraft_ui_registry::publish_handle("agent_chat:send_now", b.rect.center());
                 send_now_clicked = b.clicked();
             } else {
                 let b = ui_kit::primary_button(ui, tr("ui.agent_chat_send"));
-                crate::scenario::publish_handle("agent_chat:send_queue", b.rect.center());
+                solidcraft_ui_registry::publish_handle("agent_chat:send_queue", b.rect.center());
                 send_queue_clicked = b.clicked();
             }
         });
@@ -2321,13 +2321,13 @@ fn loading_chip(ui: &mut egui::Ui, name: &str, importing: bool, i: usize, w: f32
                 let s = Stroke::new(1.3, if x.hovered() { t.text } else { t.text_dim });
                 ui.painter().line_segment([c + vec2(-3.5, -3.5), c + vec2(3.5, 3.5)], s);
                 ui.painter().line_segment([c + vec2(-3.5, 3.5), c + vec2(3.5, -3.5)], s);
-                crate::scenario::publish_handle(&format!("agent_chat:file_loading_remove:{i}"), c);
+                solidcraft_ui_registry::publish_handle(&format!("agent_chat:file_loading_remove:{i}"), c);
                 clicked =
                     x.backing_on_hover_text(tr(if importing { "ui.agent_chat_remove_imported" } else { "ui.agent_chat_remove_file" })).clicked();
             });
         },
     );
-    crate::scenario::publish_handle(&format!("agent_chat:file_loading:{i}"), r.response.rect.center());
+    solidcraft_ui_registry::publish_handle(&format!("agent_chat:file_loading:{i}"), r.response.rect.center());
     clicked
 }
 
@@ -2383,12 +2383,12 @@ fn chip(ui: &mut egui::Ui, thumbs: &mut std::collections::HashMap<u64, egui::Tex
                 let s = Stroke::new(1.3, if x.hovered() { t.text } else { t.text_dim });
                 ui.painter().line_segment([c + vec2(-3.5, -3.5), c + vec2(3.5, 3.5)], s);
                 ui.painter().line_segment([c + vec2(-3.5, 3.5), c + vec2(3.5, -3.5)], s);
-                crate::scenario::publish_handle(&format!("agent_chat:file_remove:{i}"), c);
+                solidcraft_ui_registry::publish_handle(&format!("agent_chat:file_remove:{i}"), c);
                 clicked = x.backing_on_hover_text(remove_tip(f)).clicked();
             });
         },
     );
-    crate::scenario::publish_target(&format!("agent_chat:file:{i}"), r.response.rect);
+    solidcraft_ui_registry::publish_target(&format!("agent_chat:file:{i}"), r.response.rect);
     clicked
 }
 
@@ -2399,9 +2399,9 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     let (mut choose, mut paste) = (false, false);
     let r = ui_kit::action_menu(ui, "+", |ui| {
         let a = ui_kit::button(ui, tr("ui.agent_chat_add_file"), ui_kit::Button::Normal);
-        crate::scenario::publish_handle("agent_chat:add_file", a.rect.center());
+        solidcraft_ui_registry::publish_handle("agent_chat:add_file", a.rect.center());
         let b = ui_kit::button(ui, tr("ui.agent_chat_paste_picture"), ui_kit::Button::Normal);
-        crate::scenario::publish_handle("agent_chat:paste_picture", b.rect.center());
+        solidcraft_ui_registry::publish_handle("agent_chat:paste_picture", b.rect.center());
         if a.clicked() {
             choose = true;
             ui.close();
@@ -2411,7 +2411,7 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.close();
         }
     });
-    crate::scenario::publish_handle("agent_chat:add", r.response.rect.center());
+    solidcraft_ui_registry::publish_handle("agent_chat:add", r.response.rect.center());
     r.response.backing_on_hover_text(tr("ui.agent_chat_add"));
     if choose {
         app.pick_file(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, path| {
@@ -2485,7 +2485,7 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
             });
         });
         let click = ui.interact(head.response.rect, id.with("head"), Sense::click());
-        crate::scenario::publish_handle(&format!("agent_chat:tool:{n}"), head.response.rect.center());
+        solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}"), head.response.rect.center());
         if details && click.clicked() {
             state_.toggle(ui);
         }
@@ -2572,7 +2572,7 @@ mod tests {
                     assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == FLATPAK_OVERRIDE));
                     output.textures_delta.clear();
                 }
-                let at = crate::scenario::handle_at("agent_chat:flatpak_override").expect("copy override");
+                let at = solidcraft_ui_registry::handle_at("agent_chat:flatpak_override").expect("copy override");
                 let mut copied = false;
                 for pressed in [true, false] {
                     let mut output =
@@ -2636,7 +2636,7 @@ mod tests {
                 let input =
                     egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, 720.0))), ..Default::default() };
                 for _ in 0..2 {
-                    crate::scenario::clear_handles();
+                    solidcraft_ui_registry::clear_handles();
                     let mut output = ctx.run_ui(input.clone(), |ui| {
                         ui.set_width(width);
                         ui_kit::scope(ui, |ui| {
@@ -2650,7 +2650,7 @@ mod tests {
                     .into_iter()
                     .map(|name| {
                         let key = format!("agent_chat:{name}");
-                        let rect = crate::scenario::rect_of(&key).unwrap_or_else(|| panic!("missing {key}"));
+                        let rect = solidcraft_ui_registry::rect_of(&key).unwrap_or_else(|| panic!("missing {key}"));
                         assert!(rect.left() >= 0.0 && rect.right() <= width + 16.0, "{key} outside {width}: {rect:?}");
                         rect
                     })
@@ -2681,18 +2681,18 @@ mod tests {
                 ],
             });
             let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, 720.0))), ..Default::default() };
-            crate::scenario::clear_handles();
+            solidcraft_ui_registry::clear_handles();
             let mut output = ctx.run_ui(input, |ui| {
                 ui.set_width(width);
                 ui_kit::scope(ui, |ui| conversation(&mut app, ui));
             });
             output.textures_delta.clear();
             for id in ["reject", "remember", "once", "custom"] {
-                let at = crate::scenario::handle_at(&format!("agent_chat:permission:{id}")).expect("provider option retained");
+                let at = solidcraft_ui_registry::handle_at(&format!("agent_chat:permission:{id}")).expect("provider option retained");
                 assert!(at.x > 0.0 && at.x < width + 16.0, "choice outside {width}: {id} {at:?}");
             }
-            let once = crate::scenario::handle_at("agent_chat:permission:once").expect("once");
-            let always = crate::scenario::handle_at("agent_chat:permission:remember").expect("always");
+            let once = solidcraft_ui_registry::handle_at("agent_chat:permission:once").expect("once");
+            let always = solidcraft_ui_registry::handle_at("agent_chat:permission:remember").expect("always");
             assert!(once.x > always.x, "primary once choice remains on the right");
             assert_eq!(app.agent_chat.waiting(), 1, "drawing never answers an approval");
         }
@@ -2723,7 +2723,7 @@ mod tests {
         ];
         app.agent_chat.model = "model".into();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(296.0, 720.0))), ..Default::default() };
-        crate::scenario::clear_handles();
+        solidcraft_ui_registry::clear_handles();
         let mut output = ctx.run_ui(input, |ui| {
             ui.set_width(280.0);
             ui_kit::scope(ui, |ui| switcher(&mut app, ui));
@@ -2732,7 +2732,7 @@ mod tests {
         let rects: Vec<_> = ["switcher", "mode", "model"]
             .into_iter()
             .map(|name| {
-                let rect = crate::scenario::rect_of(&format!("agent_chat:{name}")).expect("picker retained");
+                let rect = solidcraft_ui_registry::rect_of(&format!("agent_chat:{name}")).expect("picker retained");
                 assert!(rect.left() >= 0.0 && rect.right() <= 296.0, "{name} outside narrow panel: {rect:?}");
                 rect
             })
