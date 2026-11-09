@@ -1,0 +1,23 @@
+[package]
+name = "meshbake"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone (own workspace): it sits inside solidcore/, which SolidCraft's workspace excludes, and
+# it needs SolidCraft's kernel too. Built by bench/tess/run.sh against whichever tree it is in.
+[workspace]
+
+[dependencies]
+solidcraft-kernel = { path = "../../../crates/kernel" }
+solidcraft-geom = { path = "../../../crates/geom" }
+solidcore = { path = "../../crates/solidcore" }
+solidcore-record = { path = "../../crates/solidcore-record" }
+solidcore-convert = { path = "../../crates/solidcore-convert" }
+solidcore-tess = { path = "../../crates/solidcore-tess" }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+debug = false
+codegen-units = 16
