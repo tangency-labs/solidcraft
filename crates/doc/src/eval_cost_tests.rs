@@ -21,7 +21,8 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go), and face surfaces classified for a hole's direction.
+/// go), face surfaces classified for a hole's direction, and the holes whose tools were built
+/// (not moved from another copy's).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -37,6 +38,7 @@ pub(super) struct Counts {
     pub miss_intersects: usize,
     pub cut_tools: usize,
     pub surfaces: usize,
+    pub hole_tools: usize,
 }
 
 thread_local! {
@@ -55,6 +57,7 @@ thread_local! {
             miss_intersects: 0,
             cut_tools: 0,
             surfaces: 0,
+            hole_tools: 0,
         })
     };
 }
@@ -1777,6 +1780,86 @@ fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_o
     });
     assert_eq!(patterned, kernel::measure(&one_by_one).unwrap().merged.faces);
     assert_eq!(work.cut_tools, 1, "{work:?}");
+}
+
+/// A 100 x 100 x 2 plate with a 3 mm hole at (5, 5) drilled from its top, in a 10 x 9 grid on a
+/// 10 mm pitch: the plate's volume, the holes' and the work.
+fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
+    let mut doc = Document::new("perforated");
+    let plate: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "box", "corner": [0, 0, 0], "length": "100", "width": "100", "height": "2",
+    }))
+    .unwrap();
+    doc.add_feature(plate, Some("Plate")).unwrap();
+    let mut spec = serde_json::json!({"type": "hole", "position": [5, 5, 2], "direction": [0, 0, -1], "diameter": "3"});
+    if let (Some(spec), Some(extra)) = (spec.as_object_mut(), hole.as_object()) {
+        spec.extend(extra.clone());
+    }
+    let hole = doc.add_feature(serde_json::from_value(spec).unwrap(), Some("Hole")).unwrap();
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [hole],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "10", "spacing1": "10", "dir2": [0, 1, 0], "count2": "9", "spacing2": "10"},
+    }))
+    .unwrap();
+    doc.add_feature(pattern, Some("Grid")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
+}
+
+/// A pattern of a hole builds its tools once when every copy is drilled the same way, and for
+/// each copy when the tools look at the material there (#7942).
+#[test]
+fn copies_of_a_plain_hole_move_its_tools_and_a_drill_point_drills_each() {
+    // A plain hole's tools are the same at every copy, moved: they are built for the hole and
+    // for the pattern's first copy, and the 90 holes are all cut (#7942).
+    let (v, hole, work) = plate_with_hole_grid(serde_json::json!({}));
+    assert!((v - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{v}");
+    assert_eq!(work.hole_tools, 2, "{work:?}");
+    // A counterbore's are too.
+    let cb = serde_json::json!({"hole": {"type": "counterbore", "cb_diameter": "5", "cb_depth": "1"}});
+    let (v, hole, work) = plate_with_hole_grid(cb);
+    let pocket = std::f64::consts::PI * (2.5 * 2.5 - 1.5 * 1.5) * 1.0;
+    assert!((v - (20_000.0 - 90.0 * (hole + pocket))).abs() < 1e-6 * hole, "{v}");
+    assert_eq!(work.hole_tools, 2, "{work:?}");
+    // A blind hole with a drill point looks at the material at each copy, so each copy is
+    // drilled on its own, as before.
+    let drilled = serde_json::json!({"depth": "1", "hole": {"type": "drilled", "tip_angle": "118 deg"}});
+    let (_, _, work) = plate_with_hole_grid(drilled);
+    assert_eq!(work.hole_tools, 90, "{work:?}");
+}
+
+/// A pattern of a pattern is held to the copies one pattern makes, counted before they are made
+/// (#7942).
+#[test]
+fn a_pattern_of_a_pattern_is_refused_past_the_copies_one_pattern_makes() {
+    // Four holes in a row, patterned 5000 times: 14997 copies, more than one pattern makes. The
+    // two counts are multiplied before any copy is placed, so a pattern of two large patterns
+    // is refused without placing them all (#7942).
+    let mut doc = Document::new("nested");
+    let plate: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "box", "corner": [0, 0, 0], "length": "20", "width": "10", "height": "2",
+    }))
+    .unwrap();
+    doc.add_feature(plate, Some("Plate")).unwrap();
+    let hole: FeatureKind =
+        serde_json::from_value(serde_json::json!({"type": "hole", "position": [5, 5, 2], "direction": [0, 0, -1], "diameter": "1"})).unwrap();
+    let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+    let row = |features: u64, count: &str, spacing: &str| -> FeatureKind {
+        serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [features],
+            "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": count, "spacing1": spacing},
+        }))
+        .unwrap()
+    };
+    let inner = doc.add_feature(row(hole, "4", "2"), Some("Inner")).unwrap();
+    let outer = doc.add_feature(row(inner, "5000", "0.001"), Some("Outer")).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().find(|r| r.id == inner).is_some_and(|r| r.error.is_none()), "{:?}", model.results);
+    let error = model.results.iter().find(|r| r.id == outer).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(error.contains("too many pattern instances"), "{error}");
 }
 
 #[test]

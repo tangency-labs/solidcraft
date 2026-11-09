@@ -5107,6 +5107,16 @@ fn sheet_hole_cut(
     Ok(handled)
 }
 
+/// A pattern copy's hole tools ([`hole_tools`]) at `at`, kept for the next copy drilled the same
+/// way: along `dir`, `depth` deep, with the reach of `size` ([`hole_axis_size`]).
+struct HoleBuilt {
+    at: Vec3,
+    dir: Vec3,
+    size: f64,
+    depth: Option<crate::Expr>,
+    tools: Vec<Traced>,
+}
+
 /// The cutting tools of one hole at `position`, drilling along `dir`.
 #[allow(clippy::too_many_arguments)]
 fn hole_tools(
@@ -5167,6 +5177,8 @@ fn hole_tools_and_prisms(
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.hole_tools += 1);
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     if !(r > 1e-6) {
         return Err(DocError::Invalid("hole diameter must be positive".into()));
@@ -6564,7 +6576,9 @@ fn mirror_matrix(pl: &Plane) -> Mat {
     ]
 }
 
-const MAX_INSTANCES: usize = 1000;
+/// The most copies one pattern makes (the original included), and so one mirror or pattern step
+/// of nested ones; perforated plates and perfboard grids need a few thousand (#3042).
+const MAX_INSTANCES: usize = 10_000;
 
 /// Where a mirrored body was picked and where its copy goes: the component the copy joins and
 /// that component's world frame, and the frame the body's own geometry is in where it was picked
@@ -6656,7 +6670,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
                 _ => (1, 0.0, Vec3::Y),
             };
-            if n1 * n2 > MAX_INSTANCES {
+            if n1.saturating_mul(n2) > MAX_INSTANCES {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
             for i in 0..n1 {
@@ -6844,7 +6858,9 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
 /// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
 /// shows takes material from a target ([`shares_material`]) is not a miss, and skips it; only
 /// copies the test cannot place (in an earlier hole, on the edge, thinner than its samples) are
-/// intersected.
+/// intersected. The targets don't change while their copies are counted, so each one's exact box
+/// is worked out once, not once for every copy, and each copy's tool box once, not once for every
+/// target (#7942).
 fn count_copy_misses(
     st: &ModelState,
     f: &Feature,
@@ -6853,12 +6869,16 @@ fn count_copy_misses(
     instances: &[std::ops::Range<usize>],
     axes: &[Vec<(Vec3, Vec3)>],
 ) -> (usize, usize) {
-    let scope: Vec<&ModelBody> = miss_scope(st, f, targets).collect();
+    let scope: Vec<(&ModelBody, Option<solidcraft_geom::Aabb3>)> =
+        miss_scope(st, f, targets).map(|b| (b, (!b.body.is_mesh()).then(|| more::exact_box(&b.body)).flatten())).collect();
     let (mut missed, mut total) = (0, 0);
     for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
         total += 1;
         let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
-        let takes = tools.iter().any(|t| scope.iter().any(|b| shares_material(&b.body, &t.body, lines)));
+        let takes = tools.iter().any(|t| {
+            let tool_box = (!t.body.is_mesh()).then(|| more::exact_box(&t.body)).flatten();
+            scope.iter().any(|(b, target_box)| shares_material(&b.body, target_box.as_ref(), &t.body, tool_box.as_ref(), lines))
+        });
         if !takes && copy_misses(st, f, targets, tools) {
             missed += 1;
         }
@@ -6871,13 +6891,21 @@ fn count_copy_misses(
 /// `lines` (a hole's axis: through the wall it drills into, however thin and slanted), along the
 /// axes of the tool's round faces (a cylinder's axis, the middle of a slot's ends) and along the
 /// three lines parallel to the axes through the middle of the box both exact boxes hold (the
-/// axis of a straight hole through a plate), within that box. `false` says nothing.
-fn shares_material(target: &Body, tool: &Body, lines: &[(Vec3, Vec3)]) -> bool {
+/// axis of a straight hole through a plate), within that box. `target_box` is `target`'s exact
+/// box and `tool_box` `tool`'s ([`more::exact_box`]), each worked out once by the caller; none,
+/// as when it can't be worked out, is no answer. `false` says nothing.
+fn shares_material(
+    target: &Body,
+    target_box: Option<&solidcraft_geom::Aabb3>,
+    tool: &Body,
+    tool_box: Option<&solidcraft_geom::Aabb3>,
+    lines: &[(Vec3, Vec3)],
+) -> bool {
     if target.is_mesh() || tool.is_mesh() {
         return false;
     }
-    let (Some(a), Some(b)) = (more::exact_box(target), more::exact_box(tool)) else { return false };
-    let both = a.intersection(&b);
+    let (Some(a), Some(b)) = (target_box, tool_box) else { return false };
+    let both = a.intersection(b);
     if both.is_empty() {
         return false;
     }
@@ -7050,10 +7078,12 @@ fn copy_plan<'a>(
             if depth >= MAX_NESTING {
                 return Err(DocError::Invalid(format!("patterns and mirrors of patterns and mirrors nest at most {MAX_NESTING} deep")));
             }
-            let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
-            if moved.len() > MAX_INSTANCES || next.saturating_add(moved.len()) > MAX_INSTANCES * MAX_NESTING {
+            // Counted before they are made: a pattern of a pattern multiplies the two counts.
+            let count = mats.len().saturating_mul(inner_mats.len());
+            if count > MAX_INSTANCES || next.saturating_add(count) > MAX_INSTANCES * MAX_NESTING {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
+            let moved: Vec<Mat> = mats.iter().flat_map(|m| inner_mats.iter().map(move |mi| crate::mat_mul(m, mi))).collect();
             let block = *next;
             *next += moved.len();
             walk(doc, vals, st, &inner, &moved, block, next, depth + 1, out)?;
@@ -7238,6 +7268,15 @@ fn replay(
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
             let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            // A hole whose tools depend on where it is drilled only through their direction,
+            // depth and reach (no drill point or bridge, which look at the material there) has
+            // the same tools at every copy with those, moved: they are built once and moved to
+            // the next copy, not built again for each one (#7942).
+            let movable = matches!(
+                hole,
+                HoleKind::Simple | HoleKind::Counterbore { tip_angle: None, bridge: None, .. } | HoleKind::Countersink { tip_angle: None, .. }
+            );
+            let mut built: Option<HoleBuilt> = None;
             for (k, m) in mats.iter().enumerate() {
                 let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                 let start = copies.len();
@@ -7247,12 +7286,25 @@ fn replay(
                     on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
+                    let size = hole_axis_size(st, &at, d);
+                    let tools = match built.as_ref().filter(|b| movable && b.dir == d && b.size == size && b.depth == depth) {
+                        Some(b) => {
+                            let to_here = translation(at - b.at);
+                            b.tools
+                                .iter()
+                                .map(|t| Ok(Traced { lineage: t.lineage.clone(), body: kernel::transform_matrix(&t.body, to_here)? }))
+                                .collect::<Result<Vec<_>>>()?
+                        }
+                        None => {
+                            let tools = hole_tools(vals, st, &at, d, diameter, &depth, hole)?;
+                            if movable {
+                                built = Some(HoleBuilt { at, dir: d, size, depth: depth.clone(), tools: tools.clone() });
+                            }
+                            tools
+                        }
+                    };
                     // Each copy's faces are named as the hole's, with the instance.
-                    copies.extend(
-                        hole_tools(vals, st, &at, d, diameter, &depth, hole)?
-                            .into_iter()
-                            .map(|t| Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body }),
-                    );
+                    copies.extend(tools.into_iter().map(|t| Traced { lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)), body: t.body }));
                 }
                 instances.push(start..copies.len());
                 axes.push(on);
