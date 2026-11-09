@@ -1136,6 +1136,9 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     if n >= 1000 {
         return Err(bad(cmd, "too many named views"));
     }
+    // Its angles are the ones the viewport's camera gave, measured in the design's orientation
+    // now: the view keeps that orientation, so it shows the same after a Set as or Reset (#6455).
+    v.frame = s.doc.view_frame;
     let name = v.name.clone();
     let d = s.doc_mut();
     d.named_views.retain(|x| x.name != name);
@@ -1217,10 +1220,11 @@ fn view_frame(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-/// The orbit camera of a named view (no roll), in the design's own orientation when it has one
-/// (#6455): its angles are the ones the viewport's camera gave, measured in that frame.
+/// The camera of a named view in the design's own orientation now (#6455): the view as it was
+/// saved, in the orientation it was saved in, turned to the same direction and roll in this one.
 fn camera_of(s: &Session, v: &solidcraft_doc::NamedView) -> crate::render::Camera {
-    crate::render::Camera { frame: s.doc.view_frame, ..plain_camera_of(v) }
+    let saved = crate::render::Camera { frame: v.frame, ..plain_camera_of(v) };
+    if v.frame == s.doc.view_frame { saved } else { saved.in_frame(s.doc.view_frame) }
 }
 
 /// The orbit camera of a named view in world axes (Z up, no roll).
@@ -2457,6 +2461,45 @@ mod tests {
         for bad in [json!({}), json!({"set": "left", "camera": cam}), json!({"set": "front"}), json!({"set": "top", "camera": cam, "reset": true})] {
             assert!(s.execute("view.frame", &bad).is_err(), "{bad}");
         }
+    }
+
+    /// #6455: a named view shows the same after Set as and after Reset Orientation. Its angles
+    /// are measured in the orientation the design had when it was saved, and it keeps that one.
+    #[test]
+    fn a_named_view_keeps_its_direction_when_the_designs_orientation_changes() {
+        use crate::render::{Camera, StandardView};
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5}));
+        let image = |c: Camera| c.basis();
+        use solidcore_record::Vec3;
+        let same = |a: (Vec3, Vec3, Vec3), b: (Vec3, Vec3, Vec3)| a.0.dist(b.0) < 1e-9 && a.1.dist(b.1) < 1e-9 && a.2.dist(b.2) < 1e-9;
+        // Saved with no orientation of the design's own.
+        let plain = Camera { yaw: 0.4, pitch: 0.3, distance: 80.0, ..Camera::default() };
+        run(&mut s, "view.save", json!({"name": "Plain", "camera": plain}));
+        // FRONT from the right, then TOP from world front: a frame whose top is not +Z.
+        let mut right = Camera::default();
+        right.set_view(StandardView::Right);
+        run(&mut s, "view.frame", json!({"set": "front", "camera": right}));
+        let mut world_front = Camera::default();
+        world_front.set_view(StandardView::Front);
+        run(&mut s, "view.frame", json!({"set": "top", "camera": world_front}));
+        let f = s.doc.view_frame.expect("the design has its own frame");
+        assert!(f.top.dist(Vec3::Z) > 0.5, "{f:?}");
+        run(&mut s, "view.apply", json!({"view": "Plain"}));
+        let shown = s.camera.unwrap();
+        assert_eq!(shown.frame, Some(f), "shown in the design's orientation");
+        assert!(same(image(shown), image(plain)), "the same view after Set as: {:?} vs {:?}", image(shown), image(plain));
+        // Saved in that orientation, it shows the same after Reset.
+        let framed = Camera { frame: Some(f), yaw: -0.7, pitch: 0.5, distance: 60.0, ..Camera::default() };
+        run(&mut s, "view.save", json!({"name": "Framed", "camera": framed}));
+        run(&mut s, "view.frame", json!({"reset": true}));
+        run(&mut s, "view.apply", json!({"view": "Framed"}));
+        let shown = s.camera.unwrap();
+        assert_eq!(shown.frame, None);
+        assert!(same(image(shown), image(framed)), "the same view after Reset: {:?} vs {:?}", image(shown), image(framed));
+        // And both after a save and reopen.
+        let reopened = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+        assert_eq!((reopened.named_views[0].frame, reopened.named_views[1].frame), (None, Some(f)));
     }
 
     #[test]

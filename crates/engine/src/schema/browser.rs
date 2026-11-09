@@ -1320,6 +1320,19 @@ pub struct ViewEntry {
     pub distance: f64,
     /// Vertical field of view in radians; 0 is orthographic.
     pub fov: f64,
+    /// The design's own orientation the view was saved in (#6455), which `yaw` and `pitch` are
+    /// measured in: `{front, top}`, principal axes. Absent: world axes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<ViewFrameEntry>,
+}
+
+/// A design's own orientation, as a named view keeps it: its FRONT and TOP axes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewFrameEntry {
+    /// Out of the FRONT face.
+    pub front: [f64; 3],
+    /// Out of the TOP face.
+    pub top: [f64; 3],
 }
 
 /// What `view.list` returns.

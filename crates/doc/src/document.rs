@@ -3337,6 +3337,11 @@ pub struct NamedView {
     pub distance: f64,
     #[serde(default)]
     pub fov: f64,
+    /// The design's own orientation when the view was saved (#6455), which `yaw` and `pitch` are
+    /// measured in: the view keeps its direction when the design's orientation changes later.
+    /// None: world axes, the up axis preference's.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "valid_view_frame")]
+    pub frame: Option<solidcraft_render::ViewFrame>,
 }
 
 /// A browser group: items of one folder (`bodies`, `sketches` or `construction`) of a
