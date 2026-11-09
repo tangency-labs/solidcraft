@@ -30,7 +30,6 @@ pub(crate) fn segments(
             .filter_map(|k| {
                 let (a, b) = (
                     metric(*uvs.get(r.start + k)?),
-                    // Proven: m > 0: `k` ranges over `0..m`
                     metric(*uvs.get(r.start + (k + 1) % m)?),
                 );
                 Some(0.5 * (a[0] * b[1] - b[0] * a[1]))
@@ -54,9 +53,9 @@ pub(crate) fn segments(
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
         for k in r.clone() {
             let q = metric(*uvs.get(k)?);
-            for ((l, h), x) in lo.iter_mut().zip(&mut hi).zip(q) {
-                *l = l.min(x);
-                *h = h.max(x);
+            for d in 0..2 {
+                lo[d] = lo[d].min(q[d]);
+                hi[d] = hi[d].max(q[d]);
             }
         }
         Some((lo, hi))
@@ -89,16 +88,14 @@ pub(crate) fn segments(
     };
     // The arc of loop `r` (in nodes) between its support points `a` and `b`, the way that passes
     // neither of the other two.
-    // Proven: divisor is the constant 2
     let side_count = |n: usize| if flat { n.div_ceil(2).max(1) } else { n.max(1) };
     let arc = |r: &std::ops::Range<usize>, p: &[usize; 4], k: usize| -> Option<usize> {
         let m = r.len();
         let (a, b) = (*p.get(k)? - r.start, *p.get((k + 1) % 4)? - r.start);
-        let fwd = (b + m - a).checked_rem(m)?;
+        let fwd = (b + m - a) % m;
         let others: Vec<usize> = (0..4)
-            // Proven: the divisor is the constant 4, not zero.
             .filter(|&j| j != k && j != (k + 1) % 4)
-            .filter_map(|j| p.get(j).and_then(|x| (x - r.start + m - a).checked_rem(m)))
+            .filter_map(|j| p.get(j).map(|x| (x - r.start + m - a) % m))
             .collect();
         Some(if others.iter().all(|&o| o > fwd) {
             fwd
@@ -136,12 +133,10 @@ pub(crate) fn segments(
                 centre[1] + 0.5 * (q[1] - centre[1]),
             ]);
         }
-        // Proven: the capacity is the constant 8.
         let mut segs = Vec::with_capacity(8);
         for k in 0..4 {
             segs.push(Segment {
                 a: End::Point(*corners.get(k)?),
-                // Proven: the divisor is the constant 4, not zero.
                 b: End::Point(*corners.get((k + 1) % 4)?),
                 count: Some(side_count(arc(outer, &p, k)?)),
             });
@@ -194,7 +189,6 @@ pub(crate) fn segments(
         let (ab, ap) = ([b[0] - a[0], b[1] - a[1]], [p[0] - a[0], p[1] - a[1]]);
         let len2 = ab[0] * ab[0] + ab[1] * ab[1];
         let t = if len2 > 0.0 {
-            // Proven: the clamp bounds are the constants 0.0 <= 1.0, neither NaN.
             ((ap[0] * ab[0] + ap[1] * ab[1]) / len2).clamp(0.0, 1.0)
         } else {
             0.0
@@ -212,14 +206,12 @@ pub(crate) fn segments(
     // Each square: the hole's box grown by half its clearance to the outer loop and a quarter of
     // its gap to another hole's box (both squares grow into that gap), so squares never touch.
     let m = outer.len();
-    // Proven: with_capacity of the length of `boxes`, allocated with the same element type
     let mut squares: Vec<([f64; 2], [f64; 2])> = Vec::with_capacity(boxes.len());
     for (i, &bx) in boxes.iter().enumerate() {
         let mut clear = f64::INFINITY;
         for k in 0..m {
             let (a, b) = (
                 metric(*uvs.get(outer.start + k)?),
-                // Proven: m = outer.len() > 0 inside `for k in 0..m`
                 metric(*uvs.get(outer.start + (k + 1) % m)?),
             );
             clear = clear.min(to_box(a, bx));
@@ -256,7 +248,6 @@ pub(crate) fn segments(
         for k in 0..4 {
             segs.push(Segment {
                 a: End::Point(*c.get(k)?),
-                // Proven: the divisor is the constant 4, not zero.
                 b: End::Point(*c.get((k + 1) % 4)?),
                 count: Some(side_count(arc(hole, p, k)?)),
             });
@@ -308,16 +299,12 @@ pub(crate) fn segments(
                 End::Node(u32::try_from(outer.start + k).ok()?)
             }
             Stop::Boundary(a, b) => {
-                // A side of a square: corners `a` and `b` of square `s`. A trace stops on a
-                // segment of one loop, so neither end is on the outer loop here; checked, so a
-                // segment from the outer loop to a square refuses the layout instead.
-                let (Some(ia), Some(ib)) = (a.checked_sub(outer.len()), b.checked_sub(outer.len()))
-                else {
-                    return None;
-                };
-                // Proven: the divisor 4 is a constant (the corners of a square).
-                let (s, la, lb) = (ia / 4, ia % 4, ib % 4);
-                // Proven: the divisor 4 is a constant.
+                // A side of a square: corners `a` and `b` of square `s`.
+                let (s, la, lb) = (
+                    (a - outer.len()) / 4,
+                    (a - outer.len()) % 4,
+                    (b - outer.len()) % 4,
+                );
                 let k = if (la + 1) % 4 == lb { la } else { lb };
                 End::On(4 * s + k, t.b)
             }

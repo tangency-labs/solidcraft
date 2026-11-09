@@ -6,7 +6,6 @@
 //! boundary node, at a point inside the face (a square's corner, or where two traces met
 //! head-on), or on another cut (a T-node, which that cut then passes through).
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use crate::ring::Ring;
@@ -40,36 +39,18 @@ pub(crate) struct Piece {
     pub holes: Vec<Ring<u32>>,
 }
 
-/// Where to put nodes between two nodes of a cut, given the spacing wanted at each (see
-/// [`cut`]); the error is a point the surface does not evaluate at.
-pub(crate) type Seeds<'a, E> = dyn Fn([f64; 2], [f64; 2], f64, f64) -> Result<Vec<f64>, E> + 'a;
-
 /// Cut the face bounded by `loops` (ranges of `boundary`) along `segments`, measured in the
 /// metric `scale`. `seeds(a, b, sa, sb)`: where to put nodes between two nodes of a cut (in
 /// (u, v)), as fractions strictly between 0 and 1, given the spacing wanted at each (in the
 /// metric): the boundary's own spacing at a boundary node, unbounded inside the face (the seed
 /// rule then sets it). Returns the cut nodes (numbered after the boundary) and the patches;
-/// `Ok(None)` when the cuts do not make a planar subdivision (the face is then meshed whole);
-/// `seeds`' error (a point the surface does not evaluate at) is the error.
-#[allow(clippy::type_complexity)] // the cut nodes and the patches, as Option, in a Result
-pub(crate) fn cut<E>(
+/// `None` when the cuts do not make a planar subdivision (the face is then meshed whole).
+pub(crate) fn cut(
     boundary: &[[f64; 2]],
     loops: &[std::ops::Range<usize>],
     segments: &[Segment],
     scale: [f64; 2],
-    seeds: &Seeds<'_, E>,
-) -> Result<Option<(Vec<[f64; 2]>, Vec<Piece>)>, E> {
-    super::layout(|stopped| cut_in(boundary, loops, segments, scale, seeds, stopped))
-}
-
-/// [`cut`]'s body: `seeds`' error goes to `stopped`.
-fn cut_in<E>(
-    boundary: &[[f64; 2]],
-    loops: &[std::ops::Range<usize>],
-    segments: &[Segment],
-    scale: [f64; 2],
-    seeds: &Seeds<'_, E>,
-    stopped: &mut Option<E>,
+    seeds: &dyn Fn([f64; 2], [f64; 2], f64, f64) -> Vec<f64>,
 ) -> Option<(Vec<[f64; 2]>, Vec<Piece>)> {
     let n = boundary.len();
     let metric = |q: [f64; 2]| [q[0] * scale[0], q[1] * scale[1]];
@@ -80,7 +61,6 @@ fn cut_in<E>(
     let mut cut_uv: Vec<[f64; 2]> = Vec::new();
     let mut points: HashMap<[u64; 2], u32> = HashMap::new();
     // Each segment's end nodes, and the T-nodes other segments put on it.
-    // Proven: capacity of allocated `segments`' length, its elements larger
     let mut ends: Vec<(u32, u32)> = Vec::with_capacity(segments.len());
     let mut along: Vec<Vec<u32>> = vec![Vec::new(); segments.len()];
     for s in segments {
@@ -124,7 +104,6 @@ fn cut_in<E>(
         };
         let m = r.len();
         let i = k - r.start;
-        // Proven: m = r.len() > 0, as `r` contains k
         let (prev, next) = (r.start + (i + m - 1) % m, r.start + (i + 1) % m);
         match (boundary.get(prev), boundary.get(k), boundary.get(next)) {
             (Some(&p), Some(&q), Some(&x)) => 0.5 * (dist(p, q) + dist(q, x)),
@@ -138,7 +117,6 @@ fn cut_in<E>(
         for k in 0..m {
             let (a, b) = (
                 u32::try_from(r.start + k).ok()?,
-                // Proven: m = r.len() > 0 inside `for k in 0..m`
                 u32::try_from(r.start + (k + 1) % m).ok()?,
             );
             sides.insert((a.min(b), a.max(b)));
@@ -160,7 +138,6 @@ fn cut_in<E>(
         nodes.sort_by(|a, b| a.0.total_cmp(&b.0));
         nodes.dedup_by_key(|x| x.1);
         let count = segments.get(i).and_then(|s| s.count);
-        // Proven: the window size is the constant 2, not zero.
         for w in nodes.windows(2) {
             let (Some(&(_, a)), Some(&(_, b))) = (w.first(), w.get(1)) else {
                 continue;
@@ -177,11 +154,10 @@ fn cut_in<E>(
             let fractions: Vec<f64> = match count {
                 Some(k) if total > 0.0 => {
                     let share = dist(pa, pb) / total;
-                    // Proven: the clamp bounds are the constants 1 <= 4096.
                     let k = ((k as f64 * share).round() as usize).clamp(1, 4096);
                     (1..k).map(|j| j as f64 / k as f64).collect()
                 }
-                _ => super::stop(stopped, seeds(pa, pb, spacing(a), spacing(b)))?,
+                _ => seeds(pa, pb, spacing(a), spacing(b)),
             };
             let mut prev = a;
             for f in fractions.into_iter().take(4096) {
@@ -206,7 +182,6 @@ fn cut_in<E>(
             for k in 0..m {
                 let (Some(a), Some(b)) = (
                     boundary.get(r.start + k).map(|p| metric(*p)),
-                    // Proven: m = r.len() > 0 inside `for k in 0..m`
                     boundary.get(r.start + (k + 1) % m).map(|p| metric(*p)),
                 ) else {
                     continue;
@@ -226,7 +201,7 @@ fn cut_in<E>(
         let side = |k: usize| -> Option<(u32, u32)> {
             Some((
                 u32::try_from(r.start + k).ok()?,
-                u32::try_from(r.start + (k + 1).checked_rem(m)?).ok()?,
+                u32::try_from(r.start + (k + 1) % m).ok()?,
             ))
         };
         // Which way round the face lies to the left: test beside the loop's longest side.
@@ -241,7 +216,7 @@ fn cut_in<E>(
         let (a, b) = side(longest)?;
         let (pa, pb) = (pos(a)?, pos(b)?);
         let len = (pb[0] - pa[0]).hypot(pb[1] - pa[1]);
-        if len.partial_cmp(&0.0) != Some(Ordering::Greater) {
+        if !(len > 0.0) {
             return None;
         }
         let left = [
@@ -413,9 +388,8 @@ mod tests {
                 count: None,
             },
         ];
-        let Ok(Some((cut_uv, pieces))) = cut(&b, &loops, &segs, [1.0, 1.0], &|_, _, _, _| {
-            Ok::<_, ()>(vec![0.5])
-        }) else {
+        let Some((cut_uv, pieces)) = cut(&b, &loops, &segs, [1.0, 1.0], &|_, _, _, _| vec![0.5])
+        else {
             panic!("cuts")
         };
         assert_eq!(pieces.len(), 4);
@@ -450,9 +424,8 @@ mod tests {
                 count: None,
             },
         ];
-        let Ok(Some((cut_uv, pieces))) = cut(&b, &loops, &segs, [1.0, 1.0], &|_, _, _, _| {
-            Ok::<_, ()>(Vec::new())
-        }) else {
+        let Some((cut_uv, pieces)) = cut(&b, &loops, &segs, [1.0, 1.0], &|_, _, _, _| Vec::new())
+        else {
             panic!("cuts")
         };
         assert_eq!(pieces.len(), 3, "{pieces:?}");
@@ -465,15 +438,15 @@ mod tests {
     #[test]
     fn no_segments_no_cut() {
         let b = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-        assert_eq!(
+        assert!(
             cut(
                 &b,
                 &[std::ops::Range { start: 0, end: 4 }],
                 &[],
                 [1.0, 1.0],
-                &|_, _, _, _| Ok::<_, ()>(Vec::new())
-            ),
-            Ok(None)
+                &|_, _, _, _| Vec::new()
+            )
+            .is_none()
         );
     }
 }

@@ -55,31 +55,6 @@ struct Moto {
     hit: (usize, usize),
 }
 
-impl Moto {
-    /// The coordinate of `q` along the direction of travel.
-    fn along(&self, q: [f64; 2]) -> f64 {
-        if self.d == 0 { q[0] } else { q[1] }
-    }
-    /// The coordinate of `q` across the direction of travel (constant on its line).
-    fn across(&self, q: [f64; 2]) -> f64 {
-        if self.d == 0 { q[1] } else { q[0] }
-    }
-    /// `q` with its coordinate along the direction of travel set to `x`.
-    fn with_along(&self, q: [f64; 2], x: f64) -> [f64; 2] {
-        if self.d == 0 { [x, q[1]] } else { [q[0], x] }
-    }
-}
-
-/// A motorcycle stopping, in time order: when, which one, where along its way, the one whose
-/// trace stops it and when that one passed there, and the one it meets head-on.
-struct Event {
-    t: f64,
-    who: usize,
-    at: f64,
-    cause: Option<(usize, f64)>,
-    partner: Option<usize>,
-}
-
 /// The traces of the face bounded by `loops` (ranges of `boundary`, even–odd), in (u, v),
 /// measured in the metric `scale`. Two motorcycles coming at each other on lines less than
 /// `snap` apart (in the metric) meet head-on: a polygon's extreme node is only near the curve's
@@ -101,9 +76,9 @@ pub(crate) fn traces(
     let mut lo = [f64::MAX; 2];
     let mut hi = [f64::MIN; 2];
     for q in &p {
-        for ((l, h), &x) in lo.iter_mut().zip(&mut hi).zip(q) {
-            *l = l.min(x);
-            *h = h.max(x);
+        for d in 0..2 {
+            lo[d] = lo[d].min(q[d]);
+            hi[d] = hi[d].max(q[d]);
         }
     }
     let extent = (hi[0] - lo[0]).max(hi[1] - lo[1]);
@@ -116,7 +91,6 @@ pub(crate) fn traces(
         .iter()
         .flat_map(|r| {
             let n = r.len();
-            // Proven: n = r.len() > 0: `k` ranges over `0..n`
             (0..n).map(move |k| (r.start + k, r.start + (k + 1) % n))
         })
         .collect();
@@ -143,15 +117,14 @@ pub(crate) fn traces(
         }
         for k in 0..n {
             let (Some(&a), Some(&b), Some(&c)) = (
-                // Proven (both `% n` here): n = r.len() >= 3, checked above
                 p.get(r.start + (k + n - 1) % n),
                 p.get(r.start + k),
                 p.get(r.start + (k + 1) % n),
             ) else {
                 continue;
             };
-            for (d, ((&ad, &bd), &cd)) in a.iter().zip(&b).zip(&c).enumerate() {
-                let (before, after) = (ad - bd, cd - bd);
+            for d in 0..2 {
+                let (before, after) = (a[d] - b[d], c[d] - b[d]);
                 let flat = |x: f64| x.abs() <= eps;
                 // A (non-strict) minimum higher on one side, or maximum lower on one side.
                 let min = (before > eps || flat(before))
@@ -166,12 +139,8 @@ pub(crate) fn traces(
                     _ => continue,
                 };
                 // Concave: the face lies beyond the extremum.
-                let step = sign * extent * 1e-6;
-                let probe = if d == 0 {
-                    [b[0] + step, b[1]]
-                } else {
-                    [b[0], b[1] + step]
-                };
+                let mut probe = b;
+                probe[d] += sign * extent * 1e-6;
                 if !inside(probe) {
                     continue;
                 }
@@ -194,6 +163,7 @@ pub(crate) fn traces(
     }
     // Where each would reach the boundary.
     for m in &mut motos {
+        let e = 1 - m.d;
         for &(ia, ib) in &segs {
             if ia == m.node || ib == m.node {
                 continue;
@@ -201,23 +171,20 @@ pub(crate) fn traces(
             let (Some(a), Some(b)) = (p.get(ia), p.get(ib)) else {
                 continue;
             };
-            // The segment crosses the line across = across(o) at parameter s along d.
-            let (ae, be, oe) = (m.across(*a), m.across(*b), m.across(m.o));
-            let (lo_e, hi_e) = (ae.min(be), ae.max(be));
-            if oe < lo_e || oe > hi_e {
+            // The segment crosses the line other = o[e] at parameter s along d.
+            let (lo_e, hi_e) = (a[e].min(b[e]), a[e].max(b[e]));
+            if m.o[e] < lo_e || m.o[e] > hi_e {
                 continue;
             }
             // A segment along the line itself is reached at its nearer end ahead.
-            let od = m.along(m.o);
-            let ahead = |x: f64| (x - od) * m.sign;
-            let (ad, bd) = (m.along(*a), m.along(*b));
-            let t = if (be - ae).abs() <= eps {
-                [ahead(ad), ahead(bd)]
+            let ahead = |x: f64| (x - m.o[m.d]) * m.sign;
+            let t = if (b[e] - a[e]).abs() <= eps {
+                [ahead(a[m.d]), ahead(b[m.d])]
                     .into_iter()
                     .filter(|t| *t > eps)
                     .fold(f64::INFINITY, f64::min)
             } else {
-                ahead(ad + (oe - ae) / (be - ae) * (bd - ad))
+                ahead(a[m.d] + (m.o[e] - a[e]) / (b[e] - a[e]) * (b[m.d] - a[m.d]))
             };
             if t > eps && t < m.reach {
                 m.reach = t;
@@ -225,7 +192,15 @@ pub(crate) fn traces(
             }
         }
     }
-    // Events in time order (see [`Event`]).
+    // Events in time order: (time, the motorcycle that stops, where, the one whose trace stops
+    // it and when it passed there).
+    struct Event {
+        t: f64,
+        who: usize,
+        at: f64,
+        cause: Option<(usize, f64)>,
+        partner: Option<usize>,
+    }
     let mut events: Vec<Event> = Vec::new();
     for (i, m) in motos.iter().enumerate() {
         if m.reach.is_finite() {
@@ -239,9 +214,9 @@ pub(crate) fn traces(
         }
         for (j, n) in motos.iter().enumerate().skip(i + 1) {
             if m.d != n.d {
-                // Crossing: m's line is across = m.across(m.o); n travels along it.
-                let x_on_m = (m.along(n.o) - m.along(m.o)) * m.sign;
-                let x_on_n = (n.along(m.o) - n.along(n.o)) * n.sign;
+                // Crossing: m's line is other = m.o[1 - m.d]; n travels along n.d = 1 - m.d.
+                let x_on_m = (n.o[m.d] - m.o[m.d]) * m.sign;
+                let x_on_n = (m.o[n.d] - n.o[n.d]) * n.sign;
                 if x_on_m > eps && x_on_m < m.reach && x_on_n > eps && x_on_n < n.reach {
                     // The later one stops on the earlier one's trace (a tie stops both).
                     if x_on_m >= x_on_n {
@@ -263,9 +238,9 @@ pub(crate) fn traces(
                         });
                     }
                 }
-            } else if m.sign != n.sign && (m.across(m.o) - n.across(n.o)).abs() <= eps.max(snap) {
+            } else if m.sign != n.sign && (m.o[1 - m.d] - n.o[1 - n.d]).abs() <= eps.max(snap) {
                 // Head-on on one line: they meet halfway if each would get there.
-                let gap = (m.along(n.o) - m.along(m.o)) * m.sign;
+                let gap = (n.o[m.d] - m.o[m.d]) * m.sign;
                 let half = 0.5 * gap;
                 if gap > eps && half < m.reach && half < n.reach {
                     events.push(Event {
@@ -282,7 +257,7 @@ pub(crate) fn traces(
     events.sort_by(|a, b| a.t.total_cmp(&b.t));
     let mut stop: Vec<Option<(f64, Stop)>> = vec![None; motos.len()];
     for ev in &events {
-        if stop.get(ev.who).is_none_or(Option::is_some) {
+        if stop.get(ev.who).is_none_or(|s| s.is_some()) {
             continue;
         }
         if let Some((c, passed)) = ev.cause {
@@ -302,7 +277,7 @@ pub(crate) fn traces(
             (None, None) => Stop::Boundary,
         };
         if let Some(j) = ev.partner {
-            if stop.get(j).is_none_or(Option::is_some) {
+            if stop.get(j).is_none_or(|s| s.is_some()) {
                 continue;
             }
             if let Some(s) = stop.get_mut(j) {
@@ -330,11 +305,12 @@ pub(crate) fn traces(
         .zip(&stop)
         .filter_map(|(m, s)| {
             let (len, how) = (*s)?;
-            let (a, b) = (m.along(m.o), m.along(m.o) + m.sign * len);
-            let (from, to) = (a.min(b) / m.along(scale), a.max(b) / m.along(scale));
+            let (a, b) = (m.o[m.d], m.o[m.d] + m.sign * len);
+            let (from, to) = (a.min(b) / scale[m.d], a.max(b) / scale[m.d]);
             // The trace runs along d, so it lies on the iso-line of the other parameter.
             let axis = 1 - m.d;
-            let endp = m.with_along(m.o, b);
+            let mut endp = m.o;
+            endp[m.d] = b;
             let end = match how {
                 Stop::Boundary => End::Boundary(m.hit.0, m.hit.1),
                 Stop::Trace(c) => End::Trace(*out_index.get(c)?),
@@ -342,7 +318,7 @@ pub(crate) fn traces(
             };
             Some(Trace {
                 axis,
-                at: m.across(m.o) / m.across(scale),
+                at: m.o[axis] / scale[axis],
                 from,
                 to,
                 start: m.node,

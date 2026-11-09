@@ -1,19 +1,18 @@
 //! Target triangle size: one side length per face, so triangles come out about equilateral
 //! (well-shaped triangles shade evenly) and as small as the surface needs.
 //!
-//! A face's size is the smallest of the body's longest side, the length over which the surface
+//! A flat face (a plane, or a spline lying in one) has no size: any triangulation of its
+//! boundary is exact, so it gets no interior cells and its straight edges no extra nodes.
+//! A curved face's size is the smallest of the body's longest side, the length over which the surface
 //! normal turns the caller's facet angle (when one is given, see [`Turn`]), and the chord that
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
 
-use std::cmp::Ordering;
-
+use crate::fast::EvalSurface;
 use crate::vec::VecExt as _;
-use solidcore::eval::EvalSurface;
-use solidcore_convert as kernel;
 use solidcore_record::Vec3;
 
-use solidcore::eval::uv::Domain;
+use super::uv::Domain;
 
 /// Longest side, as a fraction of the body's extent.
 const MAX_LEN_FRACTION: f64 = 1.0 / 5.0;
@@ -116,48 +115,22 @@ pub(crate) fn extent(points: impl Iterator<Item = Vec3>) -> f64 {
     2.0 * points.iter().map(|p| p.dist(c)).fold(0.0, f64::max)
 }
 
-/// A face's size, from samples over its surface's parameter box ([`face_size`]).
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct FaceSize {
-    /// The target side length (mm).
-    pub h: f64,
-    /// The surface's mean speed along u and v (mm per parameter unit).
-    pub speed: [f64; 2],
-    /// The samples the surface does not evaluate at, which measure nothing. The box reaches past
-    /// a trimmed face, so whether one refuses the face is decided against the face's own loops
-    /// when it is planned: one inside the face does.
-    pub unevaluated: Vec<[f64; 2]>,
-}
-
 /// A face's target side length and the surface's mean speed along u and v (mm per parameter
 /// unit), from samples over the surface's parameter box (the whole box of a trimmed surface,
-/// so the size is never larger than the face needs), with the samples the surface does not
-/// evaluate at.
-pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSize {
-    let plain = |h: f64, speed: [f64; 2]| FaceSize {
-        h,
-        speed,
-        unevaluated: Vec::new(),
-    };
+/// so the size is never larger than the face needs).
+pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> (f64, [f64; 2]) {
     if let EvalSurface::Plane { du, dv, .. } = s {
-        return plain(
-            rules.max_len,
-            [
-                kernel::record_vec3(*du).len(),
-                kernel::record_vec3(*dv).len(),
-            ],
-        );
+        return (f64::INFINITY, [du.len(), dv.len()]);
     }
     let (Some(ru), Some(rv)) = (dom.range[0], dom.range[1]) else {
-        return plain(rules.max_len, [1.0, 1.0]);
+        return (rules.max_len, [1.0, 1.0]);
     };
-    let mut unevaluated: Vec<[f64; 2]> = Vec::new();
+    let flat = planar(s);
     // A flat spline (sheet-metal walls, chamfers): no curvature to look for, only the speeds.
-    let samples = if planar(s) { 3 } else { SAMPLES };
-    // The point, the unit normal (`None` at a pole, where it is undefined) and the speeds.
-    let normal = |u: f64, v: f64| -> Result<(Vec3, Option<Vec3>, [f64; 2]), [f64; 2]> {
-        let (p, su, sv) = s.derivs(u, v).map(kernel::record_triple).ok_or([u, v])?;
-        Ok((p, su.cross(sv).normalized(), [su.len(), sv.len()]))
+    let samples = if flat { 3 } else { SAMPLES };
+    let normal = |u: f64, v: f64| -> Option<(Vec3, Vec3, [f64; 2])> {
+        let (p, su, sv) = s.derivs(u, v)?;
+        Some((p, su.cross(sv).normalized()?, [su.len(), sv.len()]))
     };
     let step = [(ru.1 - ru.0) * 1e-3, (rv.1 - rv.0) * 1e-3];
     let mut k_max: f64 = 0.0;
@@ -167,14 +140,9 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSiz
             // Cell centres, clear of the box edges (poles, seams).
             let u = ru.0 + (ru.1 - ru.0) * (i as f64 + 0.5) / samples as f64;
             let v = rv.0 + (rv.1 - rv.0) * (j as f64 + 0.5) / samples as f64;
-            let (p, n, sp) = match normal(u, v) {
-                Ok(at) => at,
-                Err(q) => {
-                    unevaluated.push(q);
-                    continue;
-                }
+            let Some((p, n, sp)) = normal(u, v) else {
+                continue;
             };
-            let Some(n) = n else { continue };
             speed = [speed[0] + sp[0], speed[1] + sp[1]];
             count += 1;
             if samples < SAMPLES {
@@ -182,14 +150,9 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSiz
             }
             // How fast the normal turns per mm, along u and along v (twist included).
             for (du, dv) in [(step[0], 0.0), (0.0, step[1])] {
-                let (q, m, _) = match normal(u + du, v + dv) {
-                    Ok(at) => at,
-                    Err(q) => {
-                        unevaluated.push(q);
-                        continue;
-                    }
+                let Some((q, m, _)) = normal(u + du, v + dv) else {
+                    continue;
                 };
-                let Some(m) = m else { continue };
                 let ds = p.dist(q);
                 if ds > 0.0 {
                     k_max = k_max.max((m - n).len() / ds);
@@ -202,24 +165,25 @@ pub(crate) fn face_size(s: &EvalSurface, dom: &Domain, rules: &Rules) -> FaceSiz
     } else {
         [1.0, 1.0]
     };
-    FaceSize {
-        h: rules.for_curvature(k_max),
-        speed: speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }),
-        unevaluated,
-    }
+    // A flat face is exact for any triangulation of its boundary: no length cap.
+    let size = if flat {
+        f64::INFINITY
+    } else {
+        rules.for_curvature(k_max)
+    };
+    (
+        size,
+        speed.map(|x| if x.is_finite() && x > 0.0 { x } else { 1.0 }),
+    )
 }
 
 /// A spline surface whose control points lie in one plane, with positive weights: the
 /// surface lies in that plane (it is inside the control points' convex hull).
 fn planar(s: &EvalSurface) -> bool {
-    let EvalSurface::Nurbs(n) = s else {
+    let EvalSurface::Nurbs { ctrl, .. } = s else {
         return false;
     };
-    let ctrl = n.ctrl();
-    if ctrl
-        .iter()
-        .any(|h| h[3].partial_cmp(&0.0) != Some(Ordering::Greater))
-    {
+    if ctrl.iter().any(|h| !(h[3] > 0.0)) {
         return false;
     }
     let pts: Vec<Vec3> = ctrl
@@ -246,7 +210,7 @@ fn planar(s: &EvalSurface) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore::eval::EvalCurve;
+    use crate::fast::EvalCurve;
 
     const THIRTY: Option<Turn> = Some(Turn {
         angle: std::f64::consts::PI / 6.0,
@@ -256,13 +220,13 @@ mod tests {
     #[test]
     fn a_cylinder_is_sized_by_its_radius() {
         let s = EvalSurface::Revolved {
-            profile: EvalCurve::new(
-                1,
-                vec![0.0, 0.0, 1.0, 1.0],
-                vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 40.0, 1.0]],
-            ),
-            origin: solidcore::Vec3::ZERO,
-            axis: solidcore::Vec3::Z,
+            profile: EvalCurve {
+                degree: 1,
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                ctrl: vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 40.0, 1.0]],
+            },
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
             transform: [
                 [1.0, 0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0, 0.0],
@@ -272,7 +236,7 @@ mod tests {
         };
         // A 20 mm body: sides from 1 mm (the floor, a quarter of the longest) to 4 mm.
         let rules = Rules::new(0.01, 20.0, THIRTY);
-        let FaceSize { h, speed, .. } = face_size(&s, &solidcore::eval::uv::domain(&s), &rules);
+        let (h, speed) = face_size(&s, &super::super::uv::domain(&s), &rules);
         // r = 3: 30° of turn is 1.57 mm; the 0.01 mm sag chord is √(8·3·0.01) = 0.49 mm, times the
         // aspect, unless that is under the floor.
         assert!(
@@ -287,9 +251,9 @@ mod tests {
             "{speed:?}"
         );
         // Coarser: the turn limit governs.
-        let FaceSize { h, .. } = face_size(
+        let (h, _) = face_size(
             &s,
-            &solidcore::eval::uv::domain(&s),
+            &super::super::uv::domain(&s),
             &Rules::new(0.5, 100.0, THIRTY),
         );
         assert!(
@@ -300,9 +264,9 @@ mod tests {
             "{h}"
         );
         // Without a facet angle the sag alone: √(8·3·0.5) = 3.46 mm, four times along.
-        let FaceSize { h, .. } = face_size(
+        let (h, _) = face_size(
             &s,
-            &solidcore::eval::uv::domain(&s),
+            &super::super::uv::domain(&s),
             &Rules::new(0.5, 100.0, None),
         );
         assert!(
@@ -314,9 +278,9 @@ mod tests {
             angle: std::f64::consts::PI / 6.0,
             floor: 1.0,
         });
-        let FaceSize { h, .. } = face_size(
+        let (h, _) = face_size(
             &s,
-            &solidcore::eval::uv::domain(&s),
+            &super::super::uv::domain(&s),
             &Rules::new(0.5, 100.0, floored),
         );
         assert!(
@@ -343,37 +307,29 @@ mod tests {
         assert!(planar(&patch(0.0)));
         assert!(!planar(&patch(0.5)));
         let rules = Rules::new(0.01, 100.0, THIRTY);
-        let FaceSize { h, speed, .. } = face_size(
-            &patch(0.0),
-            &solidcore::eval::uv::domain(&patch(0.0)),
-            &rules,
-        );
-        assert_eq!(h, rules.max_len);
+        let (h, speed) = face_size(&patch(0.0), &super::super::uv::domain(&patch(0.0)), &rules);
+        assert_eq!(h, f64::INFINITY);
         assert!(
             (speed[0] - 4.0).abs() < 1e-9 && (speed[1] - 3.0).abs() < 1e-9,
             "{speed:?}"
         );
         // The twisted patch (a hyperbolic paraboloid) has curvature: a smaller side.
         assert!(
-            face_size(
-                &patch(0.5),
-                &solidcore::eval::uv::domain(&patch(0.5)),
-                &rules
-            )
-            .h < rules.max_len
+            face_size(&patch(0.5), &super::super::uv::domain(&patch(0.5)), &rules).0
+                < rules.max_len
         );
     }
 
     #[test]
     fn a_tiny_radius_does_not_shrink_the_side_below_the_floor() {
         let s = EvalSurface::Revolved {
-            profile: EvalCurve::new(
-                1,
-                vec![0.0, 0.0, 1.0, 1.0],
-                vec![[0.05, 0.0, 0.0, 1.0], [0.05, 0.0, 80.0, 1.0]],
-            ),
-            origin: solidcore::Vec3::ZERO,
-            axis: solidcore::Vec3::Z,
+            profile: EvalCurve {
+                degree: 1,
+                knots: vec![0.0, 0.0, 1.0, 1.0],
+                ctrl: vec![[0.05, 0.0, 0.0, 1.0], [0.05, 0.0, 80.0, 1.0]],
+            },
+            origin: Vec3::ZERO,
+            axis: Vec3::Z,
             transform: [
                 [1.0, 0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0, 0.0],
@@ -382,21 +338,21 @@ mod tests {
             swap: false,
         };
         let rules = Rules::new(0.1, 100.0, THIRTY);
-        let FaceSize { h, .. } = face_size(&s, &solidcore::eval::uv::domain(&s), &rules);
+        let (h, _) = face_size(&s, &super::super::uv::domain(&s), &rules);
         assert!((h - rules.max_len * MIN_LEN_FRACTION).abs() < 1e-9, "{h}");
     }
 
     #[test]
-    fn a_plane_takes_the_longest_side() {
+    fn a_plane_has_no_size_cap() {
         let s = EvalSurface::Plane {
-            origin: solidcore::Vec3::ZERO,
-            du: solidcore::Vec3::X,
-            dv: solidcore::Vec3::Y,
+            origin: Vec3::ZERO,
+            du: Vec3::X,
+            dv: Vec3::Y,
         };
         let rules = Rules::new(0.01, 100.0, THIRTY);
         assert_eq!(
-            face_size(&s, &solidcore::eval::uv::domain(&s), &rules).h,
-            20.0
+            face_size(&s, &super::super::uv::domain(&s), &rules).0,
+            f64::INFINITY
         );
     }
 }

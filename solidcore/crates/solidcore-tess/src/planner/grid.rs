@@ -1,11 +1,7 @@
 //! Structured meshing of a face whose boundary runs along its parameter box: a grid of
 //! interior lines (spaced by the surface's own curvature), joined to the shared edge nodes on
-//! each side by a zipped strip (the larger side fans into the smaller one, so the edge nodes are
-//! used exactly as they are).
-
-use std::cmp::Ordering;
-
-use super::UvMesh;
+//! each side by a zipped strip (after Cadium's structured and zipped grids: the larger side
+//! fans into the smaller one, so the edge nodes are used exactly as they are).
 
 /// Most grid points of one face.
 pub(crate) const MAX_FACE_GRID: usize = 150_000;
@@ -35,7 +31,6 @@ pub(crate) fn thin(us: &mut Vec<f64>, vs: &mut Vec<f64>, cap: usize) {
         if d.len() > n && n >= 2 {
             let len = d.len();
             *d = (0..n)
-                // Proven: n >= 2 checked above, so the divisor n - 1 > 0.
                 .filter_map(|i| d.get(i * (len - 1) / (n - 1)).copied())
                 .collect();
         }
@@ -90,12 +85,12 @@ pub(crate) fn quad(boundary: &[[f64; 2]]) -> Option<Quad> {
     }
     let mut bbox = [(f64::MAX, f64::MIN); 2];
     for p in boundary {
-        for (b, &x) in bbox.iter_mut().zip(p) {
-            *b = (b.0.min(x), b.1.max(x));
+        for d in 0..2 {
+            bbox[d] = (bbox[d].0.min(p[d]), bbox[d].1.max(p[d]));
         }
     }
     let ext = [bbox[0].1 - bbox[0].0, bbox[1].1 - bbox[1].0];
-    if !(ext[0] > 0.0 && ext[1] > 0.0 && ext[0].is_finite() && ext[1].is_finite()) {
+    if !(ext[0] > 0.0 && ext[1] > 0.0) || !(ext[0].is_finite() && ext[1].is_finite()) {
         return None;
     }
     let eps = [ext[0] * 1e-7, ext[1] * 1e-7];
@@ -128,11 +123,8 @@ pub(crate) fn quad(boundary: &[[f64; 2]]) -> Option<Quad> {
     let mut sides: [Vec<u32>; 4] = Default::default();
     let mut seen = 0u8;
     for (k, &c0) in corners.iter().enumerate() {
-        // Proven: the divisor is the constant 4, not zero.
         let c1 = *corners.get((k + 1) % 4)?;
-        // Proven: n = boundary.len() >= 4, checked above.
         let len = (c1 + n - c0) % n;
-        // Proven: n = boundary.len() >= 4, checked above.
         let chain: Vec<usize> = (0..=len).map(|i| (c0 + i) % n).collect();
         let common = chain
             .iter()
@@ -143,22 +135,13 @@ pub(crate) fn quad(boundary: &[[f64; 2]]) -> Option<Quad> {
         }
         seen |= side.bit();
         let d = side.along();
-        // Proven: every index is below n = boundary.len(), a face's boundary nodes, at most
-        // MAX_FACE_NODES (checked by `plan_face`), so fits a u32.
         let mut chain: Vec<u32> = chain.into_iter().map(|i| i as u32).collect();
-        // Proven: `d` is `side.along()`, 0 or 1, and a node is a `[f64; 2]`.
-        #[allow(clippy::indexing_slicing)]
         let coord = |i: &u32| boundary.get(*i as usize).map_or(0.0, |p| p[d]);
         if chain.first().map(coord) > chain.last().map(coord) {
             chain.reverse();
         }
         // The edge nodes must advance along the side.
-        if chain
-            .iter()
-            .zip(chain.iter().skip(1))
-            .any(|(a, b)| coord(a) >= coord(b))
-            && chain.len() > 2
-        {
+        if chain.windows(2).any(|w| coord(&w[0]) >= coord(&w[1])) && chain.len() > 2 {
             return None;
         }
         let slot = SIDES.iter().position(|s| *s == side)?;
@@ -181,12 +164,9 @@ pub(crate) fn aligned_lines(boundary: &[[f64; 2]], q: &Quad, d: usize) -> Option
     }
     let (lo, hi) = q.bbox.get(d).copied()?;
     let eps = (hi - lo) * 1e-9;
-    let mut lines = crate::with_room(a.len())?;
+    let mut lines = Vec::with_capacity(a.len());
     for (i, j) in a.iter().zip(b) {
-        let (x, y) = (
-            *boundary.get(*i as usize)?.get(d)?,
-            *boundary.get(*j as usize)?.get(d)?,
-        );
+        let (x, y) = (boundary.get(*i as usize)?[d], boundary.get(*j as usize)?[d]);
         if (x - y).abs() > eps {
             return None;
         }
@@ -223,7 +203,7 @@ pub(crate) fn strip(boundary: &[[f64; 2]], q: &Quad, d: usize) -> Option<Vec<[u3
         &mut tris,
     )?;
     for t in &tris {
-        if signed_area(boundary, *t)?.partial_cmp(&0.0) != Some(Ordering::Greater) {
+        if !(signed_area(boundary, *t)? > 0.0) {
             return None;
         }
     }
@@ -250,15 +230,12 @@ pub(crate) fn structured(
     q: &Quad,
     us: &[f64],
     vs: &[f64],
-) -> Option<UvMesh> {
+) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
     let (nu, nv) = (us.len(), vs.len());
     if nu == 0 || nv == 0 || nu.checked_mul(nv)? > MAX_FACE_GRID {
         return None;
     }
     let n = u32::try_from(boundary.len()).ok()?;
-    u32::try_from(boundary.len().checked_add(nu * nv)?).ok()?;
-    // Proven: i < nu and j < nv, so n + j · nu + i < boundary.len() + nu · nv, which fits a u32
-    // (checked above; nu · nv <= MAX_FACE_GRID, checked before).
     let g = |i: usize, j: usize| n + (j * nu + i) as u32;
     let mut uv: Vec<[f64; 2]> = boundary.to_vec();
     for &v in vs {
@@ -266,7 +243,7 @@ pub(crate) fn structured(
             uv.push([u, v]);
         }
     }
-    let mut tris: Vec<[u32; 3]> = crate::with_room(2 * (nu + 1) * (nv + 1) + 2 * boundary.len())?;
+    let mut tris: Vec<[u32; 3]> = Vec::with_capacity(2 * (nu + 1) * (nv + 1) + 2 * boundary.len());
     for j in 0..nv.saturating_sub(1) {
         for i in 0..nu.saturating_sub(1) {
             let (a, b, c, d) = (g(i, j), g(i + 1, j), g(i + 1, j + 1), g(i, j + 1));
@@ -289,11 +266,10 @@ pub(crate) fn structured(
     }
     // Every triangle counter-clockwise: one that is not has folded over.
     for t in &tris {
-        if signed_area(&uv, *t)?.partial_cmp(&0.0) != Some(Ordering::Greater) {
+        if !(signed_area(&uv, *t)? > 0.0) {
             return None;
         }
     }
-    // Proven: `uv` starts as `boundary.to_vec()` and only grows.
     let extra = uv.split_off(boundary.len());
     Some((extra, tris))
 }
@@ -319,11 +295,8 @@ fn zip(
     tris: &mut Vec<[u32; 3]>,
 ) -> Option<()> {
     let mut push = |a: u32, b: u32, c: u32| tris.push(if flip { [a, c, b] } else { [a, b, c] });
-    let coord = |chain: &[u32], k: usize| {
-        chain
-            .get(k)
-            .and_then(|i| uv.get(*i as usize)?.get(d).copied())
-    };
+    let coord =
+        |chain: &[u32], k: usize| chain.get(k).and_then(|i| uv.get(*i as usize)).map(|p| p[d]);
     let (mut a, mut b) = (0usize, 0usize);
     while a + 1 < outer.len() || b + 1 < inner.len() {
         let advance_outer = if a + 1 >= outer.len() {

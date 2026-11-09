@@ -1,6 +1,8 @@
-//! A face's surface in the evaluator's form ([`EvalSurface`]), which the planner and the CPU
-//! and GPU evaluators share, on the face's own (u, v): its pcurves and domain are in those
-//! parameters, so its boundary takes them from its edges' exact pcurves as they are. A face's
+//! A face's surface in the kernel evaluator's form ([`EvalSurface`]), which the plan hands to
+//! the CPU and GPU evaluators, and the same surface in tess's own display evaluator's form
+//! ([`fast::EvalSurface`]), which the planner works on, both on the face's own (u, v): its
+//! pcurves and domain are in those parameters, so its boundary takes them from its edges' exact
+//! pcurves as they are. A face's
 //! parameters are a plane or a spline ([`brep::Face::parameters`]): the record holds every
 //! cylinder, cone, sphere, ball patch, torus and revolution as a label with its exact NURBS form,
 //! made by the kernel ([`solidcore::eval::form`]), and refuses one without it. Tess converts
@@ -8,6 +10,8 @@
 //! form is the record's error.
 
 use solidcore::eval::{EvalSurface, SurfaceEval};
+
+use crate::fast;
 use solidcore_convert as kernel;
 use solidcore_record::brep;
 
@@ -33,6 +37,37 @@ pub(crate) fn eval_surface(surface: &brep::Surface) -> Result<EvalSurface> {
     }
 }
 
+/// `s` in the display evaluator's form: the same plane, net or revolution, value for value.
+pub(crate) fn fast_surface(s: &EvalSurface) -> fast::EvalSurface {
+    let v = kernel::record_vec3;
+    match s {
+        EvalSurface::Plane { origin, du, dv } => fast::EvalSurface::Plane {
+            origin: v(*origin),
+            du: v(*du),
+            dv: v(*dv),
+        },
+        EvalSurface::Nurbs(n) => {
+            fast::EvalSurface::nurbs(n.degree(), n.knots().clone(), n.count(), n.ctrl().to_vec())
+        }
+        EvalSurface::Revolved {
+            profile,
+            origin,
+            axis,
+            transform,
+            swap,
+        } => fast::EvalSurface::Revolved {
+            profile: fast::EvalCurve {
+                degree: profile.degree(),
+                knots: profile.knots().to_vec(),
+                ctrl: profile.ctrl().to_vec(),
+            },
+            origin: v(*origin),
+            axis: v(*axis),
+            transform: *transform,
+            swap: *swap,
+        },
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

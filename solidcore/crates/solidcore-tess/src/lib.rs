@@ -19,6 +19,7 @@
 //! Library code never panics, unwraps or indexes on input-derived data: a face the planner
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
+mod fast;
 mod mesh;
 mod par;
 mod plan;
