@@ -26,9 +26,8 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
 A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
-pull request. Work in several steps that isn't safe on `main` until every step has landed goes as stacked
-pull requests into `main`, or on a feature branch for that one piece of work (like `drawings`) that
-lands on `main` through one pull request when it's done.
+pull request. A big feature in several steps goes as stacked pull requests into `main`, each one landing in order
+on top of the one before.
 Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore
