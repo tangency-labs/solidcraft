@@ -1318,6 +1318,49 @@ mod tests {
         );
     }
 
+    /// A bump 10 × 10 over the square, biquadratic, whose rows end in different weight
+    /// ratios across every side (as a variable round's): middle weights 0.8, 0.9, 0.7 along
+    /// u, so the ratios across u = 0 are 0.8, 0.9, 0.7 and across v = 0 are 1, 1.125, 1.
+    fn uneven_bump() -> Surface {
+        let w = [[1.0, 1.0, 1.0], [0.8, 0.9, 0.7], [1.0, 1.0, 1.0]];
+        let z = [[0.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 0.0]];
+        let net = (0..3_u8)
+            .map(|i| {
+                (0..3_u8)
+                    .map(|j| {
+                        let (x, y) = (5.0 * f64::from(i), 5.0 * f64::from(j));
+                        let (a, b) = (usize::from(i), usize::from(j));
+                        let (z, w) = (z[a][b], w[a][b]);
+                        CPoint::new(x * w, y * w, z * w, w)
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let patch = Patch::new(net, 2, 2, knots.clone(), knots).unwrap();
+        Surface::from(BSplineSurface::from_gw_nurb(&patch))
+    }
+
+    /// A line along the normal through the bump's corner (u, v) = (1, 0), from 0.5 below it,
+    /// meets it at the corner, 0.5 along: Krawczyk's box about the corner runs past both sides
+    /// there, whose rows end in different weight ratios, and is enclosed all the same.
+    #[test]
+    fn a_line_through_the_corner_of_a_net_with_uneven_end_weights_meets_it() {
+        let k = Kernel::default();
+        let n = net(&k, &uneven_bump());
+        let (x, su, sv) = n.at(1.0, 0.0).unwrap().unwrap();
+        let normal = su.cross(sv).unitize().unwrap();
+        let x0 = x - normal * 0.5;
+        let guess = Cell::new(None);
+        let tau = line_meets(&n, (point(x0), point(normal)), (x0, normal), &guess)
+            .unwrap()
+            .unwrap();
+        assert!(
+            tau.lo <= 0.5 + 1e-12 && 0.5 - 1e-12 <= tau.hi && tau.hi - tau.lo < 1e-9,
+            "{tau:?}"
+        );
+    }
+
     /// The plane z = 2, the quarter cylinder and the plane x = 1 as a net meet at
     /// (1, √3, 2); and the plane x = 1 with the cylinder and the sphere about (0, 0, 1.5) of
     /// radius √5 at (1, √3, 2.5). Each bound holds the distance from `p` within rounding.
