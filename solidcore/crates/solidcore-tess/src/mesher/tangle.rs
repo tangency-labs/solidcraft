@@ -3,6 +3,7 @@
 //! (two curves running closer together than their chords sag).
 
 
+use super::comp;
 use super::seam;
 use super::uv;
 
@@ -21,10 +22,10 @@ struct Chord {
 
 impl Chord {
     fn lo(&self, d: usize) -> f64 {
-        self.a[d].min(self.b[d])
+        comp(&self.a, d).min(comp(&self.b, d))
     }
     fn hi(&self, d: usize) -> f64 {
-        self.a[d].max(self.b[d])
+        comp(&self.a, d).max(comp(&self.b, d))
     }
 }
 
@@ -50,26 +51,29 @@ pub(crate) fn crossing(s: &super::poles::Face, reach: f64, loops: &[seam::Loop])
             // The loop's closing chord of a loop that winds round the surface ends at the copy of
             // its first node nearest its last; every chord then starts in one period.
             let (mut a, mut b) = (a, b);
-            for d in 0..2 {
-                let Some(per) = dom.period[d] else { continue };
-                b[d] = uv::unwrap(b[d], a[d], Some(per));
-                let back = (a[d].min(b[d]) / per).floor() * per;
-                a[d] -= back;
-                b[d] -= back;
+            for (d, per) in dom.period.into_iter().enumerate() {
+                let Some(per) = per else { continue };
+                let (Some(ad), Some(bd)) = (a.get_mut(d), b.get_mut(d)) else { continue };
+                *bd = uv::unwrap(*bd, *ad, Some(per));
+                let back = (ad.min(*bd) / per).floor() * per;
+                *ad -= back;
+                *bd -= back;
             }
             chords.push(Chord { at: (li, k), a, b });
         }
     }
     // With every chord starting in one period, two chords' copies can only cross where one of
     // them is moved a period along at most: each chord also as its copies a period along.
-    for d in 0..2 {
-        let Some(per) = dom.period[d] else { continue };
+    for (d, per) in dom.period.into_iter().enumerate() {
+        let Some(per) = per else { continue };
         let along: Vec<Chord> = chords
             .iter()
             .map(|c| {
                 let (mut a, mut b) = (c.a, c.b);
-                a[d] += per;
-                b[d] += per;
+                if let (Some(ad), Some(bd)) = (a.get_mut(d), b.get_mut(d)) {
+                    *ad += per;
+                    *bd += per;
+                }
                 Chord { at: c.at, a, b }
             })
             .collect();

@@ -24,11 +24,9 @@
 //!    the edge, as is a body none of whose faces can be planned.
 
 // SolidCraft's mesher, moved here as it is (RFC 0003, item 1.1) so it stays the same text as its
-// history. Its slice indexing is within bounds the code checks before it, and a panic in planning
-// is caught at [`crate::plan`]; checked access (with no catch) and the rest of solidcore's lints
-// come in the next step of the item.
+// history. Its slice indexing is checked access, and a panic in planning is not caught (planning
+// returns its failures as errors); the rest of solidcore's lints come in the next step of the item.
 #![allow(
-    clippy::indexing_slicing,
     clippy::neg_cmp_op_on_partial_ord,
     clippy::type_complexity,
     clippy::single_match_else,
@@ -75,6 +73,18 @@ use solidcore::eval::plan::EvalSurface;
 use crate::{FacePlan, TessPlan};
 
 use crate::{Result, TessError};
+
+/// The three of a triangle's corners (or sides) read from number `k` on, wrapping round.
+pub(crate) fn rot3<T>(mut a: [T; 3], k: usize) -> [T; 3] {
+    a.rotate_left(k % 3);
+    a
+}
+
+/// Component `d` of a parameter pair. `d` is 0 or 1 by construction everywhere it is passed; any
+/// other direction reads as NaN, so no comparison on it holds and nothing is planned from it.
+pub(crate) fn comp(p: &[f64; 2], d: usize) -> f64 {
+    p.get(d).copied().unwrap_or(f64::NAN)
+}
 
 /// Whether [`plan_face`] may leave out of its constrained Delaunay the boundary sides that cross
 /// a side already kept, and not hold the triangles to every side: the last resort for a face
@@ -158,11 +168,10 @@ fn face_edges(f: &brep::Face) -> impl Iterator<Item = &brep::OrientedEdge> {
 }
 
 /// Plan the display tessellation of `b`, a body of size `size` (its box diagonal), at the
-/// tolerance `t` ([`crate::MeshTolerance`]): faces and edges are the record's, in its order. A
-/// panic in planning is caught and returned as [`TessError::Internal`].
+/// tolerance `t` ([`crate::MeshTolerance`]): faces and edges are the record's, in its order.
 pub fn plan(b: &brep::Brep, t: &crate::MeshTolerance, size: f64) -> Result<(TessPlan, PlanStats)> {
     let (tol, turn) = t.rules(size);
-    crate::par::guard("mesh", || plan_at(b, tol, turn))
+    plan_at(b, tol, turn)
 }
 
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
@@ -447,10 +456,12 @@ fn boundary(
                 es.reverse();
             }
             if let (Some(e), Some(&start)) = (end, eq.first()) {
-                for d in 0..2 {
-                    let Some(per) = dom.period[d] else { continue };
-                    if !(pole_along(e, d) || pole_along(start, d)) {
-                        shift[d] = per * ((e[d] - start[d]) / per).round();
+                for (d, per) in dom.period.into_iter().enumerate() {
+                    let Some(per) = per else { continue };
+                    if !(pole_along(e, d) || pole_along(start, d))
+                        && let Some(sh) = shift.get_mut(d)
+                    {
+                        *sh = per * ((comp(&e, d) - comp(&start, d)) / per).round();
                     }
                 }
             }
@@ -461,7 +472,7 @@ fn boundary(
             if let (Some(&v), Some(q)) = (edge.vertices.get(usize::from(!oe.forward)), eq.first_mut()) {
                 match at_vertex.get(&v) {
                     Some(first) => {
-                        if (0..2).all(|d| (first[d] - q[d]).abs() <= 1e-9 * first[d].abs().max(q[d].abs()).max(1.0)) {
+                        if first.iter().zip(q.iter()).all(|(f, x)| (f - x).abs() <= 1e-9 * f.abs().max(x.abs()).max(1.0)) {
                             *q = *first;
                         }
                     }
@@ -479,8 +490,10 @@ fn boundary(
                             })
                         });
                         if let Some(mut w) = same.filter(|w| !(0..2).any(|d| pole_along(*w, d) || pole_along(*q, d))) {
-                            for d in 0..2 {
-                                w[d] = uv::unwrap(w[d], q[d], dom.period[d]);
+                            for (d, per) in dom.period.into_iter().enumerate() {
+                                if let Some(wd) = w.get_mut(d) {
+                                    *wd = uv::unwrap(*wd, comp(q, d), per);
+                                }
                             }
                             *q = w;
                         }
@@ -536,9 +549,11 @@ fn boundary(
                 .map(|((_, w), _)| *w)
                 .min_by(|a, b| (a[0] - q[0]).hypot(a[1] - q[1]).total_cmp(&(b[0] - q[0]).hypot(b[1] - q[1])));
             if let (Some(mut w), Some(slot)) = (partner, out.loops.get_mut(l).and_then(|lp| lp.uv.get_mut(k))) {
-                for d in 0..2 {
-                    if dom.period[d].is_some() {
-                        w[d] = uv::unwrap(w[d], q[d], dom.period[d]);
+                for (d, per) in dom.period.into_iter().enumerate() {
+                    if per.is_some()
+                        && let Some(wd) = w.get_mut(d)
+                    {
+                        *wd = uv::unwrap(*wd, comp(&q, d), per);
                     }
                 }
                 *slot = w;
@@ -922,8 +937,8 @@ fn open_pole_to_pole(s: &poles::Face, dom: &uv::Domain, reach: f64, l: &mut seam
     let n = l.uv.len();
     let poles: Vec<usize> = (0..n).filter(|&k| l.uv.get(k).is_some_and(|q| (0..2).any(|d| s.pole(*q, d, reach)))).collect();
     let [p0, p1] = poles.as_slice() else { return };
-    for d in 0..2 {
-        let Some(per) = dom.period[d] else { continue };
+    for (d, per) in dom.period.into_iter().enumerate() {
+        let Some(per) = per else { continue };
         let near =
             |a: Option<&[f64; 2]>, b: Option<&[f64; 2]>| a.zip(b).is_some_and(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()) <= 1e-9 * per);
         let turns_back = [*p0, *p1].iter().any(|&p| near(l.uv.get((p + n - 1) % n), l.uv.get((p + 1) % n)));
@@ -938,8 +953,8 @@ fn open_pole_to_pole(s: &poles::Face, dom: &uv::Domain, reach: f64, l: &mut seam
         for sign in [1.0, -1.0] {
             let mut moved = l.uv.clone();
             for &k in &second {
-                if let Some(q) = moved.get_mut(k) {
-                    q[d] += sign * per;
+                if let Some(x) = moved.get_mut(k).and_then(|q| q.get_mut(d)) {
+                    *x += sign * per;
                 }
             }
             // The poles as the planner splits them: one copy at each neighbour's parameter.
@@ -948,14 +963,18 @@ fn open_pole_to_pole(s: &poles::Face, dom: &uv::Domain, reach: f64, l: &mut seam
                 let (Some(q), Some(a), Some(b)) = (moved.get(k), moved.get((k + n - 1) % n), moved.get((k + 1) % n)) else { continue };
                 if k == *p0 || k == *p1 {
                     let (mut qa, mut qb) = (*q, *q);
-                    qa[d] = a[d];
-                    qb[d] = b[d];
+                    if let Some(x) = qa.get_mut(d) {
+                        *x = comp(a, d);
+                    }
+                    if let Some(x) = qb.get_mut(d) {
+                        *x = comp(b, d);
+                    }
                     ring.extend([qa, qb]);
                 } else {
                     ring.push(*q);
                 }
             }
-            let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+            let (lo, hi) = ring.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(comp(q, d)), b.max(comp(q, d))));
             if hi - lo <= per * (1.0 + 1e-9) && area2(&ring) > 0.0 {
                 l.uv = moved;
                 return;
@@ -988,8 +1007,8 @@ fn open_at_pole(s: &poles::Face, dom: &uv::Domain, reach: f64, l: &mut seam::Loo
     if n < 4 || l.pts.len() != n {
         return;
     }
-    for d in 0..2 {
-        let Some(per) = dom.period[d] else { continue };
+    for (d, per) in dom.period.into_iter().enumerate() {
+        let Some(per) = per else { continue };
         if (seam::drift(l, d, per).abs() - per).abs() > per * 1e-6 {
             continue;
         }
@@ -1000,17 +1019,17 @@ fn open_at_pole(s: &poles::Face, dom: &uv::Domain, reach: f64, l: &mut seam::Loo
         for &k in &order {
             let Some(mut q) = l.uv.get(k).copied() else { return };
             if let Some(pr) = uv.last() {
-                for e in 0..2 {
-                    q[e] = uv::unwrap(q[e], pr[e], dom.period[e]);
+                for ((qe, pe), per) in q.iter_mut().zip(pr).zip(dom.period) {
+                    *qe = uv::unwrap(*qe, *pe, per);
                 }
             }
             uv.push(q);
         }
         // The pole's free parameter: its predecessor's (the poles are split from it later).
-        if let (Some(prev), Some(q)) = (uv.len().checked_sub(2).and_then(|i| uv.get(i)).copied(), uv.last_mut()) {
-            q[d] = prev[d];
+        if let (Some(prev), Some(x)) = (uv.len().checked_sub(2).and_then(|i| uv.get(i)).copied(), uv.last_mut().and_then(|q| q.get_mut(d))) {
+            *x = comp(&prev, d);
         }
-        let (lo, hi) = uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+        let (lo, hi) = uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(comp(q, d)), b.max(comp(q, d))));
         // Started at the node before the pole, so the loop closes without a jump.
         let mut opened = seam::Loop { uv, pts: order.iter().filter_map(|&k| l.pts.get(k).copied()).collect() };
         opened.uv.rotate_right(2);
@@ -1031,19 +1050,19 @@ fn open_at_pole(s: &poles::Face, dom: &uv::Domain, reach: f64, l: &mut seam::Loo
 fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
     let Some(outer) = loops.iter().map(|l| area2(&l.uv).abs()).enumerate().max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i) else { return };
     let middle = |l: &seam::Loop, d: usize| {
-        let (lo, hi) = l.uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q[d]), b.max(q[d])));
+        let (lo, hi) = l.uv.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(comp(q, d)), b.max(comp(q, d))));
         0.5 * (lo + hi)
     };
-    for d in 0..2 {
-        let Some(per) = dom.period[d] else { continue };
+    for (d, per) in dom.period.into_iter().enumerate() {
+        let Some(per) = per else { continue };
         let Some(centre) = loops.get(outer).map(|l| middle(l, d)) else { continue };
         for (i, l) in loops.iter_mut().enumerate() {
             let k = ((middle(l, d) - centre) / per).round();
             if i == outer || !k.is_finite() || k == 0.0 {
                 continue;
             }
-            for q in &mut l.uv {
-                q[d] -= k * per;
+            for x in l.uv.iter_mut().filter_map(|q| q.get_mut(d)) {
+                *x -= k * per;
             }
         }
     }
@@ -1114,7 +1133,7 @@ fn plan_face(
     for l in projected.iter_mut() {
         open_at_pole(s, &dom, reach, l);
     }
-    let wound: Vec<usize> = (0..2).filter(|&d| dom.period[d].is_some_and(|per| seam::winds(&projected, d, per))).collect();
+    let wound: Vec<usize> = (0..2).filter(|&d| dom.period.get(d).copied().flatten().is_some_and(|per| seam::winds(&projected, d, per))).collect();
     // A face cut along a seam is a long winding strip whose sides are the cut lines and the
     // boundary in turn: Delaunay with sag refinement meshes it (the patch layouts below assume
     // boundary all round, and leave fans across the strip's corners off the surface).
@@ -1122,7 +1141,7 @@ fn plan_face(
     match wound.as_slice() {
         [] => {}
         [d] => {
-            let per = dom.period[*d].unwrap_or(std::f64::consts::TAU);
+            let per = dom.period.get(*d).copied().flatten().unwrap_or(std::f64::consts::TAU);
             projected = seam::cut(s, &projected, *d, per, rules, h).ok_or_else(|| fail("boundary winds around the surface"))?;
         }
         _ => return Err(fail("boundary winds around the surface both ways")),
@@ -1151,11 +1170,15 @@ fn plan_face(
                 (Some(d), Some(a), Some(b)) => {
                     let mut qa = *q;
                     let mut qb = *q;
-                    qa[d] = a[d];
-                    qb[d] = b[d];
+                    if let Some(x) = qa.get_mut(d) {
+                        *x = comp(&a, d);
+                    }
+                    if let Some(x) = qb.get_mut(d) {
+                        *x = comp(&b, d);
+                    }
                     uvs.push(qa);
                     fixed.push(*p);
-                    if (qa[d] - qb[d]).abs() > 1e-12 {
+                    if (comp(&qa, d) - comp(&qb, d)).abs() > 1e-12 {
                         uvs.push(qb);
                         fixed.push(*p);
                     }
@@ -1173,8 +1196,8 @@ fn plan_face(
     }
     let mut bbox = [(f64::MAX, f64::MIN); 2];
     for p in &uvs {
-        for d in 0..2 {
-            bbox[d] = (bbox[d].0.min(p[d]), bbox[d].1.max(p[d]));
+        for (bb, x) in bbox.iter_mut().zip(p) {
+            *bb = (bb.0.min(*x), bb.1.max(*x));
         }
     }
     // Constrained Delaunay in (u, v) scaled to millimetres: equilateral seeds of side `h`,
@@ -1211,11 +1234,12 @@ fn plan_face(
                 // Interior lines: the boundary's own where opposite sides agree (refined where the
                 // surface turns more between them inside the face), else the division.
                 let lines = |d: usize, div: &Vec<f64>| {
-                    let inner = |l: Vec<f64>| l.into_iter().filter(|x| *x > bbox[d].0 && *x < bbox[d].1).collect::<Vec<f64>>();
+                    let (Some(&(b0, b1)), Some(&across)) = (bbox.get(d), bbox.get(1 - d)) else { return Vec::new() };
+                    let inner = |l: Vec<f64>| l.into_iter().filter(|x| *x > b0 && *x < b1).collect::<Vec<f64>>();
                     match grid::aligned_lines(&uvs, &q, d) {
                         Some(aligned) => {
-                            let ends: Vec<f64> = std::iter::once(bbox[d].0).chain(aligned).chain(std::iter::once(bbox[d].1)).collect();
-                            inner(uv::refine(s, d, &ends, bbox[1 - d], rules, h, MAX_LINES))
+                            let ends: Vec<f64> = std::iter::once(b0).chain(aligned).chain(std::iter::once(b1)).collect();
+                            inner(uv::refine(s, d, &ends, across, rules, h, MAX_LINES))
                         }
                         None => inner(div.clone()),
                     }
@@ -1368,8 +1392,8 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
         let lpos: Vec<Vec3> = ids.iter().map(|&k| pos.get(k as usize).copied()).collect::<Option<_>>()?;
         let mut bbox = [(f64::MAX, f64::MIN); 2];
         for p in &luv {
-            for d in 0..2 {
-                bbox[d] = (bbox[d].0.min(p[d]), bbox[d].1.max(p[d]));
+            for (bb, x) in bbox.iter_mut().zip(p) {
+                *bb = (bb.0.min(*x), bb.1.max(*x));
             }
         }
         let clip = |lines: &[f64], (a, b): (f64, f64)| -> Vec<f64> {
@@ -1395,9 +1419,9 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
             let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
             for k in 0..m {
                 let q = at(k)?;
-                for d in 0..2 {
-                    lo[d] = lo[d].min(q[d]);
-                    hi[d] = hi[d].max(q[d]);
+                for ((lo_d, hi_d), qd) in lo.iter_mut().zip(hi.iter_mut()).zip(q) {
+                    *lo_d = lo_d.min(qd);
+                    *hi_d = hi_d.max(qd);
                 }
             }
             let (w, h) = (hi[0] - lo[0], hi[1] - lo[1]);
@@ -1559,8 +1583,8 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], uvs: &[[f6
     };
     let mut sides: HashMap<(u32, u32), u32> = HashMap::with_capacity(triangles.len() * 3);
     for t in triangles {
-        for e in 0..3 {
-            if let Some(k) = side(t[e], t[(e + 1) % 3]) {
+        for [a, b, _] in (0..3).map(|e| rot3(*t, e)) {
+            if let Some(k) = side(a, b) {
                 *sides.entry(k).or_default() += 1;
             }
         }
