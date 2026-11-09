@@ -244,6 +244,58 @@ fn numbered_projection_refuses_a_pick_inside_a_hole_in_the_named_face() {
     assert!(pick(0.).is_none(), "the pick is on the plane but inside the hole");
 }
 
+/// A tangent plane on a cylinder saved by 0.30.1, whose kernel split the round side into numbered
+/// pieces, names it `F2:side:c1#2`; the side is one face now (#13252). The plane, and the sketch
+/// on it, are found again when the cylinder is still the body its feature made; a piece that
+/// another face of the surface could be (a split side) or a pick off the face is not.
+#[test]
+fn a_tangent_plane_on_a_numbered_piece_of_a_round_face_is_found_again() {
+    let doc = |name: &str, at: [f64; 3]| Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [{"fixed": true, "id": "origin", "pos": [0., 0.]}, {"fixed": false, "id": "c1.center", "pos": [0., 0.]}],
+                    "curves": [{"c": 1, "construction": false, "id": "c1", "r": 10., "type": "circle"}],
+                    "constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}],
+                    "counters": {"k": 1, "l": 0, "p": 1}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "20"},
+                "operation": "new_body", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1
+            },
+            {
+                "id": 3, "name": "Plane1", "type": "construction_plane", "suppressed": false,
+                "plane": {"type": "tangent", "at": at, "face": {"type": "face", "at": at, "name": name}}
+            },
+            {
+                "id": 4, "name": "Sketch2", "type": "sketch", "plane": {"feature": 3, "type": "construction"},
+                "sketch": {"points": [{"fixed": true, "id": "origin", "pos": [0., 0.]}], "curves": [], "constraints": [], "counters": {}}
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let run = |doc: Document| {
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let whole = run(doc("F2:side:c1", [10., 0., 10.]));
+    assert!(whole.result(3).unwrap().error.is_none(), "{:?}", whole.result(3));
+    for piece in ["F2:side:c1#1", "F2:side:c1#2"] {
+        let model = run(doc(piece, [10., 0., 10.]));
+        assert!(model.result(3).unwrap().error.is_none(), "{piece}: {:?}", model.result(3));
+        assert!(model.result(4).unwrap().error.is_none(), "{piece}: {:?}", model.result(4));
+    }
+    // A pick that is not on the face is still lost.
+    let off = run(doc("F2:side:c1#2", [10., 0., 30.]));
+    assert!(off.result(3).unwrap().error.is_some());
+}
+
 /// An edge picked when its side face was split in two keeps the piece in its name
 /// (`F2:side:l1#[F2:start]`); once the side is one face again the edge is still found (#11731).
 #[test]

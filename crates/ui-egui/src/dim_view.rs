@@ -895,7 +895,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // Unplaced linear dimensions sit outside the shape they measure.
         let away = first_point(sk, &c.kind).and_then(|p| centres.get(p).copied()).unwrap_or(anchor);
         let reach = dim_reach(sk, &c.kind);
-        let mut text = c.text.or_else(|| default_text(&frame, away, px));
+        let mut text = c.text.or_else(|| default_text(&frame, away, px, half));
         let mut lay = dim_layout_reaching(&frame, text, px, half, reach);
         // #44: a text that would land on an already-drawn dimension's text steps to the next
         // row — across the dimension line for a linear one, out from the centre for the rest —
@@ -906,7 +906,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 break;
             }
             let row = (f64::from(size.y) + 2.0) * px;
-            let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
+            let base = text.unwrap_or_else(|| default_text_offset(&frame, px, half));
             text = Some(match frame {
                 DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
                 _ => base + base.normalized().unwrap_or(Vec2::X) * row,

@@ -165,7 +165,17 @@ job (§5.1).
 | `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_offset`; `sheets.rs`, `proved_singular` |
 | `OffsetFailure::Folds` | the offset of a NURB-based face is not certified regular over its parameter box | the face, the distance and `largest`, the least radius on the displaced side | with `shell_one_construction` only | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
-| `OffsetFailure::WallsTouch`, `LoopsCross`, `EdgeVanishes` | an offset face's loops touch or cross, or a vertex moves past its edge's end | the face or the edge | per their flags | `error/offset.rs` |
+| `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
+| `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
+| `OffsetFailure::LoopGapUncertified` | the loop-gap solve could not establish a boundary within tolerance | the original input face, when available | always | `offset_executive/step_gaps.rs` |
+
+The static `offset_brep` entry point reports an ordinary failure of `do_solid_offset` with
+status `SM_ERR` and retains the stage's original error as its cause
+(`collapse_offset_status`, `offset_executive/p2.rs`). Callers can inspect
+`SolidError::cause` or `root_cause` for a typed reason when the stage supplies one; not every
+earlier failure has an `OffsetFailure`. The post-construction manifold gate instead reports
+`OffsetFailure::Unsound` directly. A refusal before that gate does not assert that the
+unbuilt result was non-manifold.
 
 **The regularity test** (`certify_regular`) multiplies det(I − d W) out in homogeneous forms:
 Q = X⁴ − d w² X H + d² w⁴ K, with X² = |A_u × A_v|² and H, K built from the first and second
@@ -343,8 +353,9 @@ A reviewer checks each of these on a change to offsets or shells.
 3. **No folded body.** A face whose offset folds or collapses is refused before its offset is
    built, naming the face, the distance and the radius; it is never built and trimmed. (The fold
    refusal is opt-in today, §4.2.)
-4. **Typed refusals.** Every refusal is an `OffsetFailure` with its entity, passed through ops
-   with its size (today only `Folds` is, §4.2).
+4. **Typed refusals.** A refusal should name its entity and size in `OffsetFailure` and pass
+   through ops; today only `Folds` passes its size through ops (§4.2), and some earlier
+   failures have no typed offset reason.
 5. **The reach is derived.** A face's extension is its reach plus one offset, from its edges'
    geometry (`extension_reach`); a new fixed multiple of the distance is a regression. The local
    operation's 2.5 radii is the one exception, stated in its code.
