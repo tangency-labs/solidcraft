@@ -158,6 +158,32 @@ fn unsupported_joints_are_named() {
 }
 
 #[test]
+fn active_joint_limits_are_refused_instead_of_simulating_through_the_stop() {
+    let mut s = Session::default();
+    frame(&mut s);
+    bar(&mut s, "Bar", 0.0);
+    run(&mut s, "joint.limits", json!({"joint":"Bar hinge","min":0,"max":90}));
+    run(&mut s, "joint.drive", json!({"joint":"Bar hinge","value":2}));
+    let before = s.doc.occurrences.clone();
+    let e = s.execute("motion.simulate", &json!({"duration":0.5})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet") && e.contains("Bar hinge") && e.contains("limits"), "{e}");
+    assert_eq!(s.doc.occurrences, before, "refusing unsupported stops leaves the design in place");
+
+    // A suppressed joint does not constrain the moving body, so its stored limits do not apply.
+    run(&mut s, "joint.edit", json!({"joint":"Bar hinge","suppressed":true}));
+    let r = run(&mut s, "motion.simulate", json!({"duration":0.001}));
+    assert_eq!(r["joints"], json!([]));
+
+    // Nor does a joint between two grounded groups constrain a body being simulated.
+    run(&mut s, "occurrence.ground", json!({"occurrence":"Bar:1","grounded":true}));
+    run(&mut s, "joint.edit", json!({"joint":"Bar hinge","suppressed":false}));
+    part(&mut s, "Free", false, [10.0, 10.0, 10.0], [100.0, 0.0, 0.0]);
+    let r = run(&mut s, "motion.simulate", json!({"duration":0.001}));
+    assert_eq!(r["joints"], json!([]));
+    assert_eq!(r["groups"].as_array().map(Vec::len), Some(1));
+}
+
+#[test]
 fn hostile_parameters_are_refused() {
     let mut s = Session::default();
     // Nothing to simulate: the command is disabled.

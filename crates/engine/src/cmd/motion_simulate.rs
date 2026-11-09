@@ -148,6 +148,9 @@ pub(crate) fn model_of(s: &Session, gravity: Vec3) -> Result<(Model, Mapping)> {
         if ga == gb || (!map.bodies.contains_key(&ga) && !map.bodies.contains_key(&gb)) {
             continue;
         }
+        if j.limits.iter().take(j.kind.dofs().len()).any(Option::is_some) {
+            return Err(bad(CMD, format!("not supported yet: joint '{}' has motion limits", j.name)));
+        }
         let kind = match j.kind {
             JointKind::Rigid => dyn_::JointKind::Rigid,
             JointKind::Revolute => dyn_::JointKind::Revolute,
