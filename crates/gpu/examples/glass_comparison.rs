@@ -2,6 +2,7 @@
 //! Run with `--features solidcraft-render/raytrace-cpu`; output directory must not exist.
 use serde_json::json;
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_geom::{Aabb3, Mesh, Vec3Geom};
 use solidcraft_render::{
     Camera, ProductMesh, ProductScene,

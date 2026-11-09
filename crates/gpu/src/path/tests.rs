@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_render::{Camera, ProductMesh, StandardView, surface::OpaqueSurface};
 

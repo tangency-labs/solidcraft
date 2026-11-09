@@ -1,6 +1,7 @@
 //! Device execution for layered weathering and nondestructive presentation.
 use super::*;
 use serde_json::json;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::{
     JobId, Phase,
     aging::{AgingKind, AgingLayer, AgingStack, BodyName, BodyTarget},

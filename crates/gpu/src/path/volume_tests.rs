@@ -1,4 +1,5 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::{StudioLighting, volume::HomogeneousVolume};
 
 fn empty() -> ProductScene {

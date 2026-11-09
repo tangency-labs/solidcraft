@@ -3,6 +3,7 @@
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_geom::Mesh;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::job::{CpuBudget, CpuHost, DirectionalLightOptions, ImageRequest, Integrator, JobId, JobOptions, Phase, RaytraceOptions};
 use solidcraft_render::{Camera, ProductMesh, ProductScene, StandardView, surface::OpaqueSurface};
 use std::{error::Error, fs, path::PathBuf, sync::Arc, time::Duration};

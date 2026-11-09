@@ -114,6 +114,7 @@ pub(super) fn ids(triangles: &[Triangle], cancel: &CancelToken) -> Result<Vec<u3
 mod tests {
     use super::*;
     use solidcore_record::Vec3;
+    use solidcraft_geom::MeshGeom;
     use solidcraft_render::surface::OpaqueSurface;
 
     fn triangle(p: [[f64; 3]; 3], body: u32) -> Triangle {

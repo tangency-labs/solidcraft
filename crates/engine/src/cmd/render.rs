@@ -1,5 +1,6 @@
 //! Render capability discovery and persistent intent. No rendering or host probing.
 
+use solidcraft_geom::MeshGeom;
 use std::sync::Arc;
 
 use serde::Deserialize;

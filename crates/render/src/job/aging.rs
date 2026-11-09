@@ -4,6 +4,7 @@
 use super::{ErrorCode, JobError, Result};
 use crate::{ProductScene, surface::srgb8_to_linear};
 use serde::{Deserialize, Serialize, de, ser::SerializeSeq};
+use solidcraft_geom::MeshGeom;
 use std::fmt;
 
 pub const MAX_AGING_LAYERS: usize = 8;

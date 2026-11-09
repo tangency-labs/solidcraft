@@ -1288,6 +1288,18 @@ mod tests {
         assert!(sc.meshes.iter().any(|m| m.face_colors.iter().any(|(_, c)| *c == Rgb(40, 170, 80))));
     }
 
+    /// A headless picture draws each body's own display mesh, the allocation the model holds:
+    /// the renderer's mesh is the model's type, so nothing is copied or converted on the way.
+    #[test]
+    fn snapshot_scene_shares_the_bodies_meshes() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let sc = scene(&s, &home_camera(&s).unwrap()).unwrap();
+        let state = s.model.state();
+        let body = state.bodies.first().unwrap().mesh();
+        assert!(sc.meshes.iter().any(|m| Arc::ptr_eq(&m.mesh, &body)));
+    }
+
     /// A render can leave out the ground grid and the origin's axes (a box straddling Z 0 is cut
     /// through by the grid), each on its own; the body's own lines stay.
     #[test]

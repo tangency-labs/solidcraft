@@ -3,6 +3,7 @@
 use crate::{Result, params::bad};
 use serde::Deserialize;
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::{
     ProductScene,
     surface::{OpaqueSurface, srgb8_to_linear},

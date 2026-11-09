@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_geom::{Aabb3, Mesh, MeshGeom};
 
 fn fixed_request_metadata_bytes() -> u64 {
     request().retained_resource_metadata_bytes()

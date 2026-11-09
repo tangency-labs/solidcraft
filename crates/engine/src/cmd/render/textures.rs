@@ -1,6 +1,7 @@
 //! Bounded immutable file capture; decoding is deferred to the admitted worker.
 use crate::{Result, params::bad};
 use serde::Deserialize;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::{
     ProductScene,
     job::textures::{BaseColorMode, MAX_TEXTURE_BINDINGS, MAX_TEXTURE_SOURCE_BYTES, PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},

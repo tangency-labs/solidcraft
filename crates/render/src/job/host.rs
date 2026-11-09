@@ -2366,6 +2366,7 @@ fn native_worker(shared: Arc<Shared>) {
 #[cfg(test)]
 mod retained_request_tests {
     use super::*;
+    use solidcraft_geom::MeshGeom;
 
     #[test]
     fn retained_native_options_charge_actual_single_capacity_only_for_structural_nondefaults() {

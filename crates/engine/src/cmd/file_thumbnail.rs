@@ -1,6 +1,7 @@
 //! A portable picture from warm display meshes only; never evaluate on save.
 use crate::Session;
 use solidcraft_geom::Aabb3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {

@@ -2,6 +2,7 @@
 //! design with many bodies must not make every frame or every click slower per body squared.
 
 use serde_json::json;
+use solidcraft_engine::geom::MeshGeom;
 
 use crate::scenario::Harness;
 
