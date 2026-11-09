@@ -12062,7 +12062,7 @@ mod tests {
             frame(&mut app, Some(exposed), -120.0);
             assert_ne!(app.cam.half_height(), height);
             // Closing the popup returns its former area to the viewport.
-            app.prefs_window.open = false;
+            app.prefs_window.shell.open = false;
             for _ in 0..12 {
                 frame(&mut app, Some(list), 0.0);
             }

@@ -2171,7 +2171,7 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
         for (index, page) in crate::prefs::PAGES.iter().enumerate() {
             crate::prefs::open_at(&mut h.app, index);
             h.frames(3);
-            assert_eq!(h.app.prefs_window.section, index);
+            assert_eq!(h.app.prefs_window.shell.section, index);
             let nav = scenario::rect_of("dialog:pages").unwrap();
             let row = scenario::rect_of(&format!("prefs:page:{page}")).unwrap();
             assert!(nav.contains_rect(row), "{dark}: {page} stays visible");

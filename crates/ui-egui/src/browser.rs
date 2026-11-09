@@ -2107,10 +2107,10 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
     if draw_row(ui, ui.scope_id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
-        if app.prefs_window.open {
-            crate::prefs::close(app, true);
+        if app.prefs_window.shell.open {
+            crate::prefs_window::close(app, true);
         } else {
-            app.prefs_window.open = true;
+            app.prefs_window.shell.open = true;
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());

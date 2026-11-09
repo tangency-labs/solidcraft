@@ -1857,7 +1857,7 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
         assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences owns its Cancel target");
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
-        assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
+        assert!(!h.app.prefs_window.shell.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(h.app.dialog.is_none());
     }
@@ -2045,7 +2045,7 @@ fn embed_editor_keeps_the_ribbon_and_leaves_files_to_the_host() {
     }
     h.settle();
     assert_eq!((h.app.docs.count(), h.app.session.revision), (docs, revision));
-    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.open, "{}", h.call("ui.inspect", json!({})));
+    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.shell.open, "{}", h.call("ui.inspect", json!({})));
     // Undo stays the design's own.
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     h.settle();

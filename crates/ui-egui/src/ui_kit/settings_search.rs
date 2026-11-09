@@ -854,7 +854,7 @@ mod tests {
         for label in
             ["Onyx", "Follow system", "One theme", "Carousel", "Grid", "Day theme", "Night theme", "High contrast", "Import theme file…", "Imported"]
         {
-            h.app.prefs_window.filter = label.to_owned();
+            h.app.prefs_window.shell.filter = label.to_owned();
             h.frames(5);
             let (_, _, hits) = nav(&h.ctx);
             let matches: Vec<_> =
@@ -896,7 +896,7 @@ mod tests {
                 ("Live viewport details", "Live details", "prefs:viewport_status_details"),
                 ("Fold viewport status items", "Fold items", "prefs:viewport_status_summary"),
             ] {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> =
@@ -908,8 +908,8 @@ mod tests {
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 // Enter restores the full page; let its normal scroll animation settle.
                 h.frames(20);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
-                assert!(h.app.prefs_window.filter.is_empty());
+                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
+                assert!(h.app.prefs_window.shell.filter.is_empty());
                 let page = crate::scenario::rect_of("dialog:page_body").unwrap();
                 let target = crate::scenario::rect_of(handle).unwrap();
                 assert!(page.contains_rect(target), "{query} reveals the real control: page={page:?}, target={target:?}");
@@ -932,7 +932,7 @@ mod tests {
                 ("Background", "Background", "dialog:row:Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
                 ("Font", "Font", "dialog:row:Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
             ] {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
@@ -1006,7 +1006,7 @@ mod tests {
                 ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
                 ("Position", None),
             ] {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().filter(|hit| hit.page == crate::prefs::PAGE_LAYOUT && hit.label == query).collect();
@@ -1161,7 +1161,7 @@ mod tests {
             ("print face highlight", "Print face highlight"),
             ("interface language", "Interface language"),
         ] {
-            h.app.prefs_window.filter = query.into();
+            h.app.prefs_window.shell.filter = query.into();
             h.frames(4);
             let body = crate::scenario::rect_of("prefs:page_body").unwrap();
             let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
@@ -1206,7 +1206,7 @@ mod tests {
         h.app.updater.kind = Some(crate::update::InstallKind::Dev);
         assert!(!crate::update::available(&mut h.app));
         let label = "Check at start and once a day";
-        h.app.prefs_window.filter = label.into();
+        h.app.prefs_window.shell.filter = label.into();
         for checked in [false, true] {
             h.app.preferences.check_updates = checked;
             h.frames(4);
@@ -1260,7 +1260,7 @@ mod tests {
         h.step(&serde_json::json!({"text": "zo"})).expect("type");
         h.frames(20);
         assert!(h.widget("Reverse zoom direction").is_some(), "typed letters search from the open page");
-        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
+        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
         let first = crate::scenario::handle_at("prefs:search:current");
         h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
         h.frames(1);
@@ -1278,8 +1278,8 @@ mod tests {
         h.frames(2);
         h.step(&serde_json::json!({"key": "Enter"})).expect("open");
         h.frames(2);
-        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
-        assert!(h.app.prefs_window.filter.is_empty());
+        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
+        assert!(h.app.prefs_window.shell.filter.is_empty());
         assert!(h.widget("Reverse zoom direction").is_some());
         assert!(crate::scenario::handle_at("prefs:revealed").is_some(), "the opened row is highlighted");
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GRAPHICS);
@@ -1288,8 +1288,8 @@ mod tests {
         h.frames(2);
         h.step(&serde_json::json!({"key": "Escape"})).expect("clear");
         h.frames(1);
-        assert!(h.app.prefs_window.filter.is_empty());
-        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS, "Escape returns to the page from before the search");
+        assert!(h.app.prefs_window.shell.filter.is_empty());
+        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS, "Escape returns to the page from before the search");
     }
 
     #[test]
@@ -1310,7 +1310,7 @@ mod tests {
                 ("Whole bodies", "prefs:pick_bodies:bodies", "Whole bodies"),
             ] {
                 h.call("ui.prefs", serde_json::json!({"open":"General"}));
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH).collect();
@@ -1328,8 +1328,8 @@ mod tests {
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 // Enter restores the full page; allow its scroll animation to settle.
                 h.frames(20);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_SKETCH);
-                assert!(h.app.prefs_window.filter.is_empty());
+                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SKETCH);
+                assert!(h.app.prefs_window.shell.filter.is_empty());
                 let body = crate::scenario::rect_of("dialog:page_body").unwrap();
                 let actual = crate::scenario::rect_of(target).unwrap();
                 let revealed = crate::scenario::handle_at("prefs:revealed").expect("Enter publishes an actual reveal target");
@@ -1391,7 +1391,7 @@ mod tests {
         assert!(field.contains_rect(h.ctx.read_response(focused).expect("focused editor response").rect));
         h.step(&serde_json::json!({"text": "7"})).expect("type");
         h.frames(2);
-        assert!(h.app.prefs_window.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.filter);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.shell.filter);
     }
 
     /// The selected match is scrolled to when the arrows move it, not on every frame, so the
@@ -1418,7 +1418,7 @@ mod tests {
                 ("Position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
             ] {
                 h.call("ui.prefs", serde_json::json!({"open":"General"}));
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matching: Vec<_> =
@@ -1428,8 +1428,8 @@ mod tests {
                 h.frames(2);
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 h.frames(20);
-                assert_eq!(h.app.prefs_window.section, page);
-                assert!(h.app.prefs_window.filter.is_empty());
+                assert_eq!(h.app.prefs_window.shell.section, page);
+                assert!(h.app.prefs_window.shell.filter.is_empty());
                 let body = crate::scenario::rect_of("dialog:page_body").unwrap();
                 assert!(body.contains_rect(crate::scenario::rect_of(target).unwrap()), "{query} reveals its live control");
             }
@@ -1442,7 +1442,7 @@ mod tests {
         h.app.home.open = false;
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
         h.frames(2);
-        h.app.prefs_window.filter = "view".into();
+        h.app.prefs_window.shell.filter = "view".into();
         h.frames(20);
         let first = crate::scenario::handle_at("prefs:search:current").expect("first match");
         let wheel = egui::Event::MouseWheel {
@@ -1475,11 +1475,11 @@ mod tests {
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
         h.frames(2);
         assert!(h.widget("Units of new designs").is_none(), "another page stays put until a search");
-        h.app.prefs_window.filter = "units".into();
+        h.app.prefs_window.shell.filter = "units".into();
         h.frames(20);
         assert!(h.widget("Units of new designs").is_some(), "a row is found from its label");
         assert!(h.widget("Reverse zoom direction").is_none());
-        h.app.prefs_window.filter = "zoom".into();
+        h.app.prefs_window.shell.filter = "zoom".into();
         h.frames(20);
         assert!(h.widget("Reverse zoom direction").is_some());
         assert!(h.widget("Units of new designs").is_none());
@@ -1491,32 +1491,32 @@ mod tests {
         let gap = hit[1] - f64::from(search.y);
         assert!(gap < 520.0, "search results leave a {gap:.0}px gap under the field");
         assert!(h.widget("Translation X").is_none(), "unmatched pages do not stack on the result");
-        h.app.prefs_window.filter = "extrude".into();
+        h.app.prefs_window.shell.filter = "extrude".into();
         h.frames(20);
         assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_some(), "shortcut matches collapse to one row");
         assert!(crate::scenario::rect_of("dialog:cell:Extrude").is_none(), "the shortcut list stays closed");
         h.step(&serde_json::json!({"click": {"handle": "prefs:search:clear"}})).expect("clear");
         h.frames(2);
-        assert!(h.app.prefs_window.filter.is_empty(), "the search X clears the field");
-        h.app.prefs_window.filter = "fusion".into();
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "the search X clears the field");
+        h.app.prefs_window.shell.filter = "fusion".into();
         h.frames(20);
         assert!(h.widget("Mouse mapping").is_some(), "the dropdown's current value counts");
-        h.app.prefs_window.filter = "zzzz-no-setting".into();
+        h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
         h.frames(2);
         assert!(h.widget("No matching preferences").is_some());
-        h.app.prefs_window.filter = "units".into();
+        h.app.prefs_window.shell.filter = "units".into();
         h.frames(2);
         h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("design page");
         h.frames(2);
-        assert!(h.app.prefs_window.filter.is_empty(), "a page tab clears the search");
-        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_DESIGN);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "a page tab clears the search");
+        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_DESIGN);
         assert!(h.widget("Units of new designs").is_some(), "the tab shows its own page");
         assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_none(), "shortcut matches leave with the search");
-        h.app.prefs_window.filter = "zoom".into();
+        h.app.prefs_window.shell.filter = "zoom".into();
         h.frames(2);
         h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("same page");
         h.frames(2);
-        assert!(h.app.prefs_window.filter.is_empty(), "the current tab also clears the search");
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "the current tab also clears the search");
         assert!(h.widget("Reverse zoom direction").is_none());
         assert!(h.widget("Units of new designs").is_some());
     }
@@ -1542,20 +1542,20 @@ mod tests {
             ("On hover", "On hover"),
         ];
         for (query, label) in rows {
-            h.app.prefs_window.filter = query.into();
+            h.app.prefs_window.shell.filter = query.into();
             h.frames(4);
             assert!(drawn(&h, label), "searching '{query}' should show '{label}'");
         }
-        h.app.prefs_window.filter = "status bar".into();
+        h.app.prefs_window.shell.filter = "status bar".into();
         h.frames(4);
         assert!(!drawn(&h, "Keep the Sketch tab shown"), "a row that does not match stays out of the result");
         // Three unlabelled rows sit under one labelled row: each is found on its own words only.
-        h.app.prefs_window.filter = "sketch tab shown".into();
+        h.app.prefs_window.shell.filter = "sketch tab shown".into();
         h.frames(4);
         assert!(drawn(&h, "Keep the Sketch tab shown"));
         assert!(!drawn(&h, "Highlight active commands"), "its neighbour is not a match");
         assert!(!drawn(&h, "Show search results in the ribbon"), "its neighbour is not a match");
-        h.app.prefs_window.filter = "zzzz-no-setting".into();
+        h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
         h.frames(4);
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
     }
@@ -1579,7 +1579,7 @@ mod tests {
                 ("Show X/Y/Z distances", "settings.measure_axis_distances", crate::prefs::PAGE_TOOLS, "prefs:measure_axis_distances"),
                 ("Show tool at cursor", "Show tool at cursor", crate::prefs::PAGE_TOOLS, "view:tool_cursor"),
             ] {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let label = h.app.tr(id);
@@ -1590,8 +1590,8 @@ mod tests {
                 h.step(&serde_json::json!({"key":"Enter"})).unwrap();
                 // Let the normal scroll animation settle after opening the longer Design page.
                 h.frames(20);
-                assert_eq!(h.app.prefs_window.section, page);
-                assert!(h.app.prefs_window.filter.is_empty());
+                assert_eq!(h.app.prefs_window.shell.section, page);
+                assert!(h.app.prefs_window.shell.filter.is_empty());
                 let body = crate::scenario::rect_of("dialog:page_body").unwrap();
                 let target = crate::scenario::rect_of(handle).unwrap();
                 assert!(body.contains_rect(target), "{language}: {query} reveals {handle}: body={body:?}, target={target:?}");
@@ -1610,7 +1610,7 @@ mod tests {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
-            h.app.prefs_window.filter = query.into();
+            h.app.prefs_window.shell.filter = query.into();
             h.frames(4);
             assert!(h.widget(path).is_some(), "{query} shows {path}");
             let (_, _, hits) = nav(&h.ctx);
@@ -1619,8 +1619,8 @@ mod tests {
             h.frames(2);
             h.step(&serde_json::json!({"key":"Enter"})).unwrap();
             h.frames(2);
-            assert_eq!(h.app.prefs_window.section, page);
-            assert!(h.app.prefs_window.filter.is_empty());
+            assert_eq!(h.app.prefs_window.shell.section, page);
+            assert!(h.app.prefs_window.shell.filter.is_empty());
             assert!(h.widget(query).is_some());
         }
     }
@@ -1638,7 +1638,7 @@ mod tests {
             h.step(&json!({"text":"solid.extrude"})).unwrap();
             let command = solidcraft_engine::command_specs().last().unwrap().id;
             let original = crate::toolbar_custom::export(&h.app);
-            h.app.prefs_window.filter = command.into();
+            h.app.prefs_window.shell.filter = command.into();
             h.frames(4);
             let (_, _, hits) = nav(&h.ctx);
             let matches: Vec<_> =
@@ -1648,8 +1648,8 @@ mod tests {
             h.frames(2);
             h.step(&json!({"key":"Enter"})).unwrap();
             h.frames(30);
-            assert!(h.app.prefs_window.filter.is_empty());
-            assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_SHORTCUTS);
+            assert!(h.app.prefs_window.shell.filter.is_empty());
+            assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
             let target = crate::scenario::rect_of(&format!("keymap:capture:{command}")).unwrap();
             let body = crate::scenario::rect_of("dialog:page_body").unwrap();
             assert!(body.contains_rect(target), "Enter reveals the actual off-screen command, clearing the old local filter");
@@ -1674,7 +1674,7 @@ mod tests {
                 ("Do everything", "prefs:ai_mode:all"),
                 ("Limited", "prefs:agent_chat_turn_limit:mode"),
             ] {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
                 let matches: Vec<_> =
@@ -1684,7 +1684,7 @@ mod tests {
                 h.frames(2);
                 h.step(&json!({"key":"Enter"})).unwrap();
                 h.frames(30);
-                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_ASSISTANT);
+                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_ASSISTANT);
                 let rect = crate::scenario::rect_of(target).unwrap();
                 let revealed = crate::scenario::handle_at("prefs:revealed").unwrap();
                 assert!(revealed.distance(rect.center()) <= 1.0, "{query} reveals its real control");
