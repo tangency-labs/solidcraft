@@ -2399,7 +2399,7 @@ mod card_tests {
         h.step(&json!({"click":{"handle":"ai_add:preset"}})).unwrap();
         h.frames(3);
         // The presets outgrow the popup's height: scroll its list to the end, where OpenRouter is.
-        let top = scenario::handle_at("ai_add:preset:Ollama").unwrap();
+        let top = solidcraft_ui_registry::handle_at("ai_add:preset:Ollama").unwrap();
         h.call("ui.scroll", json!({"x":top.x,"y":top.y,"delta":-1000}));
         h.frames(10);
         h.step(&json!({"click":{"handle":"ai_add:preset:OpenRouter"}})).unwrap();
