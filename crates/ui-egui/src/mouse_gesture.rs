@@ -562,9 +562,10 @@ enum Op {
     Set(usize, String),
 }
 
-/// The first tool of the catalog that `list` doesn't hold.
+/// The first tool of the catalog that `list` doesn't hold. The standard views and Look At are
+/// only there to be chosen: "Add a tool" keeps adding what it did before they were offered.
 fn next_unused(list: &[String]) -> Option<String> {
-    catalog().into_iter().map(|(id, _)| id).find(|id| !list.contains(id))
+    catalog().into_iter().map(|(id, _)| id).find(|id| id != "ui.lookAt" && !VIEWS.contains(&id.as_str()) && !list.contains(id))
 }
 
 /// Applies `op` to `list`; false when it was refused (a ring keeps 1 to [`MAX_TOOLS`] tools, each
@@ -1294,6 +1295,10 @@ mod tests {
             assert!(offered.iter().any(|(i, _)| i == id), "`{id}` is offered");
         }
         assert_eq!(label_of("ui.lookAt").as_deref(), Some("Look At"));
+        // "Add a tool" picks what it always picked: the views are only there to be chosen.
+        let mut list: Vec<String> = ["repeat", "delete", "undo", "ui.fit", "ui.home"].map(String::from).to_vec();
+        assert!(apply(&mut list, Op::Add));
+        assert_eq!(list.last().map(String::as_str), Some("ui.finishSketch"));
         let shipped: Vec<&str> = Studio::ALL.iter().flat_map(|s| s.defaults().iter().copied()).collect();
         assert!(!shipped.iter().any(|id| id.starts_with("view.") || *id == "ui.lookAt"), "no shipped ring changes");
 
