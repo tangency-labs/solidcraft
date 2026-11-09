@@ -4992,15 +4992,15 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
         None if curves.is_empty() => points.len(),
         None => 0,
     };
-    let command = crate::i18n::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
-    let counted = |id: &str, n: usize| crate::i18n::format(id, &[("command", command), ("count", &n.to_string())]);
+    let command = solidcraft_ui_text::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
+    let counted = |id: &str, n: usize| solidcraft_ui_text::format(id, &[("command", command), ("count", &n.to_string())]);
     let mut text = match (curves.len(), lone) {
         (0, 0) => return None,
         (1, 0) => counted("ui.sketch_links_added_curve", 1),
         (n, 0) => counted("ui.sketch_links_added_curves", n),
         (0, 1) => counted("ui.sketch_links_added_point", 1),
         (0, n) => counted("ui.sketch_links_added_points", n),
-        (c, p) => crate::i18n::format(
+        (c, p) => solidcraft_ui_text::format(
             "ui.sketch_links_added_curves_and_points",
             &[
                 ("command", command),
@@ -5012,7 +5012,7 @@ fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
     let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
     if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
         text.push(' ');
-        text.push_str(&crate::i18n::format("ui.sketch_links_hidden", &[("option", crate::i18n::tr("ui.show_projected_geometries"))]));
+        text.push_str(&solidcraft_ui_text::format("ui.sketch_links_hidden", &[("option", solidcraft_ui_text::tr("ui.show_projected_geometries"))]));
     }
     Some(text)
 }
