@@ -16,8 +16,8 @@ use solidcraft_geom::Aabb3;
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};
 use crate::params::{bad, bool_, num};
-use crate::schema::motion_analysis::{CollidingPair, MotionInterference, MotionPlot, PlotSeries, PlottedPoint, StudyStop};
 use crate::schema::motion::PartPlace;
+use crate::schema::motion_analysis::{CollidingPair, MotionInterference, MotionPlot, PlotSeries, PlottedPoint, StudyStop};
 use crate::{EngineError, Result, Session};
 
 pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every joint that moves); occurrence? and point? (a point \

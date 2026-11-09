@@ -39,7 +39,19 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SweepParams>(),
         &[
-            "against", "apply", "budget_s", "contact_sets", "exclude_pairs", "from", "index", "joint", "occurrences", "refine", "report_gaps", "step", "to",
+            "against",
+            "apply",
+            "budget_s",
+            "contact_sets",
+            "exclude_pairs",
+            "from",
+            "index",
+            "joint",
+            "occurrences",
+            "refine",
+            "report_gaps",
+            "step",
+            "to",
         ],
     );
     let schema = input_schema_for::<SweepParams>();

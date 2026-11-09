@@ -512,7 +512,10 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
                 t.doc = lo_doc.clone();
                 let at = (hit.at.0 + hit.at.1) * 0.5;
                 let (a_part, b_part) = (place(&geometry, hit.bodies.0), place(&geometry, hit.bodies.1));
-                stop = Some((lo_v, Stop::Contact { a: hit.a.1, b: hit.b.1, at: [at.x, at.y, at.z], a_part: Box::new(a_part), b_part: Box::new(b_part) }));
+                stop = Some((
+                    lo_v,
+                    Stop::Contact { a: hit.a.1, b: hit.b.1, at: [at.x, at.y, at.z], a_part: Box::new(a_part), b_part: Box::new(b_part) },
+                ));
                 break 'sweep;
             }
             // (The drive on toward `to` past a limit stays where the last sample was.) Clear

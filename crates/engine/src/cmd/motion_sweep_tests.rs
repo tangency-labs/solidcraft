@@ -178,7 +178,11 @@ fn a_sweep_refuses_what_it_cannot_do() {
 fn a_sweep_past_its_sample_cap_stops_with_what_it_found() {
     let mut s = door();
     let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 1e8, "step": 1e-6}));
-    assert_eq!((r["stopped_by"].as_str(), r["budget_ran_out"].as_str(), &r["budget_exceeded"]), (Some("budget"), Some("samples"), &json!(true)), "{r}");
+    assert_eq!(
+        (r["stopped_by"].as_str(), r["budget_ran_out"].as_str(), &r["budget_exceeded"]),
+        (Some("budget"), Some("samples"), &json!(true)),
+        "{r}"
+    );
     assert!((num(&r["stopped_at"]) - 4096e-6).abs() < 1e-9, "{r}");
     assert_eq!(r["samples"].as_array().map(Vec::len), Some(4097), "from and each sample taken");
     // Within its caps nothing ran out.

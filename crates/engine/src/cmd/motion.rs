@@ -561,7 +561,8 @@ fn drive_with_contact_within(
         let samples = samples.max(1);
         let mut intersections = 0;
         set(s, 0.0);
-        let overlaps = |s: &Session, intersections: &mut usize, all: bool, ran: &mut Option<&'static str>| match cache.overlaps(s, intersections, all) {
+        let overlaps = |s: &Session, intersections: &mut usize, all: bool, ran: &mut Option<&'static str>| match cache.overlaps(s, intersections, all)
+        {
             Err(e) if stop_at_budget && contact_sweep::ran_out(&e).is_some() => {
                 *ran = contact_sweep::ran_out(&e);
                 Ok(None)
