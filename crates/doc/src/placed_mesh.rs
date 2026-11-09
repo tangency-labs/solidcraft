@@ -162,6 +162,7 @@ impl ModelBody {
         if same_triangles(&self.body, &old.body) {
             self.mesh = old.mesh.clone();
             self.plan = old.plan.clone();
+            self.gpu_plan = old.gpu_plan.clone();
             self.plan_mesh = old.plan_mesh.clone();
             self.opposite_hand = old.opposite_hand.clone();
         }

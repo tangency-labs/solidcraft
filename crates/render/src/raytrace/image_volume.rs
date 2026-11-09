@@ -13,10 +13,10 @@ pub(super) struct Context {
     pub shadow_mis: Option<[f64; 2]>,
     pub shadow_probability: f64,
 }
-pub(super) fn enabled(task: &ImageTask) -> bool {
+pub(super) fn enabled(task: &TransportContext<'_>) -> bool {
     task.options.volume.as_ref().is_some_and(|v| v.active())
 }
-fn medium(task: &ImageTask) -> job::Result<job::volume::HomogeneousVolume> {
+fn medium(task: &TransportContext<'_>) -> job::Result<job::volume::HomogeneousVolume> {
     task.options.volume.as_ref().copied().filter(|v| v.active()).ok_or_else(|| invalid("CPU Atmosphere disappeared"))
 }
 fn array(v: Vec3) -> [f64; 3] {
@@ -55,7 +55,7 @@ fn context_mut(state: &mut State) -> job::Result<&mut Context> {
 /// Keep the model's original near interval. Perspective optics start at the
 /// physical eye/pupil. Orthographic optics start before the union of its original
 /// near plane and the box's signed line entry, without changing that pixel line.
-pub(super) fn primary(task: &ImageTask, ray: Ray, physical: Option<Vec3>) -> job::Result<Ray> {
+pub(super) fn primary(task: &TransportContext<'_>, ray: Ray, physical: Option<Vec3>) -> job::Result<Ray> {
     let v = medium(task)?;
     let direction = ray.direction();
     let (source, near) = if let Some(eye) = physical {
@@ -86,7 +86,7 @@ pub(super) fn primary(task: &ImageTask, ray: Ray, physical: Option<Vec3>) -> job
     };
     Ray::new(source, direction, near, super::super::super::MAX_DISTANCE_MM).map_err(error)
 }
-pub(super) fn begin(task: &ImageTask, state: &mut State, ray: Ray) -> job::Result<()> {
+pub(super) fn begin(task: &TransportContext<'_>, state: &mut State, ray: Ray) -> job::Result<()> {
     medium(task)?;
     state.volume = Some(Context { source: ray.origin(), ..Default::default() });
     Ok(())
@@ -96,7 +96,7 @@ pub(super) fn reset_hit(state: &mut State) {
         v.range = None;
     }
 }
-pub(super) fn surface(task: &ImageTask, state: &mut State) -> job::Result<()> {
+pub(super) fn surface(task: &TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let hit = unmapped(task, state)?;
     let v = context_mut(state)?;
     v.source = hit.position;
@@ -107,10 +107,10 @@ pub(super) fn surface(task: &ImageTask, state: &mut State) -> job::Result<()> {
     state.stage = Stage::VolumeSurface;
     Ok(())
 }
-pub(super) fn source(task: &ImageTask, state: &State) -> job::Result<Vec3> {
+pub(super) fn source(task: &TransportContext<'_>, state: &State) -> job::Result<Vec3> {
     if let Some(v) = &state.volume { Ok(v.source) } else { Ok(shared(task, state)?.position) }
 }
-pub(super) fn ray(task: &ImageTask, state: &State, direction: Vec3, endpoint: Option<Vec3>, inclusive: bool) -> job::Result<Option<Ray>> {
+pub(super) fn ray(task: &TransportContext<'_>, state: &State, direction: Vec3, endpoint: Option<Vec3>, inclusive: bool) -> job::Result<Option<Ray>> {
     if let Some(v) = &state.volume {
         let (direction, far) = if let Some(point) = endpoint {
             let delta = point - v.source;
@@ -130,7 +130,7 @@ pub(super) fn ray(task: &ImageTask, state: &State, direction: Vec3, endpoint: Op
         shared(task, state)?.spawn(direction).map(Some).map_err(error)
     }
 }
-pub(super) fn cursor(task: &ImageTask, state: &State, ray: Ray) -> job::Result<TraceCursor> {
+pub(super) fn cursor(task: &TransportContext<'_>, state: &State, ray: Ray) -> job::Result<TraceCursor> {
     let v = context(state)?;
     if let Some(range) = v.range {
         let plane = v.source_plane.ok_or_else(|| invalid("CPU Atmosphere source plane missing"))?;
@@ -143,10 +143,10 @@ pub(super) fn cursor(task: &ImageTask, state: &State, ray: Ray) -> job::Result<T
         Ok(TraceCursor::new(ray, false))
     }
 }
-pub(super) fn response(task: &ImageTask, state: &State, direction: Vec3) -> job::Result<Option<f64>> {
+pub(super) fn response(task: &TransportContext<'_>, state: &State, direction: Vec3) -> job::Result<Option<f64>> {
     context(state)?.event.map(|incoming| medium(task)?.phase(incoming.dot(direction).clamp(-1.0, 1.0))).transpose()
 }
-pub(super) fn step(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
+pub(super) fn step(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()> {
     match state.stage {
         Stage::Volume => decide(task, state),
         Stage::VolumeSurface => range(task, state),
@@ -154,7 +154,7 @@ pub(super) fn step(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         _ => Err(invalid("CPU Atmosphere bypassed its charged phase")),
     }
 }
-fn decide(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
+fn decide(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let v = medium(task)?;
     let c = context(state)?;
     let ray = state.ray.ok_or_else(|| invalid("CPU Atmosphere incident ray missing"))?;
@@ -213,7 +213,7 @@ fn decide(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
     state.stage = Stage::Directional;
     Ok(())
 }
-fn range(task: &ImageTask, state: &mut State) -> job::Result<()> {
+fn range(task: &TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let hit = state.hit.ok_or_else(|| invalid("CPU Atmosphere source hit missing"))?;
     let body = task.looks.get(hit.primitive_index).ok_or_else(|| invalid("CPU Atmosphere source primitive missing"))?.body_index;
     let c = context_mut(state)?;
@@ -231,7 +231,7 @@ fn range(task: &ImageTask, state: &mut State) -> job::Result<()> {
     }
     Ok(())
 }
-fn shadow(task: &ImageTask, state: &mut State) -> job::Result<()> {
+fn shadow(task: &TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let ray = state.shadow_ray.ok_or_else(|| invalid("CPU Atmosphere visibility ray missing"))?;
     let v = medium(task)?;
     let [a, b] = segment(v, ray.origin(), ray.direction(), ray.interval()[1])?;
@@ -241,7 +241,7 @@ fn shadow(task: &ImageTask, state: &mut State) -> job::Result<()> {
     state.stage = Stage::ShadowEmitters;
     Ok(())
 }
-pub(super) fn scatter(task: &ImageTask, state: &mut State) -> job::Result<()> {
+pub(super) fn scatter(task: &TransportContext<'_>, state: &mut State) -> job::Result<()> {
     let c = context(state)?;
     let incoming = c.event.ok_or_else(|| invalid("CPU Atmosphere collision vertex missing"))?;
     let position = c.source;

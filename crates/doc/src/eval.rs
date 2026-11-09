@@ -55,6 +55,9 @@ pub struct ModelBody {
     /// The display plan (none when the body has no plan: a mesh body, or one the planner
     /// refuses), shared like the mesh. A GPU viewport draws it.
     plan: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
+    /// Each display plan in the form the GPU evaluates ([`crate::gpu_plan`]), made once from it
+    /// and shared like it, so the viewport sees the same allocation every frame.
+    gpu_plan: Arc<[OnceLock<Option<Arc<solidcore_tess::TessPlan>>>; 4]>,
     /// The plan evaluated on the CPU (none without a plan), shared like the mesh: the triangles a
     /// GPU viewport draws, so a highlight over a face lies exactly on it.
     plan_mesh: Arc<[OnceLock<Option<Arc<Mesh>>>; 4]>,
@@ -104,6 +107,7 @@ impl ModelBody {
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
+            gpu_plan: Arc::new(Default::default()),
             plan_mesh: Arc::new(Default::default()),
             key: 0,
             names: Default::default(),
@@ -226,6 +230,13 @@ impl ModelBody {
             Some(placed) => cell.get_or_init(|| placed.plan(q, &self.name)).clone(),
             None => placed_mesh::definition_plan(&self.body, cell, q, &self.name),
         }
+    }
+
+    /// The display plan at a given display quality in the form the GPU evaluates
+    /// ([`crate::gpu_plan`]): made once per level from [`ModelBody::display_plan_at`], the same
+    /// allocation on every call.
+    pub fn gpu_plan_at(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<solidcore_tess::TessPlan>> {
+        self.gpu_plan.get(q.index())?.get_or_init(|| self.display_plan_at(q).map(|plan| Arc::new(crate::gpu_plan::gpu_plan(&plan)))).clone()
     }
 
     /// The display plan's mesh, evaluated on the CPU once per level: the same triangles a GPU
@@ -354,13 +365,14 @@ impl ModelBody {
         self.plan_mesh_at(q)
     }
 
-    /// The display plan and its mesh `k` steps finer than `q` (view-dependent refinement, #1320;
+    /// The display plan in the form the GPU evaluates ([`ModelBody::gpu_plan_at`]) and its mesh
+    /// `k` steps finer than `q` (view-dependent refinement, #1320;
     /// see [`crate::display_quality::refinement_for`]). Step 0 is the cached plan at `q`; finer
     /// steps are made on each call and kept by the viewport, which evicts them when it runs over
     /// its budget. `None` when the body has no plan at that step.
-    pub fn refined_display(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<TessPlan>, Arc<Mesh>)> {
+    pub fn refined_display(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<solidcore_tess::TessPlan>, Arc<Mesh>)> {
         if k == 0 {
-            return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
+            return Some((self.gpu_plan_at(q)?, self.plan_mesh_at(q)?));
         }
         let plan = match self
             .body
@@ -373,7 +385,7 @@ impl ModelBody {
             }
         };
         let mesh = self.body.mesh_of(&plan).ok()?;
-        Some((Arc::new(plan), Arc::new(mesh)))
+        Some((Arc::new(crate::gpu_plan::gpu_plan(&plan)), Arc::new(mesh)))
     }
 
     /// The chord tolerance of [`ModelBody::mesh`] (mm): 1/1000 of the definition's size, at least
@@ -1227,12 +1239,15 @@ struct ImportDigests {
 struct MeshDigest {
     positions: Arc<[f64]>,
     triangles: Arc<[u32]>,
+    corner_normals: Arc<[f64]>,
     digest: u64,
 }
 
 impl MeshDigest {
     fn matches(&self, mesh: &crate::MeshData) -> bool {
-        Arc::ptr_eq(&self.positions, &mesh.positions) && Arc::ptr_eq(&self.triangles, &mesh.triangles)
+        Arc::ptr_eq(&self.positions, &mesh.positions)
+            && Arc::ptr_eq(&self.triangles, &mesh.triangles)
+            && Arc::ptr_eq(&self.corner_normals, &mesh.corner_normals)
     }
 }
 
@@ -1251,7 +1266,12 @@ impl ImportDigests {
                         .enumerate()
                         .map(|(index, mesh)| {
                             let digest = known.mesh(f.id, index, mesh).unwrap_or_else(|| mesh_content_digest(mesh));
-                            MeshDigest { positions: mesh.positions.clone(), triangles: mesh.triangles.clone(), digest }
+                            MeshDigest {
+                                positions: mesh.positions.clone(),
+                                triangles: mesh.triangles.clone(),
+                                corner_normals: mesh.corner_normals.clone(),
+                                digest,
+                            }
                         })
                         .collect();
                     out.meshes.insert(f.id, digests);
@@ -1280,6 +1300,9 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
         coordinate.to_bits().hash(&mut h);
     }
     mesh.triangles.hash(&mut h);
+    for n in mesh.corner_normals.iter() {
+        n.to_bits().hash(&mut h);
+    }
     h.finish()
 }
 
@@ -1371,6 +1394,7 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
                 digests.push(steps.mesh(f.id, index, mesh).unwrap_or_else(|| mesh_content_digest(mesh)));
                 mesh.positions = Arc::from([]);
                 mesh.triangles = Arc::from([]);
+                mesh.corner_normals = Arc::from([]);
             }
         }
         // Keep the complete definition (including mesh order, names and colors) without
@@ -8589,7 +8613,17 @@ fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
     for m in meshes {
         let positions: Vec<Vec3> = m.positions.as_chunks::<3>().0.iter().map(|c| Vec3::new(c[0], c[1], c[2])).collect();
         let triangles: Vec<[u32; 3]> = m.triangles.as_chunks::<3>().0.to_vec();
-        let b = kernel::mesh_body(&positions, &triangles).map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
+        if !m.corner_normals.is_empty() && m.corner_normals.len() != m.triangles.len().saturating_mul(3) {
+            return Err(DocError::Invalid(format!("mesh `{}`: invalid shading normal count", m.name)));
+        }
+        let normals: Vec<[Vec3; 3]> = m
+            .corner_normals
+            .as_chunks::<9>()
+            .0
+            .iter()
+            .map(|c| [Vec3::new(c[0], c[1], c[2]), Vec3::new(c[3], c[4], c[5]), Vec3::new(c[6], c[7], c[8])])
+            .collect();
+        let b = kernel::mesh_body_with_normals(&positions, &triangles, &normals).map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
         out.push((m.name.clone(), b.with_color(m.color)));
     }
     Ok(out)
@@ -9055,6 +9089,7 @@ impl PlacedBodies {
             fresh.joint_faces = placed.joint_faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
+            fresh.gpu_plan = placed.gpu_plan.clone();
             fresh.plan_mesh = placed.plan_mesh.clone();
             fresh
         })
@@ -9124,6 +9159,7 @@ fn in_frame(b: &ModelBody, m: &crate::Mat, placed: &ModelBody) -> ModelBody {
     let mut moved = ModelBody::new(b.name.clone(), placed.body.clone(), b.feature);
     moved.mesh = placed.mesh.clone();
     moved.plan = placed.plan.clone();
+    moved.gpu_plan = placed.gpu_plan.clone();
     moved.plan_mesh = placed.plan_mesh.clone();
     moved.component = b.component;
     moved.transferred = b.transferred;
