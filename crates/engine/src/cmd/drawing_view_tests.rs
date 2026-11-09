@@ -2199,6 +2199,23 @@ fn the_assembly_sheets_views_keep_what_they_show_through_the_model() {
         base([480.0, 100.0], json!({"source": {"occurrences": [[second]]}})),
         base([480.0, 300.0], json!({"hide": [[second]]})),
     ];
+    // The hand-worked expectations are defined once in cases.json, checked against
+    // assembly.json by the static fixture validator in the upstream CI job.
+    let contract: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/cases.json")).unwrap();
+    let hand_views = contract["hand_views"]["views"].as_array().unwrap();
+    assert_eq!(hand_views.len(), views.len(), "one expectation for each saved view");
+    let sizes = |when: &str| -> [Option<[f64; 2]>; 8] {
+        std::array::from_fn(|i| {
+            let size = &hand_views[i][when];
+            if size == "placeholder" {
+                None
+            } else {
+                let values = size.as_array().unwrap_or_else(|| panic!("hand_views[{i}].{when} must be a pair or placeholder"));
+                assert_eq!(values.len(), 2, "hand_views[{i}].{when} has exactly two sides");
+                Some([values[0].as_f64().unwrap(), values[1].as_f64().unwrap()])
+            }
+        })
+    };
     let authored = s.drawing("test").unwrap().to_json().unwrap();
     // A view's boundary is read from the display mesh, whose chords sit inside a round screw: never
     // wider than worked out, and within 0.01 mm of it. `None` is a placeholder with nothing chosen.
@@ -2221,12 +2238,12 @@ fn the_assembly_sheets_views_keep_what_they_show_through_the_model() {
         run(s, id, p);
         run(s, "drawing.open", drawing.clone());
     };
-    let as_made = [[120.0, 80.0], [28.0, 28.0], [28.0, 68.0], [106.0, 68.0], [20.0, 20.0], [6.0, 26.0], [28.0, 28.0], [120.0, 80.0]].map(Some);
+    let as_made = sizes("as_made");
     expect(&mut s, "as made", as_made);
 
     // The second holder 30 along Y: its block reaches y 100, its screws y 98.
     on_the_model(&mut s, "occurrence.move", json!({"occurrence": second, "space": "world", "translate": [0, 30, 0]}));
-    let moved = [[120.0, 100.0], [28.0, 28.0], [28.0, 98.0], [106.0, 98.0], [20.0, 20.0], [6.0, 26.0], [28.0, 28.0], [120.0, 80.0]].map(Some);
+    let moved = sizes("second_holder_moved");
     expect(&mut s, "second holder moved", moved);
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "the record never changes with the model");
     on_the_model(&mut s, "edit.undo", json!({}));
@@ -2234,8 +2251,7 @@ fn the_assembly_sheets_views_keep_what_they_show_through_the_model() {
 
     // The second holder deleted: the corner screws end at y 68, the first holder's start at y 2.
     on_the_model(&mut s, "selection.delete", json!({"occurrences": [second]}));
-    let mut deleted = [[120.0, 80.0], [28.0, 28.0], [28.0, 28.0], [106.0, 66.0], [20.0, 20.0], [6.0, 26.0], [0.0, 0.0], [120.0, 80.0]].map(Some);
-    deleted[6] = None;
+    let deleted = sizes("second_holder_deleted");
     expect(&mut s, "second holder deleted", deleted);
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "the paths stay, for an undo");
     on_the_model(&mut s, "edit.undo", json!({}));
