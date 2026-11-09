@@ -39,8 +39,11 @@ use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, Canonical
 use solidcore::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
 };
+use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::p5::DropPointOptions;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{create_planar_faces_with_3d_curves, FaceBuildEnv};
@@ -384,6 +387,196 @@ fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_refused_with_its_fi
             assert!(top.contains(&e));
         }
         other => panic!("expected OffsetCollapses, got {other:?}"),
+    }
+}
+
+/// The disc's side rounds, each with the two walls of the edge it rounds.
+struct SideRounds {
+    brep: Brep,
+    rounds: Vec<(FaceId, [usize; 2])>,
+    walls: Vec<Surface>,
+}
+
+/// The disc (2 slots) with its 4 side edges rounded 2 mm. The walls' surfaces are kept from
+/// before (the fillet replaces their faces); a round is a face on none of them nor a cap,
+/// matched to the side edge whose ends' middle it is nearest, with that edge's walls (the
+/// two through both its ends).
+fn side_rounds(k: &mut Kernel) -> SideRounds {
+    let mut b = twisted_disc(k, 2);
+    let sides = side_edges(&b);
+    assert_eq!(sides.len(), 4);
+    let walls: Vec<Surface> = b
+        .faces()
+        .ids()
+        .map(|f| b.face(f).unwrap().surface.clone().unwrap())
+        .filter(|s| matches!(s.kind(), SurfaceKind::BSpline(_)))
+        .collect();
+    let edges: Vec<(Point3, [usize; 2])> = sides
+        .iter()
+        .map(|&e| {
+            let [p, q] = ends(&b, e);
+            let mut by_gap: Vec<(f64, usize)> = walls
+                .iter()
+                .enumerate()
+                .map(|(w, s)| (gap(k, s, p).max(gap(k, s, q)), w))
+                .collect();
+            by_gap.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert!(by_gap[1].0 < 1e-6, "{by_gap:?}");
+            ((p + q) * 0.5, [by_gap[0].1, by_gap[1].1])
+        })
+        .collect();
+    fillet_edges(k, &mut b, &sides, 2.0, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    let rounds = b
+        .faces()
+        .ids()
+        .filter_map(|f| {
+            let s = b.face(f).unwrap().surface.as_ref().unwrap();
+            if matches!(s.kind(), SurfaceKind::Plane(_)) {
+                return None;
+            }
+            let d = s.natural_uv_domain_with_nurb(k).unwrap();
+            let x = s.evaluate_point(k, (d.min() + d.max()) * 0.5).unwrap();
+            if walls.iter().any(|w| gap(k, w, x) < 1e-6) {
+                return None;
+            }
+            let (_, on) = edges
+                .iter()
+                .min_by(|a, c| a.0.distance(x).total_cmp(&c.0.distance(x)))
+                .unwrap();
+            Some((f, *on))
+        })
+        .collect();
+    SideRounds {
+        brep: b,
+        rounds,
+        walls,
+    }
+}
+
+/// The distance from `p` to `s`.
+fn gap(k: &Kernel, s: &Surface, p: Point3) -> f64 {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    s.drop_point::<NoObject>(k, p, &d, &DropPointOptions::default())
+        .unwrap()
+        .gap
+}
+
+/// The distance from `p` to `s` where its foot is inside `s`'s domain (`None` on its
+/// boundary: the nearest point of the wall's continuation is past it).
+fn gap_inside(k: &Kernel, s: &Surface, p: Point3) -> Option<f64> {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let drop = s
+        .drop_point::<NoObject>(k, p, &d, &DropPointOptions::default())
+        .unwrap();
+    let uv = drop.result_uv;
+    let margin = 1e-6;
+    let inside = drop.success
+        && uv.x > d.min().x + margin
+        && uv.x < d.max().x - margin
+        && uv.y > d.min().y + margin
+        && uv.y < d.max().y - margin;
+    inside.then_some(drop.gap)
+}
+
+/// The largest error of a side round against the 2 mm round of its two walls, and the
+/// number of points judged: over a 201 x 9 grid (v from a tenth to nine tenths across),
+/// the points whose ball has its feet inside both walls. For a point x with unit normal n
+/// the ball's centre is x + 2n or x - 2n (the side nearer), 2 from each wall.
+fn worst_error(k: &Kernel, r: &SideRounds, round: FaceId, walls: [usize; 2]) -> (f64, usize) {
+    let s = r.brep.face(round).unwrap().surface.as_ref().unwrap();
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut worst = 0.0_f64;
+    let mut judged = 0;
+    for i in 0..=200 {
+        for j in 1..=9 {
+            let uv = Point2::new(
+                d.min().x + (d.max().x - d.min().x) * f64::from(i) / 200.0,
+                d.min().y + (d.max().y - d.min().y) * f64::from(j) / 10.0,
+            );
+            let x = s.evaluate_point(k, uv).unwrap();
+            let n = s.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap();
+            let mut err: Option<f64> = None;
+            for sign in [1.0, -1.0] {
+                let c = x + n * (2.0 * sign);
+                let gaps: Option<Vec<f64>> = walls
+                    .iter()
+                    .map(|&w| gap_inside(k, &r.walls[w], c))
+                    .collect();
+                if let Some(gaps) = gaps {
+                    let e = gaps.iter().map(|g| (g - 2.0).abs()).fold(0.0, f64::max);
+                    err = Some(err.map_or(e, |o: f64| o.min(e)));
+                }
+            }
+            if let Some(e) = err {
+                worst = worst.max(e);
+                judged += 1;
+            }
+        }
+    }
+    (worst, judged)
+}
+
+/// The largest distance between a round by its definition and its net (the B-spline
+/// surface its certificate encloses, which tessellation and intersections read), over a
+/// 1001 x 11 grid; `None` for a round that is not its definition.
+fn net_off_definition(k: &Kernel, s: &Surface) -> Option<f64> {
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        return None;
+    };
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut worst = 0.0_f64;
+    for i in 0..=1000 {
+        for j in 0..=10 {
+            let uv = Point2::new(
+                d.min().x + (d.max().x - d.min().x) * f64::from(i) / 1000.0,
+                d.min().y + (d.max().y - d.min().y) * f64::from(j) / 10.0,
+            );
+            let x = s.evaluate_point(k, uv).unwrap();
+            worst = worst.max(x.distance(pb.net().evaluate_point(uv).unwrap()));
+        }
+    }
+    Some(worst)
+}
+
+/// #13774: each of the disc's 4 twisted side rounds is the round by its definition (a
+/// `ProceduralBlend`), and the rounded disc is a clean manifold solid.
+#[test]
+fn a_twisted_side_round_is_its_definition() {
+    let mut k = kernel();
+    let r = side_rounds(&mut k);
+    assert_eq!(r.rounds.len(), 4);
+    for &(f, _) in &r.rounds {
+        let s = r.brep.face(f).unwrap().surface.as_ref().unwrap();
+        // the definition, and its net within the round's tolerance of it (on the old
+        // boundary of a wall's extension, which is only G1, a net whose stations took one
+        // side's series left the definition by 2e-3)
+        let net = net_off_definition(&k, s);
+        let net = net.unwrap_or_else(|| panic!("{f:?} is not its definition"));
+        assert!(net <= 4e-5, "{f:?} net off its definition by {net:e}");
+    }
+    let mut b = r.brep;
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+}
+
+/// #13774: between its traced sections as at them, each side round is the 2 mm round of
+/// its walls: the ball's centre off a point of the round is 2 from both walls (it missed
+/// by up to 1.8e-3 on two of them, the trace's skinned B-spline exact only at its
+/// sections).
+#[test]
+fn a_twisted_side_round_is_its_walls_round_between_sections() {
+    let mut k = kernel();
+    let r = side_rounds(&mut k);
+    assert_eq!(r.rounds.len(), 4);
+    for &(f, walls) in &r.rounds {
+        let (worst, judged) = worst_error(&k, &r, f, walls);
+        eprintln!("{f:?} {walls:?} worst {worst:e} over {judged} points");
+        assert!(judged > 1000, "{f:?} judged {judged}");
+        assert!(worst <= 1e-6, "{f:?} worst {worst:e}");
     }
 }
 

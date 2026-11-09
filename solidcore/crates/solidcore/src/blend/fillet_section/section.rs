@@ -22,7 +22,8 @@ use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
 use super::series::{Ser, Trunc, VSer};
 use super::station::{
-    gn_solve_station_with, smax, surface_partials, vec3, GnStation, Nurbs, StationOptions,
+    feet_on_knots, gn_solve_station_with, smax, surface_partials, vec3, GnStation, Nurbs,
+    StationOptions,
 };
 use super::tay::{
     acos_clamped, gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, GnAreaCells,
@@ -1840,6 +1841,49 @@ impl GnSectionFsg {
                 next.sort_by(|a, b| a.s.total_cmp(&b.s));
                 stations = next;
             }
+        }
+        // a station given on a knot line of a face (the solver's station where the trace
+        // met the face's edge: the old boundary of a face's extension, which is only G1
+        // there), which no pair of stations straddles, takes its sides as a crossing station
+        // does, and as the definition evaluates it (`sm_FeetOnKnots`): the pieces its feet
+        // move into as s grows for the span after it, solved again where they are not the
+        // pieces a solve without sides took, and the pieces they come from for the span
+        // ending there. Without them both spans took one side's series, and the net left the
+        // definition by the jump in the face's partials across the line (2e-3 along a
+        // twisted wall's side round)
+        let partials = tr.s() + tr.e() + 1;
+        for st in &mut stations {
+            k.check_cancelled(OP_CERTIFY)?;
+            if st.before.iter().any(|&q| q != 0) {
+                continue;
+            }
+            let on = [0, 1, 2, 3].map(|q| param(st, q, 0, 0));
+            let dir = [0, 1, 2, 3].map(|q| param(st, q, 1, 0));
+            let (after, other) = feet_on_knots(k, faces, on, dir, false, partials)?;
+            if after.iter().all(|&q| q == 0) {
+                continue;
+            }
+            let (before, _) = feet_on_knots(k, faces, on, dir, true, partials)?;
+            if other {
+                let tol_on = solve_tol(st.s)?;
+                let law_r = law_series(law, st.s, tr.s(), false)?;
+                *st = solve_top(
+                    k,
+                    faces,
+                    center,
+                    st.s,
+                    on,
+                    r,
+                    side,
+                    tr,
+                    tol_on,
+                    self.order,
+                    Some(after),
+                    false,
+                    law_r.as_ref(),
+                )?;
+            }
+            st.before = before;
         }
         // the equal area thumbweight at every station, and I's enclosures on a grid over
         // their range (a little wider: the stations put in later lie between these)
