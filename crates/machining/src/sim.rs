@@ -24,6 +24,9 @@ const LINE_STEP_MM: f64 = 2.0;
 /// The most pieces a straight move is cut in. A longer line gets longer pieces, so a hostile length
 /// costs a bounded number of steps.
 const MAX_LINE_STEPS: usize = 1024;
+/// The longest move a round tool cuts. Its pieces are at most `LINE_STEP_MM` long, so a longer move would
+/// need more pieces than `MAX_LINE_STEPS`; it is reported instead of cut.
+const ROUND_MAX_MM: f64 = LINE_STEP_MM * MAX_LINE_STEPS as f64;
 
 fn finite(p: &[f64; 3]) -> bool {
     p.iter().all(|x| x.is_finite())
@@ -237,17 +240,41 @@ fn plan(program: &Program, index: usize) -> Result<Cut, Stop> {
             Err(why) => return Err(refuse("corner", Diag::error(m.source, 0, format!("tool {}: {why}", m.tool)))),
         },
     };
+    let too_long = |len: f64| {
+        let msg = format!("a move of {len:.0} mm at line {} is over {ROUND_MAX_MM:.0} mm, not simulated with a round tool", m.source);
+        refuse("round_length", Diag::error(m.source, 0, msg))
+    };
     let steps = match &m.kind {
-        MoveKind::Rapid | MoveKind::Feed => line_steps(Vec3::from(start), Vec3::from(m.tip), flat, round),
+        MoveKind::Rapid | MoveKind::Feed => {
+            let (from, to) = (Vec3::from(start), Vec3::from(m.tip));
+            match round {
+                None => line_steps(from, to, flat),
+                Some(tool) => {
+                    if (to - from).len() > ROUND_MAX_MM {
+                        return Err(too_long((to - from).len()));
+                    }
+                    split_line(from, to)
+                        .into_iter()
+                        .map(|(a, b)| Step::Round(RoundPiece { path: RoundPath::Line { from: a, to: b }, tool }))
+                        .collect()
+                }
+            }
+        }
         MoveKind::Arc { centre, normal, ccw, turns } => {
             if *turns > MAX_ARC_TURNS {
                 let msg = format!("arc at line {} has more than {MAX_ARC_TURNS} turns; not simulated", m.source);
                 return Err(refuse("turns", Diag::error(m.source, 0, msg)));
             }
             let arc = ArcFixedAxis::new(Vec3::from(start), Vec3::from(m.tip), Vec3::from(*centre), Vec3::from(*normal), *ccw, *turns, flat);
-            match arc {
-                Some(arc) => arc.pieces(STEP_SWEEP).into_iter().map(|piece| arc_step(piece, round)).collect(),
-                None => return Err(refuse("arc", Diag::error(m.source, 0, format!("degenerate arc at line {} skipped", m.source)))),
+            match (arc, round) {
+                (Some(arc), None) => arc.pieces(STEP_SWEEP).into_iter().map(Step::Arc).collect(),
+                (Some(arc), Some(tool)) => {
+                    if arc.length() > ROUND_MAX_MM {
+                        return Err(too_long(arc.length()));
+                    }
+                    arc.pieces_by_length(LINE_STEP_MM).into_iter().map(|p| Step::Round(RoundPiece { path: RoundPath::Arc(p), tool })).collect()
+                }
+                (None, _) => return Err(refuse("arc", Diag::error(m.source, 0, format!("degenerate arc at line {} skipped", m.source)))),
             }
         }
         MoveKind::Jump => return Err(Stop::Quiet),
@@ -263,23 +290,14 @@ pub fn step_count(program: &Program, index: usize) -> usize {
 
 /// A straight move cut in pieces of at most `LINE_STEP_MM` (and at most `MAX_LINE_STEPS` of them), in
 /// order. Their union is the move, so the stock is the same as for one piece.
-fn line_steps(from: Vec3, to: Vec3, flat: FlatTool, round: Option<RoundTool>) -> Vec<Step> {
+fn split_line(from: Vec3, to: Vec3) -> Vec<(Vec3, Vec3)> {
     let n = (((to - from).len() / LINE_STEP_MM).ceil() as usize).clamp(1, MAX_LINE_STEPS);
     let at = |k: usize| if k >= n { to } else { from + (to - from) * (k as f64 / n as f64) };
-    (0..n)
-        .map(|k| match round {
-            Some(tool) => Step::Round(RoundPiece { path: RoundPath::Line { from: at(k), to: at(k + 1) }, tool }),
-            None => Step::Line(LinearFixedAxis { from: at(k), to: at(k + 1), tool: flat }),
-        })
-        .collect()
+    (0..n).map(|k| (at(k), at(k + 1))).collect()
 }
 
-/// One quarter-turn piece of an arc as a step: a flat sweep, or a round tool's piece.
-fn arc_step(piece: ArcFixedAxis, round: Option<RoundTool>) -> Step {
-    match round {
-        Some(tool) => Step::Round(RoundPiece { path: RoundPath::Arc(piece), tool }),
-        None => Step::Arc(piece),
-    }
+fn line_steps(from: Vec3, to: Vec3, flat: FlatTool) -> Vec<Step> {
+    split_line(from, to).into_iter().map(|(a, b)| Step::Line(LinearFixedAxis { from: a, to: b, tool: flat })).collect()
 }
 
 fn apply_step(step: &Step, tag: u32, stock: &mut Stock) -> Result<(), SimError> {

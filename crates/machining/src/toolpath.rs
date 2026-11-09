@@ -79,7 +79,7 @@ pub enum Shape {
     Flat,
     /// Corner radius equal to the tool radius.
     Ball,
-    /// Corner radius `rc`, above 0 and below the tool radius.
+    /// Corner radius `rc`, above 0 and at most the tool radius (equal is a ball).
     Bull {
         rc: f64,
     },

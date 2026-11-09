@@ -502,6 +502,18 @@ impl ArcFixedAxis {
         self.pieces(TAU)
     }
 
+    /// The arc cut into the fewest equal pieces whose helix length is at most `max_len` each, in order.
+    pub fn pieces_by_length(&self, max_len: f64) -> Vec<ArcFixedAxis> {
+        let total = self.sweep.abs();
+        let len = self.length();
+        if !(total > 0.0 && len > 0.0 && max_len > 0.0) {
+            return Vec::new();
+        }
+        // `pieces` takes ceil(total / max) pieces; the factor keeps that at exactly `count`.
+        let count = (len / max_len).ceil().max(1.0);
+        self.pieces(total / count * (1.0 + 1e-9))
+    }
+
     /// The arc cut into equal pieces, the fewest of at most `max` radians each, in order, with the same
     /// union. Equal pieces make a step a fixed share of the arc, so a time fraction maps onto steps.
     /// The pieces share one circle and one lift per radian, so the pieces are exact parts of the arc.
