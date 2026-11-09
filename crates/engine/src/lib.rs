@@ -800,8 +800,24 @@ impl Session {
             .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
     }
 
-    /// A session on `doc` evaluated as `model`, with what it hides.
+    /// `doc` with each fold that keeps no side of its line that stays (a design saved before
+    /// folds kept one) given the side it folds now, and `model` evaluated on it: from then on that
+    /// side stays, wherever the fold's line moves. As they are where every fold keeps its side.
+    fn with_fold_sides(doc: Arc<Document>, mut model: Model) -> (Arc<Document>, Model) {
+        match doc.with_fold_sides(&model) {
+            Some(settled) => {
+                let doc = Arc::new(settled);
+                model.evaluate_shared(&doc);
+                (doc, model)
+            }
+            None => (doc, model),
+        }
+    }
+
+    /// A session on `doc` evaluated as `model`, with what it hides. A design opened from before
+    /// folds kept which side stays has each fold's side settled first ([`Self::with_fold_sides`]).
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
+        let (doc, model) = Self::with_fold_sides(doc, model);
         Session {
             stop: Default::default(),
             is_copy: false,

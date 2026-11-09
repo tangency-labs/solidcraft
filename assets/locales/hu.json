@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Támaszt ad egy lapra: kerek vagy téglalap alakú, tömör vagy üreges párnát dőléssel. Használja alátámasztásként vagy távtartóként egy öntött házban.",
   "help.plastic.snap_fit": "Pattintós illesztésű kampót ad egy lapra, megadott hosszal, vastagsággal és reteszeléssel. Használja alkatrészek csavar nélküli összepattintására.",
   "help.pointcloud.insert": "PLY, XYZ vagy PTS szkennelést szúr be pontfelhőként a modell mellé. Használja referenciaként, amikor mért adatokból épít modellt.",
-  "help.sheet.convert": "Egyenletes vastagságú lemezt vagy héjazott testet lemeztestté alakít, a kiválasztott éleken hajlításokkal. Használja egy meglévő alkatrész kiteríthetővé tételére.",
+  "help.sheet.convert": "A felületeket a szabály szerinti lemezzé alakítja: egy szilárd test vagy egy felülettest lapjait, hajlításokkal a kiválasztott éleken. Használja lemezalkatrész készítésére egy modellezett formából.",
   "help.sheet.export_bend_table": "Egy lemeztest hajlítási táblázatát CSV- vagy JSON-fájlba menti: szögeket, sugarakat és a hajlítások helyzetét a kiterített állapotban. Használja a lemezhajlító géphez vagy a műhelynek.",
   "help.sheet.export_dxf": "A lapmintát DXF-fájlba menti, körvonalakkal, hajlítási vonalakkal és opcionális hajlítási megjegyzésekkel. Használja lézeres, plazma- vagy vízsugaras vágáshoz.",
   "help.sheet.flange": "Peremet ad hozzá: alaplemezt egy vázlatból, falat egy nyitott vázlatkontúr mentén, vagy hajlított falat a lemez élein. Használja lemezalkatrészek felépítésére.",

@@ -162,6 +162,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("sheet_unfold", json!({"type": "sheet_unfold"})),
         ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o})),
         ("sheet_surface_convert", json!({"type": "sheet_surface_convert", "body": "B", "skip": [o]})),
+        ("sheet_recognize", json!({"type": "sheet_recognize", "body": "B", "face": o, "skip": [o]})),
         (
             "boss",
             json!({"type": "boss", "position": o, "diameter": "boss.diameter", "height": "boss.height", "hole_diameter": "boss.hole_diameter", "hole_depth": "boss.hole_depth",
@@ -304,7 +305,7 @@ pub(super) fn with_points(name: &str, mut v: Value) -> Value {
             json!({"references": [{"edge": p(11.0), "distance": "hole.reference1"}, {"edge": p(12.0), "distance": "hole.reference2"}]})
         }
         "emboss" => json!({"face": {"body": "B", "at": p(5.0)}}),
-        "sheet_convert" | "sheet_surface_convert" => json!({"bends": [p(6.0)]}),
+        "sheet_convert" | "sheet_surface_convert" | "sheet_recognize" => json!({"bends": [p(6.0)]}),
         "sheet_fold" => json!({"fixed": p(7.0)}),
         "rest" => json!({"along": [0.6, 0.8, 0.0]}),
         "align" => json!({"from_normal": [0.0, 0.0, 1.0], "to_normal": [1.0, 0.0, 0.0]}),

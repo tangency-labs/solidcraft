@@ -91,7 +91,8 @@ mod sheet_surface_fold;
 mod sheet_surface_shadow;
 pub mod sketch_equation;
 pub use sheet_surface_convert::{
-    ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces,
+    ConvertRule, RollEdge, RollInfo, RollLine, SheetFaces, SheetMeasure, SurfaceBendLine, SurfaceConversion, SurfaceSheet, convert_surfaces,
+    measure_sheet_body,
 };
 pub use sheet_surface_cuts::{Loose, Recess};
 pub mod text_params;

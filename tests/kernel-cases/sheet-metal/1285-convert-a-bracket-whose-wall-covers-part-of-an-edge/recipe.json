@@ -45,7 +45,6 @@
   {
    "command": "sheet.convert",
    "params": {
-    "mode": "thicken",
     "body": "Bracket",
     "face": [
      40,

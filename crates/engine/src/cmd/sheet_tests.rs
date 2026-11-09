@@ -882,7 +882,7 @@ fn unfold_cut_refold_and_convert() {
     // Convert a plate.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 2.5, "body_name": "Plate"}));
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, 2.5]}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, 2.5]}));
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20}));
     assert!(rel(volume(&mut s), 18972.622) < 1e-4, "{}", volume(&mut s));
     // Thickening takes the faces picked (#6748): a rod picked on its end is a disc of the rule's
@@ -890,13 +890,13 @@ fn unfold_cut_refold_and_convert() {
     // its thin face, is that face's sheet at the plate's own thickness.
     let mut t = Session::default();
     run(&mut t, "solid.cylinder", json!({"radius": 10, "height": 30, "body_name": "Rod"}));
-    run(&mut t, "sheet.convert", json!({"mode": "thicken", "body": "Rod", "face": [0, 0, 30]}));
+    run(&mut t, "sheet.convert", json!({"body": "Rod", "face": [0, 0, 30]}));
     let f = flat(&mut t);
     assert!(rel(f["thickness"].as_f64().unwrap_or(0.0), 2.5) < 1e-9 && rel(f["flat_size_mm"][0].as_f64().unwrap_or(0.0), 20.0) < 1e-4, "{f}");
     let mut t = Session::default();
     run(&mut t, "solid.box", json!({"length": 100, "width": 60, "height": 2.5, "body_name": "Block"}));
     run(&mut t, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 60, "height": 10, "operation": "join"}));
-    run(&mut t, "sheet.convert", json!({"mode": "thicken", "body": "Block", "face": [50, 30, 2.5]}));
+    run(&mut t, "sheet.convert", json!({"body": "Block", "face": [50, 30, 2.5]}));
     let f = flat(&mut t);
     assert!(rel(f["thickness"].as_f64().unwrap_or(0.0), 2.5) < 1e-9, "{f}");
     let size = (f["flat_size_mm"][0].as_f64().unwrap_or(0.0), f["flat_size_mm"][1].as_f64().unwrap_or(0.0));
@@ -1284,6 +1284,118 @@ fn fold_positions_fixed_side_and_flip() {
     assert!(b["max"][2].as_f64().unwrap_or(0.0) < t + r + 40.0 - ba / 2.0);
 }
 
+/// A fold line across the 100 x 60 plate's top face at x = `x_fold`, a parameter now `x` mm.
+fn fold_line_at(s: &mut Session, x: f64) {
+    run(s, "parameters.add", json!({"name": "x_fold", "expression": format!("{x} mm")}));
+    run(s, "sketch.create", json!({"plane": "XY", "offset": 2.5, "name": "FoldLine"}));
+    run(s, "sketch.line", json!({"points": [[x, 0.0], [x, 60.0]], "ids": ["fl"], "connect": false}));
+    run(s, "sketch.constraint.horizontal_vertical", json!({"line": "fl", "mode": "vertical"}));
+    run(s, "sketch.dimension", json!({"entities": ["origin", "fl.start"], "type": "horizontal", "value": "x_fold"}));
+    run(s, "sketch.finish", json!({}));
+}
+
+/// The side the last feature, a fold, keeps put.
+fn fold_stays(s: &Session) -> Option<solidcraft_doc::FoldSide> {
+    match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::SheetFold { stays, .. }) => *stays,
+        _ => None,
+    }
+}
+
+/// A fold given a fixed point turns it into the side that stays as it is made, and keeps that
+/// side wherever its line goes after (#6748). On the 100 x 60 plate folded at x = 60 with the
+/// point at x = 80, the smaller side, right of the line drawn along +y as seen from the top (the
+/// sheet's surface), stays put. Moved to x = 90, past the point, the line still keeps its right
+/// side put: the 90 mm side left of it stands up, though the point now lies on it.
+#[test]
+fn a_fold_keeps_the_side_its_fixed_point_picked_when_its_line_moves_past_the_point() {
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    fold_line_at(&mut s, 60.0);
+    run(&mut s, "sheet.fold", json!({"sketch": "FoldLine", "curve": "fl", "fixed": [80, 30, 2.5]}));
+    assert_eq!(fold_stays(&s), Some(solidcraft_doc::FoldSide::Right));
+    // The left side stands up as in fold_takes_the_bend_out_of_the_flat_sheet, its line at x:
+    // the outer face at the zone's end, x + BA/2, less R + T; the leg x − BA/2 tall above the
+    // bend; the right side flat out to x = 100.
+    let check = |s: &mut Session, x: f64| {
+        let b = bbox(s);
+        assert!((b["min"][0].as_f64().unwrap_or(0.0) - (x + ba / 2.0 - r - t)).abs() < 1e-6, "{x}: {b}");
+        assert!((b["max"][0].as_f64().unwrap_or(0.0) - 100.0).abs() < 1e-6, "{x}: {b}");
+        assert!((b["max"][2].as_f64().unwrap_or(0.0) - (t + r + x - ba / 2.0)).abs() < 1e-6, "{x}: {b}");
+    };
+    check(&mut s, 60.0);
+    run(&mut s, "parameters.change", json!({"name": "x_fold", "expression": "90 mm"}));
+    assert_eq!(fold_stays(&s), Some(solidcraft_doc::FoldSide::Right));
+    check(&mut s, 90.0);
+}
+
+/// Takes `stays` out of every fold in a design's file: the file a version from before folds kept
+/// their side wrote.
+fn strip_stays(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            if m.get("type").and_then(Value::as_str) == Some("sheet_fold") {
+                m.remove("stays");
+            }
+            m.values_mut().for_each(strip_stays);
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_stays),
+        _ => {}
+    }
+}
+
+/// A design saved before folds kept their side (a fold with no `stays`, with and without a fixed
+/// point) gets each fold's side once, as it opens: the side the fold made then, the one making it
+/// now stores. A parameter edit after that keeps it, where the side would have been decided again
+/// from the areas (the line at x = 40: the left side is the smaller now) or from the point (the
+/// line at x = 90: the point at x = 80 is left of it now).
+#[test]
+fn an_older_designs_fold_gets_its_side_once_as_it_opens_and_keeps_it() {
+    use solidcraft_doc::FoldSide::{Left, Right};
+    let (t, r, k) = (2.5, 2.5, 0.44);
+    let ba = FRAC_PI_2 * (r + k * t);
+    let near = |a: &Value, b: &Value| {
+        let at = |v: &Value, m: &str, i: usize| v[m][i].as_f64().unwrap_or(f64::NAN);
+        ["min", "max"].iter().all(|m| (0..3).all(|i| (at(a, m, i) - at(b, m, i)).abs() < 1e-9))
+    };
+    for (fixed, side, to) in [(None, Left, 40.0), (Some([80.0, 30.0, 2.5]), Right, 90.0)] {
+        let mut s = Session::default();
+        base(&mut s, 100.0, 60.0);
+        fold_line_at(&mut s, 60.0);
+        let mut p = json!({"sketch": "FoldLine", "curve": "fl"});
+        if let Some(f) = fixed {
+            p["fixed"] = json!(f);
+        }
+        run(&mut s, "sheet.fold", p);
+        assert_eq!(fold_stays(&s), Some(side), "{fixed:?}");
+        let made = bbox(&mut s);
+        let mut file: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+        strip_stays(&mut file);
+        let older = solidcraft_doc::Document::from_json(&file.to_string()).unwrap();
+        assert!(older.features.iter().any(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetFold { stays: None, .. })), "{fixed:?}");
+        let mut s = Session::new(older);
+        assert_eq!(fold_stays(&s), Some(side), "{fixed:?}: converted as it opens");
+        let opened = bbox(&mut s);
+        assert!(near(&opened, &made), "{fixed:?}: {opened} {made}");
+        run(&mut s, "parameters.change", json!({"name": "x_fold", "expression": format!("{to} mm")}));
+        assert_eq!(fold_stays(&s), Some(side), "{fixed:?}");
+        // The side that moves stands up as in fold_takes_the_bend_out_of_the_flat_sheet, its line
+        // at `to`: the right side's outer face at the zone's start, to − BA/2, plus R + T, its leg
+        // 100 − to − BA/2 tall above the bend; the left side's at the zone's end, to + BA/2, less
+        // R + T, its leg to − BA/2 tall.
+        let (lo, hi, top) = match side {
+            Left => (0.0, to - ba / 2.0 + r + t, t + r + 100.0 - to - ba / 2.0),
+            Right => (to + ba / 2.0 - r - t, 100.0, t + r + to - ba / 2.0),
+        };
+        let b = bbox(&mut s);
+        assert!((b["min"][0].as_f64().unwrap_or(f64::NAN) - lo).abs() < 1e-6, "{fixed:?}: {b}");
+        assert!((b["max"][0].as_f64().unwrap_or(f64::NAN) - hi).abs() < 1e-6, "{fixed:?}: {b}");
+        assert!((b["max"][2].as_f64().unwrap_or(f64::NAN) - top).abs() < 1e-6, "{fixed:?}: {b}");
+    }
+}
+
 #[test]
 fn fold_carries_flanges_on_the_moving_side() {
     let mut s = Session::default();
@@ -1388,9 +1500,12 @@ fn flange_edges_are_named_and_follow_the_base_sketch() {
     let d = run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 100}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
     run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2.5]], "height": 20, "name": "Side"}));
     let side = s.doc.find_feature("Side").cloned().unwrap();
-    assert_eq!(side.edge_names, vec!["base:rim.l2:top".to_string()]);
+    // The model's name for the edge picked: where the base's rim on the sketch line `l2` meets
+    // its top (#7990: a sheet has no edge names of its own).
+    assert_eq!(side.edge_names, vec![format!("F{base}:side:l2|F{base}:top")]);
     let v0 = volume(&mut s);
     // Narrower base: the flange stays on the right edge (now at x = 40).
     let name = d["param"].as_str().or_else(|| d["name"].as_str()).map(str::to_string).unwrap_or_else(|| "d1".into());
@@ -1401,12 +1516,13 @@ fn flange_edges_are_named_and_follow_the_base_sketch() {
     assert!(volume(&mut s) < v0);
     let id = side.id;
     assert_eq!(s.model.result(id).and_then(|r| r.warning.clone()), None);
-    // A hem on the flange's far edge is named after the flange.
+    // A hem on the flange's far edge is named after the flange's far rim, which is named after
+    // the base's rim the flange stands on.
     let top = b["max"][2].as_f64().unwrap_or(0.0);
     let x = b["max"][0].as_f64().unwrap_or(0.0);
     run(&mut s, "sheet.hem", json!({"edges": [[x, 30, top]], "length": 6, "name": "H"}));
     let h = s.doc.find_feature("H").cloned().unwrap();
-    assert!(h.edge_names[0].starts_with(&format!("F{id}.base.l2:rim.far")), "{:?}", h.edge_names);
+    assert!(h.edge_names[0].contains(&format!("F{id}:far:F{base}:side:l2")), "{:?}", h.edge_names);
 }
 
 /// With no fixed side, the larger side stays whichever side of the line it is on (QA s22).
@@ -1463,12 +1579,13 @@ fn a_sketch_on_a_flange_face_attaches_to_its_panel() {
     plate_with_flange(&mut s);
     let v0 = volume(&mut s);
     let made = circle_sketch(&mut s, "Holes", json!({"face": [50, 2.5, 12]}), [30.0, 5.0 - ba - 7.0], 3.6);
-    assert_eq!(made["attachment"], "sheet_face");
-    // The sketch keeps the face's name: the body, the panel (its flange) and the side of the sheet.
+    assert_eq!(made["attachment"], "exact_face");
+    // The sketch keeps the face's name, the model's: the flange's top, after the base's rim on the
+    // sketch line `l1` it stands on.
     let sketch = s.doc.find_feature("Holes").cloned().unwrap();
     let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &sketch.kind else { panic!("{:?}", sketch.kind) };
-    let name = solidcraft_doc::sheet::plane_sheet_face(plane).unwrap_or_default();
-    assert!(name.starts_with("sheet:Body1:F") && name.ends_with(":top"), "{name}");
+    let name = solidcraft_doc::face_anchor::plane_face_anchor(plane).map(|a| a.target.name.clone()).unwrap_or_default();
+    assert!(name.starts_with('F') && name.contains(":top:F") && name.ends_with(":side:l1"), "{name}");
     // A cut through the flange from that sketch is a round hole 7 mm up the face, at x = 30.
     run(&mut s, "solid.extrude", json!({"sketch": "Holes", "distance": 2.5, "direction": "negative", "operation": "cut"}));
     assert!((v0 - volume(&mut s) - hole).abs() < 0.1, "{}", v0 - volume(&mut s));
@@ -1597,24 +1714,24 @@ fn a_sketch_on_a_sheet_face_reports_a_lost_attachment_instead_of_moving_to_anoth
     circle_sketch(&mut s, "Holes", json!({"face": [50, 2.5, 12]}), [30.0, -8.0], 3.6);
     let id = s.doc.find_feature("Holes").map(|f| f.id).unwrap_or(0);
     let status = |s: &Session| s.placed_document().sketch_face_attachment(id, &s.model);
-    assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Sheet { plane: Some(_) }));
+    assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Healthy { .. }), "{:?}", status(&s));
     // With the flange suppressed there is no such face; the base's top face is not a substitute.
     run(&mut s, "timeline.suppress", json!({"feature": "EdgeFlange1", "suppressed": true}));
     let error = run(&mut s, "timeline.inspect", json!({"feature": "Holes"}))["error"].as_str().unwrap_or_default().to_string();
-    assert!(error.contains("lost face attachment") && error.contains("reattach"), "{error}");
+    assert!(!error.is_empty(), "the sketch's face is gone");
     let solidcraft_doc::FaceAttachmentStatus::Lost { message, repair_plane } = status(&s) else { panic!("{:?}", status(&s)) };
-    assert!(message.contains("sheet face") && repair_plane.is_some(), "{message}");
+    assert!(message.contains("lost face attachment") && repair_plane.is_some(), "{message}");
     // Redefine Sketch Plane repairs it on another face, here the base's top (its sketch keeps its geometry).
     let repaired = run(&mut s, "sketch.redefine", json!({"sketch": "Holes", "plane": {"face": [10, 30, 2.5]}}));
-    assert_eq!(repaired["attachment"], "sheet_face");
+    assert_eq!(repaired["attachment"], "exact_face");
     assert!(run(&mut s, "timeline.inspect", json!({"feature": "Holes"}))["error"].is_null());
-    assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Sheet { .. }));
+    assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Healthy { .. }));
     // The flange is back, and a sketch attached to it again is healthy.
     run(&mut s, "timeline.suppress", json!({"feature": "EdgeFlange1", "suppressed": false}));
     let again = run(&mut s, "sketch.redefine", json!({"sketch": "Holes", "plane": {"face": [50, 2.5, 12]}}));
-    assert_eq!(again["attachment"], "sheet_face");
+    assert_eq!(again["attachment"], "exact_face");
     assert!(run(&mut s, "timeline.inspect", json!({"feature": "Holes"}))["error"].is_null());
-    assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Sheet { .. }));
+    assert!(matches!(status(&s), solidcraft_doc::FaceAttachmentStatus::Healthy { .. }));
 }
 
 #[test]
@@ -1625,11 +1742,13 @@ fn renaming_a_sheet_body_keeps_its_sketches_on_their_faces() {
     circle_sketch(&mut s, "Holes", json!({"face": [50, 2.5, 12]}), [30.0, -8.0], 3.6);
     run(&mut s, "sketch.create", json!({"plane": {"face": [10, 30, 2.5]}, "offset": "5 mm", "name": "Above"}));
     run(&mut s, "sketch.finish", json!({}));
+    let base = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetBase { .. })).map_or(0, |f| f.id);
     run(&mut s, "body.rename", json!({"body": "Body1", "name": "Bracket"}));
-    for (sketch, face) in [("Holes", "sheet:Bracket:F"), ("Above", "sheet:Bracket:base:top")] {
+    for (sketch, face) in [("Holes", ":side:l1".to_string()), ("Above", format!("F{base}:top"))] {
         let feature = s.doc.find_feature(sketch).cloned().unwrap();
         let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("{:?}", feature.kind) };
-        assert!(solidcraft_doc::sheet::plane_sheet_face(plane).is_some_and(|name| name.starts_with(face)), "{sketch}: {:?}", feature.kind);
+        let anchor = solidcraft_doc::face_anchor::plane_face_anchor(plane);
+        assert!(anchor.is_some_and(|a| a.target.body == "Bracket" && a.target.name.ends_with(&face)), "{sketch}: {:?}", feature.kind);
         assert!(run(&mut s, "timeline.inspect", json!({"feature": sketch}))["error"].is_null(), "{sketch}");
     }
     cut_through(&mut s, "Holes");
@@ -2414,10 +2533,14 @@ fn elliptic_cut_out_stays_exact_in_the_flat_pattern_and_follows_arcs_when_folded
     let (cut_faces, cut_cylinders) = faces(&mut s);
     let wall = cut_faces - plain_faces;
     assert!(wall < 132 && cut_cylinders - plain_cylinders + 4 >= wall, "{wall} wall faces, {} cylinders", cut_cylinders - plain_cylinders);
-    // Unfolded, it is the four conic faces of the ellipse.
+    // Unfolded, the body keeps the folded body's faces, each the face of the same part (#7990, the
+    // flat in docs/design/sheet-metal-naming.md): not one face per conic of the flat's hole, as a
+    // body built from the flat's regions had. Counted as `inspect.measure` merges faces on one
+    // surface: the top and the bottom (2), the outline's sides (its 4 segments), and the cut's wall
+    // in the two pieces its sketch ellipse makes (`side:<curve>#1`, `#2`): 2 + 4 + 2 = 8.
     run(&mut s, "sheet.unfold", json!({}));
     assert!((volume(&mut s) - (blank - cut) * 2.5).abs() < 0.5);
-    assert_eq!(faces(&mut s).0, regions[0].outer.segs.len() as u64 + 4 + 2);
+    assert_eq!(faces(&mut s).0, regions[0].outer.segs.len() as u64 + 2 + 2);
     run(&mut s, "sheet.refold", json!({}));
     assert!((volume(&mut s) - folded).abs() < 0.1);
 }
@@ -3286,7 +3409,7 @@ fn bar_with_leg(s: &mut Session, converted: bool) {
     run(s, "sketch.finish", json!({}));
     if converted {
         run(s, "solid.extrude", json!({"sketch": "Bar", "distance": 2, "body_name": "Plate"}));
-        run(s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [80, 15, 2]}));
+        run(s, "sheet.convert", json!({"body": "Plate", "face": [80, 15, 2]}));
     } else {
         run(s, "sheet.flange", json!({"sketch": "Bar"}));
     }
@@ -5752,8 +5875,8 @@ fn flat_face_points(s: &Session) -> Vec<(usize, solidcore_record::Vec3, solidcor
 }
 
 /// Every flat face of a sheet takes an attached sketch (#495): its panels, the rims along the
-/// panels' straight edges (named by the base sketch line or the flange's far edge and sides) and
-/// the flat ends of a bend. Each lies on its face, facing out of the sheet, and a rim's sketch
+/// panels' straight edges (named after the base sketch line or the flange's far edge and ends) and
+/// the flat ends of a bend, each by the model's name for it (#7990). Each lies on its face, facing out of the sheet, and a rim's sketch
 /// follows the rim when the base grows. A press-pull on a rim pushes it out, and a plain hole into
 /// a panel is kept as a cut-out of the flat pattern (#560).
 #[test]
@@ -5775,9 +5898,9 @@ fn every_flat_face_of_a_sheet_takes_an_attached_sketch() {
     for (index, point, normal) in faces {
         let made = run(&mut s, "sketch.create", json!({"plane": {"face": point, "body": "Body1", "index": index}}));
         run(&mut s, "sketch.finish", json!({}));
-        assert_eq!(made["attachment"], "sheet_face", "face {index} at {point:?}");
+        assert_eq!(made["attachment"], "exact_face", "face {index} at {point:?}");
         let id = made["sketch"].as_u64().unwrap();
-        let solidcraft_doc::FaceAttachmentStatus::Sheet { plane: Some(plane) } = s.placed_document().sketch_face_attachment(id, &s.model) else {
+        let solidcraft_doc::FaceAttachmentStatus::Healthy { plane, .. } = s.placed_document().sketch_face_attachment(id, &s.model) else {
             panic!("face {index} at {point:?}")
         };
         assert!(plane.normal().dot(normal) > 1.0 - 1e-9 && (point - plane.origin).dot(normal).abs() < 1e-6, "face {index}: {plane:?}");
@@ -5788,7 +5911,7 @@ fn every_flat_face_of_a_sheet_takes_an_attached_sketch() {
     // The base's rim along x = W (the sketch's l2) moves with W.
     let side = on_side.expect("the base rim on x = 100");
     run(&mut s, "parameters.change", json!({"name": "W", "expression": "120 mm"}));
-    let solidcraft_doc::FaceAttachmentStatus::Sheet { plane: Some(plane) } = s.placed_document().sketch_face_attachment(side, &s.model) else {
+    let solidcraft_doc::FaceAttachmentStatus::Healthy { plane, .. } = s.placed_document().sketch_face_attachment(side, &s.model) else {
         panic!("the rim sketch after the edit")
     };
     assert!((plane.origin.x - 120.0).abs() < 1e-9 && (plane.normal().x - 1.0).abs() < 1e-9, "{plane:?}");
@@ -6190,24 +6313,58 @@ fn last_warning(s: &Session) -> String {
     s.model.results.last().and_then(|r| r.warning.clone()).unwrap_or_default()
 }
 
-fn parted_note(area: f64, at: [f64; 2]) -> String {
-    format!("1 piece of `Body1` is no longer joined to its base ({area:.2} mm², near ({:.1}, {:.1}) in the flat pattern); it is kept", at[0], at[1])
-}
-
 fn flat_pieces(s: &Session) -> Vec<f64> {
     s.model.state().surface_sheets[0].shown().regions.iter().map(solidcore_record::Region2::area).collect()
 }
 
+/// Whether `pieces` hold one of area `want` (mm²), to a millionth of it.
+fn has_piece(pieces: &[f64], want: f64) -> bool {
+    pieces.iter().any(|a| (a - want).abs() <= 1e-6 * want.max(1.0))
+}
+
+/// The feature whose panel has the face of the sheet `Body1` holding the point `p`: the feature
+/// the face's name starts with (`F12`), the model's name for it (#7990). A panel's faces, its
+/// bend's and its rims' are all named after the feature that made the panel.
+fn panel_at(s: &Session, p: [f64; 3]) -> String {
+    let st = s.model.state();
+    let name = solidcraft_doc::naming::face_names_at(&st, &[solidcore_record::Vec3::new(p[0], p[1], p[2])]).into_iter().next().unwrap_or_default();
+    maker(&name)
+}
+
+/// The feature a face's name starts with (`F12` of `F12:top:F3:side:l1`).
+fn maker(name: &str) -> String {
+    name.split(':').next().unwrap_or_default().to_string()
+}
+
+/// The names of the faces of the sheet body `Body1`, the model's.
+fn sheet_faces(s: &mut Session) -> SheetFaces {
+    let faces = run(s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().cloned().unwrap_or_default();
+    faces.iter().filter_map(|f| Some(f["name"].as_str().filter(|n| !n.is_empty())?.to_string())).collect()
+}
+
+/// The names of a sheet body's faces.
+type SheetFaces = std::collections::BTreeSet<String>;
+
+/// The faces of `before` on panels other than those the features `cut` made (see [`panel_at`])
+/// that `after` no longer has under the same names: none where a cut renamed nothing it did not
+/// reach.
+fn renamed(before: &SheetFaces, after: &SheetFaces, cut: &[String]) -> Vec<String> {
+    before.iter().filter(|name| !cut.contains(&maker(name))).filter(|name| !after.contains(*name)).cloned().collect()
+}
+
 #[test]
-fn a_cut_that_parts_a_flange_from_the_base_keeps_it_and_says_so_folded_or_flat() {
-    // A slot across the flange beside its bend (flat y −3 to −1.5) leaves the flange's panel past
-    // it, with any return on it, joined to nothing: 100 × (−3 − far). Cut on the folded flange's
-    // face or in the unfolded sheet, the piece stays, and the cut names it in its reply and on the
-    // timeline, with the middle of the piece in the flat pattern.
+fn a_slot_across_a_flange_beside_its_bend_leaves_two_pieces_folded_or_flat() {
+    // A slot across the flange beside its bend (flat y −3 to −1.5) parts the sheet in two: the
+    // plate with its bend and a strip of the flange, and the flange past the slot with any return
+    // on it, 100 × (−3 − far). Cut on the folded flange's face or in the unfolded sheet, both
+    // pieces stay where they are, folded and flat, the cut says nothing, and every face it did not
+    // reach (all but the flange's) keeps its name.
     for (with_return, unfolded) in [(false, false), (false, true), (true, false), (true, true)] {
         let what = format!("return {with_return}, unfolded {unfolded}");
         let mut s = Session::default();
         let far = tray_with_a_45_degree_flange(&mut s, with_return);
+        let before = sheet_faces(&mut s);
+        let flange = vec![panel_at(&s, FLANGE_FACE)];
         let out = if unfolded {
             run(&mut s, "sheet.unfold", json!({}));
             rectangle_tool(&mut s, "Slot", [-5.0, -3.0], [105.0, -1.5]);
@@ -6218,32 +6375,38 @@ fn a_cut_that_parts_a_flange_from_the_base_keeps_it_and_says_so_folded_or_flat()
             run(&mut s, "sketch.finish", json!({}));
             run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "direction": "negative", "operation": "cut"}))
         };
-        let note = parted_note(100.0 * (-3.0 - far), [50.0, (far - 3.0) / 2.0]);
-        assert!(last_warning(&s).contains(&note), "{what}: {}", last_warning(&s));
-        assert_eq!(out["warning"], json!(last_warning(&s)), "{what}: {out}");
-        // Both pieces stay, folded and flat: the base with its bend left, and the flange.
+        assert!(out["warning"].is_null() && last_warning(&s).is_empty(), "{what}: {out}");
+        // Both pieces stay, folded and flat, each its own flat.
         let pieces = flat_pieces(&s);
-        assert!(pieces.len() == 2 && pieces.iter().any(|a| (a - 100.0 * (-3.0 - far)).abs() < 1e-6), "{what}: {pieces:?}");
+        assert!(pieces.len() == 2 && has_piece(&pieces, 100.0 * (-3.0 - far)), "{what}: {pieces:?}");
+        if !unfolded {
+            assert_eq!(renamed(&before, &sheet_faces(&mut s), &flange), Vec::<String>::new(), "{what}");
+        }
         for command in if unfolded { ["sheet.refold", "sheet.unfold"] } else { ["sheet.unfold", "sheet.refold"] } {
             run(&mut s, command, json!({}));
             assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(2), "{what} {command}");
             assert_eq!(flat_pieces(&s), pieces, "{what} {command}");
             if command == "sheet.unfold" {
                 assert!((volume(&mut s) - pieces.iter().sum::<f64>() * 2.5).abs() < 1e-3, "{what}: {}", volume(&mut s));
+            } else {
+                assert_eq!(renamed(&before, &sheet_faces(&mut s), &flange), Vec::<String>::new(), "{what} {command}");
             }
         }
     }
 }
 
 #[test]
-fn a_ring_over_a_flanges_edge_names_the_piece_of_its_inside_on_the_flange_but_not_an_island() {
+fn a_ring_over_a_flange_keeps_the_piece_of_its_inside() {
     // A ring Ø16 / Ø10 cut on the folded flange's face, centred on its far edge: the half of its
-    // inside on the flange (π·5²/2, its centroid 4·5/3π inside the edge) has nothing round it,
-    // and is named. Centred on the flange, its inside is an island, and nothing is named.
-    for (y, named) in [(None, true), (Some(-20.0), false)] {
+    // inside on the flange, π·5²/2, is a piece of its own. Centred on the flange, its inside,
+    // π·5², is an island in the flange's hole. Either way the cut says nothing, the flat has the
+    // two pieces, and every face off the flange keeps its name.
+    for (y, inside) in [(None, 12.5 * PI), (Some(-20.0), 25.0 * PI)] {
         let mut s = Session::default();
         let far = tray_with_a_45_degree_flange(&mut s, false);
         let y = y.unwrap_or(far);
+        let before = sheet_faces(&mut s);
+        let flange = vec![panel_at(&s, FLANGE_FACE)];
         run(&mut s, "sketch.create", json!({"plane": {"face": FLANGE_FACE}, "name": "Ring"}));
         run(&mut s, "sketch.circle.center", json!({"center": [50, y], "diameter": 16}));
         run(&mut s, "sketch.circle.center", json!({"center": [50, y], "diameter": 10}));
@@ -6253,42 +6416,61 @@ fn a_ring_over_a_flanges_edge_names_the_piece_of_its_inside_on_the_flange_but_no
             "solid.extrude",
             json!({"sketch": "Ring", "profiles": [{"point": [56.5, y]}], "through_all": true, "direction": "negative", "operation": "cut"}),
         );
-        let warning = out["warning"].as_str().unwrap_or_default().to_string();
-        let note = parted_note(12.5 * PI, [50.0, far + 20.0 / (3.0 * PI)]);
-        assert_eq!(warning.contains(&note), named, "{y}: {warning}");
-        assert!(named || !warning.contains("no longer joined"), "{y}: {warning}");
-        assert_eq!(flat_pieces(&s).len(), 2, "{y}");
+        assert!(out["warning"].is_null(), "{y}: {out}");
+        let pieces = flat_pieces(&s);
+        assert!(pieces.len() == 2 && has_piece(&pieces, inside), "{y}: {pieces:?}");
+        assert_eq!(renamed(&before, &sheet_faces(&mut s), &flange), Vec::<String>::new(), "{y}");
     }
 }
 
 #[test]
-fn cuts_that_split_a_sheet_or_cut_it_beside_the_base_name_only_the_pieces_they_part() {
-    // Unfolded, a strip across tray and flange leaves two pieces that each keep their part of
-    // the base: nothing to name. A box over the smaller piece's base and bend then leaves its
-    // flange panel, 26 × (−3 − far), named; a hole in the base after it names nothing again.
+fn cuts_that_split_a_sheet_leave_its_pieces_each_with_its_flat() {
+    // Unfolded, a strip across tray and flange (x 70 to 74) leaves two pieces. A box over the
+    // right one's plate and bend and the flange down to flat y = −3 then leaves that flange's end
+    // a piece of its own, 26 × (−3 − far); a Ø8 hole in the plate after it leaves the two pieces,
+    // the plate's 16π less. None of the cuts says anything, and the refold keeps both pieces.
+    // The box takes the right piece's bend whole (its one wall lies on the flange), and the body
+    // shows it: flat, it weighs its two pieces, 70 × (60 − far) and 26 × (−3 − far), times T;
+    // refolded, the plate 70 × (60 − s) less the hole, the bend 70 long bent π/4 round R 2.5,
+    // (π/4)·T·(R + T/2) a unit of it, and the flange 70 × (40 − s) and its end, flat, times T.
     let mut s = Session::default();
     let far = tray_with_a_45_degree_flange(&mut s, false);
+    let (t, r, setback) = (2.5, 2.5, 5.0 * (PI / 8.0).tan());
     run(&mut s, "sheet.unfold", json!({}));
     rectangle_tool(&mut s, "Strip", [70.0, -60.0], [74.0, 70.0]);
     let out = run(&mut s, "solid.extrude", json!({"sketch": "Strip", "through_all": true, "direction": "symmetric", "operation": "cut"}));
-    assert!(out["warning"].is_null() && last_warning(&s).is_empty(), "{out}");
+    assert!(out["warning"].is_null() && last_warning(&s).is_empty() && flat_pieces(&s).len() == 2, "{out}");
     rectangle_tool(&mut s, "Box", [72.0, -3.0], [101.0, 61.0]);
     let out = run(&mut s, "solid.extrude", json!({"sketch": "Box", "through_all": true, "direction": "symmetric", "operation": "cut"}));
-    assert_eq!(out["warning"], json!(parted_note(26.0 * (-3.0 - far), [87.0, (far - 3.0) / 2.0])), "{out}");
+    assert!(out["warning"].is_null(), "{out}");
+    let pieces = flat_pieces(&s);
+    assert!(pieces.len() == 2 && has_piece(&pieces, 26.0 * (-3.0 - far)), "{pieces:?}");
+    let flat_volume = (70.0 * (60.0 - far) + 26.0 * (-3.0 - far)) * t;
+    assert!((volume(&mut s) - flat_volume).abs() < 1e-6 * flat_volume, "flat: {} vs {flat_volume}", volume(&mut s));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
     run(&mut s, "sketch.circle.center", json!({"center": [30, 30], "diameter": 8}));
     run(&mut s, "sketch.finish", json!({}));
     let out = run(&mut s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "direction": "symmetric", "operation": "cut"}));
     assert!(out["warning"].is_null(), "{out}");
+    let holed = flat_pieces(&s);
+    let left = pieces.iter().copied().fold(0.0, f64::max);
+    assert!(holed.len() == 2 && has_piece(&holed, 26.0 * (-3.0 - far)) && has_piece(&holed, left - 16.0 * PI), "{holed:?}");
     run(&mut s, "sheet.refold", json!({}));
     assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(2));
-    // Folded, a slot across the base beside the bend leaves the flange with a strip of the base;
-    // a plain plate cut in two halves. Neither names anything.
+    let bent = 70.0 * PI / 4.0 * t * (r + t / 2.0);
+    let folded = (70.0 * (60.0 - setback) - 16.0 * PI + 70.0 * (40.0 - setback) + 26.0 * (-3.0 - far)) * t + bent;
+    assert!((volume(&mut s) - folded).abs() < 1e-6 * folded, "folded: {} vs {folded}", volume(&mut s));
+    // Folded, a slot across the plate beside the bend leaves the flange with a strip of the plate,
+    // and the rest of the plate; a plain plate is cut in two halves. Neither says anything, and
+    // the flange the slot did not reach keeps the names of its faces.
     let mut s = Session::default();
     tray_with_a_45_degree_flange(&mut s, false);
+    let before = sheet_faces(&mut s);
+    let plate = vec![panel_at(&s, [50.0, 30.0, 2.5])];
     rectangle_tool(&mut s, "Slot", [-5.0, 3.0], [105.0, 6.0]);
     let out = run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "direction": "symmetric", "operation": "cut"}));
     assert!(out["warning"].is_null() && flat_pieces(&s).len() == 2, "{out}");
+    assert_eq!(renamed(&before, &sheet_faces(&mut s), &plate), Vec::<String>::new());
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "Strip", [45.0, -5.0], [55.0, 65.0]);
@@ -6297,7 +6479,7 @@ fn cuts_that_split_a_sheet_or_cut_it_beside_the_base_name_only_the_pieces_they_p
 }
 
 #[test]
-fn a_hole_that_parts_a_flange_from_the_base_names_it() {
+fn a_hole_across_a_flanges_width_leaves_two_pieces() {
     // A 10 x 60 plate with a 90° flange 40 high on its y = 0 edge: the flange's panel runs from
     // flat y = 5 − BA (world z = 5) for 35 mm. A Ø12 hole drilled into it at z = 15 (flat
     // y = 5 − BA − 10) takes its whole width, and leaves the 25 mm below the hole's centre less
@@ -6305,12 +6487,102 @@ fn a_hole_that_parts_a_flange_from_the_base_names_it() {
     let mut s = Session::default();
     base(&mut s, 10.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[5, 0, 2.5]], "height": 40}));
+    let before = sheet_faces(&mut s);
+    let flange = vec![panel_at(&s, [5.0, 0.0, 25.0])];
     let out = run(&mut s, "solid.hole", json!({"position": [5, 0, 15], "diameter": 12}));
     let area = 250.0 - (5.0 * 11f64.sqrt() + 36.0 * (5.0f64 / 6.0).asin());
-    let warning = out["warning"].as_str().unwrap_or_default();
-    assert!(warning.starts_with(&format!("1 piece of `Body1` is no longer joined to its base ({area:.2} mm², near (5.0, ")), "{warning}");
-    assert_eq!(out["warning"], json!(last_warning(&s)));
-    assert_eq!(flat_pieces(&s).len(), 2);
+    assert!(out["warning"].is_null() && last_warning(&s).is_empty(), "{out}");
+    let pieces = flat_pieces(&s);
+    assert!(pieces.len() == 2 && has_piece(&pieces, area), "{pieces:?}");
+    assert_eq!(renamed(&before, &sheet_faces(&mut s), &flange), Vec::<String>::new());
+}
+
+#[test]
+fn reordering_two_flanges_moves_neither_the_flat_nor_a_face_name() {
+    // A 100 x 60 plate with a flange 20 high on its edge y = 0 (feature A) and one 15 high on its
+    // edge y = 60 (feature B): they meet at no corner, so either may come first. Moved before A on
+    // the timeline, B makes the same sheet: the flat pattern's outline lies where it did, point
+    // for point, and every face keeps its name.
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20, "name": "A"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 60, 2.5]], "height": 15, "name": "B"}));
+    let outline = |s: &mut Session| {
+        let f = flat(s);
+        let loops = f["outline"].as_array().cloned().unwrap_or_default();
+        let mut pts: Vec<(i64, i64)> = loops
+            .iter()
+            .flat_map(|l| l.as_array().cloned().unwrap_or_default())
+            .map(|p| ((p[0].as_f64().unwrap_or(f64::NAN) * 1e6).round() as i64, (p[1].as_f64().unwrap_or(f64::NAN) * 1e6).round() as i64))
+            .collect();
+        pts.sort_unstable();
+        pts.dedup();
+        pts
+    };
+    let (was, names) = (outline(&mut s), sheet_faces(&mut s));
+    assert!(!was.is_empty() && !names.is_empty());
+    let at = |s: &Session, name: &str| s.doc.features.iter().position(|f| f.name == name);
+    let a = at(&s, "A").unwrap_or_default();
+    run(&mut s, "timeline.reorder", json!({"feature": "B", "position": a}));
+    assert!(at(&s, "B") < at(&s, "A"), "B comes first now");
+    assert_eq!(outline(&mut s), was, "the flat moved");
+    assert_eq!(sheet_faces(&mut s), names, "a face was renamed");
+}
+
+#[test]
+fn cutting_away_a_trays_plate_leaves_its_two_flanges_as_pieces() {
+    // A 100 x 60 tray (2.5 mm, R 2.5, K 0.44) with a 20 high flange on each of its edges y = 0
+    // and y = 60. Unfolded, the plate lies between the bends' tangent lines, s = R + T = 5 in from
+    // those edges; each bend's zone is BA = (π/2)(R + K·T) = 1.8π wide outside them, and each
+    // flange 20 − s = 15 long past its zone. A cut over the whole plate and the half of each zone
+    // beside it, from flat y = 5 − 0.9π to 55 + 0.9π, leaves the two flanges, each with the half
+    // of its zone beside it lying flat with it: two pieces of 100 × (15 + 0.9π). The cut says
+    // nothing, both flats develop, folded and flat, and every face of the flanges keeps its name.
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2.5], [50, 60, 2.5]], "height": 20}));
+    // Each flange's faces, by where they lie: in its slab (y 0 to 2.5, or 57.5 to 60), above its
+    // bend (z past R + T = 5) while the plate is there; afterwards, anywhere in its slab, as the
+    // half zone that lies flat with it only adds to its faces.
+    let slab = |y0: f64, z0: f64| move |p: [f64; 3]| p[1] >= y0 - 1e-6 && p[1] <= y0 + 2.5 + 1e-6 && p[2] >= z0 - 1e-6;
+    let before = [model_names_where(&mut s, slab(0.0, 5.0)), model_names_where(&mut s, slab(57.5, 5.0))];
+    assert!(before.iter().all(|n| !n.is_empty()), "{before:?}");
+    run(&mut s, "sheet.unfold", json!({}));
+    let half = 0.9 * PI;
+    rectangle_tool(&mut s, "Plate", [-5.0, 5.0 - half], [105.0, 55.0 + half]);
+    let out = run(&mut s, "solid.extrude", json!({"sketch": "Plate", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    assert!(out["warning"].is_null() && last_warning(&s).is_empty(), "{out}");
+    let piece = 100.0 * (15.0 + half);
+    let pieces = flat_pieces(&s);
+    assert!(pieces.len() == 2 && pieces.iter().all(|a| (a - piece).abs() <= 1e-6 * piece), "{pieces:?}");
+    for command in ["sheet.refold", "sheet.unfold", "sheet.refold"] {
+        run(&mut s, command, json!({}));
+        assert_eq!(flat(&mut s)["outline"].as_array().map(Vec::len), Some(2), "{command}");
+        assert_eq!(flat_pieces(&s), pieces, "{command}");
+        if command == "sheet.unfold" {
+            assert!((volume(&mut s) - 2.0 * piece * 2.5).abs() < 1e-3, "{}", volume(&mut s));
+        } else {
+            let after = [model_names_where(&mut s, slab(0.0, f64::NEG_INFINITY)), model_names_where(&mut s, slab(57.5, f64::NEG_INFINITY))];
+            for (b, a) in before.iter().zip(&after) {
+                assert!(b.is_subset(a), "{command}: {:?} lost, of {a:?}", b.difference(a).collect::<Vec<_>>());
+            }
+        }
+    }
+}
+
+/// The model's names of the planar faces of `Body1` whose point (as `model.faces` gives one on
+/// each face) lies where `at` says.
+fn model_names_where(s: &mut Session, at: impl Fn([f64; 3]) -> bool) -> std::collections::BTreeSet<String> {
+    let faces = run(s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().cloned().unwrap_or_default();
+    faces
+        .iter()
+        .filter(|f| f["cylinder"].is_null())
+        .filter_map(|f| {
+            let p = f["point"].as_array()?;
+            let p = [p.first()?.as_f64()?, p.get(1)?.as_f64()?, p.get(2)?.as_f64()?];
+            at(p).then(|| f["name"].as_str().map(str::to_string)).flatten()
+        })
+        .collect()
 }
 
 /// The three exports of a sheet's flat pattern: its JSON, the DXF (of this body and of every
@@ -6595,52 +6867,41 @@ fn mirroring_or_copying_a_sheet_body_leaves_the_original_sheet_as_it_was() {
     }
 }
 
-/// The top and bottom face names of every panel of the first sheet body, by sheet face.
-fn panel_face_names(s: &mut Session) -> std::collections::BTreeMap<String, String> {
+/// The names of the faces of the first body in the state feature `id` left, sorted.
+fn names_after(s: &Session, id: u64) -> Vec<String> {
     let body = s.model.state().bodies[0].name.clone();
-    let faces = run(s, "model.faces", json!({"body": body}))["faces"].as_array().cloned().unwrap_or_default();
-    faces
-        .iter()
-        .filter_map(|f| {
-            let sheet = f["sheet_face"].as_str()?;
-            (sheet.ends_with(":top") || sheet.ends_with(":bottom")).then(|| (sheet.to_string(), f["name"].as_str().unwrap_or("").to_string()))
-        })
-        .collect()
+    let st = s.model.results.iter().find(|r| r.id == id).map(|r| r.state.clone()).expect("the feature's state");
+    let mut names = st.bodies.iter().find(|b| b.name == body).map(|b| solidcraft_doc::naming::face_names(b).as_ref().clone()).unwrap_or_default();
+    names.sort();
+    names
 }
 
-/// An unfold keeps the base where it is and lays the flanges out beside it: the flat face that
-/// spans them and the bend strips between them is the base's face, and is named after it; so are
-/// the faces the refold makes of it, at every size. It was named after the unfold whenever few of
-/// its sample points fell on the base (the bend strips are many small triangles, the base two big
-/// ones), and that changed with the sizes: a refolded part's faces were renamed by a size change,
-/// and joints and sketches on them lost their faces.
+/// An unfold lays the folded sheet's faces out flat, each the face it was (#7990: the flat is built
+/// of the same pieces, and merges no faces): every flat face keeps the name of the folded face
+/// made for the same part of the sheet, at every size, none is named after the unfold, and the
+/// refold gives every face its name back. Named after whatever faces of the flat a size change
+/// happened to sample, a refolded part's faces were renamed by it, and joints and sketches on
+/// them lost their faces.
 #[test]
-fn an_unfolded_sheets_flat_face_is_named_after_its_base_at_every_size() {
+fn an_unfolded_flats_faces_keep_their_folded_names_and_refold_to_them_at_every_size() {
     let mut s = Session::default();
     run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","gap":"0.5 mm","active":true}));
     run(&mut s, "parameters.add", json!({"name": "H", "expression": "5 mm"}));
     base(&mut s, 200.0, 150.0);
     run(&mut s, "sheet.flange", json!({"edges":[[100,0,2],[200,75,2],[100,150,2]],"height":"H","angle":"90 deg"}));
-    let folded = panel_face_names(&mut s);
-    let (top, bottom) = (folded["sheet:Body1:base:top"].clone(), folded["sheet:Body1:base:bottom"].clone());
+    let flanges = s.doc.features.last().map_or(0, |f| f.id);
     run(&mut s, "sheet.unfold", json!({}));
     let unfold = s.doc.features.last().map_or(0, |f| f.id);
     run(&mut s, "sheet.refold", json!({}));
-    let stem = |n: &str| solidcraft_doc::naming::strip_piece(n).to_string();
+    let refold = s.doc.features.last().map_or(0, |f| f.id);
     for h in ["5 mm", "60 mm", "5 mm"] {
         run(&mut s, "parameters.change", json!({"name": "H", "expression": h}));
-        let body = s.model.state().bodies[0].name.clone();
-        let flat_state = s.model.results.iter().find(|r| r.id == unfold).map(|r| r.state.clone());
-        {
-            let st = flat_state.expect("the unfold's state");
-            let flat = st.bodies.iter().find(|b| b.name == body).map(|b| solidcraft_doc::naming::face_names(b).as_ref().clone()).unwrap_or_default();
-            assert!(flat.iter().any(|n| stem(n) == stem(&top)) && flat.iter().any(|n| stem(n) == stem(&bottom)), "H {h}: the flat faces {flat:?}");
-            assert!(!flat.iter().any(|n| n.starts_with(&format!("F{unfold}:"))), "H {h}: a flat face named after the unfold: {flat:?}");
-        }
-        for (sheet, name) in panel_face_names(&mut s) {
-            let want = if sheet.ends_with(":top") { &top } else { &bottom };
-            assert_eq!(stem(&name), stem(want), "H {h}: {sheet} is {name} after the refold");
-        }
+        let folded = names_after(&s, flanges);
+        let flat = names_after(&s, unfold);
+        assert!(!folded.is_empty());
+        assert_eq!(flat, folded, "H {h}: the flat's faces");
+        assert!(!flat.iter().any(|n| n.starts_with(&format!("F{unfold}:"))), "H {h}: a flat face named after the unfold: {flat:?}");
+        assert_eq!(names_after(&s, refold), folded, "H {h}: the refold's faces");
     }
 }
 
@@ -6651,7 +6912,7 @@ fn a_primitive_cut_passes_over_a_sheet_clear_of_it_by_its_exact_box() {
     let mut s = Session::default();
     for (name, x) in [("Left", 0.0), ("Right", 100.2)] {
         run(&mut s, "solid.box", json!({"corner": [x, 0, 0], "length": 100, "width": 60, "height": 2.5, "body_name": name}));
-        run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": name, "face": [x + 50.0, 30, 2.5]}));
+        run(&mut s, "sheet.convert", json!({"body": name, "face": [x + 50.0, 30, 2.5]}));
     }
     let body = |s: &Session, name: &str| s.model.state().bodies.iter().find(|b| b.name == name).map(|b| b.body.clone()).unwrap();
     let left = body(&s, "Left");

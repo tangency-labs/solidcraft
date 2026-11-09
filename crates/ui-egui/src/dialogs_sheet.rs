@@ -12,7 +12,7 @@ use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::sheet::SheetRule;
-use solidcraft_engine::doc::{FeatureKind, ProfileSel};
+use solidcraft_engine::doc::{FeatureKind, FoldSide, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
@@ -72,12 +72,19 @@ crate::dialog_descriptor::dialog_descriptors! {
             gap: String = String::new() => gap.as_deref().map(str::to_string).unwrap_or_default(),
             flip: bool = false => *flip,
         } => json!({"length": length, "flip": flip});
-        Fold("sheet.fold", "FOLD", [("Bend Line", AXES, false), ("Stationary Side", PLANAR_FACES, false)],
-            FeatureKind::SheetFold { angle, radius, position, flip, .. }) {
+        Fold("sheet.fold", "FOLD", [("Bend Line", AXES, false), ("Fixed Face", PLANAR_FACES, false)],
+            FeatureKind::SheetFold { angle, radius, position, flip, stays, .. }) {
             angle: String = "90 deg".into() => angle.to_string(),
             radius: String = String::new() => radius.as_deref().map(str::to_string).unwrap_or_default(),
             position: usize = 0 => FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
             flip: bool = false => *flip,
+            // The side that stays: 0 decided as the fold is made, 1 left of the line as drawn
+            // (seen from the sheet's surface), 2 right of it.
+            stays: usize = 0 => match stays {
+                Some(FoldSide::Left) => 1,
+                Some(FoldSide::Right) => 2,
+                None => 0,
+            },
         } => json!({"angle": angle, "position": FOLD_POSITIONS.get(*position).copied().unwrap_or("centerline"), "flip": flip});
         Path("sheet.path_flange", "PATH FLANGE", [("Edge", EDGES, false), ("Path", CURVES, true)],
             FeatureKind::SheetPath { radius, .. }) {
@@ -111,15 +118,25 @@ crate::dialog_descriptor::dialog_descriptors! {
             Unfold {
                 refold: bool,
             },
+            /// Convert (#6748): no face is fixed; the sheet is every face of the body but the
+            /// skipped ones, or the faces picked and every face a bend joins to them, and the
+            /// sharp edges are cut open but the bends.
             Convert {
                 rule: usize,
-                /// Convert's mode (index into `CONVERT_MODES`): Convert (#6748), with no face fixed,
-                /// every face of the body converting but the skipped ones and the sharp edges cut
-                /// open but the bends; or Thicken, the sheet from a fixed face.
-                mode: usize,
-                /// Converting, the side of a solid's faces its material lies on (index into
-                /// `MATERIAL_SIDES`).
+                /// The side of the faces the material lies on (index into `MATERIAL_SIDES`).
                 side: usize,
+                /// The body last looked at, and its own thickness where it is a solid that is
+                /// sheet metal already (a shell's, a plate's), for the hint to Recognize it.
+                thin: Option<(String, Option<f64>)>,
+            },
+            /// Recognize (#6748): a body that is sheet metal already becomes the rule's sheet;
+            /// with a new rule's name, a rule made from the body first.
+            Recognize {
+                rule: usize,
+                /// The name of a new rule made from the body (empty: the rule chosen).
+                new_rule: String,
+                /// The body last measured, and what was read of it or why it is no sheet.
+                measured: Option<(String, Result<String, String>)>,
             },
             /// The rule manager: the rule shown (index into the rules, or past the end for a new one).
             Rules {
@@ -150,6 +167,7 @@ impl Sm {
             Sm::Unfold { refold: false } => "UNFOLD",
             Sm::Unfold { refold: true } => "REFOLD",
             Sm::Convert { .. } => "CONVERT TO SHEET METAL",
+            Sm::Recognize { .. } => "RECOGNIZE SHEET METAL",
             Sm::Rules { .. } => "SHEET METAL RULES",
             Sm::FlatPattern { .. } => "FLAT PATTERN",
             _ => self.simple_metadata().map_or("", |(_, title)| title),
@@ -200,7 +218,8 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
-        "sheet.convert" => (Sm::Convert { rule: 0, mode: 0, side: 0 }, convert_inputs(false)),
+        "sheet.convert" => (Sm::Convert { rule: 0, side: 0, thin: None }, convert_inputs()),
+        "sheet.recognize" => (Sm::Recognize { rule: 0, new_rule: String::new(), measured: None }, recognize_inputs()),
         "sheet.manage_rules" => {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
@@ -248,42 +267,61 @@ fn flange_type(inputs: &[SelInput]) -> usize {
     }
 }
 
-/// Converting, the sides of a solid's faces its material can lie on, and their labels.
+/// Converting, the sides of the faces the material can lie on, and their labels.
 const MATERIAL_SIDES: [(&str, &str); 2] = [("inside", "Inside"), ("outside", "Outside")];
 
-/// Convert's modes and their labels: Convert (#6748, the default) and Thicken.
-const CONVERT_MODES: [(&str, &str); 2] = [("convert", "Convert"), ("thicken", "Thicken")];
-/// Thicken's place in `CONVERT_MODES`.
-pub(crate) const THICKEN: usize = 1;
-
-/// Convert's inputs (#6748): converting, the body, the bend edges and the faces left out; or
-/// thickening, the faces that make the sheet and the bend edges.
-pub(crate) fn convert_inputs(thicken: bool) -> Vec<SelInput> {
-    if thicken {
-        vec![SelInput::new("Faces", FACES, true), SelInput::new("Bend Edges", EDGES, true)]
-    } else {
-        vec![SelInput::new("Body", BODIES, false), SelInput::new("Bend Edges", EDGES, true), SelInput::new("Skip Faces", FACES, true)]
-    }
+/// Recognize's inputs (#6748): the body that is sheet metal already, a face whose side is the
+/// sheet's surface (none: its largest face's), the faces left out, and the bend edges.
+pub(crate) fn recognize_inputs() -> Vec<SelInput> {
+    vec![
+        SelInput::new("Body", BODIES, false),
+        SelInput::new("Surface Face", FACES, false),
+        SelInput::new("Skip Faces", FACES, true),
+        SelInput::new("Bend Edges", EDGES, true),
+    ]
 }
 
-/// Switches Convert's inputs between its modes', keeping the bend edges and the body.
-pub(crate) fn convert_switch(inputs: &mut Vec<SelInput>, thicken: bool) {
-    let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| match x {
-        Sel::Face { body, .. } | Sel::Body { name: body } => Some(body.clone()),
+/// The body a dialog's picks are on: the body picked, or the one its faces or edges are on.
+fn picked_body(inputs: &[SelInput]) -> Option<String> {
+    inputs.iter().flat_map(|i| &i.items).find_map(|x| match x {
+        Sel::Body { name } | Sel::Edge { body: name, .. } | Sel::Face { body: name, .. } => Some(name.clone()),
         _ => None,
-    });
-    let bends = inputs.get_mut(1).map(|i| std::mem::take(&mut i.items)).unwrap_or_default();
-    *inputs = convert_inputs(thicken);
-    if let (false, Some(name), Some(i)) = (thicken, body, inputs.first_mut()) {
-        i.items = vec![Sel::Body { name }];
-    }
-    if let Some(i) = inputs.get_mut(1) {
-        i.items = bends;
-    }
+    })
+}
+
+/// Body `name`'s own thickness where it is a solid that is sheet metal already (a shell's, a
+/// plate's), as Recognize reads it; none for a surface body, or a solid of no one thickness.
+fn own_thickness(app: &SolveApp, name: &str) -> Option<f64> {
+    let state = app.session.model.state();
+    let mb = state.body(name).filter(|b| !b.is_surface())?;
+    solidcraft_engine::doc::measure_sheet_body(mb, None, &[], &solidcraft_engine::doc::IDENTITY).ok().map(|m| m.thickness)
+}
+
+/// What Recognize reads of body `name` (#6748), as its dialog says it: its thickness and its
+/// modelled bends' radii, or why it is no sheet.
+fn measure_text(app: &SolveApp, name: &str) -> Result<String, String> {
+    let state = app.session.model.state();
+    let mb = state.body(name).ok_or_else(|| format!("no body `{name}`"))?;
+    let m = solidcraft_engine::doc::measure_sheet_body(mb, None, &[], &solidcraft_engine::doc::IDENTITY).map_err(|e| e.to_string())?;
+    let radii: Vec<String> = m.radii.iter().map(|r| format!("R {r:.3}")).collect();
+    let bends = if radii.is_empty() { "-".to_string() } else { radii.join(", ") };
+    Ok(crate::i18n::tr("sheet.recognize_measured").replace("{thickness}", &format!("{:.3}", m.thickness)).replace("{bends}", &bends))
+}
+
+/// Convert's inputs (#6748): the body (a solid, a surface body, or a shell or a plate), the bend
+/// edges, the faces left out, and the faces that make the sheet (none: every face but those left
+/// out).
+pub(crate) fn convert_inputs() -> Vec<SelInput> {
+    vec![
+        SelInput::new("Body", BODIES, false),
+        SelInput::new("Bend Edges", EDGES, true),
+        SelInput::new("Skip Faces", FACES, true),
+        SelInput::new("Faces", FACES, true),
+    ]
 }
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<SelInput>) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [SelInput]) -> bool {
     let t = Tokens::get();
     let mut enter = false;
     match k {
@@ -392,11 +430,27 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             enter |= hint_row(ui, "ui.sheet_gap", gap, crate::i18n::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
         }
-        Sm::Fold { angle, radius, position, flip } => {
+        Sm::Fold { angle, radius, position, flip, stays } => {
             choice_row(ui, "Bend Line Position", "sm_fold_pos", position, &FOLD_POSITION_LABELS);
             enter |= expr_row(ui, "Angle", angle);
             enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
             crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
+            // Which side of the line as drawn stays, seen from the sheet's surface. A new fold
+            // decides it as it is made (the side of the face picked, else the side more of the
+            // sheet joins) and keeps it; an edit shows the fold's own side, and swaps it. A face
+            // picked decides it again.
+            let picked = inputs.get(1).is_some_and(|i| !i.items.is_empty());
+            form_row(ui, "Stationary Side", |ui| {
+                ui.label(crate::i18n::tr_label(match *stays {
+                    _ if picked => "Fixed Face",
+                    1 => "Left",
+                    2 => "Right",
+                    _ => "Automatic",
+                }));
+                if !picked && *stays > 0 && crate::ui_kit::button(ui, crate::i18n::tr_label("Swap"), crate::ui_kit::Button::Normal).clicked() {
+                    *stays = 3 - *stays;
+                }
+            });
         }
         Sm::Path { radius } => {
             path_chain(app, inputs);
@@ -414,16 +468,41 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<
             enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
         }
         Sm::Unfold { .. } => {}
-        Sm::Convert { rule, mode, side } => {
+        Sm::Convert { rule, side, thin } => {
             rule_combo(app, ui, "sm_conv_rule", rule);
-            let was = *mode;
-            let modes = CONVERT_MODES.map(|(_, label)| label);
-            choice_row(ui, "Mode", "sm_conv_mode", mode, &modes);
-            if *mode != was {
-                convert_switch(inputs, *mode == THICKEN);
-            }
             let labels = MATERIAL_SIDES.map(|(_, label)| label);
             choice_row(ui, "Material", "sm_conv_side", side, &labels);
+            // A solid that is sheet metal already: Recognize keeps its own sides. Never shown
+            // for a surface body, which is surfaces only.
+            if let Some(name) = picked_body(inputs)
+                && thin.as_ref().is_none_or(|(b, _)| *b != name)
+            {
+                let own = own_thickness(app, &name);
+                *thin = Some((name, own));
+            }
+            if let Some((_, Some(t))) = thin.as_ref() {
+                let hint = crate::i18n::tr("sheet.convert_thin_hint").replace("{thickness}", &format!("{t:.3}"));
+                crate::ui_kit::status_line(ui, &hint, crate::ui_kit::StatusTone::Dim);
+            }
+        }
+        Sm::Recognize { rule, new_rule, measured } => {
+            if let Some(name) = picked_body(inputs)
+                && measured.as_ref().is_none_or(|(b, _)| *b != name)
+            {
+                let read = measure_text(app, &name);
+                *measured = Some((name, read));
+            }
+            match measured.as_ref() {
+                Some((_, Ok(text))) => {
+                    crate::ui_kit::status_line(ui, text, crate::ui_kit::StatusTone::Dim);
+                }
+                Some((_, Err(why))) => {
+                    crate::ui_kit::status_line(ui, why, crate::ui_kit::StatusTone::Warning);
+                }
+                None => {}
+            }
+            rule_combo(app, ui, "sm_rec_rule", rule);
+            enter |= hint_row(ui, "New Rule", new_rule, crate::i18n::tr_label("none: the rule above"));
         }
         Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
             let rules = rule_list(app);
@@ -776,7 +855,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("gap", gap)]);
             ("sheet.hem", p)
         }
-        Sm::Fold { radius, .. } => {
+        Sm::Fold { radius, stays, .. } => {
             let mut p = json!({});
             match items(inputs, 0).first() {
                 Some(Sel::SketchCurve { id, sketch: named }) => {
@@ -794,6 +873,13 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("radius", radius)]);
             if let Some(Sel::Face { point, .. }) = items(inputs, 1).first() {
                 p["fixed"] = pt(*point);
+            } else {
+                // No face picked: the fold's own side, where it has one.
+                match *stays {
+                    1 => p["stays"] = json!("left"),
+                    2 => p["stays"] = json!("right"),
+                    _ => {}
+                }
             }
             ("sheet.fold", p)
         }
@@ -826,9 +912,35 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             (if *refold { "sheet.refold" } else { "sheet.unfold" }, p)
         }
-        Sm::Convert { rule, mode, side } if *mode != THICKEN => {
-            // No face is fixed: the body picked, or the one its bend edges or skipped faces are on.
-            let picks = items(inputs, 0).iter().chain(items(inputs, 1)).chain(items(inputs, 2));
+        Sm::Recognize { rule, new_rule, .. } => {
+            let Some(body) = picked_body(inputs) else {
+                return Err("select the body to recognize first".into());
+            };
+            let mut p = json!({"body": body});
+            if let Some(face) = items(inputs, 1).face_points().first() {
+                p["face"] = pt(*face);
+            }
+            let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            if !skip.is_empty() {
+                p["skip"] = json!(skip);
+            }
+            let bends: Vec<Value> = items(inputs, 3).edge_points().into_iter().map(pt).collect();
+            if !bends.is_empty() {
+                p["bends"] = json!(bends);
+            }
+            match new_rule.trim() {
+                "" => {
+                    if let Some(r) = rule_value(app, *rule) {
+                        p["rule"] = json!(r);
+                    }
+                }
+                name => p["new_rule"] = json!(name),
+            }
+            ("sheet.recognize", p)
+        }
+        Sm::Convert { rule, side, .. } => {
+            // No face is fixed: the body picked, or the one its bend edges or faces are on.
+            let picks = items(inputs, 0).iter().chain(items(inputs, 1)).chain(items(inputs, 2)).chain(items(inputs, 3));
             let Some(body) = picks
                 .filter_map(|x| match x {
                     Sel::Body { name: body } | Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body.clone()),
@@ -844,29 +956,18 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             if !bends.is_empty() {
                 p["bends"] = json!(bends);
             }
+            // The faces picked make the sheet, with every face a bend joins to them; with none,
+            // every face but the skipped ones does (the command refuses both).
             let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            let faces: Vec<Value> = items(inputs, 3).face_points().into_iter().map(pt).collect();
+            if let Some((face, more)) = faces.split_first() {
+                p["face"] = face.clone();
+                if !more.is_empty() {
+                    p["faces"] = json!(more);
+                }
+            }
             if !skip.is_empty() {
                 p["skip"] = json!(skip);
-            }
-            if let Some((key, _)) = MATERIAL_SIDES.get(*side).filter(|_| *side > 0) {
-                p["direction"] = json!(key);
-            }
-            if let Some(r) = rule_value(app, *rule) {
-                p["rule"] = json!(r);
-            }
-            ("sheet.convert", p)
-        }
-        Sm::Convert { rule, side, .. } => {
-            // The faces that make the sheet, all of one body; the bends join more to them.
-            let faces = items(inputs, 0);
-            let Some(Sel::Face { body, .. }) = faces.first() else {
-                return Err("select the faces to thicken first".into());
-            };
-            let points: Vec<Value> = faces.face_points().into_iter().map(pt).collect();
-            let mut p = json!({"body": body, "mode": "thicken", "face": points.first(), "faces": points.get(1..)});
-            let bends: Vec<Value> = items(inputs, 1).edge_points().into_iter().map(pt).collect();
-            if !bends.is_empty() {
-                p["bends"] = json!(bends);
             }
             if let Some((key, _)) = MATERIAL_SIDES.get(*side).filter(|_| *side > 0) {
                 p["direction"] = json!(key);
@@ -969,7 +1070,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Sm::simple_restore(kind)?, edges.iter().filter_map(|p| edge_sel(s, p.0)).collect())
         }
-        FeatureKind::SheetFold { sketch, curve, a, b, fixed, body, .. } => {
+        FeatureKind::SheetFold { sketch, curve, a, b, fixed, stays, body, .. } => {
             if let Some(bd) = body {
                 extra.insert("body".into(), json!(bd));
             }
@@ -989,7 +1090,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
                 }
             }
-            if let Some(i) = ins.get_mut(1) {
+            // The face picked as the fold was made decided the side that stays, which the fold
+            // keeps (the Stationary Side row): an edit picks it no more, so the side is never
+            // decided again from where that face lies now.
+            if let Some(i) = ins.get_mut(1)
+                && stays.is_none()
+            {
                 i.items = fixed.and_then(|f| face_sel(s, f.0)).into_iter().collect();
             }
             return Some((Kind::Sheet(k), ins, extra));
@@ -1012,19 +1118,39 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         FeatureKind::SheetUnfold { body, refold } => {
             (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
         }
-        FeatureKind::SheetConvert { face, faces, rule, bends, direction, .. } => {
-            let mut ins = convert_inputs(true);
+        FeatureKind::SheetConvert { body, face, faces, rule, bends, direction } => {
+            let mut ins = convert_inputs();
             if let Some(i) = ins.first_mut() {
-                i.items = std::iter::once(face).chain(faces).filter_map(|p| face_sel(s, p.0)).collect();
+                i.items = vec![Sel::Body { name: body.to_string() }];
             }
             if let Some(i) = ins.get_mut(1) {
                 i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
             }
+            if let Some(i) = ins.get_mut(3) {
+                i.items = std::iter::once(face).chain(faces).filter_map(|p| face_sel(s, p.0)).collect();
+            }
             let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
-            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), mode: THICKEN, side }), ins, extra));
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), side, thin: None }), ins, extra));
+        }
+        FeatureKind::SheetRecognize { body, face, skip, bends, rule } => {
+            let mut ins = recognize_inputs();
+            if let Some(i) = ins.first_mut() {
+                i.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = face.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(2) {
+                i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(3) {
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            let k = Sm::Recognize { rule: rule_index(rule), new_rule: String::new(), measured: None };
+            return Some((Kind::Sheet(k), ins, extra));
         }
         FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, direction } => {
-            let mut ins = convert_inputs(false);
+            let mut ins = convert_inputs();
             if let Some(i) = ins.first_mut() {
                 i.items = vec![Sel::Body { name: body.to_string() }];
             }
@@ -1035,7 +1161,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
             }
             let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
-            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), mode: 0, side }), ins, extra));
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), side, thin: None }), ins, extra));
         }
         _ => return None,
     };

@@ -86,7 +86,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("position", Pick), ("direction", Dir), ("hook", Dir), ("along", Dir), ("body", Body)]
         }
         "plastic.lip" => &[("face", Pick), ("body", Body)],
-        "sheet.convert" => &[("face", Pick), ("bends", Picks), ("body", Body)],
+        "sheet.convert" => &[("face", Pick), ("faces", Picks), ("skip", Picks), ("bends", Picks), ("body", Body)],
+        "sheet.recognize" => &[("face", Pick), ("skip", Picks), ("bends", Picks), ("body", Body)],
+        "sheet.measure_body" => &[("face", Pick), ("body", Body)],
         "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],

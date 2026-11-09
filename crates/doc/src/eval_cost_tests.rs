@@ -1624,8 +1624,8 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
 }
 
 /// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
-/// the sheet already has: naming its pick, finding the sheet and the edge again by that name, and
-/// naming the panels it makes read the rims the sheet was last laid out with. Each of them laid
+/// the sheet already has: naming its pick (the model's name for the edge), finding the sheet and
+/// the edge again by that name, and keying the panels it makes lay nothing out. Each of them laid
 /// the whole sheet out again, five flats for every flange built (#6748).
 #[test]
 fn a_flange_lays_its_sheet_out_once() {
@@ -1649,7 +1649,7 @@ fn a_flange_lays_its_sheet_out_once() {
         // The pick is named as the engine names it, on the model as it is.
         let mut names = Vec::new();
         let naming = counted(|| names = crate::sheet::sheet_edge_names(&model.state(), &[p])).flats;
-        assert!(names.first().is_some_and(|n| n.contains(":rim.")), "{names:?}");
+        assert!(names.first().is_some_and(|n| n.contains('|')), "the model's name for the edge: {names:?}");
         let id = doc.add_feature(flange(p), None).unwrap();
         doc.feature_mut(id).unwrap().edge_names = names;
         let built = counted(|| model.evaluate(&doc)).flats;

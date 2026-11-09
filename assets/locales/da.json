@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Tilføjer en understøtning på en flade: en rund eller rektangulær pude, massiv eller hul, med slipvinkel. Brug den som støtte eller afstandsstykke i et sprøjtestøbt kabinet.",
   "help.plastic.snap_fit": "Tilføjer en snapkrog på en flade med dens længde, tykkelse og hage. Brug den til at klikke dele sammen uden skruer.",
   "help.pointcloud.insert": "Indsæt en PLY-, XYZ- eller PTS-scanning som en punktsky ved siden af modellen. Brug den som reference, når du bygger en model ud fra målte data.",
-  "help.sheet.convert": "Gør en flad plade eller et udhulet emne med ensartet tykkelse til et pladelegeme med bukninger ved de kanter, du vælger. Brug den til at gøre en eksisterende del udfoldelig.",
+  "help.sheet.convert": "Gør flader til plade efter reglen: fladerne på et massivt emne eller et overfladelegeme, med bukninger ved de kanter, du vælger. Brug den til at lave en pladedel af en modelleret form.",
   "help.sheet.export_bend_table": "Gemmer bukketabellen for et pladelegeme som CSV eller JSON: vinkler, radier og bukkepositioner i udfoldningen. Brug den til kantpressen eller værkstedet.",
   "help.sheet.export_dxf": "Gemmer udfoldningen som DXF med konturer, bukkelinjer og valgfrie bukkenoter. Brug den til laser-, plasma- eller vandskæring.",
   "help.sheet.flange": "Tilføjer en flange: en basisplade ud fra en skitse, en væg langs en åben skitsekontur eller en bukket væg på pladens kanter. Brug den til at opbygge pladedele.",

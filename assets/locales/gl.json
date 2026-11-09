@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Engade un apoio nunha cara: unha base redonda ou rectangular, maciza ou oca, con desmoldaxe. Úsao como soporte ou separador nunha carcasa moldeada.",
   "help.plastic.snap_fit": "Engade un gancho de encaixe a presión nunha cara, coa súa lonxitude, espesor e retén. Úsao para suxeitar pezas sen parafusos.",
   "help.pointcloud.insert": "Insire unha dixitalización PLY, XYZ ou PTS como nube de puntos xunto ao modelo. Úsaa como referencia ao construír un modelo a partir de datos medidos.",
-  "help.sheet.convert": "Converte unha placa ou un corpo baleirado de espesor uniforme nun corpo de chapa, con dobras nas arestas que escollas. Úsao para poder despregar unha peza existente.",
+  "help.sheet.convert": "Converte superficies en chapa segundo a regra: as caras dun sólido ou dun corpo de superficie, con dobras nas arestas que escollas. Úsao para facer unha peza de chapa a partir dunha forma modelada.",
   "help.sheet.export_bend_table": "Garda a táboa de dobras dun corpo de chapa como CSV ou JSON: ángulos, raios e posicións das dobras no desenvolvemento. Úsao para a prensa plegadora ou o taller.",
   "help.sheet.export_dxf": "Garda o desenvolvemento como DXF, con contornos, liñas de dobra e notas de dobra opcionais. Úsao para o corte por láser, plasma ou chorro de auga.",
   "help.sheet.flange": "Engade unha pestana: unha placa base a partir dun bosquexo, unha parede ao longo dun contorno aberto do bosquexo ou unha parede dobrada nas arestas da chapa. Úsao para construír pezas de chapa.",

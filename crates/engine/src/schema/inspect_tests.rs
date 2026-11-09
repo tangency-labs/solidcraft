@@ -56,7 +56,12 @@ fn model_lists_reply_with_their_schemas() {
     assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["cylinder"]["radius"].as_f64().is_some_and(|r| (r - 4.0).abs() < 1e-9)), "{r}");
     let r = run(&mut s, "model.faces", json!({"body": sheet}));
     matches(&faces, &r, false);
-    assert!(r["faces"].as_array().into_iter().flatten().any(|f| f["sheet_face"].as_str().is_some_and(|n| n.starts_with("sheet:"))), "{r}");
+    // A sheet made from surfaces has no sheet face names: its faces' names are the model's (#7990).
+    assert!(
+        r["faces"].as_array().into_iter().flatten().any(|f| f["name"].as_str().is_some_and(|n| n.starts_with('F') && n.ends_with(":top"))),
+        "{r}"
+    );
+    assert!(r["faces"].as_array().into_iter().flatten().all(|f| f["sheet_face"].is_null()), "{r}");
     let r = run(&mut s, "model.threads", json!({}));
     matches(&threads, &r, false);
     assert_eq!((r["threads"][0]["designation"].as_str(), r["threads"][0]["hand"].as_str()), (Some("M8"), Some("right")), "{r}");

@@ -1723,7 +1723,7 @@
   "help.plastic.rest": "Přidá na plochu opěrku: kulatou nebo obdélníkovou podložku, plnou nebo dutou, s úkosem. Použijte ji jako podporu nebo distanční sloupek v lisovaném krytu.",
   "help.plastic.snap_fit": "Přidá na plochu zacvakávací hák se zadanou délkou, tloušťkou a západkou. Použijte to k sepnutí dílů bez šroubů.",
   "help.pointcloud.insert": "Vložte sken PLY, XYZ nebo PTS jako mračno bodů vedle modelu. Použijte ho jako referenci při tvorbě modelu z naměřených dat.",
-  "help.sheet.convert": "Změní desku nebo těleso se skořepinou stejné tloušťky na plechové těleso s ohyby na zvolených hranách. Použijte to, aby šel existující díl rozvinout.",
+  "help.sheet.convert": "Převede plochy na plech podle pravidla: stěny tělesa nebo plošného tělesa, s ohyby na zvolených hranách. Použijte to k vytvoření plechového dílu z vymodelovaného tvaru.",
   "help.sheet.export_bend_table": "Uloží tabulku ohybů plechového tělesa jako CSV nebo JSON: úhly, poloměry a polohy ohybů v rozvinu. Použijte to pro ohraňovací lis nebo dílnu.",
   "help.sheet.export_dxf": "Uloží rozvin jako DXF s obrysy, čarami ohybů a volitelnými poznámkami k ohybům. Použijte to pro řezání laserem, plazmou nebo vodním paprskem.",
   "help.sheet.flange": "Přidá přírubu: základní desku z náčrtu, stěnu podél otevřené kontury náčrtu nebo ohnutou stěnu na hranách plechu. Použijte to k vytváření plechových dílů.",

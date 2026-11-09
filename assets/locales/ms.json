@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Menambah penyokong pada muka: pad bulat atau segi empat tepat, pepejal atau berongga, dengan sudut draf. Gunakan sebagai sokongan atau tiang pengasing dalam perumah teracu.",
   "help.plastic.snap_fit": "Menambah cangkuk sambungan sentap pada muka, dengan panjang, ketebalan dan penahannya. Gunakan untuk mengklip bahagian bersama tanpa skru.",
   "help.pointcloud.insert": "Sisipkan imbasan PLY, XYZ atau PTS sebagai awan titik di samping model. Gunakannya sebagai rujukan semasa membina model daripada data yang diukur.",
-  "help.sheet.convert": "Menukar plat atau jasad beronggak yang berketebalan sekata kepada jasad logam kepingan, dengan lenturan pada tepi yang anda pilih. Gunakan untuk menjadikan bahagian sedia ada boleh dibuka lipatan.",
+  "help.sheet.convert": "Menukar permukaan kepada logam kepingan mengikut peraturan: muka jasad pepejal atau jasad permukaan, dengan lenturan pada tepi yang anda pilih. Gunakan untuk membuat bahagian logam kepingan daripada bentuk yang dimodelkan.",
   "help.sheet.export_bend_table": "Menyimpan jadual lenturan jasad logam kepingan sebagai CSV atau JSON: sudut, jejari dan kedudukan lenturan dalam bentangan rata. Gunakan untuk brek tekan atau bengkel.",
   "help.sheet.export_dxf": "Menyimpan bentangan rata sebagai DXF, dengan garis luar, garis lenturan dan nota lenturan pilihan. Gunakan untuk pemotongan laser, plasma atau jet air.",
   "help.sheet.flange": "Menambah bebibir: plat tapak daripada lakaran, dinding di sepanjang kontur lakaran terbuka, atau dinding berlentur pada tepi kepingan. Gunakan untuk membina bahagian logam kepingan.",

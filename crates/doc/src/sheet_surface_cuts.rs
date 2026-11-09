@@ -24,17 +24,17 @@
 //! at a slant, on a roll or across a bend (not supported yet).
 //! A piece a cut parts from a panel that holds none of its joints (a letter's counter, the end
 //! of a flange cut off beside its bend) stays where it was, a loose piece of the sheet: in the
-//! folded body, in the flat and in its DXF; the cut says so of each that lies outside the panel.
-//! A cut that parts a panel into pieces that each hold some of its joints leaves the panel whole
-//! and is kept as a cut of the sheet's, in the panel's chart: each piece folds and lies flat where
-//! the panel does, and the cut says so of what it parted from the sheet's base.
+//! folded body, in the flat and in its DXF. A cut that parts a panel into pieces that each hold
+//! some of its joints leaves the panel whole and is kept as a cut of the sheet's, in the panel's
+//! chart: each piece folds and lies flat where the panel does. A cut that leaves the sheet in
+//! several pieces says nothing of it: every piece is as much the sheet as any other.
 
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::BTreeSet;
 
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Vec2};
-use solidcraft_develop::{Cut, Development, Fold, Joint, JointKind, Rigid2, Rigid3, Surface, develop};
+use solidcraft_develop::{Cut, Development, Fold, Joint, JointKind, Rigid2, Rigid3, Surface};
 use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
@@ -225,7 +225,7 @@ fn touches(g: &Region2, of: &[Region2], near: f64) -> bool {
 }
 
 /// A panel's frame in its body: where the fold puts it, or in the flat, where the development
-/// lays its chart in the plane of the first panel's face.
+/// lays its chart in the sheet's flat (see [`SurfaceSheet::flat`]).
 pub(crate) fn frames(sk: &SurfaceSheet, dev: &Development) -> Result<Vec<Option<Rigid3>>> {
     if !sk.unfolded {
         // A panel with a place of its own (the face it was made from) is read where that face is:
@@ -233,8 +233,7 @@ pub(crate) fn frames(sk: &SurfaceSheet, dev: &Development) -> Result<Vec<Option<
         let folded = crate::sheet_surface_convert::fold_onto(&sk.sheet, dev, &sk.places)?.places;
         return Ok(folded.into_iter().enumerate().map(|(i, got)| sk.places.get(i).copied().flatten().or(got)).collect());
     }
-    let base = sk.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
-    Ok(dev.placements.iter().map(|p| p.map(|r| lift(&base, &r))).collect())
+    Ok(dev.placements.iter().map(|p| p.map(|r| lift(&sk.flat, &r))).collect())
 }
 
 /// The frame `r` puts a chart in, within the plane of `base`.
@@ -247,10 +246,10 @@ pub(crate) fn lift(base: &Rigid3, r: &Rigid2) -> Rigid3 {
 /// the sheet (see the module docs): the sheet's index, the sheet, and its body built again.
 /// Features that are sheet metal build their sheets themselves, and moves leave a sheet as it is.
 /// Checking each step (`weigh`), each body built again is weighed against the body cut.
-/// What [`absorb`] made of a sheet: the sheet read with its body built again and the cut's note,
-/// or why the sheet can't hold the change.
+/// What [`absorb`] made of a sheet: the sheet read with its body built again, or why the sheet
+/// can't hold the change.
 pub(crate) enum Absorbed {
-    Read(Box<SurfaceSheet>, Body, Option<String>),
+    Read(Box<SurfaceSheet>, Body),
     Refused(String),
 }
 
@@ -286,10 +285,7 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
             continue;
         }
         match cut(&sk, &was, &now, weigh) {
-            Ok((cut, built, parted)) => {
-                let note = parted_note(&cut, sk.loose.len(), &parted);
-                out.push((i, Absorbed::Read(Box::new(cut), built, note)));
-            }
+            Ok((cut, built)) => out.push((i, Absorbed::Read(Box::new(cut), built))),
             Err(e) => out.push((i, Absorbed::Refused(format!("`{}`: what {} cut {e}", sk.body, f.name)))),
         }
     }
@@ -297,12 +293,10 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
 }
 
 /// The sheet `sk` with what was cut from its body, `was` before and `now` after, read onto its
-/// flat panels, and its body built again, with a point of each piece the cut parted from the
-/// sheet's base while leaving its panel whole (see [`Left::Apart`]): the panel, and the point in
-/// its chart. Every face the cut made must lie in a panel or a piece of the flat it was read in.
-/// Weighed (`weigh`), the body built again must also weigh what `now` does: a check of the
-/// reading itself, which costs more than the rest of it.
-pub(crate) fn cut(sk: &SurfaceSheet, was: &Body, now: &Body, weigh: bool) -> std::result::Result<(SurfaceSheet, Body, Vec<(usize, Vec2)>), String> {
+/// flat panels, and its body built again. Every face the cut made must lie in a panel or a piece
+/// of the flat it was read in. Weighed (`weigh`), the body built again must also weigh what `now`
+/// does: a check of the reading itself, which costs more than the rest of it.
+pub(crate) fn cut(sk: &SurfaceSheet, was: &Body, now: &Body, weigh: bool) -> std::result::Result<(SurfaceSheet, Body), String> {
     let walls = made(was, now, tolerance(was));
     let (mut out, read) = onto_panels(sk, was, now, Some(&walls))?;
     // Nothing else may have been cut: a bend's material, or anything the panels' faces don't show.
@@ -313,65 +307,7 @@ pub(crate) fn cut(sk: &SurfaceSheet, was: &Body, now: &Body, weigh: bool) -> std
     if weigh {
         weighed(sk, &out, &built, now, read.shadowed)?;
     }
-    Ok((out, built, read.parted))
-}
-
-/// The cut's note on the loose pieces past the first `had` of `sk` that lie outside their
-/// panel (a letter's counter lies in a hole of it), and on the pieces of its flat that hold the
-/// points `parted` (each a panel and a point in its chart) of what a cut parted from its base
-/// while leaving their panels whole: how many, their area and where they lie in the flat
-/// pattern, as it is read (see [`SurfaceSheet::shown`]). They stay. None when there are none,
-/// or their places can't be worked out: the note is no reason for a cut to fail.
-fn parted_note(sk: &SurfaceSheet, had: usize, parted: &[(usize, Vec2)]) -> Option<String> {
-    let dev = develop(&sk.sheet, 0).ok()?;
-    let flipped = |r: &Region2| crate::sheet_surface_convert::rigid_region(r, |p| Vec2::new(p.x, -p.y));
-    let mut pieces: Vec<Region2> = sk
-        .loose
-        .iter()
-        .skip(had)
-        .filter(|l| {
-            let inside = sk.sheet.panels.get(l.panel).is_some_and(|p| {
-                let x = l.region.interior_point();
-                p.region.outer.ccw().contains(x)
-            });
-            !inside
-        })
-        .filter_map(|l| Some(flipped(&dev.placements.get(l.panel).copied().flatten()?.region(&l.region))))
-        .collect();
-    // Each piece of the flat that holds a parted point, once.
-    let mut found = BTreeSet::new();
-    for (panel, at) in parted {
-        let Some(x) = dev.placements.get(*panel).copied().flatten().map(|r| r.point(*at)) else { continue };
-        if let Some(k) = sk.regions.iter().position(|r| r.contains(x))
-            && found.insert(k)
-            && let Some(r) = sk.regions.get(k)
-        {
-            pieces.push(flipped(r));
-        }
-    }
-    if pieces.is_empty() {
-        return None;
-    }
-    let area: f64 = pieces.iter().map(Region2::area).sum();
-    let at: Vec<String> = pieces
-        .iter()
-        .take(4)
-        .map(|r| {
-            let c = r.interior_point();
-            format!("({:.1}, {:.1})", c.x, c.y)
-        })
-        .collect();
-    let at = at.join(", ");
-    let body = &sk.body;
-    Some(match pieces.len() {
-        1 => format!("1 piece of `{body}` is no longer joined to its base ({area:.2} mm², near {at} in the flat pattern); it is kept"),
-        n => {
-            let more = if n > 4 { format!(" and {} more", n - 4) } else { String::new() };
-            format!(
-                "{n} pieces of `{body}` are no longer joined to its base ({area:.2} mm² in all, near {at}{more} in the flat pattern); they are kept"
-            )
-        }
-    })
+    Ok((out, built))
 }
 
 /// Whether `built`, the sheet `out` that the cut of `sk` to `now` was read into, weighs what `now`
@@ -425,7 +361,7 @@ fn tolerance(b: &Body) -> f64 {
 static FLAT: Surface = Surface::Plane;
 
 /// The flat's `pieces` (of the development `dev` of the sheet `sk`) as `fold` carries them into
-/// space, or, unfolded (no `fold`), as they lie in the plane of the sheet's first panel.
+/// space, or, unfolded (no `fold`), as they lie in the sheet's flat (see [`SurfaceSheet::flat`]).
 fn carriers<'a>(
     sk: &'a SurfaceSheet,
     dev: &Development,
@@ -438,7 +374,7 @@ fn carriers<'a>(
         .iter()
         .map(|(piece, region)| {
             let carrier = match (fold, *piece) {
-                (None, _) => Carrier::Flat(Slab::new(&FLAT, sk.places.first().copied().flatten().ok_or_else(lost)?, t)),
+                (None, _) => Carrier::Flat(Slab::new(&FLAT, sk.flat, t)),
                 (Some(f), Piece::Panel(i) | Piece::Tab(_, i)) => {
                     let place = f.places.get(i).copied().flatten().ok_or_else(lost)?;
                     Carrier::Panel(i, Slab::new(&sk.sheet.panels.get(i).ok_or_else(lost)?.surface, place, t))
@@ -472,25 +408,12 @@ fn names(sk: &SurfaceSheet, pieces: &[(Piece, Region2)], reach: &BTreeSet<usize>
     }
 }
 
-/// A point inside region `g`: a hair inside the middle of an edge of its outline.
-fn inner_point(g: &Region2) -> Option<Vec2> {
-    let hair = g.outer.polyline(1e-3).bounds().size().len() * 1e-4;
-    g.outer.segs.iter().find_map(|s| {
-        let along = s.derivative(0.5).normalized()?;
-        let side = Vec2::new(-along.y, along.x) * hair;
-        let m = s.point_at(0.5);
-        [m + side, m - side].into_iter().find(|x| g.contains(*x))
-    })
-}
-
-/// What [`onto_panels`] read besides the sheet: whether it cut a panel's shadow, the faces the
-/// cut made that lie in the panels it read, and a point of each piece it parted from the sheet's
-/// base while leaving its panel whole (see [`Left::Apart`]): the panel, and the point in its chart.
+/// What [`onto_panels`] read besides the sheet: whether it cut a panel's shadow, and the faces
+/// the cut made that lie in the panels it read.
 #[derive(Default)]
 struct Read {
     shadowed: bool,
     claimed: BTreeSet<usize>,
-    parted: Vec<(usize, Vec2)>,
 }
 
 /// A piece of a panel a cut parted from it, holding none of its joints: it stays where it was, in
@@ -505,19 +428,17 @@ pub struct Loose {
 enum Left {
     /// The piece that holds the panel's joints, and the pieces parted from it, which hold none.
     Kept(Region2, Vec<Region2>),
-    /// Pieces that each hold some of the panel's joints. The panel stays whole and the cut is a
-    /// cut of the sheet's, so that each piece folds and lies flat where the panel does. Given
-    /// are the pieces parted from the sheet's base: all but the one that holds the joint toward
-    /// it, and none where the panel is the base.
-    Apart(Vec<Region2>),
+    /// Pieces that each hold some of the panel's joints, or nothing at all: the panel stays whole
+    /// and the cut is a cut of the sheet's, so that each piece folds and lies flat where the panel
+    /// does, and a panel cut away keeps its record, its joints and its place.
+    Apart,
 }
 
-/// What is left of a panel's `region` named `name` without `through`: the piece that holds the
+/// What is left of a panel's `region` without `through`: the piece that holds the
 /// panel's joints (the points `holders` on them; the largest piece where it has none), and the
-/// pieces parted from it; or, where pieces each hold some of them, those pieces but the one that
-/// holds the point `toward` (on the joint toward the sheet's base; none on the base). What goes
-/// through clear of the region's outline and holes is a hole of it as it is, its curves kept.
-fn left(region: &Region2, through: &[Region2], name: &str, holders: &[Vec2], toward: Option<Vec2>, tol: f64) -> std::result::Result<Left, String> {
+/// pieces parted from it; or none, where pieces each hold some of them or nothing is left. What
+/// goes through clear of the region's outline and holes is a hole of it as it is, its curves kept.
+fn left(region: &Region2, through: &[Region2], holders: &[Vec2], tol: f64) -> std::result::Result<Left, String> {
     let outline = |t: &Region2| Region2 { outer: t.outer.clone(), holes: Vec::new() };
     if !through.is_empty() && through.iter().all(|t| holds_clear(region, &outline(t))) {
         let mut out = region.clone();
@@ -541,7 +462,7 @@ fn left(region: &Region2, through: &[Region2], name: &str, holders: &[Vec2], tow
     }
     let mut left = planar_regions_boolean(std::slice::from_ref(region), through, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
     if left.len() <= 1 {
-        return left.pop().map(|one| Left::Kept(one, Vec::new())).ok_or_else(|| format!("takes the whole of {name}: not supported yet"));
+        return Ok(left.pop().map_or(Left::Apart, |one| Left::Kept(one, Vec::new())));
     }
     // The piece nearest each joint's point holds it.
     let gap = |r: &Region2, p: Vec2| {
@@ -559,10 +480,7 @@ fn left(region: &Region2, through: &[Region2], name: &str, holders: &[Vec2], tow
     let keep = match held.len() {
         0 => (0..left.len()).max_by(|&i, &j| left[i].area().total_cmp(&left[j].area())).unwrap_or(0),
         1 => held.first().copied().unwrap_or(0),
-        _ => {
-            let Some(base) = toward.and_then(holder) else { return Ok(Left::Apart(Vec::new())) };
-            return Ok(Left::Apart(left.into_iter().enumerate().filter(|(i, _)| *i != base).map(|(_, r)| r).collect()));
-        }
+        _ => return Ok(Left::Apart),
     };
     let kept = left.swap_remove(keep);
     Ok(Left::Kept(kept, left))
@@ -596,40 +514,6 @@ fn holders(sk: &SurfaceSheet, p: usize) -> Vec<Vec2> {
     out
 }
 
-/// Where the joint that holds `sk`'s panel `p` toward the sheet's base (its first panel) holds
-/// it: the joint by which a walk from the base through bends and seams first reaches `p`, as the
-/// flat is laid out. None for the base, and for a panel no such walk reaches.
-fn toward_base(sk: &SurfaceSheet, p: usize) -> Option<Vec2> {
-    let joints = &sk.sheet.joints;
-    let n = sk.sheet.panels.len();
-    let mut via: Vec<Option<(usize, bool)>> = vec![None; n];
-    let mut seen = vec![false; n];
-    *seen.first_mut()? = true;
-    let mut queue = VecDeque::from([0usize]);
-    while let Some(i) = queue.pop_front() {
-        for (k, j) in joints.iter().enumerate() {
-            if matches!(j.kind, JointKind::Rip(_)) {
-                continue;
-            }
-            // The panel across the joint, and whether it is the joint's `a` panel.
-            let (other, a) = if j.a.panel == i {
-                (j.b.panel, false)
-            } else if j.b.panel == i {
-                (j.a.panel, true)
-            } else {
-                continue;
-            };
-            if seen.get(other).is_some_and(|s| !*s) {
-                seen[other] = true;
-                via[other] = Some((k, a));
-                queue.push_back(other);
-            }
-        }
-    }
-    let (k, a) = via.get(p).copied().flatten()?;
-    joints.get(k).map(|j| holds_at(j, a))
-}
-
 /// The sheet `sk` with what its body lost between `was` and `now` read onto its flat panels: what
 /// went through is out of their outlines, and their recesses are the floors `now` has in them.
 /// Reading a cut, `walls` are the faces of `now` it made, and where a panel's walls are not
@@ -637,7 +521,7 @@ fn toward_base(sk: &SurfaceSheet, p: usize) -> Option<Vec2> {
 /// body's engravings (no `walls`), a panel's walls must be square, away from its outline.
 fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]>) -> std::result::Result<(SurfaceSheet, Read), String> {
     let strict = walls.is_some();
-    let dev = develop(&sk.sheet, 0).map_err(|e| e.to_string())?;
+    let dev = sk.develop().map_err(|e| e.to_string())?;
     let frames = frames(sk, &dev).map_err(|e| e.to_string())?;
     let (qa, qb) = (Query::new(was.record()), Query::new(now.record()));
     let t = sk.sheet.thickness;
@@ -649,19 +533,43 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
     // A cut whose walls cross a joint is read once across every piece it reaches, its shadow in
     // the flat, and kept as a cut of the sheet's, drawn in the flat chart of a panel it reaches;
     // the panels' own reading leaves it be. Unfolded, where the cut's walls are square to the
-    // flat, what it took is what the flat's faces lost (see [`flat_gone`]): each region of that
-    // is the cut of the walls that run round it, up to the sheet's outline where it reaches it.
+    // flat, what it took is what the flat's faces lost (see [`flat_gone`]), and a region of that
+    // crosses a joint where it takes material from a bend or from more than one panel (see
+    // [`spans_joint`]), wherever its walls lie: a box over a panel, its bend and the next panel's
+    // end has walls on that panel alone, and takes the bend whole.
     let mut crossing: BTreeSet<usize> = BTreeSet::new();
     let mut across: Vec<Region2> = Vec::new();
+    // Folded, the fold and the flat's pieces, for the bends a cut may have taken whole (below),
+    // and what each panel's own reading takes from it, in its chart.
+    let mut whole: Option<(Fold, Vec<(Piece, Region2)>)> = None;
+    let mut gone_from: Vec<(usize, Vec<Region2>)> = Vec::new();
+    // Folded, the pieces of the flat (by their places in its list) that some wall of the cut
+    // reaches.
+    let mut touched: BTreeSet<usize> = BTreeSet::new();
     if let Some(walls) = walls.filter(|w| !w.is_empty()) {
         let fold =
             if sk.unfolded { None } else { Some(crate::sheet_surface_convert::fold_onto(&sk.sheet, &dev, &sk.places).map_err(|e| e.to_string())?) };
         let pieces = crate::sheet_surface::pieces(&dev, &mut FlatWork::new()).map_err(|e| e.to_string())?;
+        let flat = if sk.unfolded { flat_gone(sk, (was, &qa), (now, &qb), tol)? } else { None };
+        if let Some(gone) = &flat {
+            for g in gone {
+                if !spans_joint(&pieces, g, tol)? {
+                    continue;
+                }
+                let anchor = holder(&pieces, g).ok_or("leaves no panel of the sheet any material: not supported yet")?;
+                let back = dev.placements.get(anchor).copied().flatten().ok_or("a panel of the sheet has no place in the flat")?.inverse();
+                out.sheet.cuts.push(Cut { panel: anchor, region: back.region(g) });
+                across.push(g.clone());
+                // Its walls are read with it.
+                crossing.extend(walls.iter().copied().filter(|f| !bounded(&qb, &sk.flat, &[*f], std::slice::from_ref(g), tol * 100.0).is_empty()));
+                taken.shadowed = true;
+            }
+            taken.claimed.extend(crossing.iter().copied());
+        }
         let folded = Folded::new(carriers(sk, &dev, fold.as_ref(), &pieces)?, fold.as_ref(), t);
-        let mut flat: Option<Option<Vec<Region2>>> = None;
-        let mut kept: BTreeSet<usize> = BTreeSet::new();
-        for group in components(&qb, walls) {
+        for group in components(&qb, walls).into_iter().filter(|_| flat.is_none()) {
             let reach = reached(&qb, &folded, &group, sag);
+            touched.extend(reach.iter().copied());
             let mut panels = reach.iter().map(|k| match pieces.get(*k).map(|p| p.0) {
                 Some(Piece::Panel(i)) => Some(i),
                 _ => None,
@@ -670,33 +578,20 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             if first.is_some() && panels.all(|i| i == first) {
                 continue;
             }
-            if sk.unfolded && flat.is_none() {
-                flat = Some(flat_gone(sk, (was, &qa), (now, &qb), tol)?);
+            let through = shadow(now, &qb, &folded, &group, &names(sk, &pieces, &reach), 0.0, tol, sag)?;
+            // Each region is kept in the chart of the panel where it lies (see `holder`).
+            for r in &through {
+                let anchor = holder(&pieces, r).ok_or("leaves no panel of the sheet any material: not supported yet")?;
+                let back = dev.placements.get(anchor).copied().flatten().ok_or("a panel of the sheet has no place in the flat")?.inverse();
+                out.sheet.cuts.push(Cut { panel: anchor, region: back.region(r) });
             }
-            let flat_base = sk.places.first().copied().flatten();
-            let theirs = match (&flat, flat_base) {
-                (Some(Some(gone)), Some(base)) => Some(bounded(&qb, &base, &group, gone, tol * 100.0)).filter(|k| !k.is_empty()).map(|k| (gone, k)),
-                _ => None,
-            };
-            let through: Vec<Region2> = match theirs {
-                // A region two groups of walls run round (a slot across the flat) is the first's.
-                Some((gone, k)) => k.into_iter().filter(|k| kept.insert(*k)).filter_map(|k| gone.get(k).cloned()).collect(),
-                None => shadow(now, &qb, &folded, &group, &names(sk, &pieces, &reach), 0.0, tol, sag)?,
-            };
-            let anchor = reach
-                .iter()
-                .find_map(|k| match pieces.get(*k)?.0 {
-                    Piece::Panel(i) | Piece::Tab(_, i) => Some(i),
-                    Piece::Zone(z) => dev.zones.get(z).map(|zone| zone.panels[0]),
-                })
-                .unwrap_or(0);
-            let back = dev.placements.get(anchor).copied().flatten().ok_or("a panel of the sheet has no place in the flat")?.inverse();
-            out.sheet.cuts.extend(through.iter().map(|r| Cut { panel: anchor, region: back.region(r) }));
             across.extend(through);
             crossing.extend(group.iter().copied());
             taken.claimed.extend(group);
             taken.shadowed = true;
         }
+        drop(folded);
+        whole = fold.map(|f| (f, pieces));
     }
     let rest: Option<Vec<usize>> = walls.map(|w| w.iter().copied().filter(|f| !crossing.contains(f)).collect());
     for (p, (panel, frame)) in sk.sheet.panels.iter().zip(&frames).enumerate() {
@@ -716,7 +611,7 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             }
             let through = shadow(now, &qb, &slab, &here, &panel.name, around(&panel.region), tol, sag)?;
             taken.shadowed = true;
-            let Left::Kept(kept, parted) = left(&panel.region, &through, &panel.name, &holders(sk, p), None, tol)? else {
+            let Left::Kept(kept, parted) = left(&panel.region, &through, &holders(sk, p), tol)? else {
                 return Err(format!("cuts {} apart: not supported yet on a roll", panel.name));
             };
             if !parted.is_empty() {
@@ -735,7 +630,8 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             o.near.iter().chain(&o.far).cloned().chain(o.near_floors.iter().chain(&o.far_floors).map(|x| x.1.clone())).collect::<Vec<_>>()
         };
         let footprint = union(all(&before), tol).map_err(|e| e.to_string())?;
-        // What the cuts across joints took here is theirs, read with them, not here.
+        // What the cuts across joints took here is theirs, read with them, not here: a region
+        // that lies within theirs, by the planar booleans (none of its area left outside them).
         let theirs: Vec<Region2> = dev
             .placements
             .get(p)
@@ -744,7 +640,15 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             .map(|pl| pl.inverse())
             .map(|back| across.iter().map(|r| back.region(r)).collect())
             .unwrap_or_default();
-        let ours = |g: &Region2| !inner_point(g).is_some_and(|x| theirs.iter().any(|t| t.contains(x)));
+        let ours = |g: &Region2| -> std::result::Result<bool, String> {
+            if theirs.is_empty() {
+                return Ok(true);
+            }
+            let outside = planar_regions_boolean(std::slice::from_ref(g), &theirs, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
+            // A zero test on a computed area (a sliver the booleans leave along a shared edge),
+            // not a geometric tolerance.
+            Ok(area(&outside) > tol * 10.0 * perimeter(std::slice::from_ref(g)).max(1.0))
+        };
         let seen = |own: &[Region2], floors: &[(f64, Region2)]| union(own.iter().cloned().chain(floors.iter().map(|x| x.1.clone())).collect(), tol);
         // Within the flat material only: past it (toward a sharp corner the body was drawn with)
         // the two faces of a bend's panels end apart.
@@ -761,7 +665,13 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
         let slack = tol * 10.0 * perimeter(&footprint).max(1.0);
         let off_outline = |a: &[Region2], b: &[Region2]| -> std::result::Result<f64, String> {
             let gaps = planar_regions_boolean(a, b, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
-            Ok(gaps.iter().filter(|g| ours(g) && (strict || !touches(g, &footprint, tol * 100.0))).map(Region2::area).sum())
+            let mut off = 0.0;
+            for g in &gaps {
+                if ours(g)? && (strict || !touches(g, &footprint, tol * 100.0)) {
+                    off += g.area();
+                }
+            }
+            Ok(off)
         };
         // A recess's floor lies in the flat material: one reaching into a bend has no one place.
         let floors = |list: Vec<(f64, Region2)>| -> std::result::Result<Vec<(f64, Region2)>, String> {
@@ -784,7 +694,13 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
                 Some(gone) => gone,
                 None => planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?,
             };
-            gone.into_iter().filter(|g| ours(g)).collect()
+            let mut kept = Vec::with_capacity(gone.len());
+            for g in gone {
+                if ours(&g)? {
+                    kept.push(g);
+                }
+            }
+            kept
         } else if strict && !here.is_empty() {
             taken.shadowed = true;
             shadow(now, &qb, &slab, &here, &panel.name, 0.0, tol, sag)?
@@ -798,18 +714,20 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             ));
         };
         if area(&through) > slack {
-            match left(&panel.region, &through, &panel.name, &holders(sk, p), toward_base(sk, p), tol)? {
+            if whole.is_some() {
+                gone_from.push((p, through.clone()));
+            }
+            match left(&panel.region, &through, &holders(sk, p), tol)? {
                 Left::Kept(kept, parted) => {
                     if let Some(x) = out.sheet.panels.get_mut(p) {
                         x.region = kept;
                     }
                     out.loose.extend(parted.into_iter().map(|region| Loose { panel: p, region }));
                 }
-                Left::Apart(parted) => {
+                Left::Apart => {
                     // The panel stays whole: what went through is a cut of the sheet's, in the
                     // panel's chart.
                     out.sheet.cuts.extend(through.iter().map(|r| Cut { panel: p, region: r.clone() }));
-                    taken.parted.extend(parted.iter().map(|r| (p, r.interior_point())));
                 }
             }
         }
@@ -819,11 +737,112 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
         recesses.extend(far_floors.into_iter().map(|(depth, region)| Recess { panel: p, region, far: true, depth }));
     }
     out.recesses = recesses;
+    // Folded, a stretch of a bend beside which the cut took both panels' material, with no wall
+    // of its own (the cut went through it whole), would come back with the sheet. A stretch that
+    // a wall of the cut reaches was read with its walls (above). Whether a panel still holds one
+    // that no wall reaches is read by region (see [`held`]); where neither does, whether the body
+    // still has it is read at one point of it; where it has not, the stretch is a cut of the
+    // sheet's.
+    if let Some((fold, pieces)) = &whole {
+        for (k, (piece, region)) in pieces.iter().enumerate() {
+            let (Piece::Zone(z), false, false) = (*piece, region.outer.segs.is_empty(), touched.contains(&k)) else { continue };
+            let Some(zone) = dev.zones.get(z) else { continue };
+            if held(&dev, zone, region, pieces, &gone_from, 0, tol)? || held(&dev, zone, region, pieces, &gone_from, 1, tol)? {
+                continue;
+            }
+            let Some(bent) = fold.bends.get(zone.joint).copied().flatten() else { continue };
+            // One point answers for the whole stretch, exactly: no wall of the cut reaches it, so
+            // no face of the body runs through its material, which the cut took all of or none of.
+            // The point is inside it by construction, not by a chosen offset: halfway through the
+            // thickness, at the region's inner point (its centroid, or the middle of a span across
+            // it), so no face of the body lies at it.
+            let middle = bent.point(region.interior_point(), t / 2.0);
+            if now.classify_point(middle).map_err(|e| e.to_string())? != solidcraft_kernel::PointClass::Outside {
+                continue;
+            }
+            let anchor = holder(pieces, region).ok_or("leaves no panel of the sheet any material: not supported yet")?;
+            let back = dev.placements.get(anchor).copied().flatten().ok_or("a panel of the sheet has no place in the flat")?.inverse();
+            out.sheet.cuts.push(Cut { panel: anchor, region: back.region(region) });
+        }
+    }
     Ok((out, taken))
 }
 
-/// Unfolded, what went through the sheet, read over the whole flat at once in the plane of its
-/// first panel, the chart the flat is drawn in: the flat material that no face of `now` sees any
+/// Whether the panel on side `k` of a bend's `zone` (0 its `a` panel, 1 its `b` one) still holds
+/// the zone's piece `zr`, of the flat's `pieces` (both as the development `dev` lays them out),
+/// once its own reading took `gone` (each panel's, in its chart) from it. Read by region, exactly:
+/// the panel's pieces less what was taken, on its side of its tangent line, are joined to the
+/// zone's piece by the planar booleans, as the flat joins its pieces; the panel holds it where
+/// they share a stretch of the line, half of what the two outlines lose to the join. A panel
+/// nothing was taken from holds it as it did.
+#[allow(clippy::too_many_arguments)]
+fn held(
+    dev: &Development,
+    zone: &solidcraft_develop::Zone,
+    zr: &Region2,
+    pieces: &[(Piece, Region2)],
+    gone: &[(usize, Vec<Region2>)],
+    k: usize,
+    tol: f64,
+) -> std::result::Result<bool, String> {
+    let (Some(&p), Some(&[a, b]), Some(&[c, _])) = (zone.panels.get(k), [zone.near, zone.far].get(k), [zone.far, zone.near].get(k)) else {
+        return Ok(false);
+    };
+    let taken = gone.iter().find(|(i, _)| *i == p).map(|(_, g)| g);
+    let (Some(taken), Some(at)) = (taken, dev.placements.get(p).copied().flatten()) else { return Ok(true) };
+    let own: Vec<Region2> = pieces.iter().filter(|(piece, _)| *piece == Piece::Panel(p)).map(|(_, r)| r.clone()).collect();
+    let taken: Vec<Region2> = taken.iter().map(|r| at.region(r)).collect();
+    let kept = planar_regions_boolean(&own, &taken, BoolOp::Cut, tol).map_err(|e| e.to_string())?;
+    let Some(d) = (b - a).normalized() else { return Ok(false) };
+    // The panel's side of its tangent line: away from the zone's other line. What lies past the
+    // line, beyond the zone's end, is no hold of the bend's.
+    let across = Vec2::new(-d.y, d.x);
+    let outward = if (c - a).dot(across) > 0.0 { across * -1.0 } else { across };
+    // Far enough that the region below holds all of the panel's pieces on that side.
+    let bounds = std::iter::once(zr).chain(&kept).map(|r| r.outer.polyline(1e-3).bounds()).reduce(|x, y| x.union(&y));
+    let reach = bounds.map_or(0.0, |x| x.size().len()) + (b - a).len() + (c - a).len() + 1.0;
+    let side = Region2 {
+        outer: Loop2::polygon(&[a - d * reach, b + d * reach, b + d * reach + outward * reach, a - d * reach + outward * reach]).ccw(),
+        holes: Vec::new(),
+    };
+    let kept = planar_regions_boolean(&kept, std::slice::from_ref(&side), BoolOp::Intersect, tol).map_err(|e| e.to_string())?;
+    if kept.is_empty() {
+        return Ok(false);
+    }
+    let joined = planar_regions_boolean(std::slice::from_ref(zr), &kept, BoolOp::Union, tol).map_err(|e| e.to_string())?;
+    let shared = (perimeter(std::slice::from_ref(zr)) + perimeter(&kept) - perimeter(&joined)) / 2.0;
+    // A zero test on a computed length, not a geometric tolerance.
+    Ok(shared > tol * 10.0)
+}
+
+/// Whether region `g` of the flat takes material from a bend's zone (or a tab of one) or from more
+/// than one panel, of the flat's `pieces`: a cut across a joint.
+fn spans_joint(pieces: &[(Piece, Region2)], g: &Region2, tol: f64) -> std::result::Result<bool, String> {
+    let slack = tol * 10.0 * perimeter(std::slice::from_ref(g)).max(1.0);
+    let gb = g.outer.polyline(1e-3).bounds();
+    let mut panels = BTreeSet::new();
+    for (piece, region) in pieces {
+        let b = region.outer.polyline(1e-3).bounds();
+        if b.max.x < gb.min.x || gb.max.x < b.min.x || b.max.y < gb.min.y || gb.max.y < b.min.y {
+            continue;
+        }
+        let shared =
+            planar_regions_boolean(std::slice::from_ref(g), std::slice::from_ref(region), BoolOp::Intersect, tol).map_err(|e| e.to_string())?;
+        if area(&shared) <= slack {
+            continue;
+        }
+        match *piece {
+            Piece::Zone(_) | Piece::Tab(..) => return Ok(true),
+            Piece::Panel(i) => {
+                panels.insert(i);
+            }
+        }
+    }
+    Ok(panels.len() > 1)
+}
+
+/// Unfolded, what went through the sheet, read over the whole flat at once in its chart (see
+/// [`SurfaceSheet::flat`]): the flat material that no face of `now` sees any
 /// longer, as a panel's is read (see [`onto_panels`]), through bends and up to the sheet's outline.
 /// None where its two faces don't see material alike (walls not square to the flat): there their
 /// shadow is read instead.
@@ -833,9 +852,8 @@ fn flat_gone(
     (now, qb): (&Body, &Query),
     tol: f64,
 ) -> std::result::Result<Option<Vec<Region2>>, String> {
-    let base = sk.places.first().copied().flatten().ok_or("the sheet's first panel has no place")?;
     let t = sk.sheet.thickness;
-    let read = |b: &Body, q: &Query| on_panel(b, q, &base, t, &sk.regions, tol).map_err(|e| e.to_string());
+    let read = |b: &Body, q: &Query| on_panel(b, q, &sk.flat, t, &sk.regions, tol).map_err(|e| e.to_string());
     let (before, after) = (read(was, qa)?, read(now, qb)?);
     let seen = |own: &[Region2], floors: &[(f64, Region2)]| {
         union(own.iter().cloned().chain(floors.iter().map(|x| x.1.clone())).collect(), tol).map_err(|e| e.to_string())
@@ -852,6 +870,24 @@ fn flat_gone(
         Some(gone) => gone,
         None => planar_regions_boolean(&footprint, &near, BoolOp::Cut, tol).map_err(|e| e.to_string())?,
     }))
+}
+
+/// The panel a region `r` of the flat a cut took (the development's `pieces` lying as the flat has
+/// them) is kept in: the one whose material lies nearest the region's middle, so that a bend's zone
+/// goes with the panel across its nearer tangent line; between two as near, the one whose material
+/// lies lower in the flat, then more to the left. Taken from where the cut and the material lie,
+/// never from the order of the panels or the pieces. None where no panel has material left.
+fn holder(pieces: &[(Piece, Region2)], r: &Region2) -> Option<usize> {
+    let x = r.interior_point();
+    let near = |g: &Region2| if g.contains(x) { 0.0 } else { outline_gap(g, x) };
+    pieces
+        .iter()
+        .filter_map(|(p, g)| match *p {
+            Piece::Panel(i) | Piece::Tab(_, i) => Some((i, near(g), g.interior_point())),
+            Piece::Zone(_) => None,
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.2.y.total_cmp(&b.2.y)).then(a.2.x.total_cmp(&b.2.x)))
+        .map(|(i, ..)| i)
 }
 
 /// How far point `p` lies from the outline of region `g`, its holes' too.

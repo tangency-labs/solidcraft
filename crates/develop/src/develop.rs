@@ -42,8 +42,9 @@ pub struct Development {
     pub placements: Vec<Option<Rigid2>>,
     /// Each panel with material, in the flat frame.
     pub panels: Vec<Option<FlatPanel>>,
-    /// The pieces of the flat pattern: the panels that bends and seams hold together. The root's
-    /// piece is first and keeps the flat frame; the others are laid beside it, left to right.
+    /// The pieces of the flat pattern: the panels that bends and seams hold together. The pieces
+    /// with an anchored panel come first and lie where their anchors put them; the others are
+    /// laid beside them, left to right (see [`develop`]).
     pub pieces: Vec<Vec<usize>>,
     /// Each bend's zone in the flat frame.
     pub zones: Vec<Zone>,
@@ -180,18 +181,24 @@ fn anchor_offset(kind: &JointKind, sheet: &Sheet) -> Option<f64> {
 }
 
 /// Lays the sheet out flat. Each panel is first put on its neutral surface (a roll's is longer
-/// or shorter round it than its sheet), then the `root` panel's neutral chart is the flat frame
-/// and every panel that a chain of bends and seams reaches from it is turned and shifted so that
-/// each bend's zone fits between its two panels and each seam's panels meet edge to edge. Panels
-/// that rips keep apart are laid out the same way as pieces of their own, beside the root's. A
-/// joint that closes a loop is laid out once, through the rest of the loop, and reported in
+/// or shorter round it than its sheet). The flat frame is the sheet's own, given by `anchors`:
+/// where some panels' neutral charts lie in it (a sheet's flat as it was made, see the caller). A
+/// piece of the flat (the panels a chain of bends and seams holds together) with an anchored
+/// panel is laid out from it, where its anchor puts it: every panel the chain reaches is turned
+/// and shifted so that each bend's zone fits between its two panels and each seam's panels meet
+/// edge to edge. Of several anchored panels in one piece, the one with the most material starts
+/// it (see [`most_material`]); a panel whose material is all cut away anchors it as well, as it
+/// keeps its place. A piece with no anchored panel (one that rips keep apart) is laid out from its
+/// panel with the most material and beside the anchored ones, left to right; with no anchors at
+/// all, the first such piece keeps the flat frame. Nothing depends on the panels' order. A joint
+/// that closes a loop is laid out once, through the rest of the loop, and reported in
 /// [`Development::loops`].
-pub fn develop(sheet: &Sheet, root: usize) -> Result<Development, DevelopError> {
+pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development, DevelopError> {
     if sheet.panels.len() > MAX_PANELS || sheet.joints.len() > MAX_JOINTS {
         return Err(DevelopError::TooLarge);
     }
-    if root >= sheet.panels.len() {
-        return Err(DevelopError::NoPanel(root));
+    if let Some(&(i, _)) = anchors.iter().find(|(i, _)| *i >= sheet.panels.len()) {
+        return Err(DevelopError::NoPanel(i));
     }
     for (j, joint) in sheet.joints.iter().enumerate() {
         check_joint(sheet, j, joint)?;
@@ -249,20 +256,30 @@ pub fn develop(sheet: &Sheet, root: usize) -> Result<Development, DevelopError> 
     let mut placements: Vec<Option<Rigid2>> = vec![None; sheet.panels.len()];
     let mut followed = vec![false; sheet.joints.len()];
     let mut pieces = Vec::new();
-    let mut next = Some(root);
-    while let Some(start) = next {
+    // The anchored pieces, each from its anchored panel with the most material.
+    let anchored = |placements: &[Option<Rigid2>]| most_material(sheet, anchors.iter().map(|a| a.0).filter(|i| unplaced(placements, *i)));
+    while let Some(start) = anchored(&placements) {
+        if let (Some(p), Some(&(_, at))) = (placements.get_mut(start), anchors.iter().find(|a| a.0 == start)) {
+            *p = Some(at);
+        }
+        pieces.push(lay_out(sheet, start, &touching, &mut placements, &mut followed)?);
+    }
+    let held = pieces.len().max(1);
+    // Then the rest, each from its panel with the most material.
+    while let Some(start) = most_material(sheet, (0..sheet.panels.len()).filter(|i| unplaced(&placements, *i))) {
         if let Some(p) = placements.get_mut(start) {
             *p = Some(Rigid2::IDENTITY);
         }
         pieces.push(lay_out(sheet, start, &touching, &mut placements, &mut followed)?);
-        next = placements.iter().position(Option::is_none);
     }
-    // The pieces beside the root's, left to right, with their lowest edges level.
+    // The pieces no anchor holds beside those it does, left to right, with their lowest edges
+    // level.
     let gap = (10.0 * sheet.thickness).max(5.0);
     let bounds: Vec<Option<Aabb2>> = pieces.iter().map(|piece| piece_bounds(sheet, piece, &placements)).collect();
-    if let Some(Some(first)) = bounds.first() {
+    let fixed = bounds.iter().take(held).flatten().cloned().reduce(|a, b| a.union(&b));
+    if let Some(first) = fixed {
         let mut x = first.max.x + gap;
-        for (piece, b) in pieces.iter().zip(&bounds).skip(1) {
+        for (piece, b) in pieces.iter().zip(&bounds).skip(held) {
             let Some(b) = b else { continue };
             let shift = Vec2::new(x - b.min.x, first.min.y - b.min.y);
             for &p in piece {
@@ -344,6 +361,21 @@ pub fn develop(sheet: &Sheet, root: usize) -> Result<Development, DevelopError> 
         out.cuts.push(place.region(&cut.region));
     }
     Ok(out)
+}
+
+/// Whether panel `i` is not laid out yet.
+fn unplaced(placements: &[Option<Rigid2>], i: usize) -> bool {
+    placements.get(i).is_some_and(Option::is_none)
+}
+
+/// Of the panels `among`, the one with the most material, then the first by name: what a piece
+/// of the flat is laid out from. Taken from what the panels are, never from their order, so that
+/// adding, cutting away or reordering other panels moves no piece.
+fn most_material(sheet: &Sheet, among: impl Iterator<Item = usize>) -> Option<usize> {
+    among
+        .filter_map(|i| Some((i, sheet.panels.get(i)?)))
+        .min_by(|(_, a), (_, b)| b.region.area().total_cmp(&a.region.area()).then_with(|| a.name.cmp(&b.name)))
+        .map(|(i, _)| i)
 }
 
 /// Lays out the piece that bends and seams hold together with `start`, already placed: a

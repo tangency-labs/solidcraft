@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Bir yüze dayanak ekler: yuvarlak veya dikdörtgen, dolu veya içi boş, konikliği olan bir ayak. Kalıplanmış bir kasada destek veya mesafe parçası olarak kullanın.",
   "help.plastic.snap_fit": "Bir yüze, uzunluğu, kalınlığı ve tırnağıyla bir geçmeli bağlantı kancası ekler. Parçaları vidasız birbirine geçirmek için kullanın.",
   "help.pointcloud.insert": "PLY, XYZ veya PTS taramasını modelin yanına nokta bulutu olarak ekler. Ölçülmüş verilerden model oluştururken referans olarak kullanın.",
-  "help.sheet.convert": "Eşit kalınlıkta bir plakayı veya içi boşaltılmış bir gövdeyi, seçtiğiniz kenarlarda bükümlerle sac metal gövdeye dönüştürür. Mevcut bir parçayı açılabilir hâle getirmek için kullanın.",
+  "help.sheet.convert": "Yüzeyleri kurala göre sac metale dönüştürür: bir katının veya bir yüzey gövdesinin yüzlerini, seçtiğiniz kenarlarda bükümlerle. Modellenmiş bir şekilden sac metal parça yapmak için kullanın.",
   "help.sheet.export_bend_table": "Bir sac metal gövdenin büküm tablosunu CSV veya JSON olarak kaydeder: açılar, yarıçaplar ve açınımdaki büküm konumları. Abkant pres veya atölye için kullanın.",
   "help.sheet.export_dxf": "Açınımı DXF olarak kaydeder; dış hatlar, büküm çizgileri ve isteğe bağlı büküm notlarıyla. Lazer, plazma veya su jeti ile kesim için kullanın.",
   "help.sheet.flange": "Bir flanş ekler: bir eskizden taban plakası, açık bir eskiz konturu boyunca bir cidar ya da sac kenarlarında bükülmüş bir cidar. Sac metal parçaları oluşturmak için kullanın.",

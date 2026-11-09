@@ -1609,7 +1609,7 @@
   "help.plastic.rest": "Lisää pinnalle tuen: pyöreän tai suorakulmaisen, umpinaisen tai onton korokkeen päästöllä. Käytä sitä tukena tai välikkeenä valetussa kotelossa.",
   "help.plastic.snap_fit": "Lisää pinnalle napsautusliitoksen koukun, jolla on pituus, paksuus ja salpa. Käytä sitä osien kiinnittämiseen toisiinsa ilman ruuveja.",
   "help.pointcloud.insert": "Lisää PLY-, XYZ- tai PTS-skannaus pistepilvenä mallin rinnalle. Käytä sitä apuna, kun rakennat mallia mitatusta datasta.",
-  "help.sheet.convert": "Muuntaa tasapaksun levyn tai kuoritun kappaleen ohutlevykappaleeksi, jossa on taivutukset valitsemissasi särmissä. Käytä sitä, kun haluat olemassa olevasta osasta levitettävän.",
+  "help.sheet.convert": "Muuntaa pinnat ohutlevyksi säännön mukaan: solidin tai pintakappaleen tahkot, taivutuksin valitsemissasi särmissä. Käytä sitä ohutlevyosan tekemiseen mallinnetusta muodosta.",
   "help.sheet.export_bend_table": "Tallentaa ohutlevykappaleen taivutustaulukon CSV- tai JSON-muodossa: kulmat, säteet ja taivutusten paikat levityksessä. Käytä sitä särmäyspuristimelle tai verstaalle.",
   "help.sheet.export_dxf": "Tallentaa levityskuvan DXF-muodossa ääriviivoineen, taivutusviivoineen ja valinnaisine taivutusmerkintöineen. Käytä sitä laser-, plasma- tai vesileikkaukseen.",
   "help.sheet.flange": "Lisää laipan: pohjalevyn luonnoksesta, seinämän avointa luonnosääriviivaa pitkin tai taivutetun seinämän levyn särmiin. Käytä sitä ohutlevyosien rakentamiseen.",

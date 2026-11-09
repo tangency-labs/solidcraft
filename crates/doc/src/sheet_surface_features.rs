@@ -9,14 +9,14 @@
 //!
 //! Not built yet: flanges on part of an edge, and flanges on a curved edge or a roll's edge.
 
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::Cut;
 use solidcraft_develop::{Anchor, Bend, Datum, Joint, JointKind, Lap, Panel, Relief, Rigid3, Rip, Sheet, Surface, Tail, ZoneEnds, develop};
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::BoolOp;
 
 use crate::sheet::HeightFrom;
-use crate::{DocError, Result, SurfaceSheet};
+use crate::{DocError, FoldSide, Result, SurfaceSheet};
 
 fn err<T>(msg: impl Into<String>) -> Result<T> {
     Err(DocError::Invalid(msg.into()))
@@ -44,7 +44,7 @@ impl SurfaceSheet {
     /// planar panel or its rim: one no joint runs along. `None` when no such edge is within twice
     /// the thickness of `p`; refused where a bend's edge is nearer than any free one.
     pub fn free_edge_at(&self, p: Vec3) -> Result<Option<FreeEdge>> {
-        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?;
         let t = self.sheet.thickness;
         let mut best: Option<(f64, FreeEdge)> = None;
@@ -80,50 +80,6 @@ impl SurfaceSheet {
         Ok(best.map(|(_, e)| e))
     }
 
-    /// The free edge a saved edge name finds (`<panel>:rim.<rim>:<top|bottom>`, as
-    /// [`crate::sheet::sheet_edge_names`] names a pick on a sheet made from surfaces): the edge of
-    /// the named panel's outline along the rim of that name, as it lies now. Where a cut parted
-    /// the rim into several, the one nearest `near` (the body's coordinates). None where no panel
-    /// or rim has the name, or the rim lies along no line of the outline.
-    pub fn free_edge_by_name(&self, name: &str, near: Vec3) -> Option<FreeEdge> {
-        let (rest, side) = name.rsplit_once(':')?;
-        let (panel, rim) = rest.rsplit_once(':')?;
-        let rim = rim.strip_prefix("rim.")?;
-        let far_face = match side {
-            "top" => false,
-            "bottom" => true,
-            _ => return None,
-        };
-        let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
-        let region = &self.sheet.panels.get(i)?.region;
-        let dev = develop(&self.sheet, 0).ok()?;
-        let place = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?.places.get(i).copied().flatten()?;
-        let q = place.inverse().point(near);
-        let at = Vec2::new(q.x, q.y);
-        let small = (self.sheet.thickness * 1e-3).max(1e-6);
-        let on = |s: &Seg2, p: Vec2| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p) <= small;
-        let mut best: Option<(f64, FreeEdge)> = None;
-        for &(k, a, b, ref n) in &self.rims {
-            if k != i || n != rim {
-                continue;
-            }
-            // The outline's own line the rim lies along: what is made on the edge reads it there.
-            for l in std::iter::once(&region.outer).chain(&region.holes) {
-                for s in &l.segs {
-                    let Seg2::Line { a: x, b: y } = *s else { continue };
-                    if !(on(s, a) && on(s, b)) {
-                        continue;
-                    }
-                    let d = s.point_at(s.closest_param(at).clamp(0.0, 1.0)).dist(at);
-                    if best.as_ref().is_none_or(|(v, _)| d < *v) {
-                        best = Some((d, FreeEdge { panel: i, a: x, b: y, far_face }));
-                    }
-                }
-            }
-        }
-        best.map(|(_, e)| e)
-    }
-
     /// Keeps the flanges of the bends `made` (a feature's, its corners closed) clear of the panel
     /// beside their own at each end no other flange closed: where a rip parts their panel from
     /// another at that end, and the flange lies on that panel's side of its own. A wall leaning in
@@ -135,7 +91,7 @@ impl SurfaceSheet {
     /// never run on. A flange of an earlier feature is left as it is.
     pub fn clear_of_neighbours(&mut self, made: &[usize]) -> Result<()> {
         let t = self.sheet.thickness;
-        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
         let place = |i: usize| places.get(i).copied().flatten();
         let plane = |i: usize| matches!(self.sheet.panels.get(i).map(|x| &x.surface), Some(Surface::Plane));
@@ -498,9 +454,9 @@ impl SurfaceSheet {
     /// bend runs to the corner too. Only bends before `j` are met: a later flange of the same
     /// feature meets `j` when its own corners are closed.
     fn close_corners(&mut self, j: usize) -> Result<()> {
-        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let places = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?.places;
-        close_corners_on(&mut self.sheet, &places, self.reliefs.gap, j, false)
+        close_corners_on(&mut self.sheet, &places, self.reliefs.gap, j, None)
     }
 
     /// A hem on the free edge at `pick`: half a turn at the edge back over the face opposite the
@@ -509,17 +465,67 @@ impl SurfaceSheet {
     /// Folds the sheet along the line from `a` to `b` (the body's coordinates) on a face of one of
     /// its flat panels: the panel is cut in two there, its bend zone where `position` puts it from
     /// the line (`centerline`, `start`, `end` or `mould`, its outside mould line), and the side
-    /// that moves (the side away from `fixed`, or else the smaller) bends by `angle` at `radius`,
-    /// toward the material or, `flip`, away from it, with every panel joined beyond it. The zone is
-    /// the panel's own material, so the flat stays as drawn: where the outline crosses the zone on
-    /// a slanted or a curved edge, the zone's end follows it, and where a rip of the panel (a wall
-    /// mitred to the next) crosses the zone, it follows the rip's cut; a fold that would turn the
-    /// wall into the next one is refused. Where the side away from `fixed` would leave
-    /// the side that stays in pieces, or join it again beyond the bend (a tab on an inside edge of
-    /// an L, the fixed point on the far leg), the other side's pieces the line reaches fold
-    /// instead, and the fixed point's material still stays (#639). Returns the fold's joint.
+    /// `stays` (left or right of the line as drawn, seen from the sheet's surface: see
+    /// [`FoldSide`]) stays put while the other bends by `angle` at `radius`, toward the material
+    /// or, `flip`, away from it, with every panel joined beyond it. The zone is the panel's own
+    /// material, so the flat stays as drawn: where the outline crosses the zone on a slanted or a
+    /// curved edge, the zone's end follows it, and where a rip of the panel (a wall mitred to the
+    /// next) crosses the zone, it follows the rip's cut; a fold that would turn the wall into the
+    /// next one is refused. On the side that moves, only the pieces the drawn line reaches fold
+    /// (a tab beside them on the same line stays). A fold that would leave the side that stays in
+    /// pieces, or join the side that moves to it again beyond the bend, is refused: the side was
+    /// chosen when the fold was made ([`SurfaceSheet::fold_side`]) so that it does not, and it is
+    /// never chosen again. Returns the fold's joint.
     #[allow(clippy::too_many_arguments)]
-    pub fn add_fold(&mut self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, fixed: Option<Vec3>) -> Result<usize> {
+    pub fn add_fold(&mut self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, stays: FoldSide) -> Result<usize> {
+        let f = self.fold_setup(a, b, angle, radius, flip)?;
+        let n = if stays == FoldSide::Left { f.across } else { -f.across };
+        match self.plan_fold(f.i, (&f.place, f.places.as_slice()), &f.region, f.line, n, &f.bend, position)? {
+            Ok(plan) => Ok(self.apply_fold(f.i, plan)),
+            Err(why) => err(why),
+        }
+    }
+
+    /// Which side of the fold line from `a` to `b` stays put (see [`SurfaceSheet::add_fold`]),
+    /// decided once, when a fold is made: the side `fixed` lies on; else the side with more of the
+    /// sheet joined to it, the panel's own material there and every panel bends and seams join to
+    /// the panel on that side (on a panel bent from another, the side toward that bend; on a lone
+    /// panel, the larger side), a tie keeping the line's left. Where that side would fall apart,
+    /// or the side that moves would join it again beyond the bend (a tab on an inside edge of an
+    /// L, the fixed point on the far leg), the other side's pieces the line reaches fold instead:
+    /// the other side is the one that stays, so long as the fixed point's material does (#639).
+    #[allow(clippy::too_many_arguments)]
+    pub fn fold_side(&self, a: Vec3, b: Vec3, angle: f64, radius: f64, position: &str, flip: bool, fixed: Option<Vec3>) -> Result<FoldSide> {
+        let f = self.fold_setup(a, b, angle, radius, flip)?;
+        let from = f.line[0].dot(f.across);
+        let fixed = fixed.map(|p| {
+            let q = f.place.inverse().point(p);
+            Vec2::new(q.x, q.y)
+        });
+        // The side that moves lies along `n` from the line.
+        let moves_across = match fixed {
+            Some(q) => q.dot(f.across) < from,
+            None => {
+                let (along, against) = self.held_beside(&f, from)?;
+                along <= against
+            }
+        };
+        let n = if moves_across { f.across } else { -f.across };
+        let at = (&f.place, f.places.as_slice());
+        let n = match self.plan_fold(f.i, at, &f.region, f.line, n, &f.bend, position)? {
+            Ok(_) => n,
+            Err(why) => match self.plan_fold(f.i, at, &f.region, f.line, -n, &f.bend, position) {
+                Ok(Ok(plan)) if fixed.is_none_or(|q| !plan.moves.iter().any(|m| m.region.contains(q))) => -n,
+                _ => return err(why),
+            },
+        };
+        // The side that stays lies against `n`; the line's left, seen from the surface (against
+        // the panel's material normal), lies against `across`.
+        Ok(if n.dot(f.across) > 0.0 { FoldSide::Left } else { FoldSide::Right })
+    }
+
+    /// What a fold works on, whichever side stays (see [`SurfaceSheet::add_fold`]).
+    fn fold_setup(&self, a: Vec3, b: Vec3, angle: f64, radius: f64, flip: bool) -> Result<FoldSetup> {
         if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
             return err("the fold angle must be between 0 and 180°");
         }
@@ -527,7 +533,7 @@ impl SurfaceSheet {
             return err("the bend radius must not be negative");
         }
         let t = self.sheet.thickness;
-        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?;
         // The panel the line lies on: both its ends on one face of the panel, the line across it.
         let on_face = |z: f64| z.abs() < 1e-4 || (z - t).abs() < 1e-4;
@@ -570,28 +576,49 @@ impl SurfaceSheet {
             tails: (Tail::Keep, Tail::Keep),
             relief: (Relief::None, Relief::None),
         };
-        // The side that moves lies along `n` from the line: away from `fixed`, or else the
-        // smaller side.
-        let across = d.perp();
-        let from = line[0].dot(across);
-        let fixed = fixed.map(|p| {
-            let q = place.inverse().point(p);
-            Vec2::new(q.x, q.y)
-        });
-        let moves_across = match fixed {
-            Some(q) => q.dot(across) < from,
-            None => area(&half(&region, across, from)?) <= area(&half(&region, -across, -from)?),
-        };
-        let n = if moves_across { across } else { -across };
-        let at = (&place, folded.places.as_slice());
-        let plan = match self.plan_fold(i, at, &region, line, n, &bend, position)? {
-            Ok(plan) => plan,
-            Err(why) => match self.plan_fold(i, at, &region, line, -n, &bend, position) {
-                Ok(Ok(plan)) if fixed.is_none_or(|q| !plan.moves.iter().any(|m| m.region.contains(q))) => plan,
-                _ => return err(why),
-            },
-        };
-        Ok(self.apply_fold(i, plan))
+        let flat_area = dev.panels.iter().map(|p| p.as_ref().map_or(0.0, |p| p.region.area())).collect();
+        Ok(FoldSetup { i, place, places: folded.places, region, line, across: d.perp(), bend, flat_area })
+    }
+
+    /// How much of the sheet lies on either side of a fold's line `x · across = from` in its
+    /// panel's chart: the panel's own material there, and the flat material of every panel that
+    /// bends and seams join to the panel on that side, through any panels beyond it (a rip holds
+    /// nothing). Along `across` first.
+    fn held_beside(&self, f: &FoldSetup, from: f64) -> Result<(f64, f64)> {
+        let n = f.across;
+        let mut held = [area(&half(&f.region, n, from)?), area(&half(&f.region, -n, -from)?)];
+        for (slot, sign) in held.iter_mut().zip([1.0, -1.0]) {
+            let mut queue: Vec<usize> = Vec::new();
+            for joint in &self.sheet.joints {
+                let length = match &joint.kind {
+                    JointKind::Bend(b) => b.length,
+                    JointKind::Seam => 0.0,
+                    JointKind::Rip(_) => continue,
+                };
+                for (an, other) in [(&joint.a, joint.b.panel), (&joint.b, joint.a.panel)] {
+                    let mid = an.origin + an.dir * (length / 2.0);
+                    if an.panel == f.i && other != f.i && sign * (mid.dot(n) - from) > 0.0 {
+                        queue.push(other);
+                    }
+                }
+            }
+            let mut reached = std::collections::BTreeSet::new();
+            while let Some(p) = queue.pop() {
+                if p == f.i || !reached.insert(p) {
+                    continue;
+                }
+                for joint in self.sheet.joints.iter().filter(|j| !matches!(j.kind, JointKind::Rip(_))) {
+                    if joint.a.panel == p {
+                        queue.push(joint.b.panel);
+                    } else if joint.b.panel == p {
+                        queue.push(joint.a.panel);
+                    }
+                }
+            }
+            *slot += reached.iter().filter_map(|p| f.flat_area.get(*p)).sum::<f64>();
+        }
+        let [along, against] = held;
+        Ok((along, against))
     }
 
     /// How a fold folds panel `i` (its region `region`; where it and every panel lie in space,
@@ -997,6 +1024,7 @@ impl SurfaceSheet {
         let mut out = self.clone();
         out.body = body.to_string();
         out.places = self.places.iter().map(|p| p.map(place)).collect();
+        out.flat = place(self.flat);
         if mirror {
             out.turn_charts_over();
         }
@@ -1082,7 +1110,7 @@ impl SurfaceSheet {
     /// panel's material, each bend's zone, each loose piece), the panel's index for a panel's.
     #[allow(clippy::type_complexity)]
     pub(crate) fn pieces_in_space(&self) -> Option<(Vec<(usize, Rigid3, Region2)>, Vec<(Option<usize>, solidcraft_geom::Aabb3)>)> {
-        let dev = develop(&self.sheet, 0).ok()?;
+        let dev = self.develop().ok()?;
         let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
         let fold = if self.unfolded { None } else { Some(crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?) };
         let pieces = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new()).ok()?;
@@ -1119,7 +1147,7 @@ impl SurfaceSheet {
                             for depth in [0.0, t] {
                                 match fold.as_ref() {
                                     Some(fold) => b.add(fold.bends.get(zone.joint).copied().flatten()?.point(x, depth)),
-                                    None => b.add(self.places.first().copied().flatten()?.point(Vec3::new(x.x, x.y, depth))),
+                                    None => b.add(self.flat.point(Vec3::new(x.x, x.y, depth))),
                                 }
                             }
                         }
@@ -1153,7 +1181,7 @@ impl SurfaceSheet {
                 return true;
             }
         }
-        let Ok(dev) = develop(&self.sheet, 0) else { return true };
+        let Ok(dev) = self.develop() else { return true };
         let Ok(frames) = crate::sheet_surface_cuts::frames(self, &dev) else { return true };
         for l in &self.loose {
             let Some(frame) = frames.get(l.panel).copied().flatten() else { continue };
@@ -1176,81 +1204,11 @@ impl SurfaceSheet {
         })
     }
 
-    /// The face of the sheet's body `body` a point lies on (the body's coordinates, within `tol`),
-    /// found exactly on the body, with the name the sheet's builder gave it and its plane (see
-    /// [`Self::panel_face`]). None for a face the sheet names none (a hole's wall), and while the
-    /// sheet is flat.
-    pub fn panel_face_at(&self, body: &solidcraft_kernel::Body, p: Vec3, tol: f64) -> Option<(String, Plane)> {
-        if self.face_names.len() != body.face_count() || self.altered_by.is_some() {
-            return None;
-        }
-        let q = solidcraft_geom::brep::query::Query::new(body.record());
-        let (_, f) = q.faces_at(p, tol).into_iter().next()?;
-        let name = self.face_names.get(f)?.clone()?;
-        let plane = self.panel_face(&name)?;
-        Some((name, plane))
-    }
-
-    /// The plane of the end of the bend that makes panel `panel` at its start (`k` 0, at its
-    /// anchors' origin) or its other end, facing out of the bend, in the body.
-    fn bend_end(&self, panel: usize, k: usize) -> Option<Plane> {
-        let dev = develop(&self.sheet, 0).ok()?;
-        let fold = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
-        let j = self.sheet.joints.iter().position(|j| j.b.panel == panel && matches!(j.kind, JointKind::Bend(_)))?;
-        let z = dev.zones.iter().find(|z| z.joint == j)?;
-        let bent = fold.bends.get(j).copied().flatten()?;
-        let (start, end) = (bent.point(z.near[0], 0.0), bent.point(z.near[1], 0.0));
-        let along = (end - start).normalized()?;
-        let outward = if k == 0 { along * -1.0 } else { along };
-        let origin = bent.point(z.near[k], 0.0);
-        let x = (bent.point(z.near[k], self.thickness) - origin).normalized()?;
-        Plane::new(origin, x, outward.cross(x))
-    }
-
-    /// The plane of the flat face named `name` (see [`Self::panel_face_at`]), facing out of the
-    /// sheet. Its coordinates are the flat pattern's as it is read (see [`SurfaceSheet::shown`]),
-    /// the other face's mirrored, so a sketch on it measures as the flat pattern does.
-    pub fn panel_face(&self, name: &str) -> Option<Plane> {
-        let (panel, side) = name.rsplit_once(':')?;
-        if let Some(end) = side.strip_prefix("bend.end") {
-            // Numbered along the flat as it is read: `end1` is at the anchors' origin.
-            let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
-            return self.bend_end(i, if end == "1" { 0 } else { 1 });
-        }
-        if let Some(rim) = side.strip_prefix("rim.") {
-            // Along the rim's edge, through the thickness from the sheet's surface.
-            let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
-            let &(_, a, b, _) = self.rims.iter().find(|(k, _, _, n)| *k == i && n == rim)?;
-            let dev = develop(&self.sheet, 0).ok()?;
-            let frame = crate::sheet_surface_cuts::frames(self, &dev).ok()?.get(i).copied().flatten()?;
-            let d = (b - a).normalized()?;
-            let foot = a + d * (Vec2::new(0.0, 0.0) - a).dot(d);
-            return Plane::new(frame.point(Vec3::new(foot.x, foot.y, 0.0)), frame.vector(Vec3::new(d.x, d.y, 0.0)), frame.z);
-        }
-        let top = match side {
-            "top" => true,
-            "bottom" => false,
-            _ => return None,
-        };
-        let i = match panel {
-            "flat" => 0,
-            name => self.sheet.panels.iter().position(|p| p.name == name)?,
-        };
-        let dev = develop(&self.sheet, 0).ok()?;
-        let frames = crate::sheet_surface_cuts::frames(self, &dev).ok()?;
-        let frame = frames.get(i).copied().flatten()?;
-        let back = dev.placements.get(i).copied().flatten()?.inverse();
-        let o = back.point(Vec2::new(0.0, 0.0));
-        let (x, y) = (back.vector(Vec2::new(1.0, 0.0)), back.vector(Vec2::new(0.0, if top { -1.0 } else { 1.0 })));
-        let z = if top { 0.0 } else { self.thickness };
-        Plane::new(frame.point(Vec3::new(o.x, o.y, z)), frame.vector(Vec3::new(x.x, x.y, 0.0)), frame.vector(Vec3::new(y.x, y.y, 0.0)))
-    }
-
     /// Whether the line from `a` to `b` lies on a face of one of the sheet's flat panels, across
     /// it: what [`Self::add_fold`] folds.
     pub fn fold_panel_at(&self, a: Vec3, b: Vec3) -> bool {
         let t = self.sheet.thickness;
-        let Ok(dev) = develop(&self.sheet, 0) else { return false };
+        let Ok(dev) = self.develop() else { return false };
         let Ok(folded) = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places) else { return false };
         let on_face = |z: f64| z.abs() < 1e-4 || (z - t).abs() < 1e-4;
         self.sheet.panels.iter().zip(&folded.places).any(|(panel, place)| {
@@ -1292,7 +1250,7 @@ impl SurfaceSheet {
     pub fn far_edge_point(&self, panel: usize) -> Option<Vec3> {
         let j = self.sheet.joints.iter().position(|jt| jt.b.panel == panel && matches!(jt.kind, JointKind::Bend(_)))?;
         let e = self.far_edge(j).ok()?;
-        let dev = develop(&self.sheet, 0).ok()?;
+        let dev = self.develop().ok()?;
         let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places).ok()?;
         let m = (e.a + e.b) * 0.5;
         Some(folded.places.get(panel).copied().flatten()?.point(Vec3::new(m.x, m.y, 0.0)))
@@ -1316,7 +1274,7 @@ impl SurfaceSheet {
         // The path says which way each bend turns, from the surface, whichever face was picked.
         let edge = FreeEdge { far_face: false, ..edge };
         let (a, _, d) = straight(&edge)?;
-        let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?;
         let place = folded.places.get(edge.panel).copied().flatten().ok_or_else(|| DocError::Invalid("the edge's panel has no place".into()))?;
         // The edge's frame: along it, out of the sheet past it, and up from its top (the surface).
@@ -1426,9 +1384,11 @@ impl SurfaceSheet {
 
 /// [`SurfaceSheet::close_corners`] on `sheet`, its panels where `places` put them in space, its
 /// rips parting the flanges by `gap`. Convert closes a converted sheet's corners with it too,
-/// before it settles them, with `open_only`: only a corner the body left open, where neither
-/// flange is joined to anything else.
-pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap: f64, j: usize, open_only: bool) -> Result<()> {
+/// before it settles them, with `open_in` the sheet's joints as the body gave them: only a
+/// corner the body left open closes, where neither flange is joined there to any of those. (Read
+/// on the joints as they were, not as earlier closings left them, so that which corner closes
+/// does not depend on the order the bends are met in.)
+pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap: f64, j: usize, open_in: Option<&[Joint]>) -> Result<()> {
     let t = sheet.thickness;
     let reach_of = |b: &Bend| (b.radius + t) * (b.angle / 2.0).tan();
     for k in 0..sheet.joints.len() {
@@ -1495,16 +1455,19 @@ pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap
         if !across && !(into2.dot(on_p.dir.perp()) > 1e-9 && into1.dot(on_q.dir.perp() * side_q) > 1e-9) {
             continue;
         }
-        // The other panel's side at the corner held by a third bend (a flange on its end edge):
-        // the new flange closes against that bend's flange, across the other bend, instead.
-        if !across && held_at(sheet, w, on_w.origin + on_w.dir * s2, on_w.dir, [j, k], reach) {
+        // A side at the corner held by a third bend (a flange on a panel's end edge): the flanges
+        // close against that bend's flange, across the other bend, instead. Looked for on both
+        // panels, so that it does not matter which of the two bends was made first.
+        let (at_f, at_w) = (on_f.origin + on_f.dir * s1, on_w.origin + on_w.dir * s2);
+        if !across && (held_at(sheet, w, at_w, on_w.dir, [j, k], reach) || held_at(sheet, f, at_f, on_f.dir, [j, k], reach)) {
             continue;
         }
         // A corner the body left open, and only that, closes on a converted sheet: neither flange is
         // joined there to anything but its own bend (where five faces meet round an icosahedron's
         // corner, the body's rips and bends there stay as they are).
-        let (at_f, at_w) = (on_f.origin + on_f.dir * s1, on_w.origin + on_w.dir * s2);
-        if open_only && (meets(sheet, f, at_f, [j, k], reach) || meets(sheet, w, at_w, [j, k], reach)) {
+        if let Some(joints) = open_in
+            && (meets(joints, f, at_f, [j, k], reach) || meets(joints, w, at_w, [j, k], reach))
+        {
             continue;
         }
         // The bend across, from its anchor on the panel: where the corner lies along it, and its
@@ -1548,6 +1511,9 @@ pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap
         let (Some(rf), Some(rw)) = (sheet.panels.get(f).map(|x| x.region.clone()), sheet.panels.get(w).map(|x| x.region.clone())) else {
             continue;
         };
+        // Converting, a relief the body cut at this corner leaves its panels first (see
+        // `fill_bites`): the rule's is cut afresh once the corner is settled.
+        let (rf, rw) = if open_in.is_some() { (fill_bites(&rf, at_f, reach), fill_bites(&rw, at_w, reach)) } else { (rf, rw) };
         let (Some((rf, hf)), Some((rw, hw))) = (to_line(&rf, &on_f, -1.0, e1, s1, mf)?, to_line(&rw, &on_w, side_w, e2, s2, mw)?) else {
             continue;
         };
@@ -1586,6 +1552,11 @@ pub(crate) fn close_corners_on(sheet: &mut Sheet, places: &[Option<Rigid3>], gap
         }
         if let Some(x) = sheet.panels.get_mut(w) {
             x.region = rw;
+        }
+        if open_in.is_some()
+            && let Some(x) = sheet.panels.get_mut(p)
+        {
+            x.region = fill_bites(&x.region, c1, reach);
         }
         // Each bend's edge runs to the corner.
         if let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = sheet.joints.get_mut(j) {
@@ -1650,11 +1621,11 @@ fn held_at(sheet: &Sheet, w: usize, at: Vec2, along: Vec2, skip: [usize; 2], rea
     })
 }
 
-/// Whether a joint other than `skip`'s runs on panel `x` within `reach` of the point `at` of its
-/// chart: a bend along its anchor, a rip along its edge on `x`, a seam on its anchor's line.
-fn meets(sheet: &Sheet, x: usize, at: Vec2, skip: [usize; 2], reach: f64) -> bool {
+/// Whether a joint of `joints` other than `skip`'s runs on panel `x` within `reach` of the point
+/// `at` of its chart: a bend along its anchor, a rip along its edge on `x`, a seam on its anchor's line.
+fn meets(joints: &[Joint], x: usize, at: Vec2, skip: [usize; 2], reach: f64) -> bool {
     let near = |pts: &[Vec2]| pts.windows(2).any(|w| dist_to_segment(at, w[0], w[1]) <= reach);
-    sheet.joints.iter().enumerate().any(|(m, jt)| {
+    joints.iter().enumerate().any(|(m, jt)| {
         !skip.contains(&m)
             && match &jt.kind {
                 JointKind::Bend(bend) => {
@@ -1726,6 +1697,22 @@ struct FoldPiece {
     bend: Bend,
     start: f64,
     span: (f64, f64),
+}
+
+/// What a fold works on, whichever side stays (see [`SurfaceSheet::add_fold`]): the panel the
+/// line lies on and where it lies in space, where every panel lies, the panel's material, the
+/// line in its chart (as drawn) and the way across it to its right seen from the sheet's surface
+/// (`d.perp()`, `d` the line's way: the chart's `z` runs into the material), the bend, and each
+/// panel's flat area.
+struct FoldSetup {
+    i: usize,
+    place: Rigid3,
+    places: Vec<Option<Rigid3>>,
+    region: Region2,
+    line: [Vec2; 2],
+    across: Vec2,
+    bend: Bend,
+    flat_area: Vec<f64>,
 }
 
 /// What of `region` lies between the lines `x · n = from` and `x · n = to` (`n` a unit vector).
@@ -1857,7 +1844,7 @@ fn folded_joint(t: f64, k_factor: f64, joint: &Joint, at: Rigid3, held_a: bool) 
         ..Default::default()
     };
     let (held, other) = if held_a { (0, 1) } else { (1, 0) };
-    let dev = develop(&sheet, held).ok()?;
+    let dev = develop(&sheet, &[(held, solidcraft_develop::Rigid2::IDENTITY)]).ok()?;
     let fold = solidcraft_develop::fold(&sheet, &dev, &[at]).ok()?;
     Some((fold.places.get(other).copied().flatten()?, fold.bends.first().copied().flatten()?))
 }
@@ -2003,6 +1990,43 @@ fn dist_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 /// How far a region reaches from the line through `o`, along its normal `n`.
 fn reach_from(region: &Region2, (o, n): (Vec2, Vec2)) -> f64 {
     (&region.outer.polyline(1e-4)).into_iter().map(|p| (*p - o).dot(n)).fold(0.0, f64::max)
+}
+
+/// `region` with the bites a relief took out of its corners near `at` put back (Convert, #6748):
+/// an arc of its outline between two straight edges, about a centre outside its material and
+/// within `reach` of `at` past its radius, is a disc's bite out of the corner the two edges' lines
+/// make, and the edges run on to that corner instead. So a converted panel loses the body's
+/// relief there, and the rule's is cut afresh where the corner is settled: the flat holds one
+/// exact circle at the corner, never the body's beside the rule's, nearly on it (their crossings
+/// leave slivers, and pieces of curve the flat's walls cannot be swept from).
+fn fill_bites(region: &Region2, at: Vec2, reach: f64) -> Region2 {
+    let mut segs = region.outer.ccw().segs;
+    loop {
+        let n = segs.len();
+        let found = (0..n).find_map(|i| {
+            let Seg2::Arc { center, radius, .. } = *segs.get(i)? else { return None };
+            let (Seg2::Line { a: a1, b: b1 }, Seg2::Line { a: a2, b: b2 }) = (*segs.get((i + n - 1) % n)?, *segs.get((i + 1) % n)?) else {
+                return None;
+            };
+            if n < 4 || region.contains(center) || center.dist(at) > radius + reach {
+                return None;
+            }
+            let (d1, d2) = ((b1 - a1).normalized()?, (b2 - a2).normalized()?);
+            let x = cross_lines((a1, d1), (a2, d2))?;
+            // The corner lies on past the edge before the arc, and before the edge after it.
+            ((x - b1).dot(d1) >= 0.0 && (a2 - x).dot(d2) >= 0.0).then_some((i, a1, x, b2))
+        });
+        let Some((i, a1, x, b2)) = found else { break };
+        let (before, after) = ((i + n - 1) % n, (i + 1) % n);
+        if let Some(s) = segs.get_mut(before) {
+            *s = Seg2::Line { a: a1, b: x };
+        }
+        if let Some(s) = segs.get_mut(after) {
+            *s = Seg2::Line { a: x, b: b2 };
+        }
+        segs.remove(i);
+    }
+    Region2 { outer: Loop2 { segs }, holes: region.holes.clone() }
 }
 
 fn cross_lines((p, u): (Vec2, Vec2), (q, w): (Vec2, Vec2)) -> Option<Vec2> {

@@ -1548,7 +1548,7 @@
   "help.plastic.rest": "Lägger till ett stöd på en yta: en rund eller rektangulär platta, massiv eller ihålig, med släppvinkel. Använd det som stöd eller distans i ett formsprutat hölje.",
   "help.plastic.snap_fit": "Lägger till en snäppkrok på en yta, med angiven längd, tjocklek och hake. Använd det för att snäppa ihop delar utan skruvar.",
   "help.pointcloud.insert": "Infoga en skanning i formatet PLY, XYZ eller PTS som ett punktmoln vid sidan av modellen. Använd den som referens när du bygger en modell från uppmätta data.",
-  "help.sheet.convert": "Gör en platta eller urholkad kropp med jämn tjocklek till en plåtkropp, med böjar vid de kanter du väljer. Använd det för att göra en befintlig del utvikbar.",
+  "help.sheet.convert": "Gör ytor till plåt enligt regeln: ytorna på en solid eller en ytkropp, med böjar vid de kanter du väljer. Använd det för att göra en plåtdel av en modellerad form.",
   "help.sheet.export_bend_table": "Sparar böjtabellen för en plåtkropp som CSV eller JSON: vinklar, radier och böjlägen i det plana mönstret. Använd det för kantpressen eller verkstaden.",
   "help.sheet.export_dxf": "Sparar det plana mönstret som en DXF, med konturer, böjlinjer och valfria böjanteckningar. Använd det för laser-, plasma- eller vattenskärning.",
   "help.sheet.flange": "Lägger till en fläns: en grundplåt utifrån en skiss, en vägg längs en öppen skisskontur eller en böjd vägg på plåtkanter. Använd det för att bygga upp plåtdelar.",

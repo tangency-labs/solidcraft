@@ -1827,7 +1827,7 @@
   "help.plastic.rest": "Adds a rest on a face: a round or rectangular pad, solid or hollow, with draft. Use it as a support or standoff in a moulded housing.",
   "help.plastic.snap_fit": "Adds a snap-fit hook on a face, with its length, thickness and catch. Use it to clip parts together without screws.",
   "help.pointcloud.insert": "Inserta un escaneo PLY, XYZ o PTS como nube de puntos junto al modelo. Úsala como",
-  "help.sheet.convert": "Turns a plate or shelled body of even thickness into a sheet metal body, with bends at the edges you pick. Use it to make an existing part unfoldable.",
+  "help.sheet.convert": "Convierte superficies en chapa según la regla: las caras de un sólido o de un cuerpo de superficie, con pliegues en las aristas que elija. Úselo para hacer una pieza de chapa a partir de una forma modelada.",
   "help.sheet.export_bend_table": "Saves the bend table of a sheet metal body as CSV or JSON: angles, radii and bend positions in the flat. Use it for the press brake or the workshop.",
   "help.sheet.export_dxf": "Saves the flat pattern as a DXF, with outlines, bend lines and optional bend notes. Use it for laser, plasma or waterjet cutting.",
   "help.sheet.flange": "Adds a flange: a base plate from a sketch, a wall along an open sketch contour, or a bent wall on sheet edges. Use it to build up sheet metal parts.",

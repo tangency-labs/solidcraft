@@ -893,43 +893,47 @@ fn flange_dialog_offers_material_outside_and_tangent_bend_positions() {
     assert_eq!(saved, "tangent");
 }
 
-/// Convert's Thicken mode (#6748) takes the faces that make the sheet and the edges that bend
-/// more faces onto them; Edit Feature brings both back, still thickening.
+/// Convert (#6748) takes the faces that make the sheet and the edges that bend more faces onto
+/// them, on the faces' body; the command refuses faces skipped beside faces picked. Edit Feature
+/// brings the body, the faces and the edges back.
 #[test]
-fn thicken_takes_the_faces_and_the_bend_edges() {
+fn convert_takes_the_faces_picked_and_the_bend_edges() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
     s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
     let mut app = SolveApp::new(s, Services::default());
     app.start("sheet.convert");
     let mut d = app.dialog.clone().unwrap();
-    if let Kind::Sheet(Sm::Convert { mode, .. }) = &mut d.kind {
-        *mode = THICKEN;
-    }
-    convert_switch(&mut d.inputs, true);
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Faces", "Bend Edges"]);
-    assert!(apply_commands(&app, &d).is_err(), "nothing to thicken without a face");
-    // The floor alone: one face and no `bends`.
-    d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Bend Edges", "Skip Faces", "Faces"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to convert without a body");
+    // The floor alone: one face, its body, and no `bends`.
+    d.inputs[3].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
     let c = apply_commands(&app, &d).unwrap();
-    assert!(c[0].1.get("bends").is_none() && c[0].1["faces"] == json!([]), "{}", c[0].1);
+    assert!(c[0].1.get("bends").is_none() && c[0].1.get("faces").is_none() && c[0].1["body"] == json!("Tray"), "{}", c[0].1);
     assert_eq!(c[0].1["face"], json!([50.0, 30.0, 0.0]));
+    // A face skipped beside it goes to the command, which refuses it: the faces picked are the
+    // whole sheet.
+    d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 0.0, 15.0)).into_iter().collect();
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("face").is_some() && c[0].1.get("skip").is_some(), "{}", c[0].1);
+    d.inputs[2].items.clear();
     let edges: Vec<Sel> = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
         .iter()
         .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
         .collect();
     d.inputs[1].items = edges;
     let c = apply_commands(&app, &d).unwrap();
-    assert_eq!((c[0].0.as_str(), c[0].1["mode"].clone()), ("sheet.convert", json!("thicken")));
+    assert_eq!((c[0].0.as_str(), c[0].1.get("skip")), ("sheet.convert", None));
     assert_eq!(c[0].1["bends"], json!([[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]));
     run_all(&mut app, c);
     let bends = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"].as_array().map(Vec::len);
     assert_eq!(bends(&mut app), Some(4));
-    // Edit Feature: the face and the four edges are back in their rows, and OK rebuilds the sheet.
+    // Edit Feature: the body, the four edges and the face are back in their rows, and OK
+    // rebuilds the sheet.
     let f = app.session.doc.features.last().unwrap().clone();
     let e = edit_dialog(&app, f.id, None).unwrap();
-    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { mode: THICKEN, .. })));
-    assert_eq!((e.inputs[0].items.len(), e.inputs[1].items.len()), (1, 4));
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 0, 1]);
     let c = apply_commands(&app, &e).unwrap();
     assert_eq!(c[0].0, "timeline.redefine");
     assert_eq!(c[0].1["params"]["bends"].as_array().map(Vec::len), Some(4));
@@ -948,15 +952,10 @@ fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
     let mut app = SolveApp::new(s, Services::default());
     app.start("sheet.convert");
     let mut d = app.dialog.clone().unwrap();
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Bend Edges", "Skip Faces"], "Convert is the default");
-    // A fixed face picked to thicken carries its body over to Convert.
-    convert_switch(&mut d.inputs, true);
-    d.inputs[0].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 0.0)).into_iter().collect();
-    convert_switch(&mut d.inputs, false);
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
     if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
         *side = 1;
     }
-    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Block".into() }]);
     d.inputs[1].items = [[50.0, 0.0, 0.0], [100.0, 30.0, 0.0], [50.0, 60.0, 0.0], [0.0, 30.0, 0.0]]
         .iter()
         .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
@@ -964,7 +963,7 @@ fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
     d.inputs[2].items = face_sel(&app.session, Vec3::new(50.0, 30.0, 30.0)).into_iter().collect();
     let c = apply_commands(&app, &d).unwrap();
     let p = &c[0].1;
-    assert!(p.get("mode").is_none() && p.get("face").is_none() && p["direction"] == json!("outside"), "{p}");
+    assert!(p.get("face").is_none() && p["direction"] == json!("outside"), "{p}");
     assert_eq!((p["bends"].as_array().map(Vec::len), p["skip"].as_array().map(Vec::len)), (Some(4), Some(1)));
     // Inside is the default, and goes unsaid.
     if let Kind::Sheet(Sm::Convert { side, .. }) = &mut d.kind {
@@ -980,12 +979,44 @@ fn convert_takes_the_body_its_bends_and_the_faces_it_skips() {
     let f = app.session.doc.features.last().unwrap().clone();
     app.edit_feature(f.id);
     let e = app.dialog.clone().unwrap();
-    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { mode: 0, side: 0, .. })));
-    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 1]);
-    // Switched to Thicken, the faces are to pick and the bends stay.
-    let mut back = e.inputs.clone();
-    convert_switch(&mut back, true);
-    assert_eq!(back.iter().map(|i| (i.label, i.items.len())).collect::<Vec<_>>(), [("Faces", 0), ("Bend Edges", 4)]);
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Convert { side: 0, .. })));
+    assert_eq!(e.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 4, 1, 0]);
+}
+
+/// Recognize (#6748) takes a body that is sheet metal already, here a tray shelled 2 thick: it
+/// sends a new rule's name, the rule it makes is the body's 2 mm, and Edit Feature brings the
+/// body back. Convert says such a body is sheet metal already, and never says so of a surface
+/// body.
+#[test]
+fn recognize_makes_the_bodys_rule_and_convert_points_to_it() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 100, "width": 60, "height": 30, "body_name": "Tray"})).unwrap();
+    s.execute("solid.shell", &json!({"faces": [[50, 30, 30]], "thickness": 2})).unwrap();
+    s.execute("sketch.create", &json!({"plane": "XY", "name": "Open"})).unwrap();
+    let made = s.execute("sketch.line", &json!({"points": [[200, 40], [200, 0], [260, 0]]})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    let curves = made["created"]["curves"].clone();
+    s.execute("surface.extrude", &json!({"sketch": "Open", "curves": curves, "distance": 50, "body_name": "Open"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    assert!(own_thickness(&app, "Tray").is_some_and(|t| (t - 2.0).abs() < 1e-9));
+    assert_eq!(own_thickness(&app, "Open"), None, "a surface body is surfaces only");
+    app.start("sheet.recognize");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Body", "Surface Face", "Skip Faces", "Bend Edges"]);
+    assert!(apply_commands(&app, &d).is_err(), "nothing to recognize without a body");
+    d.inputs[0].items = vec![Sel::Body { name: "Tray".into() }];
+    if let Kind::Sheet(Sm::Recognize { new_rule, .. }) = &mut d.kind {
+        *new_rule = "Tray rule".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((c[0].0.as_str(), c[0].1["new_rule"].clone(), c[0].1.get("rule")), ("sheet.recognize", json!("Tray rule"), None));
+    run_all(&mut app, c);
+    let made = app.session.doc.sheet.rules.iter().find(|r| r.name == "Tray rule").map(|r| r.thickness.clone());
+    assert_eq!(made.as_deref(), Some("2 mm"));
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Recognize { .. })));
+    assert_eq!(e.inputs[0].items, vec![Sel::Body { name: "Tray".into() }]);
 }
 
 /// The Path Flange dialog takes the edge and the path's sketch lines: one feature, one body,

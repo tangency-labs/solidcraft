@@ -1551,7 +1551,7 @@
   "help.plastic.rest": "Voegt een rustvlak toe op een vlak: een ronde of rechthoekige verhoging, massief of hol, met aanzet. Gebruik dit als steun of afstandhouder in een spuitgegoten behuizing.",
   "help.plastic.snap_fit": "Voegt een snaphaak toe op een vlak, met lengte, dikte en klikrand. Gebruik dit om onderdelen zonder schroeven aan elkaar te klikken.",
   "help.pointcloud.insert": "Voeg een PLY-, XYZ- of PTS-scan in als puntenwolk naast het model. Gebruik deze als referentie bij het bouwen van een model op basis van gemeten gegevens.",
-  "help.sheet.convert": "Maakt van een plaat of geschaald lichaam van gelijkmatige dikte een plaatwerklichaam, met buigingen op de randen die je kiest. Gebruik dit om een bestaand onderdeel ontvouwbaar te maken.",
+  "help.sheet.convert": "Maakt van oppervlakken plaatwerk volgens de regel: de vlakken van een massief lichaam of een oppervlaklichaam, met buigingen op de randen die je kiest. Gebruik dit om van een gemodelleerde vorm een plaatwerkdeel te maken.",
   "help.sheet.export_bend_table": "Slaat de buigtabel van een plaatwerklichaam op als CSV of JSON: hoeken, stralen en buigposities in de uitslag. Gebruik dit voor de kantbank of de werkplaats.",
   "help.sheet.export_dxf": "Slaat de uitslag op als DXF, met contouren, buiglijnen en optionele buigopmerkingen. Gebruik dit voor laser-, plasma- of waterstraalsnijden.",
   "help.sheet.flange": "Voegt een flens toe: een basisplaat uit een schets, een wand langs een open schetscontour, of een gebogen wand op plaatranden. Gebruik dit om plaatwerkonderdelen op te bouwen.",

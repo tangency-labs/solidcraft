@@ -22,7 +22,7 @@ use crate::{DocError, Document, IDENTITY, Mat, Result, apply_point, apply_vector
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
 pub use face_names::body_sheet_face_names;
-pub(crate) use face_names::{FaceNamer, FaceRole, carried, rims};
+pub(crate) use face_names::{FaceNamer, FaceRole, carried, ranked, rims};
 
 // Bound the aggregate geometry, including sampled curves and intermediate clipping pieces.
 // These are work limits, never geometry truncation: a larger input returns a useful error.
@@ -6058,13 +6058,12 @@ pub fn split_sheet_face_name(name: &str) -> Option<(&str, &str)> {
     Some((body, rest.get(body.len() + 1..)?))
 }
 
-/// The plane of the sheet face with a [`sheet_face_name`], in the body's own coordinates.
+/// The plane of the sheet face with a [`sheet_face_name`], in the body's own coordinates. A sheet
+/// made from surfaces has no such names: a sketch on one of its faces attaches to the face by the
+/// model's name for it, and takes the sheet's frame (see `ModelBody::sketch_frame`).
 pub fn sheet_face_plane(st: &crate::ModelState, name: &str) -> Option<(String, Plane)> {
     let (body, face) = split_sheet_face_name(name)?;
-    let plane = match st.sheets.iter().find(|s| s.body == body) {
-        Some(sh) => sh.panel_face(face)?,
-        None => st.surface_sheets.iter().find(|s| s.body == body)?.panel_face(face)?,
-    };
+    let plane = st.sheets.iter().find(|s| s.body == body)?.panel_face(face)?;
     Some((body.to_string(), plane))
 }
 
@@ -6078,15 +6077,13 @@ pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
                 .filter_map(|sh| sh.edge_at(*p).map(|e| (e.4, sh)))
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .and_then(|(_, sh)| sh.edge_name(*p));
-            // On a sheet made from surfaces (#6748): the rim along the free edge, and the face
-            // of the sheet the pick was nearer, `<panel>:rim.<rim>:<top|bottom>`.
+            // On a sheet made from surfaces (#6748): the model's name for the edge of its body
+            // at a free edge of the sheet (`<face A>|<face B>`, #7990), as every feature's edges.
             flat.or_else(|| {
                 st.surface_sheets.iter().filter(|s| !s.unfolded).find_map(|s| {
-                    let e = s.free_edge_at(*p).ok().flatten()?;
-                    let d = (e.b - e.a).normalized()?;
-                    let rim = s.rim_along(e.panel, e.a, d, (0.0, e.a.dist(e.b)), 0.0)?;
-                    let panel = s.sheet.panels.get(e.panel)?;
-                    Some(format!("{}:rim.{rim}:{}", panel.name, if e.far_face { "bottom" } else { "top" }))
+                    s.free_edge_at(*p).ok().flatten()?;
+                    let b = st.body(&s.body)?;
+                    crate::naming::edge_names_at(b, std::slice::from_ref(p)).into_iter().next().filter(|n| !n.is_empty())
                 })
             })
             .unwrap_or_default()

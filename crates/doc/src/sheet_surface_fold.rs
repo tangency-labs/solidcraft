@@ -12,7 +12,7 @@ use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_develop::{Bent, Development, Fold};
+use solidcraft_develop::{Bent, Development, Fold, Rigid3};
 use solidcraft_geom::LINEAR_TOL;
 use solidcraft_kernel::{self as kernel, Body, EdgeSpec, FaceSpec, SurfSpec};
 
@@ -94,10 +94,12 @@ impl Cell {
     }
 }
 
-/// A development folded, `t` thick.
+/// A development `t` thick, folded by `fold`, or laid flat in the plane of the frame `flat` (the
+/// flat's: each piece at its own flat coordinates).
 struct Folded<'a> {
     dev: &'a Development,
-    fold: &'a Fold,
+    fold: Option<&'a Fold>,
+    flat: Option<Rigid3>,
     t: f64,
 }
 
@@ -112,7 +114,32 @@ pub(crate) fn solid(
     work: &mut FlatWork,
     name: &dyn Fn(Piece, FaceRole) -> Option<String>,
 ) -> Result<(Body, Vec<Option<String>>)> {
-    let f = Folded { dev, fold, t };
+    solid_of(&Folded { dev, fold: Some(fold), flat: None, t }, pieces, work, name)
+}
+
+/// [`solid`] laid flat in the plane of the frame `flat` (the flat's): each piece a face of its own
+/// on either side and its walls, as the folded solid has them, so the flat's faces are the folded
+/// sheet's faces laid flat and keep what they were made for (#7990: an unfold merges no faces, and
+/// a refold finds each face as it was). Pieces meet along the lines where bends start, coplanar.
+pub(crate) fn solid_flat(
+    dev: &Development,
+    flat: Rigid3,
+    t: f64,
+    pieces: &[(Piece, Region2)],
+    work: &mut FlatWork,
+    name: &dyn Fn(Piece, FaceRole) -> Option<String>,
+) -> Result<(Body, Vec<Option<String>>)> {
+    solid_of(&Folded { dev, fold: None, flat: Some(flat), t }, pieces, work, name)
+}
+
+/// The solid of `pieces` where `f` carries them (see [`solid`]).
+fn solid_of(
+    f: &Folded<'_>,
+    pieces: &[(Piece, Region2)],
+    work: &mut FlatWork,
+    name: &dyn Fn(Piece, FaceRole) -> Option<String>,
+) -> Result<(Body, Vec<Option<String>>)> {
+    let t = f.t;
     let cells = cells(pieces.to_vec(), work)?;
     let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
     // Shared with a neighbor: the same flat line the other way, landing in the same place
@@ -158,7 +185,7 @@ pub(crate) fn solid(
                 surface: f.surface(c.piece, &samples, depth, curved)?,
                 probe: Some((p, p - f.at(c.piece, center, inside)?)),
             });
-            names.push(name(c.piece, FaceRole::Cap { surface: side == 0 }));
+            names.push(name(c.piece, FaceRole::Cap { surface: side == 0, at: center }));
         }
         // Walls along runs no other cell shares.
         for (run, [bottom, top]) in runs.iter().flatten().zip(edges.iter().flatten()) {
@@ -176,7 +203,7 @@ pub(crate) fn solid(
             let pm = f.at(c.piece, mid, t / 2.0)?;
             let outward = f.at(c.piece, mid + Vec2::new(along.y, -along.x).normalized().unwrap_or_default() * 1e-3, t / 2.0)? - pm;
             faces.push(FaceSpec { loops: vec![vec![bottom.clone(), up_b, top.reversed(), down_a]], surface, probe: Some((pm, outward)) });
-            names.push(name(c.piece, FaceRole::Wall { a, b }));
+            names.push(name(c.piece, FaceRole::Wall { a, b, mid }));
         }
     }
     // Until the kernel sews faces that touch along an edge face to face (#1597): two walls on one
@@ -257,15 +284,17 @@ fn cells(pieces: Vec<(Piece, Region2)>, work: &mut FlatWork) -> Result<Vec<Cell>
 
 impl Folded<'_> {
     fn bent(&self, zone: usize) -> Option<&Bent> {
-        self.dev.zones.get(zone).and_then(|z| self.fold.bends.get(z.joint)).and_then(Option::as_ref)
+        self.dev.zones.get(zone).and_then(|z| self.fold?.bends.get(z.joint)).and_then(Option::as_ref)
     }
 
     /// Where a point of a piece goes, `depth` into the material: a tab's where its panel puts it,
-    /// carried on flat past the panel's edge (along the roll's surface, on a roll).
+    /// carried on flat past the panel's edge (along the roll's surface, on a roll). Laid flat,
+    /// every piece's point where the flat has it.
     fn at(&self, piece: Piece, p: Vec2, depth: f64) -> Result<Vec3> {
-        let got = match piece {
-            Piece::Panel(i) | Piece::Tab(_, i) => self.fold.panel_point(i, p, depth),
-            Piece::Zone(z) => self.bent(z).map(|b| b.point(p, depth)),
+        let got = match (self.flat, piece) {
+            (Some(flat), _) => Some(flat.point(Vec3::new(p.x, p.y, depth))),
+            (None, Piece::Panel(i) | Piece::Tab(_, i)) => self.fold.and_then(|f| f.panel_point(i, p, depth)),
+            (None, Piece::Zone(z)) => self.bent(z).map(|b| b.point(p, depth)),
         };
         got.filter(|q| q.is_finite()).ok_or_else(|| DocError::Invalid("a piece of the flat pattern has no place on the folded sheet".into()))
     }
@@ -351,6 +380,9 @@ impl Folded<'_> {
     fn surface(&self, piece: Piece, samples: &[Vec2], depth: f64, curved: bool) -> Result<SurfSpec> {
         let range = |v: &mut dyn Iterator<Item = f64>| v.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
         let lost = || DocError::Invalid("a piece of the flat pattern has no place on the folded sheet".into());
+        if self.flat.is_some() {
+            return Ok(SurfSpec::Plane);
+        }
         match piece {
             Piece::Zone(z) => {
                 let b = self.bent(z).ok_or_else(lost)?;
@@ -366,10 +398,11 @@ impl Folded<'_> {
                 Ok(SurfSpec::Revolved { a: b.at(l0, p0, depth), b: b.at(l1, p0, depth), axis_origin, axis, angle: p1 - p0 })
             }
             Piece::Panel(i) | Piece::Tab(_, i) => {
-                let Some((axis_origin, axis)) = self.fold.axis(i) else { return Ok(SurfSpec::Plane) };
-                let q: Vec<Vec2> = samples.iter().map(|p| self.fold.param(i, *p)).collect::<Option<_>>().ok_or_else(lost)?;
+                let fold = self.fold.ok_or_else(lost)?;
+                let Some((axis_origin, axis)) = fold.axis(i) else { return Ok(SurfSpec::Plane) };
+                let q: Vec<Vec2> = samples.iter().map(|p| fold.param(i, *p)).collect::<Option<_>>().ok_or_else(lost)?;
                 let ((u0, u1), (v0, v1)) = (range(&mut q.iter().map(|q| q.x)), range(&mut q.iter().map(|q| q.y)));
-                let at = |u: f64| self.fold.surface_point(i, Vec2::new(u, v0), depth).ok_or_else(lost);
+                let at = |u: f64| fold.surface_point(i, Vec2::new(u, v0), depth).ok_or_else(lost);
                 Ok(SurfSpec::Revolved { a: at(u0)?, b: at(u1)?, axis_origin, axis, angle: v1 - v0 })
             }
         }
@@ -552,11 +585,11 @@ mod tests {
             corners: Vec::new(),
             cuts: Vec::new(),
         };
-        let dev = develop(&sheet, 0).expect("the bracket develops");
+        let dev = develop(&sheet, &[(0, solidcraft_develop::Rigid2::IDENTITY)]).expect("the bracket develops");
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).expect("the bracket folds");
         let [zone] = dev.zones.as_slice() else { panic!("one zone: {:?}", dev.zones) };
         let line = Seg2::Line { a: zone.near[0] + (zone.near[1] - zone.near[0]) * 0.2, b: zone.far[0] + (zone.far[1] - zone.far[0]) * 0.35 };
-        let f = Folded { dev: &dev, fold: &folded, t: 2.0 };
+        let f = Folded { dev: &dev, fold: Some(&folded), flat: None, t: 2.0 };
         let (o, w) = f.bent(0).expect("the zone is bent").axis();
         let edges = f.edges(Piece::Zone(0), &[line]).expect("the line folds");
         for (edge, (depth, radius)) in edges.iter().zip([(0.0, 4.0), (2.0, 2.0)]) {

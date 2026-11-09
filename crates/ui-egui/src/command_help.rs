@@ -148,6 +148,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sheet.manage_rules",
     "sheet.path_flange",
     "sheet.perforate",
+    "sheet.recognize",
     "sheet.refold",
     "sheet.unfold",
     "sketch.arc.center_point",

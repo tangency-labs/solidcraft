@@ -1553,7 +1553,7 @@
   "help.plastic.rest": "Aggiunge un appoggio su una faccia: un tampone tondo o rettangolare, pieno o cavo, con sformo. Usalo come supporto o distanziale in un involucro stampato.",
   "help.plastic.snap_fit": "Aggiunge un gancio a scatto su una faccia, con lunghezza, spessore e dente di aggancio. Usalo per fissare a scatto le parti senza viti.",
   "help.pointcloud.insert": "Inserisci una scansione PLY, XYZ o PTS come nuvola di punti accanto al modello. Usala come riferimento quando costruisci un modello a partire da dati misurati.",
-  "help.sheet.convert": "Trasforma una piastra o un corpo svuotato di spessore uniforme in un corpo in lamiera, con pieghe sugli spigoli che scegli. Usalo per rendere sviluppabile un pezzo esistente.",
+  "help.sheet.convert": "Trasforma superfici in lamiera secondo la regola: le facce di un solido o di un corpo di superficie, con pieghe sugli spigoli che scegli. Usalo per ottenere un pezzo in lamiera da una forma modellata.",
   "help.sheet.export_bend_table": "Salva la tabella delle pieghe di un corpo in lamiera come CSV o JSON: angoli, raggi e posizioni delle pieghe nello sviluppo piano. Usalo per la pressopiegatrice o per l'officina.",
   "help.sheet.export_dxf": "Salva lo sviluppo piano come DXF, con contorni, linee di piega e note di piega facoltative. Usalo per il taglio laser, al plasma o a getto d'acqua.",
   "help.sheet.flange": "Aggiunge una flangia: una piastra di base da uno schizzo, una parete lungo un contorno aperto dello schizzo o una parete piegata sugli spigoli della lamiera. Usalo per costruire pezzi in lamiera.",

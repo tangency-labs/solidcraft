@@ -44,8 +44,12 @@ parameter along the sketch curve where a hole wall's piece starts, the distance 
 or a bend's anchor. Never a build or kernel order (#7990 change 4).
 
 The engine compares the report with the previous build's. A face whose part existed before keeps
-its name; a face made for a new part is named by the feature that made it. Two small engine
-extensions carry this, both shaped like what the engine already has:
+its name; a face made for a new part is named by the feature that made it. That includes a face a
+later feature adds to a panel an earlier one made: it is the later feature's, named after the face
+of that panel it was made from (a rim past a bend's end after that bend end, a tab's cap after its
+bend's face on the same side). The feature whose build made a face decides; a feature number or
+creation order never does. Two small engine extensions carry this, both shaped like what the
+engine already has:
 
 - a **grown face**, `F<feature>:<role>:<face it was built on>`, the same shape as today's
   `F<f>:inner:<face>` and `F<f>:blend:<edge>`: a flange's top is named after the rim it stands on;
@@ -61,8 +65,10 @@ extensions carry this, both shaped like what the engine already has:
 | a flange's caps | `F<f>:top:<rim>`, `F<f>:bottom:<rim>` |
 | a flange's far edge and ends | `F<f>:far:<rim>`, `F<f>:end0:<rim>`, `F<f>:end1:<rim>` (`end0` at the joint's anchor origin) |
 | a bend zone | `F<f>:bend.inner:<rim>`, `F<f>:bend.outer:<rim>`, `F<f>:bend.end0:<rim>`, `bend.end1` |
+| a flange's rim past its bend's end, where a closed corner runs it on | `F<f>:past0:<rim>`, `past1` (`past0` at the joint's anchor origin) when its own feature closed the corner; `F<g>:past0:<bend end>` when a later feature `g` did |
+| a tab's caps (bend material riding with one panel) | `F<f>:tab.top:<rim>`, `tab.bottom` when the bend's own feature made the tab; `F<cut>:tab.top:<bend face on that side>` when a later cut freed it |
 | a hole or cut wall | `F<cut>:side:<curve>`, pieces told apart by the faces that bound them, else `#k` by where each starts along the curve |
-| a relief wall | `F<f>:relief:<edge between the two rims>` |
+| a relief wall | `F<f>:relief:<edge between the two rims>`, `<f>` the feature whose build cut it |
 | a converted sheet's faces | the source body's face names, carried |
 
 Edges are the engine's: `<face A>|<face B>`. A flange or hem pick stores that edge name.

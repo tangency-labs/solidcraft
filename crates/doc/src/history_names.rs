@@ -10,8 +10,10 @@
 //! Two faces with the same name are pieces of one face (a cut split it). Each piece is told apart
 //! by the faces around it that the others do not have: `F2:top#[F2:side:l4,F4:side:l4]` is the
 //! piece of `F2:top` bounded by the block's left wall and the slot's left wall. Pieces nothing
-//! around them tells apart are numbered (`#1`, `#2`): in the order of what they came from when
-//! that differs (exact), else in the kernel's order (unverified). A face made of several (a
+//! around them tells apart are numbered (`#1`, `#2`): in the order along their definition where
+//! the feature says where each starts (exact; a sheet's hole wall along its sketch curve), else in
+//! the order of what they came from when that differs (exact), else by place (unverified). A face
+//! made of several (a
 //! coplanar join) takes one name and keeps the others as aliases: a reference to one of them is
 //! to a face that is no longer as it was picked, and finds nothing. A face a feature built from
 //! several of its own roles (a side drawn in collinear pieces) has each of them as a name
@@ -89,6 +91,9 @@ struct Named {
     /// What it came from (`None`: not known): faces with one name but different origins (an
     /// extrude's two caps both above its sketch plane) are numbered in this order.
     origins: Option<Vec<FaceOrigin>>,
+    /// Its place among the faces made for one part of the definition that made it, where the
+    /// feature says (see `lineage::GrownFace`): faces with one name are numbered in this order first.
+    ordinal: Option<usize>,
 }
 
 /// Names of a body (`b`, made by `o`'s feature) from its lineage; `None` when the lineage does
@@ -146,8 +151,13 @@ impl<'a> OperandNames<'a> {
                 let body = o.before.body(name)?;
                 Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
-            Operand::Made(_) | Operand::CopiedTool { .. } => {
+            Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Grown { body: None, .. } => {
                 Some(OperandNames { operand, body: None, names: Arc::default(), edges: OnceLock::new() })
+            }
+            // Grown from a body before the feature: named after its faces.
+            Operand::Grown { body: Some(name), .. } => {
+                let body = o.before.body(name)?;
+                Some(OperandNames { operand, names: crate::naming::names(body), body: Some(body.clone()), edges: OnceLock::new() })
             }
             Operand::Stage(stage) => {
                 let body = &stage.body;
@@ -176,6 +186,7 @@ impl<'a> OperandNames<'a> {
                 synonyms: info.synonyms.clone(),
                 verified: info.verified,
                 origins: None,
+                ordinal: None,
             })
         };
         match self.operand {
@@ -188,6 +199,7 @@ impl<'a> OperandNames<'a> {
                     synonyms: copied(&n.synonyms),
                     verified: n.verified,
                     origins: None,
+                    ordinal: None,
                 }
             }),
             Operand::Inner(_) => {
@@ -207,6 +219,25 @@ impl<'a> OperandNames<'a> {
                 let (first, rest) = roles.get(face)?.split_first()?;
                 Some(Named { name: named(first), synonyms: rest.iter().map(named).collect(), verified: true, ..Named::default() })
             }
+            Operand::Grown { faces, .. } => {
+                let grown = faces.get(face)?.as_ref()?;
+                let feature = grown.feature.unwrap_or(fid);
+                // After the faces it was grown from: their name, the one they are all pieces of.
+                let after = if grown.on.is_empty() {
+                    None
+                } else {
+                    let around = |k: usize| {
+                        let info = self.names.info.get(k)?;
+                        Some(Named { name: self.names.faces.get(k)?.clone(), verified: info.verified, ..Named::default() })
+                    };
+                    Some(merged(grown.on.iter().map(|&k| around(k)).collect::<Option<Vec<_>>>()?)?)
+                };
+                let (name, verified) = match after {
+                    Some(on) => (format!("F{feature}:{}:{}", grown.role, on.name), on.verified),
+                    None => (format!("F{feature}:{}", grown.role), true),
+                };
+                Some(Named { name, verified, ordinal: grown.ordinal, ..Named::default() })
+            }
         }
     }
 
@@ -220,7 +251,7 @@ impl<'a> OperandNames<'a> {
                 let verified = faces.iter().all(|f| self.names.verified(*f as usize));
                 Some((names.get(edge)?.clone(), verified))
             }
-            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } => None,
+            Operand::Copy { .. } | Operand::Inner(_) | Operand::Made(_) | Operand::CopiedTool { .. } | Operand::Grown { .. } => None,
         }
     }
 }
@@ -257,6 +288,11 @@ fn from_origins(face: &FaceProv, operands: &[OperandNames], fid: u64) -> Option<
 /// whose name it takes stay its synonyms.
 fn merged(names: Vec<Named>) -> Option<Named> {
     let verified = names.iter().all(|n| n.verified);
+    // One face's place along its definition; a face made of several has none.
+    let ordinal = match names.as_slice() {
+        [one] => one.ordinal,
+        _ => None,
+    };
     let first = names.first()?.name.clone();
     let mut common = Some(first.as_str());
     while let Some(c) = common {
@@ -280,7 +316,7 @@ fn merged(names: Vec<Named>) -> Option<Named> {
             }
         }
     }
-    Some(Named { name, aliases, synonyms, verified, origins: None })
+    Some(Named { name, aliases, synonyms, verified, origins: None, ordinal })
 }
 
 /// The name the faces have in common: their stem, the faces their qualifiers share and the
@@ -418,12 +454,21 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
                 }
                 continue;
             }
-            // The faces around them don't tell these apart: numbered by what they came from when
-            // that differs (exact), else in the kernel's order (unverified).
+            // The faces around them don't tell these apart: numbered along their definition where
+            // the feature says where each starts and no two start at one place (exact, #7990
+            // change 4), else by what they came from when that differs (exact), else in the
+            // kernel's order (unverified).
             let mut tied = tied;
+            let ordinals: Option<Vec<usize>> = tied.iter().map(|i| named.get(*i).and_then(|x| x.ordinal)).collect();
+            let along = ordinals.is_some_and(|mut o| {
+                o.sort_unstable();
+                o.windows(2).all(|w| w[0] < w[1])
+            });
             let origins: Vec<Option<&Vec<FaceOrigin>>> = tied.iter().map(|i| named.get(*i).and_then(|x| x.origins.as_ref())).collect();
-            let distinct = origins.iter().all(Option::is_some) && origins.iter().collect::<BTreeSet<_>>().len() == origins.len();
-            if distinct && !by_place {
+            let distinct = along || (origins.iter().all(Option::is_some) && origins.iter().collect::<BTreeSet<_>>().len() == origins.len());
+            if along {
+                tied.sort_by_key(|i| named.get(*i).and_then(|x| x.ordinal));
+            } else if distinct && !by_place {
                 tied.sort_by_key(|i| named.get(*i).and_then(|x| x.origins.clone()));
             } else if distinct {
                 // By what they came from, but not by where it stood in its operand's face order:

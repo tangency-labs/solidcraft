@@ -199,12 +199,28 @@ word!(
     ["inside", "outside", "bend_outside", "middle", "material_outside", "tangent"]
 );
 word!(
+    /// A conversion's `direction` (read by `sheet::material_side`).
+    MaterialSide,
+    crate::cmd::material_side,
+    "must be inside or outside",
+    "inside or outside, in any case.",
+    ["inside", "outside"]
+);
+word!(
     /// A fold's `position` (read by `sheet::fold_position`).
     FoldPosition,
     crate::cmd::fold_position,
     "must be centerline, start, end or mould",
     "centerline, start, end or mould (or mold), in any case.",
     ["centerline", "start", "end", "mould", "mold"]
+);
+word!(
+    /// A fold's `stays` (read by `sheet::fold_stays`).
+    FoldStays,
+    crate::cmd::fold_stays,
+    "must be left or right",
+    "left or right of the fold line as drawn, seen from the sheet's surface, in any case.",
+    ["left", "right"]
 );
 
 /// A corner relief's shape: notch, round, rectangular or tear, in any case and with blanks
@@ -504,11 +520,20 @@ pub struct FoldParams {
     /// centerline.
     #[serde(default)]
     pub position: Option<FoldPosition>,
-    /// A point on the side that stays, on the sheet. Default: the larger side (on a flange, the
-    /// side toward its own bend).
+    /// A point on the side that stays, on the sheet. The fold is made with the side it lies on,
+    /// kept in `stays`: the point is converted, so a later edit that moves the line past it
+    /// keeps that side. Ignored where `stays` is given.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "FixedPoint")]
     pub fixed: Option<FixedPoint>,
+    /// The side of the fold line that stays put: left or right of the line as drawn (from its
+    /// first point to its second, or along the sketch line), seen from the sheet's surface.
+    /// Decided once, as the fold is made, and kept with it: every rebuild folds the other side,
+    /// wherever the line moves. Default: the side `fixed` lies on, else the side with more of
+    /// the sheet joined to it (on a panel bent from another, the side toward that bend; on a
+    /// lone panel, the larger side).
+    #[serde(default)]
+    pub stays: Option<FoldStays>,
     /// Fold the other way. Default: false.
     #[serde(default)]
     pub flip: Option<bool>,
@@ -532,30 +557,95 @@ pub struct UnfoldParams {
     pub common: FeatureCommon,
 }
 
-/// Turn a body into sheet metal. Without `bends`, a plate of even thickness: its large flat face
-/// becomes the sheet, holes become cut-outs and recesses in one face up to half the thickness
-/// deep (an engraved label) become pockets. With `bends`, a solid or shelled body: `face` stays
-/// put and the flat faces reached from it across those edges become the sheet; a shell keeps its
-/// thickness, a solid takes the rule's inward, and edges between two of those faces that are no
-/// bends are cut open with the rule's gap. `participants` changes nothing.
+/// Convert to Sheet Metal (#6748): surfaces become the rule's sheet. The surfaces are the faces
+/// of a solid, of a surface body, or of one side of a shell or a plate: every face but the
+/// `skip`ped ones, or with `face` (and `faces`) those and every face a bend joins to them. The
+/// sharp edges at `bends` become bends, and every other sharp edge between two faces of the sheet
+/// is cut open with the rule's gap; a cylinder modelled between two planes is a bend, and other
+/// cylinders and cones are rolls. The thickness, radius and reliefs are the rule's, whatever the
+/// body's; the material lies on the faces' `direction` side. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConvertParams {
-    /// The body to convert.
+    /// The body to convert: a solid, a surface body, or a shell or a plate.
     pub body: String,
-    /// Its large flat face (a plate), or the face that stays put (with `bends`).
-    pub face: FaceRef,
-    /// The sharp edges that become bends of the rule's radius at their virtual sharp. A point in
-    /// the middle of a chamfer between two faces, or on a bend modelled with its radius (a
-    /// cylinder tangent to two flat faces, either skin), makes it one bend. Default: none (a
-    /// plate).
+    /// A face of the sheet: the sheet is this face, `faces`, and every face a bend joins to them.
+    /// Default: every face but `skip`.
+    #[serde(default)]
+    pub face: Option<FaceRef>,
+    /// More faces of the sheet, with `face`.
+    #[serde(default)]
+    pub faces: Option<Vec<FaceRef>>,
+    /// The faces left out of the sheet, where no face is picked.
+    #[serde(default)]
+    pub skip: Option<Vec<FaceRef>>,
+    /// The sharp edges that become bends of the rule's radius at their virtual sharp. A point on
+    /// a bend modelled with its radius (a cylinder tangent to two flat faces) picks that bend.
+    /// Default: none.
     #[serde(default)]
     pub bends: Option<SheetPoints>,
-    /// The sheet metal rule, by name. Default: the active rule. A plate keeps its own thickness.
+    /// The sheet metal rule, by name. Default: the active rule.
     #[serde(default)]
     pub rule: Option<String>,
+    /// The side of the faces the material lies on: inside (default) or outside. A shell or a
+    /// plate keeps its own.
+    #[serde(default)]
+    pub direction: Option<MaterialSide>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// Recognize Sheet Metal (#6748): a body that is sheet metal already (a shell, a plate, an
+/// imported part) becomes the rule's sheet with no picks: its surface is the side of `face`, or
+/// of its largest face; its bends modelled with their radius are bends, its other cylinders and
+/// cones rolls, and its sharp edges are cut open but the `bends`. A body of walls of more than one
+/// thickness is refused. `new_rule` first makes a rule from the body (its thickness and the
+/// radius most of its modelled bends have; the rest the active rule's), and the sheet takes it.
+/// `participants` changes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RecognizeParams {
+    /// The body that is sheet metal already.
+    pub body: String,
+    /// A face whose side is the sheet's surface. Default: the body's largest face's side.
+    #[serde(default)]
+    pub face: Option<FaceRef>,
+    /// The faces left out of the sheet.
+    #[serde(default)]
+    pub skip: Option<Vec<FaceRef>>,
+    /// Sharp edges that become bends of the rule's radius at their virtual sharp. Default: none.
+    #[serde(default)]
+    pub bends: Option<SheetPoints>,
+    /// The sheet metal rule, by name. Default: the active rule.
+    #[serde(default)]
+    pub rule: Option<String>,
+    /// The name of a new rule made from the body, which the sheet takes (not with `rule`).
+    #[serde(default)]
+    pub new_rule: Option<RuleName>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Measure a body as sheet metal (#6748), as Recognize reads it. Reads only.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MeasureBodyParams {
+    /// The body to measure.
+    pub body: String,
+    /// A face whose side is the sheet's surface. Default: the body's largest face's side.
+    #[serde(default)]
+    pub face: Option<FaceRef>,
+}
+
+/// A body measured as sheet metal (#6748): its own thickness, the inside radius of each bend
+/// modelled with its radius, and a point on a face of its surface side.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct SheetBodyMeasure {
+    pub thickness_mm: f64,
+    pub bend_radii_mm: Vec<f64>,
+    pub surface: [f64; 3],
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// List the design's sheet metal rules (the built-in steel rule if none are saved).

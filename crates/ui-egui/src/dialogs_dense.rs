@@ -76,6 +76,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_sheet::Sm::Flange { .. } => Some("sheet.flange"),
             crate::dialogs_sheet::Sm::Unfold { refold } => Some(if *refold { "sheet.refold" } else { "sheet.unfold" }),
             crate::dialogs_sheet::Sm::Convert { .. } => Some("sheet.convert"),
+            crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
             crate::dialogs_sheet::Sm::Rules { .. } => Some("sheet.manage_rules"),
             crate::dialogs_sheet::Sm::FlatPattern { .. } => Some("sheet.flat_pattern"),
             _ => k.simple_metadata().map(|(command, _)| command),

@@ -1,0 +1,90 @@
+{
+  "en": {
+    "cmd.sheet_recognize": "Recognize Sheet Metal",
+    "cmd.sheet_measure_body": "Measure Sheet Metal Body",
+    "help.sheet.recognize": "Gives sheet metal behavior to a body that is sheet metal already, such as an import or a shelled part of one thickness: its bends and rolls are found from its faces. Use it to unfold and edit a part made elsewhere.",
+    "RECOGNIZE SHEET METAL": "RECOGNIZE SHEET METAL",
+    "Surface Face": "Surface Face",
+    "New Rule": "New Rule",
+    "none: the rule above": "none: the rule above",
+    "sheet.recognize_measured": "{thickness} mm thick; modelled bends: {bends}",
+    "sheet.convert_thin_hint": "This body is sheet metal already, {thickness} mm thick: Recognize Sheet Metal keeps its own sides."
+  },
+  "ar": {
+    "cmd.sheet_recognize": "التعرف على الصفائح المعدنية",
+    "cmd.sheet_measure_body": "قياس جسم صفائح معدنية",
+    "help.sheet.recognize": "يمنح سلوك الصفائح المعدنية لجسم هو صفائح معدنية بالفعل، مثل قطعة مستوردة أو قطعة مفرَّغة بسماكة واحدة: تُستخرج ثنياته ولفّاته من أوجهه. استخدمه لفرد قطعة صُنعت في مكان آخر وتعديلها.",
+    "RECOGNIZE SHEET METAL": "التعرف على الصفائح المعدنية",
+    "Surface Face": "وجه السطح",
+    "New Rule": "قاعدة جديدة",
+    "none: the rule above": "بلا: القاعدة أعلاه",
+    "sheet.recognize_measured": "سماكة {thickness} مم؛ الثنيات المنمذجة: {bends}",
+    "sheet.convert_thin_hint": "هذا الجسم صفائح معدنية بالفعل بسماكة {thickness} مم: يحتفظ «التعرف على الصفائح المعدنية» بجانبيه كما هما."
+  },
+  "de": {
+    "cmd.sheet_recognize": "Blech erkennen",
+    "cmd.sheet_measure_body": "Blechkörper messen",
+    "help.sheet.recognize": "Gibt einem Körper, der schon Blech ist, das Verhalten von Blech, etwa einem Import oder einem ausgehöhlten Teil einer Dicke: Seine Biegungen und Rollungen werden aus seinen Flächen gefunden. Damit wird ein anderswo erstelltes Teil abwickelbar und bearbeitbar.",
+    "RECOGNIZE SHEET METAL": "BLECH ERKENNEN",
+    "Surface Face": "Oberflächenseite",
+    "New Rule": "Neue Regel",
+    "none: the rule above": "leer: die Regel darüber",
+    "sheet.recognize_measured": "{thickness} mm dick; modellierte Biegungen: {bends}",
+    "sheet.convert_thin_hint": "Dieser Körper ist schon Blech, {thickness} mm dick: Blech erkennen behält seine eigenen Seiten."
+  },
+  "fr": {
+    "cmd.sheet_recognize": "Reconnaître la tôlerie",
+    "cmd.sheet_measure_body": "Mesurer un corps de tôlerie",
+    "help.sheet.recognize": "Donne le comportement de la tôlerie à un corps qui en est déjà, comme une pièce importée ou une pièce évidée d'une seule épaisseur : ses plis et ses roulages sont trouvés à partir de ses faces. À utiliser pour déplier et modifier une pièce faite ailleurs.",
+    "RECOGNIZE SHEET METAL": "RECONNAÎTRE LA TÔLERIE",
+    "Surface Face": "Face de surface",
+    "New Rule": "Nouvelle règle",
+    "none: the rule above": "vide : la règle ci-dessus",
+    "sheet.recognize_measured": "{thickness} mm d'épaisseur ; plis modélisés : {bends}",
+    "sheet.convert_thin_hint": "Ce corps est déjà de la tôlerie, de {thickness} mm d'épaisseur : Reconnaître la tôlerie garde ses propres côtés."
+  },
+  "he": {
+    "cmd.sheet_recognize": "זיהוי פח",
+    "cmd.sheet_measure_body": "מדידת גוף פח",
+    "help.sheet.recognize": "מעניק התנהגות של פח לגוף שהוא כבר פח, כמו חלק מיובא או חלק חלול בעובי אחד: הכיפופים והגלילים שלו נמצאים מתוך הפאות שלו. מתאים לפריסה ולעריכה של חלק שנבנה במקום אחר.",
+    "RECOGNIZE SHEET METAL": "זיהוי פח",
+    "Surface Face": "פאת המשטח",
+    "New Rule": "כלל חדש",
+    "none: the rule above": "ריק: הכלל שלמעלה",
+    "sheet.recognize_measured": "עובי {thickness} מ״מ; כיפופים ממודלים: {bends}",
+    "sheet.convert_thin_hint": "הגוף הזה כבר פח, בעובי {thickness} מ״מ: 'זיהוי פח' שומר על הצדדים שלו."
+  },
+  "ja": {
+    "cmd.sheet_recognize": "板金として認識",
+    "cmd.sheet_measure_body": "板金ボディを測定",
+    "help.sheet.recognize": "インポートした部品や厚さが一定のシェル部品など、すでに板金であるボディに板金の動作を与えます。曲げとロールは面から見つけます。他で作った部品を展開して編集するときに使います。",
+    "RECOGNIZE SHEET METAL": "板金として認識",
+    "Surface Face": "表面の面",
+    "New Rule": "新しいルール",
+    "none: the rule above": "空欄: 上のルール",
+    "sheet.recognize_measured": "厚さ {thickness} mm、モデリングされた曲げ: {bends}",
+    "sheet.convert_thin_hint": "このボディはすでに板金です (厚さ {thickness} mm)。「板金として認識」は両側をそのまま保ちます。"
+  },
+  "vi": {
+    "cmd.sheet_recognize": "Nhận dạng kim loại tấm",
+    "cmd.sheet_measure_body": "Đo thân kim loại tấm",
+    "help.sheet.recognize": "Cho một thân khối vốn đã là kim loại tấm hoạt động như kim loại tấm, chẳng hạn chi tiết nhập vào hoặc chi tiết khoét rỗng có một độ dày: các chỗ uốn và cuốn được tìm từ các mặt của nó. Dùng để trải phẳng và chỉnh sửa chi tiết làm ở nơi khác.",
+    "RECOGNIZE SHEET METAL": "NHẬN DẠNG KIM LOẠI TẤM",
+    "Surface Face": "Mặt bề mặt",
+    "New Rule": "Quy tắc mới",
+    "none: the rule above": "để trống: quy tắc ở trên",
+    "sheet.recognize_measured": "dày {thickness} mm; các chỗ uốn đã dựng: {bends}",
+    "sheet.convert_thin_hint": "Thân khối này vốn đã là kim loại tấm, dày {thickness} mm: Nhận dạng kim loại tấm giữ nguyên các mặt của nó."
+  },
+  "zh": {
+    "cmd.sheet_recognize": "识别钣金",
+    "cmd.sheet_measure_body": "测量钣金实体",
+    "help.sheet.recognize": "让本身已是钣金的实体（如导入件或厚度均匀的抽壳件）具有钣金行为：从其面中找出折弯和卷圆。用于展开和编辑在别处制作的零件。",
+    "RECOGNIZE SHEET METAL": "识别钣金",
+    "Surface Face": "表面所在的面",
+    "New Rule": "新规则",
+    "none: the rule above": "留空：使用上面的规则",
+    "sheet.recognize_measured": "厚 {thickness} mm；建模的折弯：{bends}",
+    "sheet.convert_thin_hint": "此实体已是钣金，厚 {thickness} mm：“识别钣金”会保留它本身的两侧。"
+  }
+}

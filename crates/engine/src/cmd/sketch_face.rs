@@ -126,13 +126,12 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             let inverse = mat_inverse(&frame).ok_or_else(|| bad(cmd, "invalid selected face frame"))?;
             let local_point = apply_point(&inverse, point);
             let tolerance = (body.body.size() * 1e-4).max(1e-5);
-            // A flat face of a sheet metal body attaches to its panel (or a panel's rim): the
-            // exact plane comes from the panel's flat region and fold, and the sketch keeps the
-            // face's name to follow it.
-            let on_sheet = || match state.sheets.iter().find(|sheet| sheet.body == body.name) {
-                Some(sheet) => sheet.panel_face_at(local_point, tolerance * 10.0),
-                None => state.surface_sheets.iter().find(|sheet| sheet.body == body.name)?.panel_face_at(&body.body, local_point, tolerance * 10.0),
-            };
+            // A flat face of a flat-model sheet metal body attaches to its panel (or a panel's
+            // rim): the exact plane comes from the panel's flat region and fold, and the sketch
+            // keeps the face's name to follow it. A sheet made from surfaces attaches as every
+            // body does, by the model's name for the face, in the frame the sheet gives it (see
+            // `ModelBody::sketch_frame`).
+            let on_sheet = || state.sheets.iter().find(|sheet| sheet.body == body.name)?.panel_face_at(local_point, tolerance * 10.0);
             if !fixed && let Some((face, plane)) = on_sheet() {
                 if chosen.is_some() || sheet_face.is_some() {
                     return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
@@ -176,7 +175,13 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 let relative = mat_mul(&author_inverse, &frame);
                 let normal = apply_vector(&relative, normal).normalized().ok_or_else(|| bad(cmd, "invalid planar face normal"))?;
                 let centroid = apply_point(&relative, face.centroid);
-                let picked = Plane::from_normal(normal * centroid.dot(normal), normal).ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
+                // The frame the body gives the face (a sheet's panel: its flat pattern's), else one
+                // through the face.
+                let picked = match body.sketch_frame(face.index).filter(|_| !fixed) {
+                    Some(own) => Plane::new(apply_point(&relative, own.origin), apply_vector(&relative, own.x), apply_vector(&relative, own.y)),
+                    None => Plane::from_normal(normal * centroid.dot(normal), normal),
+                }
+                .ok_or_else(|| bad(cmd, "invalid selected planar face"))?;
                 chosen = Some((body, face.index, path.clone(), picked));
             }
         }

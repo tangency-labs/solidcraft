@@ -16,8 +16,8 @@ use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    ConvertParams, FlangeParams, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, PerforateParams, RuleFeatureError,
-    RuleReply, RulesParams, RulesResult, UnfoldParams,
+    ConvertParams, FlangeParams, FoldParams, HemParams, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams, PerforateParams,
+    RecognizeParams, RuleFeatureError, RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -28,6 +28,8 @@ const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
 const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
 const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
+const RECOGNIZE_CONTRACT: TypedContract<RecognizeParams> = TypedContract::new();
+const MEASURE_BODY_CONTRACT: TypedContract<MeasureBodyParams> = TypedContract::new();
 
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
@@ -80,7 +82,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "line: sketch + curve (a sketch line on the sheet's base face; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
          angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
-         fixed?: [x,y,z] on the side that stays (default: the larger side); flip? (fold the other way); body?",
+         stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on that side \
+         (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
     ),
     CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold))
         .at("SHEET METAL", "MODIFY")
@@ -100,18 +103,39 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONVERT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "body; mode?: convert (default) | thicken; rule?; bends?: [[x,y,z] on sharp edges]. \
-             convert (#6748): no face is fixed; every face of a solid, or of one side of a shell or a plate, becomes the sheet, \
-             a cylinder or cone a roll at its own radius; every sharp edge between two of its faces is cut open but the `bends`; \
-             a ring of bends is refused; the body becomes the folded sheet, and sheet.flat_pattern shows its flat; \
-             skip?: [faces left out, as points or names]; direction?: inside (default) | outside (the side of a solid's \
-             faces its material lies on; a shell or a plate keeps its own). \
-             thicken: the sheet is the faces you pick: face: [x,y,z] on a face, or its name from model.faces; faces?: [more \
-             faces]; every face a bend joins to a picked face joins the sheet too, and a bend modelled with its radius is picked \
-             on its roll; a cylinder or cone is a roll at its own radius; edges between two faces of the sheet that are no \
-             bends are cut open with the rule's gap, and its other edges stay its edges; a shell or a plate keeps its \
-             thickness, a solid takes the rule's, inside or outside its faces as `direction` says; the faces' holes become \
-             cut-outs",
+            "body (a solid, a surface body, or a shell or a plate); rule?; bends?: [[x,y,z] on sharp edges]. \
+             (#6748) surfaces become the rule's sheet, its thickness, radius and reliefs whatever the body's: every face of \
+             a solid or a surface body, or of one side of a shell or a plate, but skip?: [faces left out, as points or names]; \
+             or, with face?: [x,y,z] on a face or its name from model.faces, and faces?: [more faces], those faces and every \
+             face a bend joins to them. No face is fixed. A cylinder or cone is a roll at its own radius, and a bend modelled \
+             with its radius is a bend (pick it on its roll); every sharp edge between two faces of the sheet is cut open with \
+             the rule's gap but the `bends`; a ring of bends is refused; the faces' holes become cut-outs; \
+             direction?: inside (default) | outside (the side of the faces the material lies on; a shell or a plate keeps its \
+             own). The body becomes the folded sheet, and sheet.flat_pattern shows its flat",
+        ),
+    CommandSpec::new("sheet.recognize", "Recognize Sheet Metal", crate::checked!("sheet.recognize", recognize))
+        .at("SHEET METAL", "CREATE")
+        .icon("convert_sheet")
+        .contract(&RECOGNIZE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "body (sheet metal already: a shell, a plate, an imported part, of one even thickness); face?: [x,y,z] on a face, or its \
+             name from model.faces, whose side is the sheet's surface (default: the body's largest face's side); skip?: [faces left \
+             out]; bends?: [[x,y,z] on sharp edges]; rule? | new_rule?: name (a new rule of the body's own thickness and the radius \
+             most of its modelled bends have, the rest the active rule's). (#6748) The body becomes the rule's sheet with no picks: \
+             a cylinder modelled between two planes is a bend, other cylinders and cones are rolls, every other sharp edge is cut \
+             open with the rule's gap but the `bends`; a body of walls of two thicknesses is refused, naming them (Convert takes \
+             its surfaces). sheet.measure_body reads what Recognize reads",
+        ),
+    CommandSpec::new("sheet.measure_body", "Measure Sheet Metal Body", crate::checked!("sheet.measure_body", measure_body))
+        .contract(&MEASURE_BODY_CONTRACT)
+        .output(output_schema_for::<SheetBodyMeasure>)
+        .icon("measure")
+        .noundo()
+        .params(
+            "body; face? (as sheet.recognize) → thickness_mm (the body's own), bend_radii_mm (the inside radius of each bend \
+             modelled with its radius) and surface (a point on a face of the side that is the sheet's surface); a body of no one \
+             even thickness is refused, naming its thicknesses",
         ),
     CommandSpec::new("sheet.manage_rules", "Sheet Metal Rules", crate::checked!("sheet.manage_rules", rules))
         .contract(&MANAGE_RULES_CONTRACT).output(output_schema_for::<ManageRulesResult>).at("SHEET METAL", "MODIFY").icon("sheet_rules").params(
@@ -471,6 +495,11 @@ pub(crate) fn fold_position(t: &str) -> Option<String> {
     Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "centerline" | "start" | "end" | "mould" | "mold"))
 }
 
+/// A fold's `stays` (in any case), lower-cased: left or right.
+pub(crate) fn fold_stays(t: &str) -> Option<String> {
+    Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "left" | "right"))
+}
+
 /// A fold's `points`: the fold line's two ends. The error follows the key's name.
 pub(crate) fn fold_points(v: &Value) -> std::result::Result<(Vec3, Vec3), &'static str> {
     let pts = v.as_array().filter(|a| a.len() == 2).ok_or("must be two points [x, y, z]")?;
@@ -565,23 +594,48 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
         None => None,
     };
-    let body = str_(p, "body").map(str::to_string);
-    let r = add_feature(
-        s,
-        p,
-        FeatureKind::SheetFold {
-            sketch: sketch.map(SketchId),
-            curve,
-            a: Position(a),
-            b: Position(b),
-            angle,
-            radius,
-            position,
-            flip: bool_(p, "flip").unwrap_or(false),
-            fixed: fixed.map(Position),
-            body: body.map(BodyName),
+    let stays = match str_(p, "stays") {
+        Some(t) => match fold_stays(t).as_deref() {
+            Some("left") => Some(solidcraft_doc::FoldSide::Left),
+            Some(_) => Some(solidcraft_doc::FoldSide::Right),
+            None => return Err(bad(cmd, "`stays` must be left or right")),
         },
-    )?;
+        None => None,
+    };
+    let body = str_(p, "body").map(str::to_string);
+    let mut kind = FeatureKind::SheetFold {
+        sketch: sketch.map(SketchId),
+        curve,
+        a: Position(a),
+        b: Position(b),
+        angle,
+        radius,
+        position,
+        flip: bool_(p, "flip").unwrap_or(false),
+        fixed: fixed.map(Position),
+        stays,
+        body: body.map(BodyName),
+    };
+    // Which side stays is decided once, here, on the sheet as it is now: by `fixed`, else as the
+    // sheet joins on either side. The fold keeps it, so no later edit decides it again. A fold
+    // this cannot decide is left to fail as it is evaluated. It is decided on the fold as it
+    // will be evaluated: in the active component's frame, bare lengths in the design's unit.
+    if stays.is_none() {
+        let mut authored = kind.clone();
+        super::component::to_active_frame(s, &mut authored);
+        if s.doc.units.trim() != "mm" {
+            let doc = s.doc.clone();
+            for (_, e, k) in authored.inputs_mut() {
+                *e = doc.with_design_unit(e, k).into();
+            }
+        }
+        if let Ok(Some(side)) = s.doc.fold_side_at(&s.model.state(), &authored)
+            && let FeatureKind::SheetFold { stays, .. } = &mut kind
+        {
+            *stays = Some(side);
+        }
+    }
+    let r = add_feature(s, p, kind)?;
     // A recompute keeps a stored fold whose fixed point no longer touches the sheet (with a
     // warning); a new fold refuses one, since it picks no side (#263).
     if let Some(f) = fixed {
@@ -635,89 +689,151 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => Vec::new(),
         Some(_) => points(p, "bends", cmd)?,
     };
-    // A face given with no mode is the face to thicken from, as Convert took it before it read
-    // the body's own faces.
-    let thicken = match str_(p, "mode").map(str::to_ascii_lowercase).as_deref() {
-        None => p.get("face").is_some_and(|f| !f.is_null()),
-        Some("convert") => false,
-        Some("thicken") => true,
-        Some(_) => return Err(bad(cmd, "`mode` must be convert or thicken")),
-    };
-    // The sheet's values are its rule's (a shell's or a plate's thickness is its own).
+    // The sheet's values are its rule's, whatever the body's.
     if let Some(key) = RULE_ONLY.iter().find(|k| p.get(**k).is_some()) {
         return Err(bad(cmd, format!("`{key}` is not a sheet.convert parameter: the sheet metal rule sets it. Pass a rule's name as `rule`")));
     }
-    if !thicken {
-        return convert_surfaces(s, p, body, bends);
+    // The faces picked, `face` then `faces`: the sheet is those, and every face a bend joins to
+    // them. With none picked, it is every face of the body but the skipped ones.
+    let picks: Vec<&Value> =
+        p.get("face").filter(|f| !f.is_null()).into_iter().chain(p.get("faces").and_then(Value::as_array).into_iter().flatten()).collect();
+    if !picks.is_empty() && p.get("skip").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`skip` leaves faces out of the whole body: with faces picked, the sheet is only those, so leave out `skip`"));
     }
-    if p.get("skip").is_some() {
-        return Err(bad(cmd, "`skip` is for Convert: Thicken takes only the faces you pick, as `face` and `faces`"));
-    }
-    // The faces picked: `face`, then `faces`.
     let mut picked = Vec::new();
-    for f in p.get("face").into_iter().chain(p.get("faces").and_then(Value::as_array).into_iter().flatten()) {
+    for f in picks {
         picked.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
-    }
-    let Some((face, faces)) = picked.split_first() else {
-        return Err(bad(
-            cmd,
-            "Thicken starts from the faces you pick: `face` must be a point [x, y, z] on a face or its name from model.faces, and `faces` lists more",
-        ));
-    };
-    let direction = material_side(p, cmd)?;
-    let rule = rule_param(s, p, cmd)?;
-    add_feature(
-        s,
-        p,
-        FeatureKind::SheetConvert {
-            body: BodyName(body),
-            face: *face,
-            faces: faces.to_vec(),
-            rule,
-            bends: bends.into_iter().map(Position).collect(),
-            direction,
-        },
-    )
-}
-
-/// `direction`: the side of a solid's faces its material lies on, inside (saved as nothing) or
-/// outside.
-fn material_side(p: &Value, cmd: &str) -> Result<String> {
-    let direction = str_(p, "direction").map(str::to_ascii_lowercase).unwrap_or_default();
-    match direction.as_str() {
-        "" | "inside" => Ok(String::new()),
-        "outside" => Ok(direction),
-        _ => Err(bad(cmd, "`direction` must be inside or outside")),
-    }
-}
-
-/// `sheet.convert` (#6748): no face is fixed; every face converts but the skipped ones, and the
-/// sharp edges are cut open but the bends.
-fn convert_surfaces(s: &mut Session, p: &Value, body: String, bends: Vec<Vec3>) -> Result<Value> {
-    let cmd = "sheet.convert";
-    if p.get("face").is_some() {
-        return Err(bad(
-            cmd,
-            "Convert fixes no face: leave out `face` (pass the faces to leave out as `skip`), or pass `mode: thicken` to thicken from it",
-        ));
     }
     let mut skip = Vec::new();
     for f in p.get("skip").and_then(Value::as_array).into_iter().flatten() {
         skip.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
     }
-    let direction = material_side(p, cmd)?;
+    let direction = material_side_of(p, cmd)?;
     let rule = rule_param(s, p, cmd)?;
-    add_feature(
-        s,
-        p,
-        FeatureKind::SheetSurfaceConvert {
-            body: BodyName(body),
-            rule,
-            bends: bends.into_iter().map(Position).collect(),
-            skip,
-            direction: if direction == "inside" { String::new() } else { direction },
+    let (body, bends): (BodyName, Vec<Position>) = (BodyName(body), bends.into_iter().map(Position).collect());
+    let kind = match picked.split_first() {
+        Some((face, faces)) => FeatureKind::SheetConvert { body, face: *face, faces: faces.to_vec(), rule, bends, direction },
+        None => FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, direction },
+    };
+    add_feature(s, p, kind)
+}
+
+/// A conversion's `direction` (in any case), lower-cased: the side of the faces the material
+/// lies on.
+pub(crate) fn material_side(t: &str) -> Option<String> {
+    Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "inside" | "outside"))
+}
+
+/// `direction`: the side of the faces of a solid or a surface body its material lies on, inside
+/// (saved as nothing) or outside.
+fn material_side_of(p: &Value, cmd: &str) -> Result<String> {
+    match p.get("direction").filter(|v| !v.is_null()) {
+        None => Ok(String::new()),
+        Some(v) => match v.as_str().and_then(material_side).as_deref() {
+            Some("outside") => Ok("outside".into()),
+            Some(_) => Ok(String::new()),
+            None => Err(bad(cmd, "`direction` must be inside or outside")),
         },
-    )
+    }
+}
+
+/// `sheet.recognize` (#6748): a body that is sheet metal already becomes the rule's sheet: the
+/// rule named, the active one, or with `new_rule`, one made from the body.
+fn recognize(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.recognize";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    if s.model.state().body(&body).is_none() {
+        return Err(bad(cmd, format!("no body `{body}`")));
+    }
+    let bends = match p.get("bends") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => points(p, "bends", cmd)?,
+    };
+    // The sheet's values are its rule's, whatever the body's.
+    if let Some(key) = RULE_ONLY.iter().find(|k| p.get(**k).is_some()) {
+        return Err(bad(
+            cmd,
+            format!(
+                "`{key}` is not a sheet.recognize parameter: the sheet metal rule sets it. Pass a rule's name as `rule`, or make one from \
+                 the body with `new_rule`"
+            ),
+        ));
+    }
+    let face = match p.get("face").filter(|f| !f.is_null()) {
+        Some(f) => Some(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?)),
+        None => None,
+    };
+    let mut skip = Vec::new();
+    for f in p.get("skip").and_then(Value::as_array).into_iter().flatten() {
+        skip.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
+    }
+    let rule = match p.get("new_rule").filter(|v| !v.is_null()) {
+        Some(_) if p.get("rule").is_some_and(|r| !r.is_null()) => return Err(bad(cmd, "pass `rule` or `new_rule`, not both")),
+        Some(v) => {
+            let name = sheet_rule_name(v).map_err(|why| bad(cmd, why))?.to_string();
+            Some(rule_from_body(s, cmd, &name, &body, face, &skip)?)
+        }
+        None => rule_param(s, p, cmd)?,
+    };
+    let bends = bends.into_iter().map(Position).collect();
+    add_feature(s, p, FeatureKind::SheetRecognize { body: BodyName(body), face, skip, bends, rule })
+}
+
+/// Body `body` measured as sheet metal, as Recognize reads it (see `measure_sheet_body`): the
+/// side of the face at `face`, or its larger side, less the faces at `skip`.
+fn measure(s: &Session, cmd: &str, body: &str, face: Option<Vec3>, skip: &[Vec3]) -> Result<solidcraft_doc::SheetMeasure> {
+    let state = s.model.state();
+    let mb = state.body(body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
+    solidcraft_doc::measure_sheet_body(mb, face, skip, &solidcraft_doc::IDENTITY).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The rule `name` made from body `body` for Recognize (#6748), added to the design's rules: the
+/// body's own thickness, and the inside radius most of its modelled bends have (of two as many,
+/// the smaller; the active rule's where none is modelled), each read to 1e-9 mm as the body's
+/// thickness is. Its K-factor, reliefs and gaps are the active rule's: a folded body shows none of
+/// them. A name taken already is refused.
+fn rule_from_body(s: &mut Session, cmd: &str, name: &str, body: &str, face: Option<FacePick>, skip: &[FacePick]) -> Result<String> {
+    if s.doc.sheet.rules.iter().any(|r| r.name == name) || name == SheetRule::steel().name {
+        return Err(bad(cmd, format!("there is a sheet metal rule `{name}` already: pass it as `rule`, or name the new one otherwise")));
+    }
+    let skip: Vec<Vec3> = skip.iter().map(|f| f.0).collect();
+    let m = measure(s, cmd, body, face.map(|f| f.0), &skip)?;
+    let mut radii: Vec<f64> = m.radii.iter().map(|r| (r * 1e9).round() / 1e9).collect();
+    radii.sort_by(f64::total_cmp);
+    let smaller = |x: &[f64], y: &[f64]| match (x.first(), y.first()) {
+        (Some(a), Some(b)) => b.total_cmp(a),
+        _ => std::cmp::Ordering::Equal,
+    };
+    let common = radii.chunk_by(|a, b| a == b).max_by(|x, y| x.len().cmp(&y.len()).then_with(|| smaller(x, y))).and_then(|c| c.first().copied());
+    let mut rule = SheetRule { name: name.to_string(), ..s.doc.sheet_rule(None) };
+    rule.thickness = format!("{} mm", m.thickness);
+    if let Some(r) = common {
+        rule.bend_radius = format!("{r} mm");
+    }
+    let doc = s.doc_mut();
+    if doc.sheet.rules.len() >= 1000 {
+        return Err(EngineError::Other("too many rules".into()));
+    }
+    doc.sheet.rules.push(rule);
+    Ok(name.to_string())
+}
+
+/// `sheet.measure_body` (#6748): a body measured as sheet metal, as Recognize reads it.
+fn measure_body(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.measure_body";
+    let body = str_(p, "body").ok_or_else(|| bad(cmd, "`body` is required"))?.to_string();
+    let face = match p.get("face").filter(|f| !f.is_null()) {
+        Some(f) => Some(super::face::face_ref(s, f, Some(&body), cmd)?),
+        None => None,
+    };
+    let m = measure(s, cmd, &body, face, &[])?;
+    let reply = SheetBodyMeasure {
+        thickness_mm: m.thickness,
+        bend_radii_mm: m.radii,
+        surface: [m.surface.x, m.surface.y, m.surface.z],
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 pub(crate) fn sheet_rule_name(v: &Value) -> std::result::Result<&str, &'static str> {

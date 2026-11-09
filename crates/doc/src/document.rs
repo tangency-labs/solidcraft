@@ -676,6 +676,27 @@ impl AlignFrame {
     }
 }
 
+/// The side of a fold's line that stays put: left or right of the line as drawn (from its first
+/// point to its second, or along its sketch line), seen from the sheet's surface (the oriented
+/// sheet's outward side). A fold decides it once, when it is made, and keeps it: every rebuild
+/// folds the other side, wherever the line has moved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FoldSide {
+    Left,
+    Right,
+}
+
+impl FoldSide {
+    /// The other side.
+    pub fn other(self) -> FoldSide {
+        match self {
+            FoldSide::Left => FoldSide::Right,
+            FoldSide::Right => FoldSide::Left,
+        }
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1427,9 +1448,17 @@ pub enum FeatureKind {
         position: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         flip: bool,
-        /// A point on the side that stays put (default: the larger side).
+        /// The point the side that stays was picked by, kept as it was given: the fold made
+        /// with it stores that side in `stays` (and a design saved before `stays` gets it when
+        /// opened), so the point no longer decides; a point off the sheet is still said.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fixed: Option<Position>,
+        /// The side of the line that stays put (see [`FoldSide`]), decided once when the fold is
+        /// made: by `fixed`, else the side with more of the sheet joined to it (on a panel bent
+        /// from another, the side toward that bend). Every rebuild keeps it. None only until a
+        /// design saved before it was kept is opened.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stays: Option<FoldSide>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
@@ -1496,6 +1525,25 @@ pub enum FeatureKind {
         /// or a plate keeps its own.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         direction: String,
+    },
+    /// Recognize sheet metal (#6748): a body that is sheet metal already (a shell, a plate, an
+    /// imported part) becomes the rule's sheet. Its surface is the side of the face at `face`, or
+    /// of the body's largest face, less the faces at `skip`; a cylinder modelled between two
+    /// planes is a bend, other cylinders and cones are rolls, and the sharp edges are cut open but
+    /// the ones at `bends`. A body of walls of more than one thickness is refused.
+    SheetRecognize {
+        body: BodyName,
+        /// A face whose side is the sheet's surface.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<FacePick>,
+        /// The faces left out of the sheet.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        skip: Vec<FacePick>,
+        /// Points on the sharp edges that become bends.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bends: Vec<Position>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rule: Option<String>,
     },
     /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
     Boss {
@@ -2655,6 +2703,7 @@ impl FeatureKind {
                 | FeatureKind::SheetUnfold { .. }
                 | FeatureKind::SheetConvert { .. }
                 | FeatureKind::SheetSurfaceConvert { .. }
+                | FeatureKind::SheetRecognize { .. }
         )
     }
 
@@ -2714,6 +2763,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { refold: false, .. } => "UnfoldFeature",
             FeatureKind::SheetUnfold { .. } => "RefoldFeature",
             FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetalFeature",
+            FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetalFeature",
             FeatureKind::Coil { .. } => "CoilFeature",
             FeatureKind::Rib { web: false, .. } => "RibFeature",
             FeatureKind::Rib { .. } => "WebFeature",
@@ -2794,6 +2844,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { .. } => "sheet_unfold",
             FeatureKind::SheetConvert { .. } => "sheet_convert",
             FeatureKind::SheetSurfaceConvert { .. } => "sheet_surface_convert",
+            FeatureKind::SheetRecognize { .. } => "sheet_recognize",
             FeatureKind::Boss { .. } => "boss",
             FeatureKind::Lip { .. } => "lip",
             FeatureKind::SnapFit { .. } => "snap_fit",
@@ -2964,6 +3015,7 @@ impl FeatureKind {
             FeatureKind::SheetUnfold { refold: false, .. } => "Unfold",
             FeatureKind::SheetUnfold { .. } => "Refold",
             FeatureKind::SheetConvert { .. } | FeatureKind::SheetSurfaceConvert { .. } => "ConvertToSheetMetal",
+            FeatureKind::SheetRecognize { .. } => "RecognizeSheetMetal",
             FeatureKind::Coil { .. } => "Coil",
             FeatureKind::Rib { web: false, .. } => "Rib",
             FeatureKind::Rib { .. } => "Web",

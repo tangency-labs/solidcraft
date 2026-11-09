@@ -57,8 +57,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "body: name → per face: index, name (what face.delete, sheet.convert `face`, solid.shell … take in place of a point), exact, area, centroid (not always on the face), \
          plane_normal, point (a point on the face that picks it), cylinder? ({origin, axis, radius} of a cylindrical face), \
-         sheet_face? (a folded sheet's face: `sheet:<body>:<panel>:<side>`, panel base or F<feature>.<panel>.<rim> (the feature and the edge it was made on), side top | bottom | rim.<edge> | bend.inner | bend.outer; \
-         taken wherever a face name is, and it holds while sizes change and flanges come and go)",
+         sheet_face? (a flat-model sheet's face: `sheet:<body>:<panel>:<side>`, side top | bottom | rim.<edge> | bend.inner | bend.outer; \
+         taken wherever a face name is; a sheet made from surfaces has none: its faces' names are the model's, after what made each)",
     ),
     CommandSpec::new("model.threads", "List Threads", crate::checked!("model.threads", model_threads))
         .icon("inspect")

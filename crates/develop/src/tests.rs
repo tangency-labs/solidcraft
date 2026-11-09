@@ -107,7 +107,7 @@ fn a_rigid_motion_maps_every_kind_of_segment_exactly() {
 #[test]
 fn an_l_bracket_lays_out_with_its_bend_deduction() {
     let sheet = bracket(bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let ba = FRAC_PI_2 * (R + K * T);
     let Some(Some(flange)) = dev.placements.get(1) else { panic!("the flange is placed: {dev:?}") };
     let Some(region) = sheet.panels.get(1).map(|p| flange.region(&p.region)) else { panic!() };
@@ -140,8 +140,8 @@ fn an_l_bracket_lays_out_with_its_bend_deduction() {
 #[test]
 fn any_panel_can_be_the_root() {
     let sheet = bracket(bend(1.2, Datum::Sharp, (10.0, 90.0)));
-    let from_base = develop(&sheet, 0).unwrap_or_default();
-    let from_flange = develop(&sheet, 1).unwrap_or_default();
+    let from_base = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
+    let from_flange = develop(&sheet, &[(1, Rigid2::IDENTITY)]).unwrap_or_default();
     let (Some(Some(flange)), Some(Some(base))) = (from_base.placements.get(1), from_flange.placements.first()) else { panic!() };
     assert!(same_motion(base, &flange.inverse()));
 }
@@ -153,13 +153,13 @@ fn a_hem_is_anchored_at_its_tangent_lines() {
     let mut hem = bend(PI, Datum::Tangent, (0.0, 100.0));
     hem.radius = 0.01;
     let sheet = bracket(hem.clone());
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let ba = PI * (0.01 + K * T);
     let Some(Some(flange)) = dev.placements.get(1) else { panic!() };
     let Some(region) = sheet.panels.get(1).map(|p| flange.region(&p.region)) else { panic!() };
     assert!((bounds(&region).max.y + ba).abs() < 1e-9, "{:?}", bounds(&region));
     hem.datum = Datum::Sharp;
-    assert!(matches!(develop(&bracket(hem), 0), Err(DevelopError::Joint(0, _))));
+    assert!(matches!(develop(&bracket(hem), &[(0, Rigid2::IDENTITY)]), Err(DevelopError::Joint(0, _))));
 }
 
 /// A torn end: the zone's edge on the flange side ends where the flange's panel does, so the
@@ -168,7 +168,7 @@ fn a_hem_is_anchored_at_its_tangent_lines() {
 fn a_torn_end_slants_the_zone() {
     let mut b = bend(FRAC_PI_2, Datum::Sharp, (5.0, 95.0));
     b.ends.far = (0.0, 95.0);
-    let dev = develop(&bracket(b), 0).unwrap_or_default();
+    let dev = develop(&bracket(b), &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let ba = FRAC_PI_2 * (R + K * T);
     let [zone] = dev.zones.as_slice() else { panic!() };
     assert!((zone.region.area() - ba * (90.0 + 95.0) / 2.0).abs() < 1e-9, "{}", zone.region.area());
@@ -181,7 +181,7 @@ fn a_relieved_end_stops_the_base_at_its_tangent_line() {
     let base_band = |relief: (Relief, Relief)| {
         let mut b = bend(FRAC_PI_2, Datum::Sharp, (5.0, 95.0));
         b.relief = relief;
-        let dev = develop(&bracket(b), 0).unwrap_or_default();
+        let dev = develop(&bracket(b), &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
         let bands: Vec<Aabb2> = dev.trims.iter().filter(|t| t.panel == 0).map(|t| bounds(&t.region)).collect();
         let [band] = bands.as_slice() else { panic!("one trim of the base: {:?}", dev.trims) };
         (band.min.x, band.max.x)
@@ -209,7 +209,7 @@ fn a_ring_of_bends_is_reported_not_forced() {
         corners: Vec::new(),
         cuts: Vec::new(),
     };
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     assert!(dev.placements.iter().all(Option::is_some));
     let [miss] = dev.loops.as_slice() else { panic!("one loop: {:?}", dev.loops) };
     // Laid out from wall 0 both ways round, walls 1 and 2 go one way and wall 3 the other, so
@@ -218,7 +218,7 @@ fn a_ring_of_bends_is_reported_not_forced() {
     let step = 40.0 + FRAC_PI_2 * (R + K * T) - 8.0;
     assert!(miss.joint == 2 && (miss.distance - 4.0 * step).abs() < 1e-9 && miss.angle < 1e-12, "{miss:?}");
     let ring_free = Sheet { joints: sheet.joints.iter().take(3).cloned().collect(), ..sheet.clone() };
-    assert!(develop(&ring_free, 0).unwrap_or_default().loops.is_empty());
+    assert!(develop(&ring_free, &[(0, Rigid2::IDENTITY)]).unwrap_or_default().loops.is_empty());
 }
 
 /// A rip is not followed: its panels are laid out as pieces of their own, the second beside the
@@ -229,7 +229,7 @@ fn a_rip_lays_its_panels_out_apart_and_bad_joints_are_refused() {
     if let Some(j) = sheet.joints.get_mut(0) {
         j.kind = rip_along(j, 100.0, FRAC_PI_2, Lap::Cut(0.5, 0.25));
     }
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     assert_eq!(dev.pieces, vec![vec![0], vec![1]]);
     assert!(dev.zones.is_empty() && dev.loops.is_empty());
     // The flange lies ten thicknesses to the right of the base, level with its lowest edge.
@@ -244,11 +244,11 @@ fn a_rip_lays_its_panels_out_apart_and_bad_joints_are_refused() {
     assert!((a.y - 0.5).abs() < 1e-9 && (b.y - 0.5).abs() < 1e-9 && (a.x - b.x).abs() > 100.0 - 1e-9, "{a:?} {b:?}");
     let Some(Some(base)) = dev.panels.first() else { panic!("the base is laid out") };
     assert!((bounds(&base.region).min.y - 0.5).abs() < 1e-9, "{:?}", bounds(&base.region));
-    assert_eq!(develop(&sheet, 5), Err(DevelopError::NoPanel(5)));
+    assert_eq!(develop(&sheet, &[(5, Rigid2::IDENTITY)]), Err(DevelopError::NoPanel(5)));
     if let Some(j) = sheet.joints.get_mut(0) {
         j.b.dir = Vec2::new(2.0, 0.0);
     }
-    assert!(matches!(develop(&sheet, 0), Err(DevelopError::Joint(0, _))));
+    assert!(matches!(develop(&sheet, &[(0, Rigid2::IDENTITY)]), Err(DevelopError::Joint(0, _))));
 }
 
 /// A roll `length` long along its axis, turning through `angle` (radians) round it.
@@ -286,7 +286,7 @@ fn a_roll_flattens_through_its_neutral_surface() {
             corners: Vec::new(),
             cuts: Vec::new(),
         };
-        let dev = develop(&sheet, 0).unwrap_or_default();
+        let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
         assert!(dev.loops.is_empty() && dev.zones.is_empty() && dev.trims.is_empty() && dev.pieces.len() == 1);
         let Some(Some(wall)) = dev.panels.get(2) else { panic!("the wall is laid out: {dev:?}") };
         let flat = bounds(&wall.region).max.y;
@@ -316,7 +316,7 @@ fn a_cone_flattens_to_a_sector_at_its_neutral_radii() {
         corners: Vec::new(),
         cuts: Vec::new(),
     };
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     let d = K * T / half_angle.tan();
     let arcs: Vec<(f64, f64)> =
@@ -340,11 +340,11 @@ fn a_tube_of_rolls_opens_with_a_rip() {
         corners: Vec::new(),
         cuts: Vec::new(),
     };
-    assert_eq!(develop(&sheet, 0).unwrap_or_default().loops.len(), 1);
+    assert_eq!(develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default().loops.len(), 1);
     if let Some(j) = sheet.joints.get_mut(1) {
         j.kind = rip_along(j, 100.0, 0.0, Lap::Cut(0.0, 0.0));
     }
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     assert!(dev.loops.is_empty() && dev.pieces.len() == 1, "{dev:?}");
     let Some(Some(second)) = dev.panels.get(1) else { panic!() };
     let around = std::f64::consts::TAU * (r - (1.0 - K) * T);
@@ -368,7 +368,7 @@ fn a_hole_in_a_roll_flattens_to_an_exact_ellipse() {
     let mut panel = roll(r, false, 100.0, 60.0 / r);
     panel.region.holes.push(Loop2 { segs: quarters }.reversed());
     let sheet = Sheet { thickness: T, k_factor: K, panels: vec![panel], joints: Vec::new(), corners: Vec::new(), cuts: Vec::new() };
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     let (Some(ellipse), Some(from)) = (flat.region.holes.first(), flat.origins.get(1)) else { panic!("{flat:?}") };
     let k = (r + K * T) / r;
@@ -389,7 +389,7 @@ fn a_bend_on_the_edge_of_a_roll_is_refused() {
     if let Some(p) = sheet.panels.get_mut(1) {
         p.surface = Surface::Cylinder { radius: 50.0, material_inward: false };
     }
-    assert!(matches!(develop(&sheet, 0), Err(DevelopError::Joint(0, _))));
+    assert!(matches!(develop(&sheet, &[(0, Rigid2::IDENTITY)]), Err(DevelopError::Joint(0, _))));
 }
 
 fn spline(degree: [usize; 2], knots: [Vec<f64>; 2], points: &[Vec3], weights: &[f64]) -> Surface {
@@ -417,7 +417,7 @@ fn flat_length(sheet: &Sheet, a: Vec2, b: Vec2) -> f64 {
     if let Some(p) = probe.panels.first_mut() {
         p.region = Region2 { outer: Loop2 { segs: vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: a }] }, holes: Vec::new() };
     }
-    let dev = develop(&probe, 0).unwrap_or_default();
+    let dev = develop(&probe, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     // Every piece the line came back as: one per knot span it crosses.
     let from = flat.origins.first().cloned().unwrap_or_default();
@@ -440,7 +440,7 @@ fn a_spline_cylinder_flattens_like_a_roll() {
         }
     }
     let sheet = free(spline([1, 2], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]], &points, &weights));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch < 1e-6, "{}", flat.stretch);
     let around = flat_length(&sheet, Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0));
@@ -462,7 +462,7 @@ fn a_bent_strip_flattens_to_its_neutral_curves_length() {
         }
     }
     let sheet = free(spline([1, 3], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]], &points, &[1.0; 8]));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch < 1e-6, "{}", flat.stretch);
     // The curve in (x, z), its normal Su x Sv with Su along +y, and the neutral surface at K x T
@@ -493,7 +493,7 @@ fn a_saddle_flattens_and_reports_its_stretch() {
         }
     }
     let sheet = free(spline([1, 1], [vec![0.0, 0.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]], &points, &[1.0; 4]));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch > 1e-3 && flat.stretch < 0.5, "{}", flat.stretch);
 }
@@ -512,7 +512,7 @@ fn a_dome_flattens_and_reports_its_stretch() {
     }
     let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
     let sheet = free(spline([3, 3], [bezier.clone(), bezier], &points, &[1.0; 16]));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch > 1e-3 && flat.stretch < 0.5, "{}", flat.stretch);
 }
@@ -553,7 +553,7 @@ fn a_strip_bent_along_a_spline_of_several_spans_flattens_to_its_neutral_curves_l
         }
     }
     let sheet = free(spline([1, 3], [vec![0.0, 0.0, 1.0, 1.0], knots.clone()], &points, &[1.0; 12]));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch < 1e-6, "{}", flat.stretch);
     let Ok(space) = solidcraft_geom::spline_space::Space::new(3, knots) else { panic!() };
@@ -600,7 +600,7 @@ fn an_askew_parameterised_roll_flattens_to_its_neutral_curves_length() {
     }
     let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
     let sheet = free(spline([3, 3], [bezier.clone(), bezier], &points, &[1.0; 16]));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch < 1e-6, "{}", flat.stretch);
     // Su x Sv = C' x (C' / 2 + 60 y) = 60 C' x y: in (x, z), C' turned a quarter to the left.
@@ -630,7 +630,7 @@ fn a_roll_over_many_spans_both_ways_flattens_to_its_neutral_curves_length() {
         }
     }
     let sheet = free(spline([3, 3], [uniform(10), uniform(5)], &points, &[1.0; 104]));
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     assert!(flat.stretch < 1e-6, "{}", flat.stretch);
     let Ok(space) = solidcraft_geom::spline_space::Space::new(3, uniform(10)) else { panic!() };
@@ -690,7 +690,7 @@ fn an_l_bracket_folds_square_round_its_bend() {
         let mut b = bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0));
         b.toward_material = toward;
         let sheet = bracket(b);
-        let dev = develop(&sheet, 0).unwrap_or_default();
+        let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
         let side = if toward { 1.0 } else { -1.0 };
         // 30 along the sharp and 20 into the flange, from the `b` anchor.
@@ -742,7 +742,7 @@ fn a_roll_folds_onto_its_cylinder_between_its_neighbours() {
             corners: Vec::new(),
             cuts: Vec::new(),
         };
-        let dev = develop(&sheet, 0).unwrap_or_default();
+        let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
         assert!(folded.loops.is_empty() && folded.bends.iter().all(Option::is_none));
         let (Some(Some(roll)), Some(Some(wall))) = (dev.panels.get(1), dev.panels.get(2)) else { panic!("laid out: {dev:?}") };
@@ -774,7 +774,7 @@ fn a_cones_flat_maps_back_to_its_parameters() {
             corners: Vec::new(),
             cuts: Vec::new(),
         };
-        let dev = develop(&sheet, 0).unwrap_or_default();
+        let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
         let (Ok(map), Some(Some(place))) = (crate::chart::Flatten::of(&surface, &sheet), dev.placements.first()) else { panic!() };
         for q in [Vec2::new(40.0, 0.5), Vec2::new(90.0, 5.5), Vec2::new(65.0, 3.0)] {
@@ -806,7 +806,7 @@ fn a_ring_of_bends_closes_in_space() {
         corners: Vec::new(),
         cuts: Vec::new(),
     };
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
     let [miss] = folded.loops.as_slice() else { panic!("one ring: {:?}", folded.loops) };
     assert!(miss.distance < 1e-9 && miss.angle < 1e-9, "{miss:?}");
@@ -872,7 +872,7 @@ fn a_corner_relief_is_centered_where_the_bends_cross() {
     let center = Vec2::new(96.0 + ba / 2.0, 4.0 - ba / 2.0);
     for (round, area) in [(true, PI * 16.0), (false, 64.0)] {
         let cut = |flip: bool| {
-            let dev = develop(&corner(round, flip), 0).unwrap_or_default();
+            let dev = develop(&corner(round, flip), &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
             let [cut] = dev.cuts.as_slice() else { panic!("one cut: {:?}", dev.cuts) };
             cut.clone()
         };
@@ -892,7 +892,7 @@ fn a_corner_relief_is_centered_where_the_bends_cross() {
 fn a_bend_relief_is_cut_where_the_base_runs_on_past_the_end() {
     let mut b = bend(FRAC_PI_2, Datum::Sharp, (20.0, 80.0));
     b.relief = (Relief::Slot { width: 30.0, depth: 1.0 }, Relief::Slot { width: 2.0, depth: 1.0 });
-    let dev = develop(&bracket(b), 0).unwrap_or_default();
+    let dev = develop(&bracket(b), &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let cuts = reliefs(&dev);
     let [slot] = cuts.as_slice() else { panic!("one relief: {:?}", dev.trims) };
     let sb = bounds(slot);
@@ -918,7 +918,7 @@ fn a_torn_end_follows_its_plane_tight_round_the_bend() {
         b.relief = (Relief::None, Relief::Tear { normal: Vec3::new(-s, 0.0, s), offset: -100.0 * s });
         b.ends = ZoneEnds { near: (0.0, 96.0), far: (0.0, wall_end) };
     }
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
     let (Some(zone), Some(Some(bent))) = (dev.zones.iter().find(|z| z.joint == 0), folded.bends.first()) else {
         panic!("the bend is laid out and folded")
@@ -999,7 +999,7 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
         corners: Vec::new(),
         cuts: Vec::new(),
     };
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     assert!(dev.trims.is_empty(), "{:?}", dev.trims);
     let Some(Some(plate)) = dev.panels.first() else { panic!("the plate is laid out: {dev:?}") };
     let from = plate.origins.first().cloned().unwrap_or_default();
@@ -1059,7 +1059,7 @@ fn a_rip_on_a_roll_is_cut_back_on_the_roll() {
     if let Some(j) = sheet.joints.get_mut(0) {
         j.kind = rip_along(j, 100.0, 0.0, Lap::Cut(2.0, 0.0));
     }
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let neutral = r - (1.0 - K) * T;
     let want = (FRAC_PI_2 - 2.0 / r) * neutral;
     let cut = rip_edges(&dev, 0, 0);
@@ -1075,7 +1075,7 @@ fn a_point_of_the_folded_sheet_maps_back_to_the_flat() {
         let mut b = bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0));
         b.toward_material = toward;
         let sheet = bracket(b);
-        let dev = develop(&sheet, 0).unwrap_or_default();
+        let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
         let (Some(Some(bent)), [zone]) = (folded.bends.first(), dev.zones.as_slice()) else { panic!("one bend") };
         for (u, v) in [(0.2, 0.1), (0.5, 0.5), (0.9, 0.97)] {
@@ -1098,7 +1098,7 @@ fn a_point_of_the_folded_sheet_maps_back_to_the_flat() {
         corners: Vec::new(),
         cuts: Vec::new(),
     };
-    let dev = develop(&sheet, 0).unwrap_or_default();
+    let dev = develop(&sheet, &[(0, Rigid2::IDENTITY)]).unwrap_or_default();
     let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
     for (i, p) in [(0, Vec2::new(30.0, 20.0)), (1, Vec2::new(60.0, 50.0)), (1, Vec2::new(10.0, 80.0))] {
         let back = folded.param(i, p).and_then(|q| folded.flat_point(i, q)).unwrap_or_default();

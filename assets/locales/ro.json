@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Adaugă un reazem pe o față: o platformă rotundă sau dreptunghiulară, plină sau goală, cu înclinare. Folosiți-l ca sprijin sau distanțier într-o carcasă matrițată.",
   "help.plastic.snap_fit": "Adaugă pe o față un cârlig de prindere cu clichet, cu lungimea, grosimea și zăvorul lui. Folosiți-o pentru a prinde piesele între ele fără șuruburi.",
   "help.pointcloud.insert": "Inserați o scanare PLY, XYZ sau PTS ca nor de puncte alături de model. Folosiți-o ca referință la construirea unui model pe baza datelor măsurate.",
-  "help.sheet.convert": "Transformă o placă sau un corp scobit de grosime uniformă într-un corp din tablă, cu îndoiri la muchiile alese. Folosiți-o pentru a face desfășurabilă o piesă existentă.",
+  "help.sheet.convert": "Transformă suprafețele în tablă după regulă: fețele unui corp solid sau ale unui corp suprafață, cu îndoiri la muchiile alese. Folosiți-o pentru a face o piesă din tablă dintr-o formă modelată.",
   "help.sheet.export_bend_table": "Salvează tabelul de îndoire al unui corp din tablă ca CSV sau JSON: unghiuri, raze și poziții ale îndoirilor în desfășurată. Folosiți-o pentru presa de îndoit sau pentru atelier.",
   "help.sheet.export_dxf": "Salvează desfășurata ca DXF, cu contururi, linii de îndoire și note de îndoire opționale. Folosiți-o pentru tăierea cu laser, cu plasmă sau cu jet de apă.",
   "help.sheet.flange": "Adaugă o flanșă: o placă de bază dintr-o schiță, un perete de-a lungul unui contur deschis de schiță sau un perete îndoit pe muchii de tablă. Folosiți-o pentru a construi piese din tablă.",

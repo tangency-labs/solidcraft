@@ -307,6 +307,7 @@ sheet_path
 sheet_unfold
 sheet_convert
 sheet_surface_convert
+sheet_recognize
 boss
   inputs:
     Diameter = boss.diameter (Length)

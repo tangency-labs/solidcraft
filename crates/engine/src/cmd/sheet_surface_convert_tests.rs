@@ -87,7 +87,7 @@ fn a_channel_converts_with_its_modelled_corners_as_bends() {
     let across = 140.0 - 2.0 * deduction(std::f64::consts::FRAC_PI_2, r, t, k);
     let got = size(&c);
     assert!(same_size(got, (across, 60.0), 1e-6), "{got:?} vs {across}");
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Section", "face": [65, 0, 10], "bends": [corners[0].0, corners[1].0]}));
+    run(&mut s, "sheet.convert", json!({"body": "Section", "face": [65, 0, 10], "bends": [corners[0].0, corners[1].0]}));
     assert!(same_size(flat_size(&mut s), got, 1e-6), "{:?} vs {got:?}", flat_size(&mut s));
     // Folded, its rolls are the bends today's Convert makes of them.
     let (rolled, _) = folded(&c);
@@ -134,7 +134,7 @@ fn a_shell_is_cut_open_until_its_edges_are_picked_as_bends() {
         Ok(_) => panic!("a bend onto a skipped face converts"),
     }
     let got = size(&c);
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
+    run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
     assert!(same_size(flat_size(&mut s), got, 1e-6), "{:?} vs {got:?}", flat_size(&mut s));
 }
 
@@ -202,7 +202,7 @@ fn a_ring_of_bends_is_refused_and_opens_where_a_corner_is_left_unpicked() {
     assert!((v - want).abs() < 1e-5 * want, "{v} vs {want}");
     let got = size(&c);
     // Last, since it makes the body a sheet.
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tube", "face": [50, 0, 20], "bends": &corners[..3]}));
+    run(&mut s, "sheet.convert", json!({"body": "Tube", "face": [50, 0, 20], "bends": &corners[..3]}));
     assert!(same_size(flat_size(&mut s), got, 1e-6), "{:?} vs {got:?}", flat_size(&mut s));
     // Its bends end where its walls do, so today's Convert folds it to the same metal.
     let today = s.model.state().bodies.iter().find(|b| b.name == "Tube").map_or(f64::NAN, |b| fine_volume(&b.body));
@@ -239,10 +239,10 @@ fn a_conversion_shows_in_the_flat_pattern() {
 }
 
 /// Through the commands: a ring of bends is refused, naming its edge, and with one corner left
-/// unpicked the flat lists the other three as bends. A face is refused by Convert, and skipped
-/// faces by Thicken.
+/// unpicked the flat lists the other three as bends. Skipped faces are refused beside picked
+/// ones (the sheet is then only the picked faces), and a material side is inside or outside.
 #[test]
-fn a_ring_through_the_commands_is_refused_and_each_mode_takes_its_own_parameters() {
+fn a_ring_through_the_commands_is_refused_and_picked_faces_skip_none() {
     let (t, k, r) = (2.0, 0.44, 2.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
@@ -254,12 +254,11 @@ fn a_ring_through_the_commands_is_refused_and_each_mode_takes_its_own_parameters
         Ok(v) => panic!("a ring of four bends converts: {v}"),
     }
     for bad in [
-        json!({"body": "Tube", "mode": "convert", "face": [50, 0, 20]}),
-        json!({"body": "Tube", "mode": "thicken", "face": [50, 0, 20], "skip": [[50, 0, 20]]}),
-        json!({"body": "Tube", "mode": "thicken"}),
-        json!({"body": "Tube", "mode": "thicken", "face": [50, 0, 20], "direction": "both"}),
+        json!({"body": "Tube", "face": [50, 0, 20], "skip": [[50, 0, 20]]}),
+        json!({"body": "Tube", "faces": [[50, 0, 20]], "skip": [[50, 60, 20]]}),
+        json!({"body": "Tube", "face": [50, 0, 20], "direction": "both"}),
         json!({"body": "Tube", "direction": "both"}),
-        json!({"body": "Tube", "mode": "fold"}),
+        json!({"body": "Tube", "direction": 5}),
     ] {
         assert!(s.execute("sheet.convert", &bad).is_err(), "{bad}");
     }
@@ -283,7 +282,7 @@ fn todays_tray(shape: &str, corner: [f64; 3], size: [f64; 3]) -> f64 {
     run(&mut s, "solid.box", json!({"length": l, "width": w, "height": h, "corner": corner, "body_name": "Tray"}));
     run(&mut s, "solid.shell", json!({"faces": [[x + l / 2.0, y + w / 2.0, z + h]], "thickness": 2.0}));
     let floor = [[x + l / 2.0, y, z], [x + l, y + w / 2.0, z], [x + l / 2.0, y + w, z], [x, y + w / 2.0, z]];
-    let out = run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Tray", "face": [x + l / 2.0, y + w / 2.0, z], "bends": floor}));
+    let out = run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [x + l / 2.0, y + w / 2.0, z], "bends": floor}));
     assert!(out["warning"].is_null(), "{shape}: {out}");
     s.model.state().bodies.iter().find(|b| b.name == "Tray").map_or(f64::NAN, |b| fine_volume(&b.body))
 }
@@ -463,15 +462,15 @@ fn icosahedron() -> (solidcraft_doc::ModelBody, Vec<Vec3>, Vec<[usize; 3]>) {
 
 /// An icosahedron converted whole, its faces bent along a spanning tree of them and every other
 /// edge cut open. A triangle's sides slant across its bends' tangent lines, and its bends still
-/// run their whole edges, to the corners: where two of them meet on a face a round relief is cut,
-/// ten times, and the sheet folds.
+/// run their whole edges, to the corners: wherever two of them meet on a face a round relief is
+/// cut, and the sheet folds.
 #[test]
 fn an_icosahedron_bends_whole_edges_to_its_corners() {
     let (mb, v, faces) = icosahedron();
     let mut seen = vec![false; faces.len()];
     seen[0] = true;
     let mut queue = std::collections::VecDeque::from([0usize]);
-    let mut picks = Vec::new();
+    let (mut picks, mut tree) = (Vec::new(), Vec::new());
     while let Some(f) = queue.pop_front() {
         for (g, other) in faces.iter().enumerate() {
             let shared: Vec<usize> = faces[f].iter().copied().filter(|p| other.contains(p)).collect();
@@ -479,9 +478,24 @@ fn an_icosahedron_bends_whole_edges_to_its_corners() {
                 seen[g] = true;
                 queue.push_back(g);
                 picks.push((v[shared[0]] + v[shared[1]]) * 0.5);
+                tree.push((shared[0], shared[1]));
             }
         }
     }
+    // Two bends meet on a face at each of its corners whose two sides there are both bends of the
+    // tree: every one of those corners is the two bends', each relieved, whichever bend comes
+    // first (a bend's end can be in two of them, one on each of its faces). By hand, round each
+    // of the 12 vertices (numbered as `v`), its five edges in turn, B a bend of this tree:
+    // - 0, 1, 2, 6, 7 and 8: B B B . B, four bends in one run round the gap, 3 faces between two
+    //   of them each: 18;
+    // - 3, 4, 5 and 11: three bends, two of them side by side (. B B . B and the like): 1 each, 4;
+    // - 10: B . . B ., two bends apart: 0; 9: no bend: 0.
+    // That is 22 corners, from the 38 ends of the 19 bends; the 12 middle ends of the six runs of
+    // four are in two corners each. (Paired off one end at a time in the bends' order, as before,
+    // only 10 were.)
+    let bend = |a: usize, b: usize| tree.iter().any(|&(x, y)| (x, y) == (a, b) || (x, y) == (b, a));
+    let corners: usize = faces.iter().map(|f| (0..3).filter(|&i| bend(f[i], f[(i + 1) % 3]) && bend(f[i], f[(i + 2) % 3])).count()).sum();
+    assert_eq!(corners, 22);
     let c = convert_surfaces(
         &mb,
         &fixed(ConvertRule { corner_relief: ReliefShape::Round, ..TEST }),
@@ -492,7 +506,7 @@ fn an_icosahedron_bends_whole_edges_to_its_corners() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     assert!(c.notes.is_empty(), "{:?}", c.notes);
-    assert_eq!((c.sheet.panels.len(), c.development.zones.len(), c.sheet.corners.len()), (20, 19, 10));
+    assert_eq!((c.sheet.panels.len(), c.development.zones.len(), c.sheet.corners.len()), (20, 19, corners));
     let (v, _) = folded(&c);
     assert!(v.is_finite() && v > 0.0, "{v}");
 }
@@ -644,6 +658,41 @@ fn a_pipe_rolls_out_from_its_surface_alone() {
     }
 }
 
+/// A surface body converts as it is (#6748): an open U drawn as one surface, 8 wide with walls 40
+/// and 30 high and 100 long, its two floor edges bent under a rule 2 thick, R 1, K 0.5. Its walls
+/// face each other 8 apart, as a shell's or a plate's two sides would; a surface body is neither,
+/// so its faces stay the sheet's surface, the rule's thickness on the side `direction` says.
+/// With the faces the sheet's outside, the flat is the outside lengths less a deduction of
+/// 2(R + T)·tan 45° − (π/2)(R + T/2) = 6 − π per bend: 78 − 12 + 2π; with them its inside, less
+/// 2R − π per bend: 78 − 4 + 2π. With K 0.5 the folded volume is T × 100 × the flat's length.
+/// Which side is the faces' outside follows the surface's normals, so the two directions give the
+/// two sheets between them.
+#[test]
+fn a_surface_body_converts_with_the_rules_thickness_on_either_side() {
+    let (t, r) = (2.0, 1.0);
+    let lengths = [66.0 + 2.0 * PI, 74.0 + 2.0 * PI];
+    let mut got = Vec::new();
+    for direction in ["inside", "outside"] {
+        let mut s = Session::default();
+        rule(&mut s, "Test", t, 0.5, r, 0.5);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+        let made = run(&mut s, "sketch.line", json!({"points": [[0, 40], [0, 0], [8, 0], [8, 30]]}));
+        let curves = made["created"]["curves"].clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "surface.extrude", json!({"sketch": "Profile", "curves": curves, "distance": "100 mm", "body_name": "Channel"}));
+        assert!(s.model.state().body("Channel").is_some_and(|b| b.is_surface()), "a surface body");
+        run(&mut s, "sheet.convert", json!({"body": "Channel", "bends": [[0, 0, 50], [8, 0, 50]], "direction": direction}));
+        let (a, b) = flat_size(&mut s);
+        let length = if (b - 100.0).abs() < 1e-6 { a } else { b };
+        got.push((length, body_volume(&s, "Channel")));
+    }
+    got.sort_by(|x, y| x.0.total_cmp(&y.0));
+    for ((length, v), want) in got.iter().zip(lengths) {
+        assert!((length - want).abs() < 1e-6, "{got:?} vs {lengths:?}");
+        assert!((v - t * 100.0 * want).abs() < 1e-6 * t * 100.0 * want, "{got:?} vs {lengths:?}");
+    }
+}
+
 /// The folded body's exact volume.
 fn body_volume(s: &Session, name: &str) -> f64 {
     s.model.state().bodies.iter().find(|b| b.name == name).map_or(f64::NAN, |b| fine_volume(&b.body))
@@ -654,7 +703,7 @@ fn thickened_plate(t: f64) -> Session {
     let mut s = Session::default();
     rule(&mut s, "Test", t, TEST.k_factor, TEST.bend_radius, TEST.gap);
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": t, "body_name": "Plate"}));
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, t]}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, t]}));
     s
 }
 
@@ -848,7 +897,7 @@ fn a_flange_meets_a_bend_thicken_made_at_a_corner() {
     rule(&mut flanged, "Test", t, TEST.k_factor, TEST.bend_radius, TEST.gap);
     run(&mut flanged, "solid.box", json!({"length": 100, "width": 60, "height": t, "body_name": "Plate"}));
     run(&mut flanged, "solid.box", json!({"corner": [0, 60.0 - t, 0], "length": 100, "width": t, "height": 20, "operation": "join"}));
-    run(&mut flanged, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, 0], "bends": [[50, 60, 0]]}));
+    run(&mut flanged, "sheet.convert", json!({"body": "Plate", "face": [50, 30, 0], "bends": [[50, 60, 0]]}));
     run(&mut flanged, "sheet.flange", json!({"edges": [[100, 30, 0]], "height": 20, "flip": true}));
     let mut boxed = Session::default();
     rule(&mut boxed, "Test", t, TEST.k_factor, TEST.bend_radius, TEST.gap);

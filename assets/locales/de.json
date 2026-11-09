@@ -1633,7 +1633,7 @@
   "help.plastic.rest": "Fügt eine Auflage auf einer Fläche hinzu: ein rundes oder rechteckiges Polster, voll oder hohl, mit Formschräge. Als Stütze oder Abstandshalter in einem Spritzgussgehäuse.",
   "help.plastic.snap_fit": "Fügt eine Rastverbindung auf einer Fläche hinzu: einen Schnapphaken mit Länge, Dicke und Rastnase. Damit klipsen Sie Teile ohne Schrauben zusammen.",
   "help.pointcloud.insert": "Fügt einen PLY-, XYZ- oder PTS-Scan als Punktwolke neben dem Modell ein. Verwenden Sie ihn als Referenz beim Modellieren anhand von Messdaten.",
-  "help.sheet.convert": "Macht aus einer Platte oder einem ausgehöhlten Körper gleichmäßiger Dicke einen Blechkörper, mit Biegungen an den gewählten Kanten. Damit wird ein vorhandenes Teil abwickelbar.",
+  "help.sheet.convert": "Macht aus Flächen Blech nach der Regel: die Flächen eines Volumenkörpers oder eines Flächenkörpers, mit Biegungen an den gewählten Kanten. Damit wird aus einer modellierten Form ein Blechteil.",
   "help.sheet.export_bend_table": "Speichert die Biegungstabelle eines Blechkörpers als CSV oder JSON: Winkel, Radien und Lage der Biegungen im Flachmuster. Für die Abkantpresse oder die Werkstatt.",
   "help.sheet.export_dxf": "Speichert das Flachmuster als DXF, mit Konturen, Biegelinien und optionalen Biegevermerken. Für Laser-, Plasma- oder Wasserstrahlschneiden.",
   "help.sheet.flange": "Fügt einen Flansch hinzu: eine Grundplatte aus einer Skizze, eine Wand entlang einer offenen Skizzenkontur oder eine gebogene Wand an Blechkanten. Damit bauen Sie Blechteile auf.",

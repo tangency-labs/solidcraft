@@ -1828,7 +1828,7 @@
   "help.plastic.rest": "Thêm vấu đỡ nhựa lên một mặt: đệm tròn hoặc chữ nhật, đặc hoặc rỗng, có góc thoát khuôn. Dùng làm chân đỡ hoặc trụ kê trong vỏ ép khuôn.",
   "help.plastic.snap_fit": "Thêm móc khớp gài bấm lên một mặt, với chiều dài, độ dày và chốt hãm. Dùng để gài các chi tiết vào nhau mà không cần vít.",
   "help.pointcloud.insert": "Chèn bản quét PLY, XYZ hoặc PTS dưới dạng đám mây điểm bên cạnh mô hình. Dùng làm tham chiếu khi dựng mô hình từ dữ liệu đo.",
-  "help.sheet.convert": "Biến một tấm hoặc thân khối khoét rỗng có độ dày đều thành thân kim loại tấm, với các chỗ uốn tại cạnh bạn chọn. Dùng để làm cho chi tiết có sẵn trải phẳng được.",
+  "help.sheet.convert": "Biến các bề mặt thành kim loại tấm theo quy tắc: các mặt của một khối đặc hoặc một thân mặt cong, với các chỗ uốn tại cạnh bạn chọn. Dùng để làm chi tiết kim loại tấm từ một hình đã dựng.",
   "help.sheet.export_bend_table": "Lưu bảng chấn uốn của thân kim loại tấm dạng CSV hoặc JSON: góc, bán kính và vị trí chấn trên bản trải phẳng. Dùng cho máy chấn hoặc xưởng gia công.",
   "help.sheet.export_dxf": "Lưu bản trải phẳng dạng DXF, gồm đường viền, đường chấn và ghi chú chấn tùy chọn. Dùng cho cắt laser, plasma hoặc tia nước.",
   "help.sheet.flange": "Thêm chấn gập mép tôn: tấm đế từ phác thảo, thành dọc theo đường viền phác thảo hở, hoặc thành uốn trên cạnh tấm. Dùng để dựng các chi tiết kim loại tấm.",

@@ -1382,7 +1382,8 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // New bend edges for a conversion: the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. })
-    | (FeatureKind::SheetSurfaceConvert { bends: a, body, .. }, FeatureKind::SheetSurfaceConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
+    | (FeatureKind::SheetSurfaceConvert { bends: a, body, .. }, FeatureKind::SheetSurfaceConvert { bends: b, body: was, .. })
+    | (FeatureKind::SheetRecognize { bends: a, body, .. }, FeatureKind::SheetRecognize { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)
     {
         nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
@@ -1882,6 +1883,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.unfold"
                 | "sheet.refold"
                 | "sheet.convert"
+                | "sheet.recognize"
                 | "plastic.boss"
                 | "plastic.lip"
                 | "plastic.snap_fit"
@@ -1927,6 +1929,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
     {
         parameters.entry("names").or_insert_with(|| json!(names));
+    }
+    // A fold keeps the side that stays, decided when it was made, through an edit that names
+    // neither a side nor a fixed point: the side is never decided again.
+    if let FeatureKind::SheetFold { stays: Some(side), .. } = &old.kind
+        && cid == "sheet.fold"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("stays").is_none_or(Value::is_null)
+        && parameters.get("fixed").is_none_or(Value::is_null)
+    {
+        parameters.insert("stays".into(), json!(side));
     }
     if !old.participants.is_empty()
         && let Some(parameters) = params.as_object_mut()

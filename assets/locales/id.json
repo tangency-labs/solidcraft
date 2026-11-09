@@ -1547,7 +1547,7 @@
   "help.plastic.rest": "Menambahkan rest pada sebuah muka: bantalan bulat atau persegi panjang, padat atau berongga, dengan draft. Gunakan sebagai penopang atau standoff pada casing cetakan.",
   "help.plastic.snap_fit": "Menambahkan kait snap-fit pada sebuah muka, dengan panjang, ketebalan, dan pengaitnya. Gunakan untuk mengait part satu sama lain tanpa sekrup.",
   "help.pointcloud.insert": "Sisipkan hasil pindai PLY, XYZ, atau PTS sebagai awan titik di samping model. Gunakan sebagai referensi saat membangun model dari data hasil pengukuran.",
-  "help.sheet.convert": "Mengubah pelat atau bodi yang di-shell dengan ketebalan merata menjadi bodi pelat logam, dengan tekukan pada tepi yang Anda pilih. Gunakan untuk membuat part yang sudah ada dapat dibuka lipatannya.",
+  "help.sheet.convert": "Mengubah permukaan menjadi pelat logam sesuai aturan: muka bodi solid atau bodi permukaan, dengan tekukan pada tepi yang Anda pilih. Gunakan untuk membuat part pelat logam dari bentuk yang dimodelkan.",
   "help.sheet.export_bend_table": "Menyimpan tabel tekukan bodi pelat logam sebagai CSV atau JSON: sudut, radius, dan posisi tekukan pada bentuk datar. Gunakan untuk mesin tekuk (press brake) atau bengkel.",
   "help.sheet.export_dxf": "Menyimpan pola datar sebagai DXF, dengan kontur, garis tekukan, dan catatan tekukan opsional. Gunakan untuk pemotongan laser, plasma, atau waterjet.",
   "help.sheet.flange": "Menambahkan flens: pelat dasar dari sketsa, dinding sepanjang kontur sketsa terbuka, atau dinding tertekuk pada tepi pelat. Gunakan untuk membangun part pelat logam.",

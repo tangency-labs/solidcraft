@@ -14,7 +14,7 @@ use std::sync::{Arc, OnceLock};
 
 use solidcore_record::{Region2, Vec3};
 use solidcraft_kernel::Body;
-use solidcraft_kernel::history::{BodyHistory, Change, FaceOrigin, FaceProv, History};
+use solidcraft_kernel::history::{BodyHistory, Change, EdgeProv, FaceOrigin, FaceProv, History};
 
 use crate::SolvedSketch;
 
@@ -39,6 +39,26 @@ pub(crate) enum Operand {
     /// A body the feature made on the way to its result (a cut body before it falls into lumps),
     /// named as a whole first so pieces of one face in different results are told apart.
     Stage(Box<Stage>),
+    /// The faces a sheet's build made (see [`sheet_lineage`]), by face: each named by its role
+    /// (see [`GrownFace`]), after the faces of `body` (a body of the model before the feature, by
+    /// name) it was grown from where it was, as a shell's inner wall is after the face it offsets.
+    /// Empty where not known.
+    Grown { body: Option<String>, faces: Vec<Option<GrownFace>> },
+}
+
+/// A face a feature grew (see [`Operand::Grown`]): `F<feature>:<role>`, and `:<name>` after it,
+/// the name of the faces `on` of the operand's body (their common name, where they are pieces of
+/// one), when it was grown from them. `feature` is the feature whose definition makes the face
+/// (`None`: the feature being named); `ordinal` its place, from 1, in the order the faces made for
+/// one part start along its definition (a hole's wall's pieces along its sketch curve), which
+/// numbers the faces of one name nothing around them tells apart (#7990, change 4): a rank,
+/// never a measure.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GrownFace {
+    pub role: String,
+    pub feature: Option<u64>,
+    pub on: Vec<usize>,
+    pub ordinal: Option<usize>,
 }
 
 /// An intermediate body of a feature, with its lineage and, once worked out, its names.
@@ -91,6 +111,8 @@ impl Lineage {
             .iter()
             .map(|op| match op.as_ref() {
                 Operand::Made(roles) => Arc::new(Operand::CopiedTool { roles: roles.clone(), feature, instance }),
+                // A sheet's faces are named by what made them in the sheet: no copy has them.
+                Operand::Grown { faces, .. } => Arc::new(Operand::Made(vec![Vec::new(); faces.len()])),
                 _ => op.clone(),
             })
             .collect();
@@ -533,6 +555,238 @@ pub(crate) fn built_history(moved: &Body, built: &Body) -> Option<History> {
         Some(history)
     } else {
         (history.operands == 0).then_some(history)
+    }
+}
+
+/// A sheet's body before its build (see [`sheet_lineage`]): its name in the model before the
+/// feature, its face count, what each of its faces was made for (`SurfaceSheet::parts`, as the
+/// sheet last built it), and how the feature made it so far (`None`: as the model had it).
+pub(crate) struct SheetBefore<'a> {
+    pub name: &'a str,
+    pub faces: usize,
+    pub parts: &'a [Option<crate::sheet_surface_convert::SheetFace>],
+    pub made: Option<&'a Lineage>,
+}
+
+impl<'a> SheetBefore<'a> {
+    /// `mb`, a body of the model being evaluated, before its sheet is built again: as the feature
+    /// found it, or as it made it so far. `None` where the feature changed it in a way not known.
+    pub(crate) fn of(mb: &'a crate::ModelBody, parts: &'a [Option<crate::sheet_surface_convert::SheetFace>]) -> Option<SheetBefore<'a>> {
+        let made = match &mb.made {
+            Made::Before => None,
+            Made::Traced(l) => Some(l.as_ref()),
+            Made::Unknown => return None,
+        };
+        Some(SheetBefore { name: &mb.name, faces: mb.body.face_count(), parts, made })
+    }
+
+    /// `mb`, a body of the model before the feature, as the feature found it.
+    pub(crate) fn found(mb: &'a crate::ModelBody, parts: &'a [Option<crate::sheet_surface_convert::SheetFace>]) -> SheetBefore<'a> {
+        SheetBefore { name: &mb.name, faces: mb.body.face_count(), parts, made: None }
+    }
+}
+
+/// The lineage of `body`, a sheet's body as `sheet` built it (see `SurfaceSheet::build`), which
+/// reports what each face was made for (`SurfaceSheet::parts`, by face): sheets report history and
+/// the model names their faces as every feature's (#7990). `before` is the sheet's body before
+/// the build (see [`SheetBefore`]), none for a sheet's first build. A face made for what faces of
+/// `before` were made for (the same part, at the same place among its faces) is those faces (a
+/// piece of them where several faces are); one made for anything else is a face the feature grew,
+/// named by its role (see [`sheet_role`]), after the faces of `before` it stands on where it does.
+/// A hole's wall is always named by its role, its pieces numbered in the order they start along
+/// its sketch curve. A body Convert turns into a sheet (none of its faces made by a sheet) keeps
+/// the faces its panels were (see `PanelMade::Converted`). A face nothing says what was made for
+/// is named from geometry (it has no origin). `None` where what `before`'s faces were made for is
+/// not known (another feature changed the body since): the body is then named from geometry.
+pub(crate) fn sheet_lineage(before: Option<SheetBefore<'_>>, sheet: &crate::SurfaceSheet, body: &Body) -> Option<Lineage> {
+    use crate::sheet_surface_convert::{PanelMade, SheetFace, SheetPart};
+    let parts = &sheet.parts;
+    if parts.len() != body.face_count() {
+        return None;
+    }
+    // The body before, as an operand: as the feature found it, or as it made it so far.
+    let (first, prev): (Option<Lineage>, &[Option<SheetFace>]) = match before {
+        None => (None, Default::default()),
+        Some(b) => {
+            if b.parts.len() != b.faces {
+                return None;
+            }
+            let lineage = match b.made {
+                Some(l) => l.clone(),
+                None => {
+                    let faces =
+                        (0..b.faces).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
+                    Lineage {
+                        history: History { operands: 1, faces, edges: Vec::new() },
+                        operands: vec![Arc::new(Operand::Body(b.name.to_string()))],
+                    }
+                }
+            };
+            (Some(lineage), b.parts)
+        }
+    };
+    // The faces of the body before made for each part, at each place, and for each part at all.
+    let mut had: std::collections::HashMap<&SheetFace, Vec<usize>> = std::collections::HashMap::new();
+    let mut had_part: std::collections::HashMap<&SheetPart, Vec<usize>> = std::collections::HashMap::new();
+    for (j, x) in prev.iter().enumerate() {
+        if let Some(x) = x {
+            had.entry(x).or_default().push(j);
+            had_part.entry(&x.part).or_default().push(j);
+        }
+    }
+    // A body no sheet built: Convert turning it into one.
+    let converting = first.is_some() && had.is_empty();
+    let on = |part: &SheetPart| had_part.get(part).cloned().unwrap_or_default();
+    let mut shared: std::collections::HashMap<&SheetFace, usize> = std::collections::HashMap::new();
+    for x in parts.iter().flatten() {
+        *shared.entry(x).or_default() += 1;
+    }
+    let grown_at = usize::from(first.is_some());
+    let mut faces = Vec::with_capacity(parts.len());
+    let mut grown: Vec<Option<GrownFace>> = vec![None; parts.len()];
+    for (i, x) in parts.iter().enumerate() {
+        let Some(x) = x else {
+            faces.push(FaceProv { origins: Vec::new(), change: Change::Generated });
+            continue;
+        };
+        let source = match (&x.part, converting) {
+            (SheetPart::Cap { panel, surface: true }, true) => match sheet.recipes.iter().find(|(k, _)| k == panel) {
+                Some((_, PanelMade::Converted { face, .. })) => vec![*face],
+                _ => Vec::new(),
+            },
+            (SheetPart::Hole { .. }, _) => Vec::new(),
+            _ => had.get(x).cloned().unwrap_or_default(),
+        };
+        if !source.is_empty() {
+            let change = match (source.len(), shared.get(x).copied().unwrap_or(1)) {
+                (1, 1) => Change::Modified,
+                (1, _) => Change::Split,
+                _ => Change::Merged,
+            };
+            faces.push(FaceProv { origins: source.iter().map(|&face| FaceOrigin::Face { operand: 0, face }).collect(), change });
+            continue;
+        }
+        match sheet_role(&x.part, x.place, sheet, &on, converting) {
+            Some(g) => {
+                faces.push(FaceProv { origins: vec![FaceOrigin::Face { operand: grown_at, face: i }], change: Change::Generated });
+                if let Some(slot) = grown.get_mut(i) {
+                    *slot = Some(g);
+                }
+            }
+            None => faces.push(FaceProv { origins: Vec::new(), change: Change::Generated }),
+        }
+    }
+    // The body's edges, where its faces meet: named from its faces.
+    let edges = History::identity(body).edges.into_iter().map(|e| EdgeProv { faces: e.faces, origins: Vec::new() }).collect();
+    let mut history = History { operands: grown_at + 1, faces, edges };
+    let Some(first) = first else {
+        return Some(Lineage { history, operands: vec![Arc::new(Operand::Grown { body: None, faces: grown })] });
+    };
+    // A face grown from faces of the body as the feature found it is named after their names;
+    // where the feature made that body so far, after the faces of the model before them.
+    let mut body_name: Option<String> = None;
+    for g in grown.iter_mut().flatten() {
+        let mut found = Vec::with_capacity(g.on.len());
+        for &j in &g.on {
+            let Some([FaceOrigin::Face { operand, face }]) = first.history.faces.get(j).map(|f| f.origins.as_slice()) else { continue };
+            let Some(Operand::Body(name)) = first.operands.get(*operand).map(|o| o.as_ref()) else { continue };
+            if body_name.get_or_insert_with(|| name.clone()) == name {
+                found.push(*face);
+            }
+        }
+        g.on = found;
+    }
+    history.substitute(0, &first.history).ok()?;
+    let mut operands = first.operands.clone();
+    operands.push(Arc::new(Operand::Grown { body: body_name, faces: grown }));
+    (history.operands == operands.len()).then_some(Lineage { history, operands })
+}
+
+/// The role of a face a sheet's build made for `part` (see `SheetPart`), the `place`th of the faces
+/// made for it, as the model names it: by the feature that made it, after the faces of the body
+/// before it was made from (`on`: the faces of the body before made for a part; #7990,
+/// docs/design/sheet-metal-naming.md). A panel's faces, made with the panel, are named after what
+/// made the panel (see `PanelMade`): `top` on the sheet's surface and `bottom` (a base flange's),
+/// with the sketch line a contour or path flange's panel was drawn on (`top:<line>`), or after the
+/// faces of the rim a bend's panel stands on, or the face a converted panel was (`converting`: that
+/// face of the body before, else the panel's surface cap); its rims by what made each edge
+/// (`side:<curve>`, `far`, `end0`, `past1`); a bend's faces (`bend.inner`, `bend.outer`,
+/// `bend.end0`, `bend.end1`) and its tabs' (`tab.top`, `tab.bottom`) after the panel it makes; a
+/// fold's after the face its line lies on. A face the build adds to a panel the body before already
+/// had (a rim a later corner closing runs past its bend's end, a tab a later cut frees) is the
+/// feature being built's, after the face of that panel it was made from: a rim past a bend's end
+/// after that bend end, a tab's cap after its bend's face on the same side, else the panel's
+/// surface cap. A corner relief's walls are `relief` of the feature being built, which cut them; a
+/// hole's wall `side:<curve>` of the cut that made it. None for a panel nothing says what made.
+fn sheet_role(
+    part: &crate::sheet_surface_convert::SheetPart,
+    place: Option<usize>,
+    sheet: &crate::SurfaceSheet,
+    on: &dyn Fn(&crate::sheet_surface_convert::SheetPart) -> Vec<usize>,
+    converting: bool,
+) -> Option<GrownFace> {
+    use crate::sheet_surface_convert::{PanelMade, RimEdge, SheetPart};
+    let recipe = |key: &str| sheet.recipes.iter().find(|(k, _)| k == key).map(|(_, m)| m);
+    // Whether the bend that makes panel `key` turns toward its material.
+    let toward = |key: &str| {
+        let i = sheet.sheet.panels.iter().position(|p| p.name == key)?;
+        sheet.sheet.joints.iter().find_map(|j| match &j.kind {
+            solidcraft_develop::JointKind::Bend(b) if j.b.panel == i => Some(b.toward_material),
+            _ => None,
+        })
+    };
+    // The panel a fold's piece was parted from, through every fold (its caps are that panel's).
+    let parted = |key: &str| {
+        let mut at = key.to_string();
+        for _ in 0..sheet.recipes.len() {
+            match recipe(at.as_str()) {
+                Some(PanelMade::Fold { from, .. }) => at = from.clone(),
+                _ => break,
+            }
+        }
+        at
+    };
+    // `role` on panel `key`: named after what made the panel, or, added to a panel the body before
+    // had, the feature being built's, after that panel's face `from` (else its surface cap).
+    let made = |key: &str, role: String, from: Option<SheetPart>| -> Option<GrownFace> {
+        let cap = SheetPart::Cap { panel: key.to_string(), surface: true };
+        if !on(&cap).is_empty() {
+            let faces = from.map(|f| on(&f)).filter(|f| !f.is_empty()).unwrap_or_else(|| on(&cap));
+            return Some(GrownFace { role, feature: None, on: faces, ordinal: place });
+        }
+        let m = recipe(key)?;
+        let (role, faces) = match m {
+            PanelMade::Sketch { .. } => (role, Vec::new()),
+            PanelMade::Contour { curve, .. } | PanelMade::Chain { curve, .. } => (format!("{role}:{curve}"), Vec::new()),
+            PanelMade::Bend { on: rim, .. } => (role, rim.as_ref().map(on).unwrap_or_default()),
+            PanelMade::Fold { from, .. } => (role, on(&SheetPart::Cap { panel: parted(from.as_str()), surface: true })),
+            PanelMade::Converted { face, .. } if converting => (role, vec![*face]),
+            PanelMade::Converted { .. } => (role, on(&SheetPart::Cap { panel: key.to_string(), surface: true })),
+        };
+        Some(GrownFace { role, feature: Some(m.feature()), on: faces, ordinal: place })
+    };
+    let side = |surface: bool| if surface { "top" } else { "bottom" };
+    match part {
+        SheetPart::Cap { panel, surface } => made(panel.as_str(), side(*surface).into(), None),
+        SheetPart::Rim { panel, edge } => {
+            // A rim past a bend's end is made from that bend end.
+            let from = match edge {
+                RimEdge::Past { at_origin } => Some(SheetPart::BendEnd { panel: panel.clone(), at_origin: *at_origin }),
+                _ => None,
+            };
+            made(panel.as_str(), edge.role(), from)
+        }
+        SheetPart::Bend { panel, outer } => made(panel.as_str(), format!("bend.{}", if *outer { "outer" } else { "inner" }), None),
+        SheetPart::BendEnd { panel, at_origin } => made(panel.as_str(), format!("bend.end{}", if *at_origin { 0 } else { 1 }), None),
+        SheetPart::Tab { panel, surface } => {
+            // A tab's cap is made from its bend's face on the same side (see `FaceNamer::part`).
+            let from = toward(panel.as_str()).map(|t| SheetPart::Bend { panel: panel.clone(), outer: *surface == t });
+            made(panel.as_str(), format!("tab.{}", side(*surface)), from)
+        }
+        SheetPart::Relief { .. } => Some(GrownFace { role: "relief".into(), feature: None, on: Vec::new(), ordinal: place }),
+        SheetPart::Hole { feature, curve } => {
+            Some(GrownFace { role: format!("side:{curve}"), feature: Some(*feature), on: Vec::new(), ordinal: place })
+        }
     }
 }
 

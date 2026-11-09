@@ -1827,7 +1827,7 @@
   "help.plastic.rest": "Afegeix un recolzament en una cara: una pastilla rodona o rectangular, massissa o buida, amb angle de sortida. Feu-lo servir com a suport o separador en una carcassa motllurada.",
   "help.plastic.snap_fit": "Afegeix un encaix a pressió en una cara, amb la seva longitud, gruix i retenció. Feu-ho servir per unir peces sense cargols.",
   "help.pointcloud.insert": "Insereix un escaneig PLY, XYZ o PTS com a núvol de punts al costat del model. Feu-lo servir com a referència quan construïu un model a partir de dades mesurades.",
-  "help.sheet.convert": "Converteix una placa o un cos buidat de gruix uniforme en un cos de full metàl·lic, amb plegats a les arestes que trieu. Feu-ho servir per fer desplegable una peça existent.",
+  "help.sheet.convert": "Converteix superfícies en full metàl·lic segons la regla: les cares d'un sòlid o d'un cos de superfície, amb plegats a les arestes que trieu. Feu-ho servir per fer una peça de full metàl·lic a partir d'una forma modelada.",
   "help.sheet.export_bend_table": "Desa la taula de plegat d'un cos de full metàl·lic com a CSV o JSON: angles, radis i posicions de plegat al pla. Feu-ho servir per a la plegadora o el taller.",
   "help.sheet.export_dxf": "Desa el desenvolupament pla com a DXF, amb contorns, línies de plegat i notes de plegat opcionals. Feu-ho servir per a tall per làser, plasma o raig d'aigua.",
   "help.sheet.flange": "Afegeix una pestanya: una placa base a partir d'un bocet, una paret al llarg d'un contorn obert de bocet, o una paret plegada a les arestes del full. Feu-ho servir per construir peces de full metàl·lic.",

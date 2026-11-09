@@ -65,6 +65,10 @@ pub struct ModelBody {
     pub(crate) names: crate::naming::NameCell,
     /// How the feature being evaluated made or changed it (read when its names are set up).
     pub(crate) made: crate::lineage::Made,
+    /// The sketch frame each face takes, where what built the body gives one (a sheet's panel's
+    /// face: the flat pattern's, see `SurfaceSheet::frames`), by face (see
+    /// [`ModelBody::sketch_frame`]).
+    pub(crate) sketch_frames: Option<Arc<Vec<Option<Plane>>>>,
     /// The component the body belongs to (set after each feature).
     pub component: u64,
     /// A timeline transfer has converted this body into its evaluated owner's frame.
@@ -108,6 +112,7 @@ impl ModelBody {
             key: 0,
             names: Default::default(),
             made: Default::default(),
+            sketch_frames: None,
             component: 0,
             transferred: false,
             imported: None,
@@ -118,6 +123,18 @@ impl ModelBody {
             surface: Arc::new(OnceLock::new()),
             iso: Default::default(),
         }
+    }
+
+    /// The frame a sketch on flat face `face` is drawn in, where what built the body gives the
+    /// face one (a sheet made from surfaces: its flat pattern's, so a sketch on a panel measures
+    /// as the flat pattern does): the one central hook a body's own frames come in by (#7990).
+    /// None where it gives none, or the frame no longer lies on the face as the body has it (the
+    /// body was moved since): the face's frame is then the model's.
+    pub fn sketch_frame(&self, face: usize) -> Option<Plane> {
+        let frame = *self.sketch_frames.as_ref()?.get(face)?.as_ref()?;
+        let exact = self.body.planar_face(face)?;
+        let tol = 1e-7 * (1.0 + self.body.size());
+        (frame.normal().dot(exact.normal()) >= 1.0 - 1e-9 && (frame.origin - exact.origin).dot(exact.normal()).abs() <= tol).then_some(frame)
     }
 
     /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
@@ -2954,10 +2971,14 @@ fn absorb_sheet_cuts(
     // What isn't a cut is always weighed: material the sheet doesn't show (a join into a bend)
     // is caught there.
     for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts)? {
-        let (mut sk, built, note) = match absorbed {
-            crate::sheet_surface_cuts::Absorbed::Read(sk, built, note) => (*sk, built, note),
+        let (mut sk, built) = match absorbed {
+            crate::sheet_surface_cuts::Absorbed::Read(sk, built) => (*sk, built),
             crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
             crate::sheet_surface_cuts::Absorbed::Refused(_) => {
+                // Its body is no longer as it built it: what it said of the body's faces is gone.
+                if let Some(sk) = after.surface_sheets.get_mut(i) {
+                    sk.parts.clear();
+                }
                 if let Some(sk) = after.surface_sheets.get_mut(i).filter(|sk| sk.altered_by.is_none()) {
                     sk.altered_by = Some(f.name.clone());
                     append_warning(
@@ -2971,15 +2992,18 @@ fn absorb_sheet_cuts(
                 continue;
             }
         };
-        if let Some(note) = note {
-            append_warning(warning, note);
-        }
         // The sheet remembers where the cut's letters went.
         if let Some(flat) = letters.as_ref().and_then(|(plane, regions)| sk.flat_of(plane, regions)) {
             sk.labels.extend(flat);
         }
+        // Its faces named from what the sheet says each was made for, and what it said of the body
+        // the feature found (see `lineage::sheet_lineage`).
+        let lineage = match (before.body(&sk.body), before.surface_sheets.iter().find(|s| s.body == sk.body)) {
+            (Some(mb), Some(old)) => crate::lineage::sheet_lineage(Some(crate::lineage::SheetBefore::found(mb, &old.parts)), &sk, &built),
+            _ => None,
+        };
         if let Some(b) = after.bodies.iter_mut().find(|b| b.name == sk.body) {
-            more::replace_sheet_body(b, built);
+            more::replace_traced_sheet_body(b, built, lineage, &sk.frames);
         }
         if let Some(slot) = after.surface_sheets.get_mut(i) {
             *slot = sk;
@@ -7478,7 +7502,8 @@ fn eval_feature(
         | FeatureKind::SheetPath { .. }
         | FeatureKind::SheetUnfold { .. }
         | FeatureKind::SheetConvert { .. }
-        | FeatureKind::SheetSurfaceConvert { .. } => more::sheet_eval(doc, vals, f, st, warning),
+        | FeatureKind::SheetSurfaceConvert { .. }
+        | FeatureKind::SheetRecognize { .. } => more::sheet_eval(doc, vals, f, st, warning),
         FeatureKind::Boss { .. } | FeatureKind::Lip { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => {
             more::plastic_eval(doc, vals, f, st)
         }

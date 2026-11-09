@@ -101,8 +101,9 @@ fn offset_plane_redefined_on_itself_is_refused() {
     assert!((plane(&s, "Side").origin.y + 7.0).abs() < 1e-9, "{:?}", plane(&s, "Side"));
 }
 
-/// A flat face of a sheet is kept by its sheet face name, as a sketch on it is: the plane follows
-/// the flange when the sheet changes (it stayed where the face was picked).
+/// A flat face of a sheet is kept by its name, as a sketch on it is (the model's name, after what
+/// made it, #7990): the plane follows the flange when the sheet changes (it stayed where the face
+/// was picked).
 #[test]
 fn offset_plane_from_a_sheet_flange_face_follows_the_flange() {
     let mut s = Session::default();
@@ -113,12 +114,13 @@ fn offset_plane_from_a_sheet_flange_face_follows_the_flange() {
     let width = d["param"].as_str().or_else(|| d["name"].as_str()).unwrap_or("d1").to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let base = s.doc.features.last().map_or(0, |f| f.id);
     run(&mut s, "sheet.flange", json!({"edges": [[320, 100, 1]], "height": 30}));
     let flange = s.doc.features.last().map_or(0, |f| f.id);
     // The flange's inner face, picked as model.faces lists it (body and index), 5 mm out along its normal.
-    let name = format!("sheet:Body1:F{flange}.base.l2:top");
+    let name = format!("F{flange}:top:F{base}:side:l2");
     let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
-    let face = faces["faces"].as_array().unwrap().iter().find(|f| f["sheet_face"].as_str() == Some(name.as_str())).unwrap().clone();
+    let face = faces["faces"].as_array().unwrap().iter().find(|f| f["name"].as_str() == Some(name.as_str())).unwrap().clone();
     run(
         &mut s,
         "construct.plane.offset",

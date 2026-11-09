@@ -121,7 +121,6 @@
   {
    "command": "sheet.convert",
    "params": {
-    "mode": "thicken",
     "body": "Plate",
     "face": [
      10.5,

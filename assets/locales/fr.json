@@ -1554,7 +1554,7 @@
   "help.plastic.rest": "Ajoute un appui sur une face : un plot rond ou rectangulaire, plein ou creux, avec dépouille. À utiliser comme support ou entretoise dans un boîtier moulé.",
   "help.plastic.snap_fit": "Ajoute un crochet de clip sur une face, avec sa longueur, son épaisseur et son ergot. À utiliser pour assembler des pièces par encliquetage sans vis.",
   "help.pointcloud.insert": "Insère un scan PLY, XYZ ou PTS sous forme de nuage de points à côté du modèle. Utilisez-le comme référence pour construire un modèle à partir de données mesurées.",
-  "help.sheet.convert": "Transforme une plaque ou un corps évidé d'épaisseur uniforme en corps de tôlerie, avec des plis aux arêtes choisies. À utiliser pour rendre une pièce existante dépliable.",
+  "help.sheet.convert": "Transforme des surfaces en tôlerie selon la règle : les faces d'un solide ou d'un corps surfacique, avec des plis aux arêtes choisies. À utiliser pour faire une pièce de tôlerie à partir d'une forme modélisée.",
   "help.sheet.export_bend_table": "Enregistre la table des plis d'un corps de tôlerie en CSV ou JSON : angles, rayons et positions des plis à plat. À utiliser pour la plieuse ou l'atelier.",
   "help.sheet.export_dxf": "Enregistre la mise à plat en DXF, avec contours, lignes de pli et annotations de pli facultatives. À utiliser pour la découpe laser, plasma ou jet d'eau.",
   "help.sheet.flange": "Ajoute un bord tombé : une plaque de base à partir d'une esquisse, une paroi le long d'un contour d'esquisse ouvert, ou une paroi pliée sur des arêtes de tôle. À utiliser pour construire des pièces de tôlerie.",

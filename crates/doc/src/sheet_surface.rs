@@ -178,7 +178,7 @@ fn sheet_flat(sh: &SheetBody, work: &mut FlatWork) -> Result<Vec<Region2>> {
 /// The surface model's flat: each placed panel less its trims, and the zones; with the development it
 /// was joined from.
 fn surface_flat(model: &Sheet, work: &mut FlatWork) -> Result<(Vec<Region2>, Development)> {
-    let dev = develop(model, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let dev = develop(model, &[]).map_err(|e| DocError::Invalid(e.to_string()))?;
     Ok((join(&dev, work)?, dev))
 }
 
@@ -218,7 +218,7 @@ pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piec
             // Until the kernel's planar booleans take several tools that share an edge (#6748):
             // trims of two bends can share an edge and a corner with the panel, which the
             // planar booleans take apart only one tool at a time, so join them first.
-            let trims = stage(&format!("joining panel {i}'s trims"), material_union(trims, work))?;
+            let trims = stage(&format!("joining panel {i}'s trims"), planar_union(trims, work))?;
             let left = stage(&format!("trimming panel {i}"), boolean_past_holes(&[placed], &trims, BoolOp::Cut, work))?;
             pieces.extend(left.into_iter().map(|r| (Piece::Panel(i), r)));
         }
@@ -248,7 +248,7 @@ fn cut_from(pieces: Vec<(Piece, Region2)>, cuts: &[&Region2], work: &mut FlatWor
     if cuts.is_empty() {
         return Ok(pieces);
     }
-    let cuts = stage("joining what is cut from the flat", material_union(cuts.iter().map(|c| (*c).clone()).collect(), work))?;
+    let cuts = stage("joining what is cut from the flat", planar_union(cuts.iter().map(|c| (*c).clone()).collect(), work))?;
     let mut out = Vec::with_capacity(pieces.len());
     for (piece, region) in pieces {
         out.extend(stage("cutting the flat", boolean_past_holes(&[region], &cuts, BoolOp::Cut, work))?.into_iter().map(|r| (piece, r)));
@@ -291,10 +291,9 @@ fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 
 /// The pieces with each piece of a zone sorted by what still holds it: one that runs along both
 /// its panels' tangent lines bends with the zone; one that runs along only one is a tab of that
-/// panel. A piece that runs along neither is refused, and so is a zone left with nothing that
-/// bends: the cuts part the sheet there.
+/// panel. A piece that runs along neither is refused. A zone left with nothing that bends (cuts
+/// part the sheet there) leaves its panels as pieces of their own, each where the bend held it.
 fn sort_zones(dev: &Development, pieces: Vec<(Piece, Region2)>) -> Result<Vec<(Piece, Region2)>> {
-    let mut bends = vec![false; dev.zones.len()];
     let mut out = Vec::with_capacity(pieces.len());
     for (piece, region) in pieces {
         let Piece::Zone(z) = piece else {
@@ -310,13 +309,7 @@ fn sort_zones(dev: &Development, pieces: Vec<(Piece, Region2)>) -> Result<Vec<(P
                 return Err(DocError::Invalid(format!("a cut leaves a piece of bend {} joined to neither of its panels: not supported yet", z + 1)));
             }
         };
-        if let Some(b) = bends.get_mut(z) {
-            *b |= sorted == Piece::Zone(z);
-        }
         out.push((sorted, region));
-    }
-    if let Some(z) = bends.iter().position(|b| !b) {
-        return Err(DocError::Invalid(format!("a cut takes bend {} apart, cutting the sheet in two there: not supported yet", z + 1)));
     }
     Ok(out)
 }
@@ -348,7 +341,7 @@ pub(crate) fn join_pieces(pieces: &[(Piece, Region2)], work: &mut FlatWork) -> R
         carried.extend(clear);
         bare.push(Region2 { outer: r.outer, holes: near });
     }
-    let joined = stage("joining the sheet's pieces", material_union(bare, work))?;
+    let joined = stage("joining the sheet's pieces", planar_union(bare, work))?;
     stage("joining the sheet's pieces", put_back(joined, carried))
 }
 
@@ -403,7 +396,7 @@ fn loop_clear_of(h: &Loop2, t: &Region2) -> bool {
     })
 }
 
-/// `op` of `a` with `b` ([`material_boolean`]), the holes of `a` clear of every region of `b`
+/// `op` of `a` with `b` ([`planar_boolean`]), the holes of `a` clear of every region of `b`
 /// (see [`loop_clear_of`]) left out of it and put back in the region of the result that holds
 /// them.
 pub(crate) fn boolean_past_holes(a: &[Region2], b: &[Region2], op: BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
@@ -418,9 +411,44 @@ pub(crate) fn boolean_past_holes(a: &[Region2], b: &[Region2], op: BoolOp, work:
         })
         .collect();
     if carried.is_empty() {
-        return material_boolean(a, b, op, work);
+        return planar_boolean(a, b, op, work);
     }
-    put_back(material_boolean(&bare, b, op, work)?, carried)
+    put_back(planar_boolean(&bare, b, op, work)?, carried)
+}
+
+/// How far apart (mm) the planar booleans let a loop's segments end and still close it: the
+/// kernel's own reading of a loop, which moves nothing.
+const CLOSE: f64 = 1e-7;
+
+/// `op` of `a` with `b` by the kernel's planar booleans, as the regions are: every edge of the
+/// result is a piece of an edge of `a` or `b`, however short, and no corner moves. (The flat
+/// model's `material_boolean` first welds each gap of up to 50 nm between a loop's segments,
+/// which moved a corner a hair from a bend's tangent line.) The work is charged to `work`, which
+/// bounds the flat's.
+pub(crate) fn planar_boolean(a: &[Region2], b: &[Region2], op: BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    let edges =
+        |rs: &[Region2]| rs.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).fold(0usize, |n, l| n.saturating_add(l.segs.len()));
+    let n = edges(a).saturating_add(edges(b));
+    work.charge(n.saturating_mul(n).saturating_mul(16))?;
+    Ok(solidcraft_kernel::planar_regions_boolean(a, b, op, CLOSE)?)
+}
+
+/// The union of `regions` ([`planar_boolean`]), in balanced rounds: many pieces side by side do
+/// not each meet a growing union one at a time.
+pub(crate) fn planar_union(regions: Vec<Region2>, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    let mut groups: Vec<Vec<Region2>> = regions.into_iter().map(|r| vec![r]).collect();
+    while groups.len() > 1 {
+        let mut next = Vec::with_capacity(groups.len().div_ceil(2));
+        let mut iter = groups.into_iter();
+        while let Some(a) = iter.next() {
+            match iter.next() {
+                Some(b) => next.push(planar_boolean(&a, &b, BoolOp::Union, work)?),
+                None => next.push(a),
+            }
+        }
+        groups = next;
+    }
+    Ok(groups.pop().unwrap_or_default())
 }
 
 /// A region with its points on the sheet's nanometre grid, as the sheet model rounds its

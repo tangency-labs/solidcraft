@@ -707,6 +707,7 @@ form_case!(fold, "sheet.fold", ["Bend Line Position", "Angle", "Bend Radius"]);
 form_case!(unfold, "sheet.unfold", []);
 form_case!(refold, "sheet.refold", []);
 form_case!(sheet_convert, "sheet.convert", ["Rule"]);
+form_case!(sheet_recognize, "sheet.recognize", ["Rule", "New Rule"]);
 form_case!(boss, "plastic.boss", ["Diameter", "Height", "Hole Diameter", "Hole Depth"]);
 form_case!(lip, "plastic.lip", ["Type", "Rim Edge", "Width", "Height"]);
 form_case!(snap_fit, "plastic.snap_fit", ["Catch Direction", "Length", "Thickness", "Width", "Catch Depth", "Catch Length"]);

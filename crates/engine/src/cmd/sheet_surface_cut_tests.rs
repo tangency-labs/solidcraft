@@ -24,7 +24,7 @@ fn plate() -> Session {
     let mut s = session();
     rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": T, "body_name": "Plate"}));
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, T]}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, T]}));
     s
 }
 
@@ -370,7 +370,7 @@ impl Flanged {
         let mut s = plate();
         run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
         let Some(sheet) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
-        let Ok(dev) = solidcraft_develop::develop(&sheet.sheet, 0) else { panic!("the sheet lies flat") };
+        let Ok(dev) = sheet.develop() else { panic!("the sheet lies flat") };
         let Some(z) = dev.zones.first() else { panic!("the sheet has a bend") };
         let (start, along) = (z.near[0], (z.near[1] - z.near[0]).normalized().unwrap_or_default());
         let left = Vec2::new(-along.y, along.x);
@@ -436,7 +436,7 @@ fn a_slot_across_a_bend_leaves_two_stretches_that_bend() {
     let lines: Vec<f64> = sheet.bend_infos().iter().map(|b| b.length).collect();
     assert!(lines.len() == 2 && (lines.iter().sum::<f64>() - (f.length - 20.0)).abs() < 1e-6, "{lines:?} of {}", f.length);
     assert!(sheet.bends.iter().all(|b| b.tabs.is_empty()), "no tabs");
-    let Ok(dev) = solidcraft_develop::develop(&f.sheet.sheet, 0) else { panic!("the sheet lies flat") };
+    let Ok(dev) = f.sheet.develop() else { panic!("the sheet lies flat") };
     let Some(place) = dev.placements.get(1).copied().flatten() else { panic!("the flange has a place in the flat") };
     match f.cut_on(1, vec![place.inverse().region(&slot)]) {
         Ok((on_flange, _)) => assert!((on_flange - v).abs() < 1e-9 * v, "{on_flange} vs {v}"),
@@ -481,15 +481,19 @@ fn a_hole_across_a_tangent_line_is_cut_from_the_plate_and_the_bend() {
     assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
 }
 
-/// Cuts that part a bend from its panels are refused: one that takes the whole bend, cutting the
-/// sheet in two, and a ring that leaves an island of the bend joined to neither panel.
+/// A cut that takes a whole bend, 1 mm into the plate and the flange beside it, cuts the sheet in
+/// two there: the plate and the flange each lose a strip `length` × 1 and are pieces of their own,
+/// each where the bend held it. A ring that leaves an island of the bend joined to neither panel
+/// is refused: nothing says where it lies.
 #[test]
-fn cuts_that_part_a_bend_from_its_panels_are_refused() {
+fn a_cut_that_takes_a_whole_bend_leaves_two_pieces_and_an_island_of_a_bend_is_refused() {
     let f = Flanged::new();
-    let w = f.width;
+    let (w, (v0, _)) = (f.width, f.cut(Vec::new()));
+    let (v, sheet) = f.cut(vec![f.rect([-5.0, f.length + 5.0], [-1.0, w + 1.0])]);
+    let want = v0 - 2.0 * f.length * T - f.length * w * bent_per_area();
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    assert_eq!(sheet.regions.len(), 2, "two pieces");
     let refused = |cuts: Vec<Region2>| f.cut_on(0, cuts).err().map(|e| e.to_string()).unwrap_or_default();
-    let e = refused(vec![f.rect([-5.0, f.length + 5.0], [-1.0, w + 1.0])]);
-    assert!(e.contains("takes bend 1 apart"), "{e}");
     let c = f.at(50.0, w / 2.0);
     let e = refused(vec![Region2 { outer: disc(c, 2.0), holes: vec![disc(c, 1.0).reversed()] }]);
     assert!(e.contains("joined to neither"), "{e}");
@@ -501,7 +505,7 @@ fn wide_bend() -> Session {
     let mut s = session();
     rule(&mut s, "Wide", T, 0.44, 10.0, 0.5);
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": T, "body_name": "Plate"}));
-    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, T]}));
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [50, 30, T]}));
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 30}));
     s
 }
