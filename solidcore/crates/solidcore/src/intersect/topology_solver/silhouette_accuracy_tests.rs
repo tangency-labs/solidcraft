@@ -389,6 +389,37 @@ fn projected_sphere_band_maximum_uses_a_trim_away_from_the_silhouette() {
 }
 
 #[test]
+fn projected_sphere_band_original_maximum_is_not_certified() {
+    // The analytic_face_sphere_band_5_15 fixture: band [-60, 60] degrees, a
+    // vertex query, view Z. The maximum sqrt(0.13) + 0.5 is certified; the
+    // value 0.8605419808705617, measured on a fitted silhouette, is not.
+    let k = Kernel::default();
+    let mut sphere = Sphere::new(
+        &k,
+        Vec3::new(0.0, 0.0, -1.0),
+        Vec3::X,
+        Vec3::Y,
+        Extent2d::from_bounds(0.0, -60.0, 360.0, 60.0),
+        0.5,
+        SphereOptions::default(),
+    )
+    .unwrap();
+    sphere.make_nurb(&k).unwrap();
+    let expected = 0.5 + (0.2_f64 * 0.2 + 0.3 * 0.3).sqrt();
+    let (k, net, domain) =
+        check_face_projection_kind(k, &Surface::from(sphere), Vec3::Z, expected, true);
+    assert!(!super::projected_bound::maximum_is_bounded(
+        &k,
+        &net,
+        &domain,
+        FACE_QUERY,
+        Vec3::Z,
+        0.8605419808705617 + 1e-5,
+    )
+    .unwrap());
+}
+
+#[test]
 fn projected_brep_maximum_is_certified_against_the_final_candidate_in_either_order() {
     for (specs, query_x, expected) in [
         (vec![(0.0, 0.5), (0.1, 0.6)], 1e-6, 0.7 - 1e-6),
@@ -659,16 +690,27 @@ fn check_face_projection(k: Kernel, surface: &Surface, normal: Vec3, expected: f
     check_face_projection_kind(k, surface, normal, expected, false);
 }
 
+/// What a checked face projection leaves for further assertions: the kernel,
+/// the face's NURBS net and its domain. The query point is `FACE_QUERY`.
+type CheckedFace = (
+    Kernel,
+    crate::blend::fillet_section::station::Nurbs,
+    Extent2d,
+);
+
+/// The query point of every `check_face_projection_kind` case.
+const FACE_QUERY: Vec3 = Vec3::new(0.2, 0.3, 2.0);
+
 fn check_face_projection_kind(
     mut k: Kernel,
     surface: &Surface,
     normal: Vec3,
     expected: f64,
     vertex_query: bool,
-) {
+) -> CheckedFace {
     let domain = surface.natural_uv_domain_with_nurb(&k).unwrap();
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
-    let query = Vec3::new(0.2, 0.3, 2.0);
+    let query = FACE_QUERY;
     let vertex = vertex_query.then(|| b.add_vertex(query).unwrap());
     let mut state = ArenaNotifyState::new(&b);
     let mut env = state.env(None);
@@ -758,20 +800,6 @@ fn check_face_projection_kind(
             .unwrap(),
         "whole-domain bound did not close: normal={normal:?}"
     );
-    if normal == Vec3::new(0.0, 0.0, 1.0) && expected > 0.86 && expected < 0.87 {
-        assert!(
-            !super::projected_bound::maximum_is_bounded(
-                &k,
-                &net,
-                &domain,
-                query,
-                normal,
-                0.8605419808705617 + tol,
-            )
-            .unwrap(),
-            "the inaccurate original result must not be certified"
-        );
-    }
     assert!(
         (solution.start.solution_value - expected).abs() <= tol,
         "value={}, expected={expected}",
@@ -832,6 +860,7 @@ fn check_face_projection_kind(
         "global={:?}, normal={normal:?}, expected={expected}",
         global.as_slice()
     );
+    (k, net, domain)
 }
 
 fn check_maximum_after_near_seam_vertex(operation: SolverOperation) {
