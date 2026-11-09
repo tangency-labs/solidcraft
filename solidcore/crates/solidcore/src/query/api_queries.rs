@@ -17,6 +17,7 @@
 //! | [`face_bounding_box`], [`face_internal_point`], [`face_classify_uv`], [`face_closest_point`], [`face_closest_point_in_shape`] | `SmApiFaceBoundingBox`, `SmApiFaceInternalPoint`, `SmApiFaceClassifyUV`, `SmApiFaceClosestPoint` |
 //! | [`edge_bounding_box`], [`edge_closest_point`], [`edge_parameter_range`], [`edge_classify_parameter`], [`edge_tangent`] | `SmApiEdgeBoundingBox`, `SmApiEdgeClosestPoint`, `SmApiEdgeParameterRange`, `SmApiEdgeClassifyParameter`, `SmApiEdgeTangent` |
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
+//! | [`edge_plane_crossings`] | not upstream: where an edge, over its own interval, meets a plane |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -1017,6 +1018,50 @@ pub fn edge_closest_point(
     })
 }
 
+/// One end of a [`PlaneCrossing`]: where it is on the edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrossingEnd {
+    /// The edge curve's parameter.
+    pub parameter: f64,
+    /// The edge curve's point there.
+    pub point: Point3,
+    /// The edge's vertex, when the crossing is at one of its ends.
+    pub vertex: Option<VertexId>,
+}
+
+/// Where an edge meets a plane ([`edge_plane_crossings`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlaneCrossing {
+    /// The edge crosses or touches the plane at one point.
+    Point(CrossingEnd),
+    /// The edge lies in the plane, within its tolerance, from `start` to `end`.
+    Along {
+        /// The stretch's first end along the edge.
+        start: CrossingEnd,
+        /// The stretch's last end along the edge.
+        end: CrossingEnd,
+    },
+}
+
+/// Where edge `id`, over its own interval, meets the plane through `point` with normal
+/// `normal` (not upstream), in order along the edge. No crossing is an empty list.
+///
+/// # Errors
+///
+/// Not built yet: every call is refused ([`SolidError::Unsupported`]).
+pub fn edge_plane_crossings(
+    _k: &Kernel,
+    _brep: &Brep,
+    _id: EdgeId,
+    _point: Point3,
+    _normal: Vec3,
+) -> Result<Vec<PlaneCrossing>> {
+    Err(SolidError::Unsupported {
+        operation: OP,
+        reason: "edge_plane_crossings is not built yet",
+    })
+}
+
 /// Parameter interval (`SmApiEdgeParameterRange`); dangling ids are errors.
 pub fn edge_parameter_range(brep: &Brep, id: EdgeId) -> Result<Extent1d> {
     Ok(brep.edge(id)?.interval)
@@ -1790,5 +1835,306 @@ mod tests {
                 .unwrap(),
             (PointClassType::Region, false)
         );
+    }
+
+    /// A wire B-rep of one edge over `interval` of `curve`: the edge.
+    fn wire(k: &mut Kernel, curve: Curve, interval: Extent1d) -> (Brep, EdgeId) {
+        let mut b = Brep::new_with_infinite_region().unwrap();
+        let e = crate::topology::brep::p5::create_wire_edge_from_curve(k, &mut b, curve, interval)
+            .unwrap();
+        (b, e)
+    }
+
+    /// A wire edge over the whole of `curve`.
+    fn whole(k: &mut Kernel, curve: Curve) -> (Brep, EdgeId) {
+        let interval = curve.natural_interval();
+        wire(k, curve, interval)
+    }
+
+    /// Each crossing's point is on its edge at its parameter, to 1e-9.
+    fn on_the_edge(k: &Kernel, b: &Brep, e: EdgeId, crossings: &[PlaneCrossing]) {
+        let curve = b.edge(e).unwrap().curve.clone().unwrap();
+        for c in crossings {
+            let ends = match c {
+                PlaneCrossing::Point(p) => vec![*p],
+                PlaneCrossing::Along { start, end } => vec![*start, *end],
+            };
+            for end in ends {
+                let at = curve.evaluate_point(k, end.parameter).unwrap();
+                assert!(at.distance(end.point) <= 1e-9, "{c:?}");
+            }
+        }
+    }
+
+    /// The crossings are points, at `expected` in this order, to 1e-9.
+    fn points_at(crossings: &[PlaneCrossing], expected: &[Point3]) {
+        assert_eq!(crossings.len(), expected.len(), "{crossings:?}");
+        for (c, want) in crossings.iter().zip(expected) {
+            let PlaneCrossing::Point(p) = c else {
+                panic!("not a point: {c:?}")
+            };
+            assert!(p.point.distance(*want) <= 1e-9, "{c:?} against {want:?}");
+        }
+    }
+
+    /// The crossings are one stretch from `a` to `b`, to 1e-9.
+    fn along(crossings: &[PlaneCrossing], a: Point3, b: Point3) {
+        let [PlaneCrossing::Along { start, end }] = crossings else {
+            panic!("not one stretch: {crossings:?}")
+        };
+        assert!(
+            start.point.distance(a) <= 1e-9 && end.point.distance(b) <= 1e-9,
+            "{crossings:?}"
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_straight_edge() {
+        // the segment (0,0,0)-(10,0,0) against x = 2.5: one point; against y = 0 (the
+        // normal not of unit length): the whole edge; against z = 1: none
+        let mut k = Kernel::default();
+        let line = |a: Point3, b: Point3| {
+            Curve::from(crate::primitive::api_curves::create_line_segment(a, b).unwrap())
+        };
+        let (b, e) = whole(&mut k, line(Point3::ZERO, Point3::new(10.0, 0.0, 0.0)));
+        let across = edge_plane_crossings(&k, &b, e, Point3::new(2.5, 0.0, 0.0), Vec3::X).unwrap();
+        points_at(&across, &[Point3::new(2.5, 0.0, 0.0)]);
+        on_the_edge(&k, &b, e, &across);
+        let PlaneCrossing::Point(p) = across[0] else {
+            panic!("not a point")
+        };
+        assert_eq!(p.vertex, None, "inside the edge");
+        let lying =
+            edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::new(0.0, 2.0, 0.0)).unwrap();
+        along(&lying, Point3::ZERO, Point3::new(10.0, 0.0, 0.0));
+        on_the_edge(&k, &b, e, &lying);
+        assert!(
+            edge_plane_crossings(&k, &b, e, Point3::new(0.0, 0.0, 1.0), Vec3::Z)
+                .unwrap()
+                .is_empty()
+        );
+        // the same line over the stretch from 4 to 10 of the segment's 0 to 1: its curve
+        // crosses x = 2.5, the edge doesn't
+        let (b, e) = wire(
+            &mut k,
+            line(Point3::ZERO, Point3::new(10.0, 0.0, 0.0)),
+            Extent1d::from_min_max(0.4, 1.0),
+        );
+        assert!(
+            edge_plane_crossings(&k, &b, e, Point3::new(2.5, 0.0, 0.0), Vec3::X)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_circular_edge() {
+        // a circle of radius 5 about the origin in z = 0: x = 3 meets it at (3, -4) and
+        // (3, 4); y = 5 touches it at (0, 5) inside the edge; z = 0 holds all of it
+        let mut k = Kernel::default();
+        let circle =
+            crate::primitive::api_curves::create_analytic_circle(&k, Point3::ZERO, 5.0).unwrap();
+        let (b, e) = whole(&mut k, Curve::from(circle));
+        let mut two = edge_plane_crossings(&k, &b, e, Point3::new(3.0, 0.0, 0.0), Vec3::X).unwrap();
+        on_the_edge(&k, &b, e, &two);
+        two.sort_by(|a, c| match (a, c) {
+            (PlaneCrossing::Point(a), PlaneCrossing::Point(c)) => a.point.y.total_cmp(&c.point.y),
+            _ => std::cmp::Ordering::Equal,
+        });
+        points_at(
+            &two,
+            &[Point3::new(3.0, -4.0, 0.0), Point3::new(3.0, 4.0, 0.0)],
+        );
+        let touch = edge_plane_crossings(&k, &b, e, Point3::new(0.0, 5.0, 0.0), Vec3::Y).unwrap();
+        points_at(&touch, &[Point3::new(0.0, 5.0, 0.0)]);
+        let PlaneCrossing::Point(p) = touch[0] else {
+            panic!("not a point")
+        };
+        assert_eq!(p.vertex, None, "a touch inside the edge has no vertex");
+        let lying = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Z).unwrap();
+        assert_eq!(lying.len(), 1, "{lying:?}");
+        assert!(matches!(lying[0], PlaneCrossing::Along { .. }), "{lying:?}");
+        on_the_edge(&k, &b, e, &lying);
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_an_elliptical_edge() {
+        // the ellipse x^2/36 + y^2/16 = 1 in z = 0 against x = 3: y = +-4 sqrt(3)/2
+        let mut k = Kernel::default();
+        let ellipse =
+            crate::primitive::api_curves::create_ellipse(&k, Point3::ZERO, 6.0, 4.0).unwrap();
+        let (b, e) = whole(&mut k, Curve::from(ellipse));
+        let mut two = edge_plane_crossings(&k, &b, e, Point3::new(3.0, 0.0, 0.0), Vec3::X).unwrap();
+        on_the_edge(&k, &b, e, &two);
+        two.sort_by(|a, c| match (a, c) {
+            (PlaneCrossing::Point(a), PlaneCrossing::Point(c)) => a.point.y.total_cmp(&c.point.y),
+            _ => std::cmp::Ordering::Equal,
+        });
+        let y = 2.0 * 3.0_f64.sqrt();
+        points_at(&two, &[Point3::new(3.0, -y, 0.0), Point3::new(3.0, y, 0.0)]);
+    }
+
+    /// A cubic B-spline of three spans that is one polynomial curve: x = t, y =
+    /// 10 (t - 0.2)(t - 0.5)(t - 0.8), z = 0 on [0, 1], each span's control points the
+    /// cubic's blossom values at its ends, so it meets y = 0 at x = 0.2, 0.5 and 0.8.
+    fn three_span_cubic() -> Curve {
+        let c = [-0.8, 6.6, -15.0, 10.0];
+        let blossom = |u: [f64; 3]| {
+            let sum = u[0] + u[1] + u[2];
+            let pairs = u[0] * u[1] + u[0] * u[2] + u[1] * u[2];
+            let x = sum / 3.0;
+            let y = c[0] + c[1] * sum / 3.0 + c[2] * pairs / 3.0 + c[3] * u[0] * u[1] * u[2];
+            CPoint::from_point(Point3::new(x, y, 0.0))
+        };
+        let (a, b) = (1.0 / 3.0, 2.0 / 3.0);
+        let mut pw = Vec::new();
+        for (l, r) in [(0.0, a), (a, b), (b, 1.0)] {
+            if pw.is_empty() {
+                pw.push(blossom([l, l, l]));
+            }
+            pw.extend([blossom([l, l, r]), blossom([l, r, r]), blossom([r, r, r])]);
+        }
+        let knots = [0.0, 0.0, 0.0, 0.0, a, a, a, b, b, b, 1.0, 1.0, 1.0, 1.0];
+        Curve::from(BSplineCurve::from_data(3, 9, 13, 3, &pw, &knots).unwrap())
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_b_spline_edge_of_three_spans() {
+        let mut k = Kernel::default();
+        let (b, e) = whole(&mut k, three_span_cubic());
+        let three = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Y).unwrap();
+        on_the_edge(&k, &b, e, &three);
+        points_at(&three, &[0.2, 0.5, 0.8].map(|x| Point3::new(x, 0.0, 0.0)));
+        // over [0, 0.6] the edge holds the first two; its curve's third is past its end
+        let (b, e) = wire(&mut k, three_span_cubic(), Extent1d::from_min_max(0.0, 0.6));
+        let two = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Y).unwrap();
+        points_at(&two, &[0.2, 0.5].map(|x| Point3::new(x, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_a_rational_quarter_circle() {
+        // the NURBS quarter circle of radius 5 from (5, 0) to (0, 5) in z = 0 (weights 1,
+        // sqrt(2)/2, 1) against x = 3: at (3, 4)
+        let mut k = Kernel::default();
+        let w = 0.5_f64.sqrt();
+        let pw = [
+            CPoint::new(5.0, 0.0, 0.0, 1.0),
+            CPoint::new(5.0 * w, 5.0 * w, 0.0, w),
+            CPoint::new(0.0, 5.0, 0.0, 1.0),
+        ];
+        let quarter = Curve::from(
+            BSplineCurve::from_data(3, 2, 5, 2, &pw, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap(),
+        );
+        let (b, e) = whole(&mut k, quarter);
+        let one = edge_plane_crossings(&k, &b, e, Point3::new(3.0, 0.0, 0.0), Vec3::X).unwrap();
+        on_the_edge(&k, &b, e, &one);
+        points_at(&one, &[Point3::new(3.0, 4.0, 0.0)]);
+    }
+
+    #[test]
+    fn edge_plane_crossings_refuses_what_has_no_plane_or_edge() {
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let e = get_edges(&b).unwrap()[0];
+        let bad = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+        for x in bad {
+            for (point, normal) in [
+                (Point3::new(x, 0.0, 0.0), Vec3::Z),
+                (Point3::ZERO, Vec3::new(0.0, x, 1.0)),
+            ] {
+                let refused = edge_plane_crossings(&k, &b, e, point, normal);
+                assert!(
+                    matches!(refused, Err(SolidError::InvalidInput { .. })),
+                    "{point:?} {normal:?}: {refused:?}"
+                );
+            }
+        }
+        let zero = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::ZERO);
+        assert!(
+            matches!(zero, Err(SolidError::InvalidInput { .. })),
+            "{zero:?}"
+        );
+        let dangling = edge_plane_crossings(&k, &b, EdgeId::from_index(999), Point3::ZERO, Vec3::Z);
+        assert!(
+            matches!(dangling, Err(SolidError::NotFound { .. })),
+            "{dangling:?}"
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_of_an_edge_that_misses_the_plane_is_empty() {
+        let mut k = Kernel::default();
+        let circle =
+            crate::primitive::api_curves::create_analytic_circle(&k, Point3::ZERO, 5.0).unwrap();
+        let (b, e) = whole(&mut k, Curve::from(circle));
+        assert_eq!(
+            edge_plane_crossings(&k, &b, e, Point3::new(0.0, 0.0, 1.0), Vec3::Z).unwrap(),
+            Vec::new()
+        );
+        assert_eq!(
+            edge_plane_crossings(&k, &b, e, Point3::new(5.5, 0.0, 0.0), Vec3::X).unwrap(),
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn edge_plane_crossings_at_a_vertex_name_it() {
+        // the plane x + y + z = 0 meets the box [0,1]x[0,2]x[0,3] at its corner (0,0,0)
+        // alone: each of the three edges there crosses at that corner, at its interval's
+        // end, and names the same vertex; the other nine edges miss it
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let corner = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point == Point3::ZERO)
+            .unwrap();
+        let normal = Vec3::new(1.0, 1.0, 1.0);
+        let mut at_corner = 0;
+        for e in get_edges(&b).unwrap() {
+            let crossings = edge_plane_crossings(&k, &b, e, Point3::ZERO, normal).unwrap();
+            on_the_edge(&k, &b, e, &crossings);
+            match crossings.as_slice() {
+                [] => {}
+                [PlaneCrossing::Point(p)] => {
+                    assert_eq!(p.vertex, Some(corner), "{p:?}");
+                    assert!(p.point.distance(Point3::ZERO) <= 1e-12, "{p:?}");
+                    let ivl = b.edge(e).unwrap().interval;
+                    assert!(
+                        p.parameter == ivl.min() || p.parameter == ivl.max(),
+                        "at its interval's end: {p:?} {ivl:?}"
+                    );
+                    at_corner += 1;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(at_corner, 3);
+        // the box's bottom, z = 0: its four bottom edges lie in it, each from vertex to
+        // vertex; the four upright edges meet it at their bottom vertex
+        let (mut lying, mut ends) = (0, 0);
+        for e in get_edges(&b).unwrap() {
+            let crossings = edge_plane_crossings(&k, &b, e, Point3::ZERO, Vec3::Z).unwrap();
+            match crossings.as_slice() {
+                [] => {}
+                [PlaneCrossing::Along { start, end }] => {
+                    assert!(
+                        start.vertex.is_some()
+                            && end.vertex.is_some()
+                            && start.vertex != end.vertex,
+                        "{crossings:?}"
+                    );
+                    lying += 1;
+                }
+                [PlaneCrossing::Point(p)] => {
+                    assert!(p.vertex.is_some() && p.point.z.abs() <= 1e-12, "{p:?}");
+                    ends += 1;
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!((lying, ends), (4, 4));
     }
 }
