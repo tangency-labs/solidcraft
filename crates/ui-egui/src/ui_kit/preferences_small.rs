@@ -226,14 +226,25 @@ fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label
             super::settings_search::block_finish(ui, &gate, false, before);
             return result;
         }
-        let result = settings_block_body(ui, label, hint, label_width, add);
+        // A block that matches is a result even when its control reports none (a plain number
+        // field, as Sketch › Window steps has): without this the page and section headings never
+        // appear and the window says nothing matched.
+        if gate.matched {
+            super::settings_search::reveal(ui);
+        }
+        let stops = super::settings_search::nav_len(ui);
+        let (result, rect) = settings_block_body(ui, label, hint, label_width, add);
+        // The arrow keys reach it too, unless a control inside already gave it a stop.
+        if super::settings_search::nav_len(ui) == stops {
+            super::settings_search::remember(ui, label, rect);
+        }
         super::settings_search::block_finish(ui, &gate, true, before);
         return result;
     }
-    settings_block_body(ui, label, hint, label_width, add)
+    settings_block_body(ui, label, hint, label_width, add).0
 }
 
-fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> (R, Rect) {
     let t = Tokens::get();
     let width = super::metrics::dimension(ui.available_width());
     let label_width = label_width.min(width * 0.45);
@@ -263,7 +274,7 @@ fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_wi
         .inner
     });
     solidcraft_ui_registry::publish_rect(&format!("dialog:row:{label}"), response.response.rect);
-    response.inner
+    (response.inner, response.response.rect)
 }
 
 /// A bounded control that keeps its intended width inside a larger form column.

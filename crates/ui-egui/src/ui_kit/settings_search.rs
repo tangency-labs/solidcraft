@@ -297,6 +297,10 @@ pub(crate) struct BlockGate {
     key: String,
     discover: bool,
     pub show: bool,
+    /// The block is a result in its own right: its label or hint, its section or a forced pass
+    /// matches. Such a block counts as a hit even when the control inside it (a plain number
+    /// field) does not report one.
+    pub matched: bool,
 }
 
 /// `Some` while a search is active. `show` draws the block; otherwise the caller runs it hidden
@@ -313,8 +317,14 @@ pub(crate) fn block_gate(ui: &Ui, label: &str, hint: Option<&str>) -> Option<Blo
         let discover = !state.seen_blocks.contains(&key);
         let show = state.section_matches || state.force > 0 || label_hit || state.open_blocks.contains(&key);
         state.block_matches = state.section_matches || state.force > 0 || label_hit;
-        BlockGate { key, discover, show }
+        BlockGate { key, discover, show, matched: state.block_matches }
     })
+}
+
+/// How many keyboard stops this pass has painted so far, to tell whether a block's controls
+/// registered one of their own.
+pub(crate) fn nav_len(ui: &Ui) -> usize {
+    with(ui, |state| state.nav.len()).unwrap_or(0)
 }
 
 pub(crate) fn block_finish(ui: &Ui, gate: &BlockGate, showed: bool, hits_before: u32) {
@@ -1146,6 +1156,31 @@ mod tests {
         for id in ["prefs.search", "prefs.search_empty"] {
             let text = solidcraft_ui_text::tr(id).to_lowercase();
             assert!(text.contains(&name), "`{text}` should name the window `{name}`");
+        }
+    }
+
+    /// A labelled row whose control reports no match of its own (a plain number field, as
+    /// Sketch › Window steps has) drew when its label matched, but never counted as a result: the
+    /// page heading stayed away and the window said "No matching preferences". It is a result now,
+    /// with one stop for the arrow keys.
+    #[test]
+    fn a_matching_row_with_a_plain_number_field_is_a_result() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SKETCH);
+        for (query, label) in [("window steps", "Window steps"), ("dimension values", "Dimension values")] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none(), "{query} has a result instead of the empty-results message");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
+            assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
+            assert!(h.widget("Sketch").is_some(), "{query}: the page heading names where it is");
+            let (_, _, hits) = nav(&h.ctx);
+            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+            assert_eq!(matching.len(), 1, "{label} must have one stop for the arrow keys: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
+            assert_eq!(matching[0].page, crate::prefs::PAGE_SKETCH);
         }
     }
 
