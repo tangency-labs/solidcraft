@@ -47,8 +47,24 @@ impl Report {
     }
 }
 
+/// The registry flags. CI splits the check so the fast repository job never builds the app:
+/// that job passes `--no-registry` (catalog coverage only), and the job that already built
+/// `solidcraft-cli` passes `--cli <binary>` (everything, command labels included). With neither
+/// the registry is read through `cargo run`, as before. A registry that cannot be read still
+/// fails the check; only an explicit `--no-registry` skips it.
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
-    run_with_registry(root, args, registry)
+    let cli = match args.iter().position(|a| *a == "--cli") {
+        Some(i) => Some(args.get(i + 1).ok_or("--cli needs the path of a built solidcraft-cli")?.to_string()),
+        None => None,
+    };
+    if args.contains(&"--no-registry") {
+        if cli.is_some() || args.contains(&"--add-missing") {
+            return Err("--no-registry cannot be combined with --cli or --add-missing".into());
+        }
+        println!("i18n: catalog coverage only; command labels are checked where solidcraft-cli is built (--cli)");
+        return run_with_registry(root, args, || Ok(Vec::new()));
+    }
+    run_with_registry(root, args, || registry(cli.as_deref()))
 }
 
 /// Resolve the command registry before reporting success or writing any catalog.
@@ -162,11 +178,20 @@ fn labels_needing_translation(known: &[&str], commands: Vec<Value>) -> BTreeMap<
     out
 }
 
-fn registry() -> Result<Vec<Value>, String> {
-    let out = crate::cargo()
-        .args(["run", "-q", "--release", "-p", "solidcraft-cli", "--", "commands"])
-        .output()
-        .map_err(|e| format!("solidcraft-cli: {e}"))?;
+fn registry(cli: Option<&str>) -> Result<Vec<Value>, String> {
+    let mut command = match cli {
+        Some(path) => {
+            let mut c = std::process::Command::new(path);
+            c.arg("commands");
+            c
+        }
+        None => {
+            let mut c = crate::cargo();
+            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--", "commands"]);
+            c
+        }
+    };
+    let out = command.output().map_err(|e| format!("solidcraft-cli: {e}"))?;
     if !out.status.success() {
         return Err(format!("solidcraft-cli commands failed:\n{}", String::from_utf8_lossy(&out.stderr)));
     }
@@ -294,5 +319,20 @@ mod tests {
     #[test]
     fn an_empty_report_has_no_problems() {
         assert_eq!(Report::default().problems(), 0);
+    }
+
+    #[test]
+    fn no_registry_skips_label_discovery_and_conflicts_are_refused() {
+        let root = catalog_root();
+        run(&root, &["--check", "--no-registry"]).unwrap();
+        assert!(run(&root, &["--check", "--no-registry", "--cli", "x"]).is_err());
+        assert!(run(&root, &["--add-missing", "--no-registry"]).is_err());
+    }
+
+    #[test]
+    fn an_unreadable_cli_fails_the_check() {
+        let root = catalog_root();
+        let error = run(&root, &["--check", "--cli", "/nonexistent/solidcraft-cli"]).unwrap_err();
+        assert!(error.starts_with("solidcraft-cli:"), "{error}");
     }
 }
