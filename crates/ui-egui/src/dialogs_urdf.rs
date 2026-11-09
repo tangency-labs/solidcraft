@@ -37,11 +37,11 @@ pub fn rows(ui: &mut egui::Ui, f: &mut UrdfExport) -> bool {
     let mut enter = crate::ui_kit::text_row(ui, "Mesh file prefix", &mut f.mesh_prefix, "package://robot/meshes/").0;
     enter |= crate::ui_kit::text_row(ui, "Joint effort", &mut f.effort, "1000").0;
     enter |= crate::ui_kit::text_row(ui, "Joint velocity", &mut f.velocity, "10").0;
-    crate::ui_kit::text(ui, crate::i18n::tr_label("urdf.fallback_help"), crate::ui_kit::Text::Note("urdf_fallback"));
-    let r = crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Couple motion links"), &mut f.mimic);
+    crate::ui_kit::text(ui, solidcraft_ui_text::tr_label("urdf.fallback_help"), crate::ui_kit::Text::Note("urdf_fallback"));
+    let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Couple motion links"), &mut f.mimic);
     crate::scenario::publish_handle("dialog:urdf:mimic", r.rect.center());
-    crate::ui_kit::checkbox(ui, crate::i18n::tr_label("urdf.place_meshes"), &mut f.place_meshes);
-    crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Convex hull collision"), &mut f.hulls);
+    crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("urdf.place_meshes"), &mut f.place_meshes);
+    crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Convex hull collision"), &mut f.hulls);
     enter
 }
 
@@ -55,7 +55,7 @@ pub fn params(f: &UrdfExport, path: &str) -> Result<Value, String> {
         let text = text.trim();
         if !text.is_empty() {
             let x = text.parse::<f64>().ok().filter(|x| x.is_finite() && *x > 0.0);
-            let x = x.ok_or_else(|| format!("{}: {}", crate::i18n::tr_label(label), crate::i18n::tr_label("urdf.positive_number")))?;
+            let x = x.ok_or_else(|| format!("{}: {}", solidcraft_ui_text::tr_label(label), solidcraft_ui_text::tr_label("urdf.positive_number")))?;
             p[key] = json!(x);
         }
     }
