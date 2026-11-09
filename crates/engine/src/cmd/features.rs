@@ -12,24 +12,34 @@ use solidcraft_geom::prelude::*;
 
 use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
+use crate::schema::features::SweepParams;
 use crate::schema::features::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureNotice, FeatureResult, NoticeAction, OffsetPlaneParams,
-    PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, RevolveParams,
+    ScaleParams, SphereParams, TorusParams,
 };
+use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const BOX_CONTRACT: TypedContract<BoxParams> = TypedContract::new();
 const EXTRUDE_CONTRACT: TypedContract<ExtrudeParams> = TypedContract::new();
+const REVOLVE_CONTRACT: TypedContract<RevolveParams> = TypedContract::new();
 const CYLINDER_CONTRACT: TypedContract<CylinderParams> = TypedContract::new();
 const SPHERE_CONTRACT: TypedContract<SphereParams> = TypedContract::new();
 const TORUS_CONTRACT: TypedContract<TorusParams> = TypedContract::new();
 const CONE_CONTRACT: TypedContract<ConeParams> = TypedContract::new();
 const PIPE_CONTRACT: TypedContract<PipeParams> = TypedContract::new();
+const SWEEP_CONTRACT: TypedContract<SweepParams> = TypedContract::new();
 const BOUNDING_SOLID_CONTRACT: TypedContract<BoundingSolidParams> = TypedContract::new();
 const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
+const COMBINE_CONTRACT: TypedContract<CombineParams> = TypedContract::new();
 const OFFSET_PLANE_CONTRACT: TypedContract<OffsetPlaneParams> = TypedContract::new();
 const PLANE_AT_ANGLE_CONTRACT: TypedContract<PlaneAtAngleParams> = TypedContract::new();
+const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
+const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
+const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new();
+const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -38,14 +48,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("E")
         .contract(&EXTRUDE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); distance2?: expr (Two Sides: a second distance the other way from the first side, which may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
-    CommandSpec::new("solid.revolve", "Revolve", revolve)
+        .params("distance: expr (or through_all: true); taper?: angle expr (positive: outward, so the far end is larger along the extrusion direction; negative: inward, so the far end is smaller); corner?: preserve_curvature|tangent|round (how a taper closes a sharp corner its offset opens: each wall continues as itself, a line's plane or an arc's cone, until it meets its neighbour; each continues straight along its end tangent; or an arc about the corner. Without it, each profile preserves curvature where every curve is a line or an arc and takes tangent where another curve has a corner, and the feature's warning says so; a corner rule given is kept, and refused where the kernel cannot build it); sketch?: id|name (default: active or last sketch); profiles?: all | [index] | [{curves: [ids]}] (the profile whose outer loop is made of exactly these curves, or pieces of them; found again on every recompute, so it follows parameter changes; islands inside are its holes; an error when no profile or several match) | [{point:[x,y]}] (index and point picks are stored by their curves when that finds the same profile; a pick on a drawn profile that reference geometry, such as the projected outline of the face the sketch is on, cuts into regions takes the whole drawn profile); exact_regions?: bool (each index or point pick is exactly the region it names, as the dialogs send); default: every drawn profile, except that a loop inside another is its hole and a loop inside that hole is material again; face?: [x,y,z] (extrude a planar body face instead of a sketch profile); faces?: [[x,y,z],…] (coplanar faces of one body); face_body?: name (whose face, where faces of several bodies meet at the point); direction?: positive|negative|symmetric (distance is total thickness, split evenly around the start plane); convention?: total_distance|legacy_per_side (how a symmetric distance is read; default total_distance, split evenly around the start plane; legacy_per_side: the distance on each side, as older symmetric extrudes keep); distance2?: expr (Two Sides: a second distance on the side direction leaves free, the first side may be through_all or to; with direction: negative the first side goes against the normal and distance2 along it; a negative distance only turns its own side over); start_offset?: expr (along the sketch normal, also with direction: negative); to?: [x,y,z] (To Object: a face, vertex or point; to_offset?: expr past it); from?: [x,y,z] (From Object: start at that face or point); operation?: new|join|cut|intersect|auto (cut into a body, otherwise join existing solids; new in an empty component); touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); targets?: [body] (Join from a face, or from a sketch on a body's face, defaults to that face's body; explicit targets or participants override); name?; body_name?; thin?: true (Thin: a wall along sketch curves instead of the profiles) with curves?: [curve ids] (open chains and closed loops, joined where they meet end to end; default: every drawn curve of the sketch), thickness: expr, side?: center|inside|outside|two_sides (a closed loop's inside is the area it encloses, an open chain's the side it bends toward, a straight line's the left of its first curve as drawn; default center), thickness2?: expr (two_sides: the thickness outside); corners are mitred, crossing walls are one"),
+    CommandSpec::new("solid.revolve", "Revolve", crate::checked!("solid.revolve", revolve))
         .at("SOLID", "CREATE")
         .icon("revolve")
-        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
-    CommandSpec::new("solid.sweep", "Sweep", sweep)
+        .contract(&REVOLVE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("axis: sketch line id | x | y (sketch axes) | X|Y|Z (world) | {type: world, axis: X|Y|Z} (as returned by timeline.inspect) | construction axis name (followed when edited) | {origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (Two Sides: the other side's angle); direction?: symmetric (angle split either side, independent of axis direction); convention?: sketch_normal|legacy_axis_start (default sketch_normal; legacy retains older angular starts); to?: [x,y,z] (To Object: turn until that face, vertex or point); sketch?, profiles? | face: [x,y,z] (a planar body face as the profile) and face_body?: name (whose face, where faces of several bodies meet), operation?, touching?, targets?, name?, body_name?"),
+    CommandSpec::new("solid.sweep", "Sweep", crate::checked!("solid.sweep", sweep))
         .at("SOLID", "CREATE")
         .icon("sweep")
+        .contract(&SWEEP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
@@ -78,13 +92,25 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("radius | diameter, height: expr (the base circle, and the top's distance along the axis; a negative height goes the other way); top_radius? | top_diameter?: expr (the top circle; default 0: a full cone ending in an apex); base?: [x,y,z] (centre of the base circle: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); operation?, touching?, targets?: [body], name?, body_name?"),
-    CommandSpec::new("solid.fillet", "Fillet", fillet)
+    CommandSpec::new("solid.fillet", "Fillet", crate::checked!("solid.fillet", fillet))
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
-        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
-    CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
-    CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
+        .contract(&FILLET_CONTRACT)
+        .output(output_schema_for::<FilletResult>)
+        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them); type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; a curvature round's corners are always g2 patches, between its own sections; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); turn?: mitre|swept (where two rounds turn round a sharp, straight, convex side edge square to both on a plane, such as the rounds along a boss's base at its upright edges: mitre, the default, runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus; swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused, naming the largest that fits; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
+    CommandSpec::new("solid.chamfer", "Chamfer", crate::checked!("solid.chamfer", chamfer))
+        .at("SOLID", "MODIFY")
+        .icon("chamfer")
+        .contract(&CHAMFER_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?: the body the edges are on (without it, each point is looked up on every placed body, shown or hidden, and a point on edges of 2 bodies is refused, naming them)"),
+    CommandSpec::new("solid.combine", "Combine", crate::checked!("solid.combine", combine))
+        .at("SOLID", "MODIFY")
+        .icon("combine")
+        .contract(&COMBINE_CONTRACT)
+        .output(output_schema_for::<CombineResult>)
+        .params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
@@ -102,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -152,22 +178,26 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; name?"),
-    CommandSpec::new("solid.split_face", "Split Face", split_face)
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
+    CommandSpec::new("solid.split_face", "Split Face", crate::checked!("solid.split_face", split_face))
         .at("SOLID", "MODIFY")
         .icon("split_face")
+        .contract(&SPLIT_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params(
             "faces: [[x,y,z] points on the faces to split, or face names from model.faces]; body?; and the splitting tool: plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id or name (its curves, along the sketch's normal)",
         ),
-    CommandSpec::new("solid.split_body", "Split Body", split_body)
+    CommandSpec::new("solid.split_body", "Split Body", crate::checked!("solid.split_body", split_body))
         .at("SOLID", "MODIFY")
         .icon("split_body")
+        .contract(&SPLIT_BODY_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
     CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
-        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
+        .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet); body?: the body the face or edges are on (for edges, as for solid.fillet)"),
     CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place); occurrences?: [occurrence paths, root first] (only with copy: each component is copied as an independent component, as Paste New copies it, and the copy moves by the same translate, axis and angle in the world; the reply lists the copies in occurrences)"),
 ];
 
@@ -741,6 +771,8 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
             names
         } else if pts.is_empty() {
             Vec::new()
+        } else if matches!(kind, FeatureKind::Hole { .. }) {
+            hole_face_names(s, p, &kind)?
         } else {
             solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)?
         }
@@ -1079,6 +1111,22 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
     Ok(Some(body.name.clone()))
 }
 
+/// A hole's face points, named on the bodies it drills where one of theirs holds the point
+/// (#7520): a face of another body in the same plane, a hidden one the hole leaves alone, would
+/// otherwise take the name of the face that was picked. Over every body, as before, elsewhere.
+fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Result<Vec<String>> {
+    let st = s.model.state();
+    let all = solidcraft_doc::face_point_names(&s.doc, &st, kind, s.active_component)?;
+    let drilled = string_list_or_default(p, "participants");
+    if drilled.is_empty() || drilled.iter().any(|b| b == "*") {
+        return Ok(all);
+    }
+    let mut scoped = solidcraft_doc::ModelState::default();
+    scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
+    let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component)?;
+    Ok(own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect())
+}
+
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
 /// it is one the active component works on ([`active_scope`]).
 fn sketch_face_body(s: &Session, sketch: u64) -> Option<String> {
@@ -1248,6 +1296,7 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
         distance2,
         start_offset,
         through_all,
+        second_follows_first: false,
         taper,
         corner,
         to: p.get("to").and_then(vec3).map(FacePick),
@@ -1314,7 +1363,8 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
 /// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
-/// (followed when it is edited), {origin, dir}, or an edge
+/// (followed when it is edited), {origin, dir} (each origin coordinate a number or an expression over
+/// the parameters, which the axis follows), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
 /// changes. A line of the sketch wins over a construction axis of the same name.
 pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Result<AxisRef> {
@@ -1327,9 +1377,12 @@ pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Resu
                 str_(o, "axis").filter(|a| matches!(*a, "X" | "Y" | "Z")).ok_or_else(|| bad(cmd, "world axis requires `axis` to be X, Y or Z"))?;
             return Ok(AxisRef::World { axis: axis.into() });
         }
-        let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
-        let dir = o.get("dir").and_then(vec3).ok_or_else(|| bad(cmd, "axis needs `dir`"))?;
-        return Ok(AxisRef::Line { origin: Position(origin), dir: Dir(dir) });
+        let origin = point_param(s, o, "origin", cmd)?.unwrap_or_else(|| solidcraft_doc::point_expr(Vec3::ZERO));
+        let dir = match o.get("dir") {
+            None => return Err(bad(cmd, "axis needs `dir`")),
+            Some(v) => vec3(v).ok_or_else(|| bad(cmd, "axis `dir` must be a direction [x, y, z] of numbers"))?,
+        };
+        return Ok(AxisRef::Line { origin, dir: Dir(dir) });
     }
     match str_(p, "axis") {
         Some(a @ ("X" | "Y" | "Z")) => Ok(AxisRef::World { axis: a.into() }),
@@ -1521,20 +1574,131 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Cone { base, axis: Dir(axis), radius, top_radius, height, operation: operation(p, cmd)? })
 }
 
-/// Edge references → points on the edges.
-fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
+/// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
+/// feature keeps (`None`: each edge is looked up on its own).
+struct EdgePicks {
+    points: Vec<Vec3>,
+    body: Option<String>,
+}
+
+/// A body as a pick is looked up on: the model body, the name it is shown by, and the frame it
+/// is placed by and its inverse.
+struct PickRow {
+    body: usize,
+    name: String,
+    frame: solidcraft_doc::Mat,
+    inverse: solidcraft_doc::Mat,
+}
+
+/// What one body's edges near a pick are: the point in its frame, its distance from the pick on
+/// the exact curves and the edge there, whether any edge within reach is not a seam, and the
+/// edges within reach (polyline distance, seam, the direction leaving).
+struct RowHit {
+    row: usize,
+    q: Vec3,
+    d: f64,
+    edge: Option<usize>,
+    edge_like: bool,
+    near: Vec<(f64, bool, Option<Vec3>)>,
+}
+
+/// How many bodies a refusal names before "and N more".
+const NAMED_BODIES: usize = 8;
+
+/// A body's size, its edges' polylines and which of them are seams.
+type EdgeShape = (f64, Vec<Vec<Vec3>>, Vec<bool>);
+
+/// How far a polyline is from `q`.
+fn polyline_dist(points: &[Vec3], q: Vec3) -> f64 {
+    points.windows(2).filter_map(|w| Some(q.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min)
+}
+
+/// How far from an edge of a body this big a pick still means it.
+fn edge_reach(size: f64) -> f64 {
+    size * 0.05 + 1e-3
+}
+
+/// Edge references → points on the edges, each in the frame of the body it lies on.
+///
+/// A point is looked up where it was picked, on every placed body, shown or hidden: a part
+/// whose edge is in the same place only in its own frame is not in the way, and two bodies
+/// with an edge there make it ambiguous. The polylines short-list the edges; which body a pick
+/// means is decided on the exact curves.
+fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
     let a = p.get("edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`edges` must be a list"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 edges"));
     }
+    let verb = if cmd == "solid.chamfer" { "chamfer" } else { "round" };
     let st = s.model.state();
     // A picked point must lie on an edge (within the distance the kernel re-finds an edge from)
     // of the body the feature names, or of any body: a pick far from every edge would round
-    // whichever edge is nearest (#783). Each body's edges are worked out once.
-    let named = str_(p, "body").filter(|n| st.body(n).is_some());
-    // Per body: its size, its edges' polylines and which of them are seams.
-    let mut candidates: Option<Vec<(f64, Vec<Vec<Vec3>>, Vec<bool>)>> = None;
+    // whichever edge is nearest (#783).
+    let given = str_(p, "body");
+    let named = given.and_then(|n| st.bodies.iter().position(|b| b.name == n));
+    // A pick's own body is the feature's, which keeps one.
+    let agrees = |i: usize| -> Result<usize> {
+        match given {
+            Some(g) if named != Some(i) => {
+                let n = st.bodies.get(i).map_or("", |b| b.name.as_str());
+                Err(bad(cmd, format!("an edge names `{n}`, but `body` is `{g}`: give one")))
+            }
+            _ => Ok(i),
+        }
+    };
+    let identity = |i: usize, b: &solidcraft_doc::ModelBody| PickRow {
+        body: i,
+        name: b.name.clone(),
+        frame: solidcraft_doc::IDENTITY,
+        inverse: solidcraft_doc::IDENTITY,
+    };
+    // Mesh bodies have no edges to pick: rounding one is refused later, saying why.
+    let local: Vec<PickRow> = st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).map(|(i, b)| identity(i, b)).collect();
+    let placed = crate::frames::placed(s);
+    // Worked out for the first pick looked up where it was picked.
+    let world: std::cell::OnceCell<Vec<PickRow>> = std::cell::OnceCell::new();
+    let world_rows = || {
+        world.get_or_init(|| {
+            let index: std::collections::BTreeMap<&str, usize> = st.bodies.iter().enumerate().map(|(i, b)| (b.definition_name(), i)).collect();
+            s.body_frames()
+                .iter()
+                .filter_map(|(name, own, frame)| {
+                    let body = *index.get(own.as_str())?;
+                    let inverse = solidcraft_doc::mat_inverse(frame)?;
+                    (!st.bodies.get(body)?.body.is_mesh()).then(|| PickRow { body, name: name.clone(), frame: *frame, inverse })
+                })
+                .collect()
+        })
+    };
+    // Per body, worked out once.
+    let mut shapes: std::collections::BTreeMap<usize, EdgeShape> = std::collections::BTreeMap::new();
+    let shape_of = |i: usize, shapes: &mut std::collections::BTreeMap<usize, EdgeShape>| {
+        if shapes.contains_key(&i) {
+            return;
+        }
+        let Some(b) = st.bodies.get(i) else { return };
+        let size = b.body.size();
+        let tol = (size * 2e-3).max(1e-3);
+        // The display mesh flags seams (a smooth surface meeting itself, as down the side
+        // of a cylinder), which nobody means by a pick where they end.
+        let shape = match b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)) {
+            // An edge where the faces meet tangentially (the spans of a spline wall
+            // meeting) can't be blended either: nobody means it by a pick.
+            Ok(m) => Some((
+                size,
+                m.edges,
+                m.seams.iter().zip(&m.smooth_edges).map(|(s, t)| *s || *t).chain(m.seams.iter().skip(m.smooth_edges.len()).copied()).collect(),
+            )),
+            Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
+        };
+        if let Some(shape) = shape {
+            shapes.insert(i, shape);
+        }
+    };
     let mut out = Vec::new();
+    // Per pick: the body it was found on, where it was picked, and how far from that body's edge.
+    let mut found: Vec<(usize, String, Vec3, Vec3, f64)> = Vec::new();
+    let mut seen: Vec<Vec3> = Vec::new();
     for e in a {
         let pt = match edge_ref_form(e).map_err(|why| bad(cmd, why))? {
             EdgeRefForm::Point(pt) => pt,
@@ -1543,57 +1707,139 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                 let b = st.body(body).ok_or_else(|| bad(cmd, format!("no body `{body}`")))?;
                 let tol = (b.body.size() * 2e-3).max(1e-3);
                 let edges = b.body.edges(tol)?;
-                out.push(edges.get(idx).ok_or_else(|| bad(cmd, format!("{body} has no edge {idx}")))?.mid);
+                let mid = edges.get(idx).ok_or_else(|| bad(cmd, format!("{body} has no edge {idx}")))?.mid;
+                if let Some(i) = st.bodies.iter().position(|m| m.name == b.name) {
+                    found.push((agrees(i)?, b.name.clone(), mid, mid, 0.0));
+                }
+                out.push(mid);
                 continue;
             }
         };
-        let bodies = candidates.get_or_insert_with(|| {
-            // Mesh bodies have no edges to pick: rounding one is refused later, saying why.
-            st.bodies
+        // The nth pick seen at this point is the nth remembered there.
+        let nth = seen.iter().filter(|q| **q == pt).count();
+        seen.push(pt);
+        let picked = crate::frames::picked_world(pt, nth).filter(|_| placed);
+        let shown = picked.unwrap_or(pt);
+        let own = match e.get("body").and_then(Value::as_str) {
+            Some(n) => Some(agrees(st.bodies.iter().position(|b| b.name == n).ok_or_else(|| bad(cmd, format!("no body `{n}`")))?)?),
+            None => named,
+        };
+        // Named: on that body only, in its frame. Else where it was picked, on every placed body;
+        // a command run by another without the world point, or a design with no placement to look
+        // through, sees the bodies in their own frames.
+        let (w, rows): (Vec3, Vec<&PickRow>) = match (own, picked) {
+            (Some(i), _) => (pt, local.iter().filter(|r| r.body == i).collect()),
+            (None, Some(w)) if !world_rows().is_empty() => (w, world_rows().iter().collect()),
+            _ => (pt, local.iter().collect()),
+        };
+        let q_of = |r: &PickRow| {
+            let q = solidcraft_doc::apply_point(&r.inverse, w);
+            (q.x.is_finite() && q.y.is_finite() && q.z.is_finite()).then_some(q)
+        };
+        // Only bodies whose box (grown by the reach) holds the pick: an edge lies in its body's box.
+        let culled: Vec<(usize, Vec3)> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(k, r)| {
+                let b = st.bodies.get(r.body)?;
+                let q = q_of(r)?;
+                b.outline_bounds().inflated(edge_reach(b.body.size())).contains(q).then_some((k, q))
+            })
+            .collect();
+        for (k, _) in &culled {
+            if let Some(r) = rows.get(*k) {
+                shape_of(r.body, &mut shapes);
+            }
+        }
+        let mut hits: Vec<RowHit> = Vec::new();
+        for (k, q) in culled {
+            let Some(r) = rows.get(k) else { continue };
+            let (Some((size, edges, seams)), Some(b)) = (shapes.get(&r.body), st.bodies.get(r.body)) else { continue };
+            let chord = (size * 2e-3).max(1e-3);
+            let mut near = Vec::new();
+            let mut candidates = Vec::new();
+            for (i, points) in edges.iter().enumerate() {
+                let d = polyline_dist(points, q);
+                if d <= edge_reach(*size) {
+                    let seam = seams.get(i).copied().unwrap_or(false);
+                    near.push((d, seam, leaving(points, q)));
+                    candidates.push((i, d, seam));
+                }
+            }
+            if near.is_empty() {
+                continue;
+            }
+            // Seams count only where nothing else is near.
+            let edge_like = candidates.iter().any(|(_, _, seam)| !seam);
+            let candidates: Vec<(usize, f64)> = candidates.into_iter().filter(|(_, _, seam)| !edge_like || !seam).map(|(i, d, _)| (i, d)).collect();
+            let polyline = candidates.iter().map(|(_, d)| *d).fold(f64::INFINITY, f64::min);
+            let (d, edge) = candidates
                 .iter()
-                .filter(|b| named.is_none_or(|n| b.name == n) && !b.body.is_mesh())
-                .filter_map(|b| {
-                    let size = b.body.size();
-                    let tol = (size * 2e-3).max(1e-3);
-                    // The display mesh flags seams (a smooth surface meeting itself, as down the side
-                    // of a cylinder), which nobody means by a pick where they end.
-                    match b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)) {
-                        // An edge where the faces meet tangentially (the spans of a spline wall
-                        // meeting) can't be blended either: nobody means it by a pick.
-                        Ok(m) => Some((
-                            size,
-                            m.edges,
-                            m.seams
-                                .iter()
-                                .zip(&m.smooth_edges)
-                                .map(|(s, t)| *s || *t)
-                                .chain(m.seams.iter().skip(m.smooth_edges.len()).copied())
-                                .collect(),
-                        )),
-                        Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
-                    }
-                })
-                .collect()
-        });
+                .filter(|(_, d)| *d <= polyline + 2.0 * chord)
+                .map(|(i, d)| (edge_foot(&b.body, *i, q).map_or(*d, |(_, foot)| solidcraft_doc::apply_point(&r.frame, foot).dist(w)), *i))
+                .fold((f64::INFINITY, None), |best, (d, i)| if d < best.0 { (d, Some(i)) } else { best });
+            hits.push(RowHit { row: k, q, d, edge, edge_like, near });
+        }
+        if hits.is_empty() {
+            if rows.is_empty() {
+                out.push(pt);
+                continue;
+            }
+            // How far the nearest edge is, on every body the pick was looked up on.
+            let mut nearest = f64::INFINITY;
+            for r in &rows {
+                let Some(q) = q_of(r) else { continue };
+                shape_of(r.body, &mut shapes);
+                let Some((_, edges, _)) = shapes.get(&r.body) else { continue };
+                nearest = edges.iter().map(|points| polyline_dist(points, q)).fold(nearest, f64::min);
+            }
+            let far = if nearest.is_finite() { format!("the nearest edge is {nearest:.3} mm away") } else { "there is no edge".to_string() };
+            return Err(bad(cmd, format!("no edge at [{}, {}, {}]: {far}", shown.x, shown.y, shown.z)));
+        }
+        // A body with only a seam there has no edge to blend, where another body has one.
+        if hits.iter().any(|h| h.edge_like) {
+            hits.retain(|h| h.edge_like);
+        }
+        // Bodies with an edge as near as the nearest one's: the pick is on both. A pick off its
+        // curve by e widens the window to about 2e. The same body placed twice, at the same
+        // edge or point of its frame, is one edge.
+        let d_min = hits.iter().map(|h| h.d).fold(f64::INFINITY, f64::min);
+        let mut groups: Vec<&RowHit> = Vec::new();
+        for h in hits.iter().filter(|h| h.d <= 2.0 * d_min + 1e-3) {
+            let Some(r) = rows.get(h.row) else { continue };
+            let size = shapes.get(&r.body).map_or(1.0, |(size, _, _)| *size);
+            let same = |g: &&RowHit| {
+                rows.get(g.row).is_some_and(|o| o.body == r.body) && ((g.edge.is_some() && g.edge == h.edge) || g.q.dist(h.q) <= 1e-6 * size.max(1.0))
+            };
+            if !groups.iter().any(same) {
+                groups.push(h);
+            }
+        }
+        if groups.len() > 1 {
+            let names: Vec<String> = groups.iter().filter_map(|g| rows.get(g.row).map(|r| r.name.clone())).collect();
+            let hidden: String = names.iter().filter(|n| !s.body_visible(n)).map(|n| format!(" ({n} is hidden)")).collect();
+            return Err(bad(
+                cmd,
+                format!(
+                    "[{}, {}, {}] lies on edges of {} bodies, {}: name the one to {verb} with `body`{hidden}",
+                    shown.x,
+                    shown.y,
+                    shown.z,
+                    names.len(),
+                    and_list(&names, NAMED_BODIES)
+                ),
+            ));
+        }
+        let Some(hit) = hits.iter().filter(|h| h.d <= d_min).chain(hits.iter()).next() else { continue };
+        let Some(row) = rows.get(hit.row) else { continue };
         // A point where several edges meet (a corner) is ambiguous: the kernel would round one of
         // them, picked silently (#5173). Edges that carry straight on through the point (the two
         // halves of a circle) are one edge to whoever picked it, and seams and tangent joins don't
-        // count. Directions
-        // come from the polylines' end chords, which lean off a curve's tangent: within about 45°
-        // of opposite counts as carrying on (edges at a real corner are far from opposite).
-        let mut nearest = f64::INFINITY;
-        let mut near = Vec::new();
-        for (size, edges, seams) in bodies.iter() {
-            for (i, points) in edges.iter().enumerate() {
-                let d = points.windows(2).filter_map(|w| Some(pt.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
-                nearest = nearest.min(d);
-                if d <= size * 0.05 + 1e-3 {
-                    near.push((d, seams.get(i).copied().unwrap_or(false), leaving(points, pt)));
-                }
-            }
-        }
-        let matches = near.len();
-        let mut meeting: Vec<Option<Vec3>> = near.iter().filter(|(d, seam, _)| !seam && *d <= nearest + 1e-3).map(|(_, _, dir)| *dir).collect();
+        // count. Directions come from the polylines' end chords, which lean off a curve's
+        // tangent: within about 45° of opposite counts as carrying on (edges at a real corner are
+        // far from opposite).
+        let nearest = hit.near.iter().map(|(d, _, _)| *d).fold(f64::INFINITY, f64::min);
+        let mut meeting: Vec<Option<Vec3>> = hit.near.iter().filter(|(d, seam, _)| !seam && *d <= nearest + 1e-3).map(|(_, _, dir)| *dir).collect();
         let mut chains = 0usize;
         while let Some(dir) = meeting.pop() {
             chains += 1;
@@ -1606,16 +1852,107 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
         if chains > 1 {
             return Err(bad(
                 cmd,
-                format!("[{}, {}, {}] is where {chains} edges meet: give a point along one edge, such as its midpoint", pt.x, pt.y, pt.z),
+                format!("[{}, {}, {}] is where {chains} edges meet: give a point along one edge, such as its midpoint", shown.x, shown.y, shown.z),
             ));
         }
-        if matches == 0 && !bodies.is_empty() {
-            let far = if nearest.is_finite() { format!("the nearest edge is {nearest:.3} mm away") } else { "there is no edge".to_string() };
-            return Err(bad(cmd, format!("no edge at [{}, {}, {}]: {far}", pt.x, pt.y, pt.z)));
-        }
-        out.push(pt);
+        found.push((row.body, row.name.clone(), hit.q, shown, hit.d));
+        out.push(hit.q);
     }
-    Ok(out)
+    if given.is_some() {
+        return Ok(EdgePicks { points: out, body: given.map(str::to_string) });
+    }
+    let mut bodies: Vec<(usize, String)> = Vec::new();
+    for (i, name, ..) in &found {
+        if !bodies.iter().any(|(b, _)| b == i) {
+            bodies.push((*i, name.clone()));
+        }
+    }
+    let body = match bodies.as_slice() {
+        // One body of several: the feature keeps it, so the model never looks the edges up on
+        // another body that has one in the same place in its own frame.
+        [(i, _)] => st.bodies.get(*i).filter(|_| local.len() > 1).map(|b| b.name.clone()),
+        [] => None,
+        _ => {
+            // Several: each edge is looked up on its own when the model is built, on whichever
+            // body has an edge there in its own frame, so another body's edge there is refused.
+            for (i, _, q, shown, d) in &found {
+                for other in local.iter().filter(|r| r.body != *i) {
+                    let Some(b) = st.bodies.get(other.body) else { continue };
+                    let reach = edge_reach(b.body.size());
+                    if !b.outline_bounds().inflated(reach).contains(*q) {
+                        continue;
+                    }
+                    shape_of(other.body, &mut shapes);
+                    let Some((size, edges, seams)) = shapes.get(&other.body) else { continue };
+                    // The exact curve is no nearer than the polyline less its chord tolerance.
+                    let chord = (size * 2e-3).max(1e-3);
+                    let ghost = edges.iter().enumerate().filter(|(k, _)| !seams.get(*k).copied().unwrap_or(false)).any(|(k, points)| {
+                        let poly = polyline_dist(points, *q);
+                        poly <= reach && poly - chord <= 2.0 * d + 1e-3 && edge_foot(&b.body, k, *q).map_or(poly, |(d, _)| d) <= 2.0 * d + 1e-3
+                    });
+                    if ghost {
+                        let names: Vec<String> = bodies.iter().map(|(_, n)| n.clone()).collect();
+                        return Err(bad(
+                            cmd,
+                            format!(
+                                "the picks lie on {} bodies, {}, and at [{}, {}, {}] {} has an edge in the same place in its own component: {verb} each body in a command of its own, naming it with `body`",
+                                names.len(),
+                                and_list(&names, NAMED_BODIES),
+                                shown.x,
+                                shown.y,
+                                shown.z,
+                                b.name
+                            ),
+                        ));
+                    }
+                }
+            }
+            None
+        }
+    };
+    Ok(EdgePicks { points: out, body })
+}
+
+/// "A", "A and B", "A, B and C", and past `most` names "A, B and 3 more".
+fn and_list(names: &[String], most: usize) -> String {
+    let mut shown: Vec<String> = names.iter().take(most).cloned().collect();
+    if names.len() > most {
+        shown.push(format!("{} more", names.len() - most));
+    }
+    match shown.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+        Some((last, _)) => last.clone(),
+        None => String::new(),
+    }
+}
+
+/// The distance from `q` to edge `index` of `body` on its exact curve, and the point there:
+/// samples, then a golden-section search between the best one's neighbours.
+fn edge_foot(body: &solidcraft_kernel::Body, index: usize, q: Vec3) -> Option<(f64, Vec3)> {
+    const SAMPLES: usize = 32;
+    const STEPS: usize = 40;
+    let e = body.record().edges.get(index)?;
+    let c = solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).ok()?;
+    let [t0, t1] = e.interval;
+    if !(t0.is_finite() && t1.is_finite()) {
+        return None;
+    }
+    let at = |t: f64| c.point(t).map(|p| p.dist(q)).filter(|d| d.is_finite());
+    let step = (t1 - t0) / SAMPLES as f64;
+    let (k, _) = (0..=SAMPLES).filter_map(|k| Some((k, at(t0 + step * k as f64)?))).min_by(|a, b| a.1.total_cmp(&b.1))?;
+    let (mut lo, mut hi) = (t0 + step * k.saturating_sub(1) as f64, t0 + step * (k + 1).min(SAMPLES) as f64);
+    let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
+    for _ in 0..STEPS {
+        let (a, b) = (hi - ratio * (hi - lo), lo + ratio * (hi - lo));
+        if at(a).unwrap_or(f64::INFINITY) <= at(b).unwrap_or(f64::INFINITY) {
+            hi = b;
+        } else {
+            lo = a;
+        }
+    }
+    let foot = c.point((lo + hi) / 2.0)?;
+    let d = foot.dist(q);
+    d.is_finite().then_some((d, foot))
 }
 
 /// The direction an edge's polyline leaves `pt` in, when `pt` is one of its ends; `None` when
@@ -1654,7 +1991,11 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.press_pull";
     let distance = req_expr(cmd, p, "distance")?;
     if p.get("edges").is_some() {
-        return fillet(s, &json!({"edges": p.get("edges"), "radius": distance}));
+        let mut q = json!({"edges": p.get("edges"), "radius": distance});
+        if let Some(body) = p.get("body").filter(|b| b.is_string()) {
+            q["body"] = body.clone();
+        }
+        return fillet(s, &q);
     }
     let face = p.get("face").ok_or_else(|| bad(cmd, "needs `face` or `edges`"))?;
     let d = s.doc.eval(&distance, Kind::Length).map_err(|e| bad(cmd, format!("distance: {e}")))?;
@@ -1683,7 +2024,13 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         // Another curved face moves along its normal.
         if super::face::face_is_planar(s, fp) == Some(false) {
             let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
-            return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+            let mut q = json!({"faces": [face], "distance": distance});
+            // The face's body, when given, goes along: found by point alone, a face inside another
+            // part's box (a screw bore in a housing) can be looked for on that part instead.
+            if let Some(body) = p.get("body").filter(|b| b.is_string()) {
+                q["body"] = body.clone();
+            }
+            return (r.run)(s, &q);
         }
     }
     // Pushed in: the extrude cuts the other way by as much (a bare number stays one, so it keeps
@@ -1698,7 +2045,7 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.fillet";
-    let edges = edge_points(s, p, cmd)?;
+    let picks = edge_points(s, p, cmd)?;
     let radius = req_expr(cmd, p, "radius")?;
     check_expr(s, &radius, Kind::Length, cmd, "radius")?;
     let style = match str_(p, "type").map(str::to_ascii_lowercase).as_deref() {
@@ -1788,17 +2135,27 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`setbacks` are built for a constant-radius fillet (`type: constant`, `fit: exact`) only"));
         }
     }
+    // How two rounds turn at a sharp side edge.
+    let turn = match str_(p, "turn").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("mitre") => solidcraft_doc::FilletTurn::Mitre,
+        Some("swept") => solidcraft_doc::FilletTurn::Swept,
+        Some(o) => return Err(bad(cmd, format!("unknown turn `{o}` (mitre or swept)"))),
+    };
+    if !turn.is_mitre() && (!style.is_constant() || fit == solidcraft_doc::FilletFit::Taper || !corner.is_rolling() || !setbacks.is_empty()) {
+        return Err(bad(cmd, solidcraft_doc::SWEPT_TAKES));
+    }
     let mut out = add_feature(
         s,
         p,
         FeatureKind::Fillet {
-            edges: edges.into_iter().map(Position).collect(),
+            edges: picks.points.into_iter().map(Position).collect(),
             radius,
-            body: str_(p, "body").map(BodyName::from),
+            body: picks.body.map(BodyName::from),
             style,
             fit,
             corner,
             setbacks,
+            turn,
             tangent_chain: bool_(p, "tangent_chain").unwrap_or(true),
         },
     )?;
@@ -1808,16 +2165,16 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(r) = state.fitted_radius(id)
     {
         out["radius_applied"] = serde_json::json!(r);
-        let each: Vec<Value> =
-            state.fitted_edges(id).unwrap_or_default().into_iter().map(|(p, r)| serde_json::json!({"edge": [p.x, p.y, p.z], "radius": r})).collect();
-        out["radii_applied"] = Value::Array(each);
+        let each: Vec<AppliedRadius> =
+            state.fitted_edges(id).unwrap_or_default().into_iter().map(|(p, radius)| AppliedRadius { edge: [p.x, p.y, p.z], radius }).collect();
+        out["radii_applied"] = serde_json::to_value(each).map_err(|e| EngineError::Internal(cmd.into(), e.to_string()))?;
     }
     Ok(out)
 }
 
 fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.chamfer";
-    let edges = edge_points(s, p, cmd)?;
+    let picks = edge_points(s, p, cmd)?;
     let distance = req_expr(cmd, p, "distance")?;
     check_expr(s, &distance, Kind::Length, cmd, "distance")?;
     let (distance2, angle) = (expr(p, "distance2"), expr(p, "angle"));
@@ -1835,12 +2192,12 @@ fn chamfer(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         p,
         FeatureKind::Chamfer {
-            edges: edges.into_iter().map(Position).collect(),
+            edges: picks.points.into_iter().map(Position).collect(),
             distance,
             distance2,
             angle,
             flip,
-            body: str_(p, "body").map(BodyName::from),
+            body: picks.body.map(BodyName::from),
             tangent_chain: bool_(p, "tangent_chain").unwrap_or(true),
         },
     )
@@ -2491,17 +2848,30 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
+    let direction_only = crate::params::bool_(p, "direction_only").unwrap_or(false);
+    let pivot = match p.get("pivot").filter(|t| !t.is_null()) {
+        Some(_) if !direction_only => return Err(bad(cmd, "`pivot` needs `direction_only`: true")),
+        Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
+        None => None,
+    };
+    let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
+        base: Box::new(base),
+        axis_origin,
+        axis_dir,
+        angle: angle.clone(),
+        line: line.clone(),
+        direction_only,
+        pivot: pivot.clone(),
+    };
     // A planar body face: attached exactly, as a sketch on that face is, so the plane follows it.
     if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
-        let plane = solidcraft_doc::PlaneRef::AtAngle { base: Box::new(base), axis_origin, axis_dir, angle, line };
         // The capture is already in the authoring frame.
-        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane }, false);
+        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) }, false);
     }
     let base = plane_param(s, p.get("base"), cmd)?;
-    let plane = solidcraft_doc::PlaneRef::AtAngle { base: Box::new(base), axis_origin, axis_dir, angle, line };
-    add_feature(s, p, FeatureKind::ConstructionPlane { plane })
+    add_feature(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) })
 }
 
 fn split_face(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2587,6 +2957,18 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(s, p, FeatureKind::Split { body: BodyName(body), plane, tool: None, sketch: None, line: None })
 }
 
+/// The fits [`clearance_diameter`] knows (close, normal, loose, and their older names).
+const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
+
+/// A value typed by the user, cut short for a message.
+pub(super) fn brief(text: &str) -> String {
+    const MAX: usize = 32;
+    match text.char_indices().nth(MAX) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_string(),
+    }
+}
+
 /// ISO 273 clearance hole diameters (close, normal, loose fit) for metric bolts.
 fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     const TABLE: [(f64, f64, f64, f64); 21] = [
@@ -2621,6 +3003,35 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
         "loose" | "coarse" => Some(row.3),
         _ => None,
     }
+}
+
+/// The counterbore a cap screw's head sits in (`head` with `clearance`): its diameter and depth.
+/// The head's dk and k come from the standard's table (ISO 4762 socket heads, ISO 7380-1 button
+/// heads, in `parts`), with `head_gap` (default 0.5 mm) added each side and below. A gap that
+/// names parameters is kept as an expression, so the recess follows them. `None` without `head`.
+fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<(Expr, Expr)>> {
+    let head = match p.get("head") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(h)) => h.trim(),
+        Some(_) => return Err(bad(cmd, "`head` must be a text: `ISO 4762` (socket head) or `ISO 7380-1` (button head)")),
+    };
+    let size = str_(p, "clearance").ok_or_else(|| bad(cmd, "`head` needs `clearance`, the screw size the head belongs to (e.g. \"M4\")"))?;
+    let (dk, k) = super::parts::cap_screw_head(head, size).map_err(|e| bad(cmd, e))?;
+    let gap = match (expr(p, "head_gap"), p.get("head_gap")) {
+        (Some(g), _) => g,
+        (None, None | Some(Value::Null)) => Expr::new("0.5 mm"),
+        (None, v) => return Err(bad(cmd, format!("`head_gap` {}", expr_problem(v)))),
+    };
+    let g = s.doc.eval(gap.as_str(), Kind::Length).map_err(|e| bad(cmd, format!("head_gap: {e}")))?;
+    if !(0.0..=dk).contains(&g) {
+        return Err(bad(cmd, format!("`head_gap` must be 0 to {dk} mm (the head's diameter), not {g}")));
+    }
+    let mm = |x: f64| format!("{} mm", (x * 1e6).round() / 1e6);
+    Ok(Some(if solidcraft_doc::expr::references(gap.as_str()).is_empty() {
+        (Expr::new(mm(dk + 2.0 * g)), Expr::new(mm(k + g)))
+    } else {
+        (Expr::new(format!("{dk} mm + 2 * ({})", gap.as_str())), Expr::new(format!("{k} mm + ({})", gap.as_str())))
+    }))
 }
 
 /// The pitches to try for a plain `M<d>` that has no ISO coarse pitch, `None` for anything else.
@@ -2784,9 +3195,16 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             Some(d) => d.normalized().ok_or_else(|| bad(cmd, "`direction` must be non-zero"))?,
             None => {
                 // Into the face the position lies on: against the outward normal of the face
-                // nearest it (planar or curved), as it faces out of its own body.
+                // nearest it (planar or curved), as it faces out of its own body. A hole that
+                // names the bodies it drills goes by the face of one of them where one passes
+                // through the position, never that of a body touching it there (#12066).
+                let named = match string_list(cmd, p, "participants")? {
+                    v if v.is_empty() => string_list(cmd, p, "targets")?,
+                    v => v,
+                };
+                let scope: &[String] = if named.iter().any(|b| b == "*") { &[] } else { &named };
                 let st = s.model.state();
-                solidcraft_doc::hole_direction_at(&st, position).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
+                solidcraft_doc::hole_direction_at(&st, position, scope).ok_or_else(|| bad(cmd, "no face at `position`; give `direction`"))?
             }
         },
     };
@@ -2795,10 +3213,18 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     let position = if references.is_empty() { position } else { referenced_centre(s, cmd, &references, position, direction)? };
     // The diameter: given, or a metric-estimate/Unified-table tap drill, or an ISO 273
     // clearance hole for a bolt size (close, normal or loose fit).
+    // A diameter number out of range says so, rather than that none was given (#9625).
+    if matches!(p.get("diameter"), Some(Value::Number(_))) && expr(p, "diameter").is_none() {
+        return Err(bad(cmd, format!("`diameter` {}", expr_problem(p.get("diameter")))));
+    }
     let diameter = match (expr(p, "diameter"), &thread, str_(p, "clearance")) {
         (Some(d), _, _) => d,
         (None, _, Some(c)) => {
             let fit = str_(p, "fit").unwrap_or("normal").to_ascii_lowercase();
+            // An unknown fit is not an unknown bolt size (#9625).
+            if !CLEARANCE_FITS.contains(&fit.as_str()) {
+                return Err(bad(cmd, format!("`fit` must be close, normal or loose, not `{}`", brief(&fit))));
+            }
             let d = clearance_diameter(c, &fit).ok_or_else(|| bad(cmd, format!("no clearance hole for `{c}` ({fit} fit): M1.6 to M64")))?;
             Expr::new(format!("{d} mm"))
         }
@@ -2825,22 +3251,51 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         let e = req_expr(cmd, p, k)?;
         Ok(e)
     };
-    let kind = match str_(p, "type").unwrap_or("simple") {
+    // Given but unreadable (`true`, a list, an empty text): refused, never a plain counterbore.
+    let bridge = match (expr(p, "bridge"), p.get("bridge")) {
+        (Some(b), _) => Some(b),
+        (None, None | Some(Value::Null)) => None,
+        (None, v) => return Err(bad(cmd, format!("`bridge` {}", expr_problem(v)))),
+    };
+    // A counterbore sized to the screw's head: `head` with `clearance`.
+    let head = head_recess(s, cmd, p)?;
+    if head.is_some() && str_(p, "type").is_some_and(|t| t != "counterbore") {
+        return Err(bad(cmd, "`head` needs `type: counterbore` (the default with `head`); a countersink for a flat head is not supported yet"));
+    }
+    let kind = match str_(p, "type").unwrap_or(if head.is_some() { "counterbore" } else { "simple" }) {
         "simple" => match expr(p, "tip_angle") {
             Some(t) if depth.is_some() => solidcraft_doc::HoleKind::Drilled { tip_angle: t },
             _ => solidcraft_doc::HoleKind::Simple,
         },
         "drilled" => solidcraft_doc::HoleKind::Drilled { tip_angle: expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()) },
         "counterbore" => {
-            solidcraft_doc::HoleKind::Counterbore { cb_diameter: get("cb_diameter")?, cb_depth: get("cb_depth")?, tip_angle: expr(p, "tip_angle") }
+            // Sized to the screw's head unless given; a value given, even a bad one, is checked.
+            let given = |k: &str| !matches!(p.get(k), None | Some(Value::Null));
+            let (cb_diameter, cb_depth) = match &head {
+                Some((d, h)) => {
+                    (if given("cb_diameter") { get("cb_diameter")? } else { d.clone() }, if given("cb_depth") { get("cb_depth")? } else { h.clone() })
+                }
+                None => (get("cb_diameter")?, get("cb_depth")?),
+            };
+            solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle: expr(p, "tip_angle"), bridge: bridge.clone() }
         }
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
-            cs_angle: expr(p, "cs_angle").unwrap_or_else(|| "90 deg".into()),
+            // The default only when no angle is given: a supplied one out of range is refused (#9625).
+            cs_angle: match p.get("cs_angle") {
+                None | Some(Value::Null) => "90 deg".into(),
+                Some(Value::String(t)) if t.trim().is_empty() => "90 deg".into(),
+                Some(_) => req_expr(cmd, p, "cs_angle")?,
+            },
             tip_angle: expr(p, "tip_angle"),
         },
         other => return Err(bad(cmd, format!("unknown hole type `{other}`"))),
     };
+    match (&kind, &bridge) {
+        (solidcraft_doc::HoleKind::Counterbore { .. }, Some(b)) => check_expr(s, b, Kind::Length, cmd, "bridge")?,
+        (_, Some(_)) => return Err(bad(cmd, "`bridge` needs `type: counterbore`")),
+        _ => {}
+    }
     let to = match p.get("to") {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`to` must be a point [x, y, z] on the face to drill to"))?),
         None => None,
@@ -2863,6 +3318,20 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // placed) cuts that body: the pick is already in that body's frame, and the
             // component's own bodies alone would leave nothing to cut.
             p["participants"] = json!([body]);
+        } else if let Some(mut shown) = shown_scope(s) {
+            // Like a cut (#3961), a hole leaves hidden bodies alone (#7520): while some are
+            // hidden, it drills the shown ones, stored so showing the others later changes
+            // nothing. The body whose face was picked is drilled though hidden (picked through
+            // Select Other, or hidden with the dialog open): it is the one the hole is for.
+            if !shown.is_empty()
+                && points.is_none()
+                && let Some(body) = hidden_body_picked_at(s, position, &shown)
+            {
+                shown.push(body);
+            }
+            if !shown.is_empty() {
+                p["participants"] = json!(shown);
+            }
         }
     }
     add_feature(
@@ -2948,16 +3417,36 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
 /// component than the active one.
 fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
     let st = s.model.state();
-    let (_, body) = st
-        .bodies
+    let body = body_with_face_at(&st, p, |_| true)?;
+    (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+}
+
+/// The hidden body whose face holds `p`, when no shown body has a face there: a face shared by
+/// a shown and a hidden body is the shown one's, as a pick in the view would take it (#7520).
+fn hidden_body_picked_at(s: &Session, p: Vec3, shown: &[String]) -> Option<String> {
+    let st = s.model.state();
+    if body_with_face_at(&st, p, |b| shown.contains(&b.name)).is_some() {
+        return None;
+    }
+    let scope: Vec<&str> = active_scope(s, &st).into_iter().map(|b| b.name.as_str()).collect();
+    body_with_face_at(&st, p, |b| scope.contains(&b.name.as_str())).map(|b| b.name.clone())
+}
+
+/// The body, among those `keep` takes, with the face nearest `p` within its pick tolerance.
+fn body_with_face_at(
+    st: &solidcraft_doc::ModelState,
+    p: Vec3,
+    keep: impl Fn(&solidcraft_doc::ModelBody) -> bool,
+) -> Option<&solidcraft_doc::ModelBody> {
+    st.bodies
         .iter()
-        .filter(|b| !b.body.is_mesh())
+        .filter(|b| !b.body.is_mesh() && keep(b))
         .filter_map(|b| {
             let (d, _) = solidcraft_doc::appearance::nearest_face(b, p)?;
             (d <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((d, b))
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0))?;
-    (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b)| b)
 }
 
 /// The points of a sketch a hole drills at when only the sketch is given.
@@ -3086,17 +3575,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
 pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepOrientation, Option<Expr>, Option<Expr>)> {
     let orientation = match p.get("orientation") {
         None | Some(Value::Null) => SweepOrientation::Perpendicular,
-        Some(Value::String(o)) if o.eq_ignore_ascii_case("perpendicular") => SweepOrientation::Perpendicular,
-        Some(Value::String(o)) if o.eq_ignore_ascii_case("parallel") => SweepOrientation::Parallel,
-        Some(v) => {
-            let d = vec3(v)
-                .or_else(|| v.get("direction").and_then(vec3))
-                .ok_or_else(|| bad(cmd, "`orientation` must be perpendicular, parallel or a direction [x, y, z]"))?;
-            if !(d.len() > 1e-9) {
-                return Err(bad(cmd, "the `orientation` direction must not be zero"));
-            }
-            SweepOrientation::Direction(Dir(d))
-        }
+        Some(v) => sweep_orientation(v).map_err(|e| bad(cmd, e))?,
     };
     let twist = match p.get("twist") {
         None | Some(Value::Null) => None,
@@ -3124,6 +3603,24 @@ pub(super) fn sweep_options(s: &Session, p: &Value, cmd: &str) -> Result<(SweepO
     Ok((orientation, twist, scale))
 }
 
+/// A sweep's `orientation` as given (not `null`): perpendicular or parallel (any case), or a
+/// non-zero direction `[x, y, z]`, `{x, y, z}` or `{direction: …}`. The error is the message.
+pub(crate) fn sweep_orientation(v: &Value) -> std::result::Result<SweepOrientation, &'static str> {
+    match v {
+        Value::String(o) if o.eq_ignore_ascii_case("perpendicular") => Ok(SweepOrientation::Perpendicular),
+        Value::String(o) if o.eq_ignore_ascii_case("parallel") => Ok(SweepOrientation::Parallel),
+        v => {
+            let d = vec3(v)
+                .or_else(|| v.get("direction").and_then(vec3))
+                .ok_or("`orientation` must be perpendicular, parallel or a direction [x, y, z]")?;
+            if !(d.len() > 1e-9) {
+                return Err("the `orientation` direction must not be zero");
+            }
+            Ok(SweepOrientation::Direction(Dir(d)))
+        }
+    }
+}
+
 /// A sweep's guide `rails` and `rail_fit` (solid.sweep and surface.sweep), checked: one or two
 /// rails, each a sketch (default: the path's) and 1…1000 of its curves; a fit of scale or
 /// stretch; and no orientation, twist or scale besides, since the rails set those.
@@ -3144,9 +3641,7 @@ pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: u64) -
 pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
     let rail_fit = match p.get("rail_fit") {
         None | Some(Value::Null) => RailFit::Scale,
-        Some(Value::String(f)) if f.eq_ignore_ascii_case("scale") => RailFit::Scale,
-        Some(Value::String(f)) if f.eq_ignore_ascii_case("stretch") => RailFit::Stretch,
-        Some(_) => return Err(bad(cmd, "`rail_fit` must be scale or stretch")),
+        Some(v) => rail_fit_form(v).map_err(|e| bad(cmd, e))?,
     };
     let given = match p.get("rails") {
         None | Some(Value::Null) => return Ok((Vec::new(), rail_fit)),
@@ -3170,6 +3665,16 @@ pub(super) fn guide_rails(s: &Session, p: &Value, cmd: &str, what: &str, default
         rails.push(SweepRail { sketch: SketchId(sketch), curves });
     }
     Ok((rails, rail_fit))
+}
+
+/// Guide rails' `rail_fit` as given (not `null`): scale or stretch, in any case. The error is
+/// the message.
+pub(crate) fn rail_fit_form(v: &Value) -> std::result::Result<RailFit, &'static str> {
+    match v {
+        Value::String(f) if f.eq_ignore_ascii_case("scale") => Ok(RailFit::Scale),
+        Value::String(f) if f.eq_ignore_ascii_case("stretch") => Ok(RailFit::Stretch),
+        _ => Err("`rail_fit` must be scale or stretch"),
+    }
 }
 
 fn loft(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3566,6 +4071,87 @@ mod corner_tests {
         let err = s.execute("solid.fillet", &mixed).unwrap_err().to_string();
         eprintln!("mixed corner g2: {err}");
         assert!(err.contains("not supported yet") && err.contains("(40.000, 20.000, 20.000)") && err.contains("all convex or all concave"), "{err}");
+    }
+
+    /// `solid.fillet turn?: mitre|swept` on the four base edges of a 10 x 10 x 5 boss on a
+    /// 40 x 30 x 10 plate, r 1: at each upright boss edge the two rounds turn round it. Each base
+    /// edge gains the spandrel A = (1 - π/4) r² along its 10, and the corners the rounds' part
+    /// beyond both walls, whose section's first moment about the upright edge is
+    /// M = (5/6 - π/4) r³: mitred (the default), 8 M; swept, that section revolved a quarter turn at
+    /// each corner, 2π M, the corner's face the horn torus of radii r, r about the upright edge,
+    /// centred r above the plate. The turn is saved; an unknown turn and a swept chord round are
+    /// refused as parameters, and swept rounds along a pocket's floor (its upright edges concave)
+    /// with the kernel's reason.
+    #[test]
+    fn rounds_turning_round_a_boss_edge_are_mitred_or_swept() {
+        use std::f64::consts::PI;
+        const BASE: [[f64; 3]; 4] = [[20.0, 10.0, 10.0], [25.0, 15.0, 10.0], [20.0, 20.0, 10.0], [15.0, 15.0, 10.0]];
+        let boss = || {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"}));
+            run(&mut s, "solid.box", &json!({"corner": [15, 10, 10], "length": 10, "width": 10, "height": 5, "operation": "join"}));
+            s
+        };
+        let turned = |turn: Option<&str>| {
+            let mut s = boss();
+            let mut p = json!({"edges": BASE, "radius": 1});
+            if let Some(t) = turn {
+                p["turn"] = json!(t);
+            }
+            let reply = run(&mut s, "solid.fillet", &p);
+            assert_eq!(reply["warning"], json!(null), "{reply}");
+            let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+            assert!(body.validity().is_empty(), "{:?}", body.validity());
+            (s, solidcraft_kernel::measure(&body).unwrap(), body)
+        };
+        let (mitred, mitre, _) = turned(None);
+        let (_, named, _) = turned(Some("mitre"));
+        let (swept_session, swept, body) = turned(Some("swept"));
+        eprintln!("mitre: {} faces, {:.9}; swept: {} faces, {:.9}", mitre.faces, mitre.volume, swept.faces, swept.volume);
+        let r: f64 = 1.0;
+        let (a, m) = ((1.0 - PI / 4.0) * r * r, (5.0 / 6.0 - PI / 4.0) * r * r * r);
+        let near = |v: f64, want: f64| (v - want).abs() < 1e-9 * want;
+        assert!(near(mitre.volume, 12500.0 + 40.0 * a + 8.0 * m), "{}", mitre.volume);
+        assert!(near(swept.volume, 12500.0 + 40.0 * a + 2.0 * PI * m), "{}", swept.volume);
+        assert_eq!(named.volume.to_bits(), mitre.volume.to_bits(), "mitre is the default");
+        assert_eq!((mitre.faces, swept.faces), (15, 19));
+        // The four corner faces (the record's torus is a ring torus, so a horn torus is its exact
+        // rational form): every point on the horn torus about its upright edge.
+        let mut corners = 0;
+        for f in &body.record().faces {
+            if !matches!(f.surface, solidcore_record::brep::Surface::RationalSpline { .. }) {
+                continue;
+            }
+            corners += 1;
+            let eval = solidcraft_geom::brep::eval::SurfaceEval::new(&f.surface).unwrap();
+            let [[u0, u1], [v0, v1]] = f.domain;
+            for i in 0..=4 {
+                for j in 0..=4 {
+                    let p = eval.point([u0 + (u1 - u0) * f64::from(i) / 4.0, v0 + (v1 - v0) * f64::from(j) / 4.0]).unwrap();
+                    let (cx, cy) = (if p.x < 20.0 { 15.0 } else { 25.0 }, if p.y < 15.0 { 10.0 } else { 20.0 });
+                    let rho = (p.x - cx).hypot(p.y - cy);
+                    let off = ((rho - r).powi(2) + (p.z - 10.0 - r).powi(2)).sqrt() - r;
+                    assert!(off.abs() < 1e-9, "{p:?} is {off} off the horn torus");
+                }
+            }
+        }
+        assert_eq!(corners, 4);
+        assert!(!mitred.doc.to_json().contains("\"turn\""));
+        assert!(swept_session.doc.to_json().contains("\"turn\": \"swept\""));
+        let mut s = boss();
+        let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "round"})).unwrap_err().to_string();
+        assert!(e.contains("unknown turn `round` (mitre or swept)"), "{e}");
+        let e = s.execute("solid.fillet", &json!({"edges": BASE, "radius": 1, "turn": "swept", "type": "chord"})).unwrap_err().to_string();
+        assert!(e.contains(solidcraft_doc::SWEPT_TAKES), "{e}");
+        // A pocket 5 deep in the plate, its floor's edges rounded: the rounds meet at its concave
+        // upright edges.
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "P"}));
+        run(&mut s, "solid.box", &json!({"corner": [10, 10, 5], "length": 20, "width": 10, "height": 6, "operation": "cut"}));
+        let rim = json!([[20, 10, 5], [30, 15, 5], [20, 20, 5], [10, 15, 5]]);
+        let e = s.execute("solid.fillet", &json!({"edges": rim, "radius": 1, "turn": "swept"})).unwrap_err().to_string();
+        eprintln!("swept along a pocket's rim: {e}");
+        assert!(e.contains("swept corner at (") && e.contains("round that edge at a radius of at least 1 first"), "{e}");
     }
 }
 #[cfg(test)]

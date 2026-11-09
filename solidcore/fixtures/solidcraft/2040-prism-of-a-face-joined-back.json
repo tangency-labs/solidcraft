@@ -1,0 +1,58 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2040",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2041",
+ "test": "crates/kernel/src/whole_face_tests.rs: a_prism_from_the_face_joins_by_its_shared_edges",
+ "summary": "Extruding a whole face of a body and joining the prism back must fuse along the edges the two share (#2040). A 20 x 10 x 5 block's top face is swept 3 up (the runner's sweep_face: the prism of that face's own loops) and joined to the block: one solid of 20 x 10 x 8. The fix's test of a face rounded by fillets uses SolidCraft's own face-prism code and is not ported.",
+ "cases": [
+  {
+   "name": "top_face_prism_joined",
+   "note": "The block's top face (z = 5) swept 3 along +z, then union(block, prism).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      20,
+      10,
+      5
+     ]
+    },
+    {
+     "op": "sweep_face",
+     "id": "prism",
+     "body": "block",
+     "face": [
+      10,
+      5,
+      5
+     ],
+     "direction": [
+      0,
+      0,
+      1
+     ],
+     "distance": 3
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "block",
+     "b": "prism"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1600.0,
+     "tol": 1e-06,
+     "formula": "20*10*8"
+    }
+   }
+  }
+ ]
+}

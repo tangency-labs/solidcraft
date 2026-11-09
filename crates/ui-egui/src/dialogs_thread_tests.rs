@@ -5,7 +5,7 @@ use super::*;
 use crate::dialogs::{Kind, apply_commands, edge_sel};
 use crate::preselect_tests::thread_face;
 use crate::scenario::{self, Harness};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// A thread dialog on an 8 mm shaft 10 mm long, the face picked, in a window tall enough for
 /// every row without scrolling the fields.

@@ -19,13 +19,14 @@ pub mod pcurves;
 mod sheets;
 mod split;
 pub mod ssi;
+pub mod stop;
 pub mod sweeps;
 pub mod trace;
 pub mod trim;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties, PointClass};
-pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS};
+pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS, Turn};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]
@@ -54,13 +55,18 @@ pub enum Error {
     /// middle of the edge it was found for, and why there is no room, when the refusal names them.
     TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, why: Option<RoomReason> },
     /// A shell, offset or thicken whose wall is thicker than a face curves: the face's offset
-    /// folds (solidcore's `ShellRefused`, `ShellRefusal::Fold`). The largest wall that works,
+    /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
     /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
     CornerUnsupported,
+    /// A swept turn ([`Turn::Swept`]) solidcore does not build at the corner `at`: `room` where
+    /// no radius builds it (a sharp concave side edge between the rounds, solidcore's `NoRoom`),
+    /// else not supported there (`CornerUnsupported`: unequal or variable rounds, a corner of
+    /// four edges, a curved, drafted or tangent side edge); `why` is solidcore's reason.
+    TurnRefused { room: bool, why: String, at: Option<[f64; 3]> },
     /// SMLib does not set back the corner of corner point `corner`: SMLib sets back a corner
     /// only where every edge meeting it is blended and they are all convex or all concave.
     CornerRefused { corner: usize },
@@ -192,6 +198,13 @@ impl std::fmt::Display for Error {
             }
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
             Error::CornerUnsupported => write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends"),
+            Error::TurnRefused { why, at, .. } => {
+                write!(f, "the swept corner is not built")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                write!(f, ": {why}")
+            }
             Error::CornerRefused { corner } => write!(
                 f,
                 "not supported yet: SMLib does not set back corner {}: it sets back a corner only where every edge meeting it is blended, all convex or all concave",
@@ -230,6 +243,13 @@ pub fn set_dump_dir(dir: Option<&Path>) {
 /// The kernel call running right now, if any: for crash reports. Takes no lock.
 pub fn current_call() -> Option<String> {
     core::dump::current()
+}
+
+/// Keeps one of the kernels calls run on out of use until dropped: the next calls run on another.
+/// For tests of what happens when a design's bodies come from a kernel that is busy elsewhere.
+#[doc(hidden)]
+pub fn hold_a_kernel() -> core::HeldKernel {
+    core::hold_a_kernel()
 }
 
 /// Is this thread inside a solidcore call? A panic there is caught and becomes

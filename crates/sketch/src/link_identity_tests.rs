@@ -458,3 +458,60 @@ fn rebuilt_face_keeps_a_users_circle_on_its_projected_centre() {
     }
     assert_eq!(sk.link_curves(&link).len(), 4 + 3, "the projection is the new outline and holes");
 }
+
+/// #12086: the bottom face of a holder, an arm 2 thick along a hole's ring, projected into a
+/// sketch. The ring's diameter `d` drives the outline: the arm's end corners are 2 apart, at
+/// (55 + s, -9 + s) and (55 + s, -7 + s), with `s` = (10 - d) / 2. Made smaller (d 10 to 8),
+/// the outline's box shrinks with it, and in box-relative terms each end corner lands nearer
+/// to where the other one goes. The lines leave the two corners in different directions, so they
+/// are not confused: the projection follows, keeping its ids and a point drawn on a corner.
+#[test]
+fn a_face_with_a_thin_arm_follows_its_body_made_smaller() {
+    let holder = |d: f64| -> Vec<LinkGeom> {
+        let (r, s) = (d / 2.0, (10.0 - d) / 2.0);
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let hole = r - 2.0;
+        vec![
+            LinkGeom::Line(p(-r, 0.0), p(-r, -67.0 + s)),
+            LinkGeom::Line(p(-r, -67.0 + s), p(-3.0 + s, -67.0 + s)),
+            LinkGeom::Arc { c: Vec2::ZERO, a: p(r, 0.0), b: p(-r, 0.0) },
+            LinkGeom::Line(p(-3.0 + s, -67.0 + s), p(-3.0 + s, -9.0 + s)),
+            LinkGeom::Line(p(-3.0 + s, -9.0 + s), p(55.0 + s, -9.0 + s)),
+            LinkGeom::Line(p(r, -7.0 + s), p(r, 0.0)),
+            LinkGeom::Line(p(55.0 + s, -7.0 + s), p(r, -7.0 + s)),
+            LinkGeom::Line(p(55.0 + s, -9.0 + s), p(55.0 + s, -7.0 + s)),
+            LinkGeom::Arc { c: Vec2::ZERO, a: p(-hole, 0.0), b: p(hole, 0.0) },
+            LinkGeom::Arc { c: Vec2::ZERO, a: p(hole, 0.0), b: p(-hole, 0.0) },
+        ]
+    };
+    let mut sk = Sketch::new();
+    let link = sk.add_link(LinkKind::Project, face(), &holder(10.0)).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let corner = |sk: &Sketch, at: Vec2| sk.link_points(&link).into_iter().find(|p| sk.points[*p].pos.dist(at) < 1e-9).unwrap();
+    let upper = corner(&sk, Vec2::new(55.0, -7.0));
+    let lower = corner(&sk, Vec2::new(55.0, -9.0));
+    let free = sk.add_point(Vec2::new(55.0, -7.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: free, q: upper }, None).unwrap();
+
+    assert_eq!(sk.update_link(&link, &holder(8.0)).map_err(|e| e.to_string()), Ok(false), "the same outline, moved");
+    assert!(!sk.link(&link).unwrap().lost);
+    assert_eq!(ids, sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect::<Vec<_>>());
+    assert!(sk.points[upper].pos.dist(Vec2::new(56.0, -6.0)) < 1e-9, "{:?}", sk.points[upper].pos);
+    assert!(sk.points[lower].pos.dist(Vec2::new(56.0, -8.0)) < 1e-9, "{:?}", sk.points[lower].pos);
+    assert!(solve(&mut sk).ok());
+    assert!(sk.points[free].pos.dist(Vec2::new(56.0, -6.0)) < 1e-7, "{:?}", sk.points[free].pos);
+}
+
+/// The lines at a point leave it the same ways only when each direction matches a different
+/// one: two nearly parallel lines at a sharp corner don't both match one line while the other
+/// line turned round.
+#[test]
+fn leaving_directions_match_one_to_one() {
+    let (right, left, up) = (Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, 1.0));
+    let near_right = Vec2::new(0.995, 0.0998);
+    assert!(super::loops::same_leaving(&[right, up], &[up, right]), "the same lines, read in another order");
+    assert!(super::loops::same_leaving(&[right, near_right], &[near_right, right]));
+    assert!(!super::loops::same_leaving(&[right, near_right], &[right, left]), "one line turned round");
+    assert!(!super::loops::same_leaving(&[right, up], &[right, up, left]));
+    assert!(super::loops::same_leaving(&[], &[]));
+}

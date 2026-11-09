@@ -1,0 +1,112 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.17453292519943295,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                -5.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                5.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 1.5707963267948966,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -1.5707963267948966
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "831-tapered-extrude-d-shape-arc-meets-line",
+  "expected": {
+    "body_count": 1,
+    "method": "half disc r5 (x>=0) with a -10 deg taper (shrinks inward), 2 mm: the section at height z is the eroded D = disc r=5-d cut at x>=d, d=z tan10deg (erosion of a convex intersection is the intersection of the erosions). Area(d) = rho^2 acos(d/rho) - d sqrt(rho^2-d^2), rho=5-d; V = integral_0^2 Area(z tan10) dz = 69.7714 (Simpson; Area(0) = 12.5 pi = 39.27 at the base)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#831"
+    ],
+    "volume_mm3": 69.77140599276278,
+    "what": "tapered extrude of a D shape (an arc meeting a line at a sharp corner): refused as 'tapered profiles where an arc meets another edge at a corner'"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 119.55463701661589,
+      "body_count": 1,
+      "edges": 6,
+      "faces": 4,
+      "vertices": 4,
+      "volume_mm3": 69.77140599266502
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#831"
+  ],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "tapered extrude of a D shape (an arc meeting a line at a sharp corner): refused as 'tapered profiles where an arc meets another edge at a corner'",
+  "why_not": []
+}

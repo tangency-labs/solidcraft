@@ -331,14 +331,14 @@ fn fillet_max_finds_the_largest_radius_that_works() {
     let b = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
     assert!(too_large(&b, &mids, 3.5));
-    let (r, body) = fillet_max(&b, &mids, 3.5).unwrap().unwrap();
+    let (r, body) = fillet_max(&b, &mids, 3.5, FilletTurn::Mitre).unwrap().unwrap();
     assert_eq!(r, 3.0);
     assert!(rel(measure(&body).unwrap().volume, 840.0 - (4.0 - PI) * 90.0) < 2e-4);
     // No edge there: the fillet's own error, not a smaller radius (only a refusal as too large
     // narrows the search).
     let e = fillet(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err();
     assert!(!matches!(e, KernelError::TooLarge(_)), "{e}");
-    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err().to_string(), e.to_string());
+    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0, FilletTurn::Mitre).unwrap_err().to_string(), e.to_string());
 }
 
 /// Edges that share no face get their own largest radius: a 2 mm fin's top edge takes at most
@@ -360,7 +360,7 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     // at its edge less the quarter disc about (17, 26), inside the fin (x >= 19): 2 x 4 less the
     // disc's part, in closed form; the corner's round (1 − π/4)·16 along 20.
     let both = fillet(&body, &edges, 4.0).unwrap();
-    let (radii, b) = fillet_max_each(&body, &edges, 4.0).unwrap().unwrap();
+    let (radii, b) = fillet_max_each(&body, &edges, 4.0, FilletTurn::Mitre).unwrap().unwrap();
     assert_eq!(radii, vec![4.0, 4.0], "{radii:?}");
     assert!(b.validity().is_empty(), "{:?}", b.validity());
     let disc = |a: f64| 0.5 * (a * (16.0 - a * a).max(0.0).sqrt() + 16.0 * (a / 4.0).asin());
@@ -371,7 +371,7 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     // The post's four edges limit each other: one radius, as `fillet_max`.
     let post = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
-    assert_eq!(fillet_max_each(&post, &mids, 3.5).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
+    assert_eq!(fillet_max_each(&post, &mids, 3.5, FilletTurn::Mitre).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
 }
 
 /// R21 on an edge of a 20 mm cube overflows on its tangent sides, which a round may, taking all
@@ -1129,6 +1129,29 @@ fn chamfer_wider_than_sloped_basin_rim_builds() {
         let want = measure(&b).unwrap().volume - sloped_basin_rim_chamfer_removed(margin, distance);
         assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
     }
+}
+
+#[test]
+fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
+    let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+    let normals = [[Vec3::new(1., 0., 1.), Vec3::new(0., 1., 1.), Vec3::Z]];
+    let body = crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &normals).unwrap();
+    let matrix = [[-2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [7., 11., 13., 1.]];
+    let moved = crate::transform_matrix(&body, matrix).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    let expected = [Vec3::new(-0.5, 0., 2.).normalized().unwrap(), Vec3::Z, Vec3::new(0., 1. / 3., 2.).normalized().unwrap()];
+    for (actual, expected) in mesh.normals.iter().zip(expected) {
+        assert!((*actual - expected).len() < 1e-12);
+    }
+    let tiny = crate::transform_matrix(&body, [[1e-6, 0., 0., 0.], [0., 1e-6, 0., 0.], [0., 0., 1e-6, 0.], [0., 0., 0., 1.]]).unwrap();
+    let tiny = tiny.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!((tiny.normals[0] - Vec3::new(1., 0., 1.).normalized().unwrap()).len() < 1e-12);
+    assert!((tiny.normals[0].len() - 1.).abs() < 1e-12, "normal magnitude must not depend on a small geometric scale");
+    let [a, b, c] = mesh.triangles[0].map(|i| mesh.positions[i as usize]);
+    assert!((b - a).cross(c - a).z > 0.);
+    assert_eq!(body.triangle_mesh().unwrap().1, &[[0, 1, 2]]);
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::ZERO; 3]]).is_err());
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::Z; 3]; 2]).is_err());
 }
 
 #[test]
@@ -2438,4 +2461,18 @@ fn a_box_cut_round_a_small_hole_of_a_long_plate_keeps_the_hole() {
             assert!(measure(&piece).unwrap().volume > 0.0, "r {r}, tilt {tilt}, hole at {q:?}");
         }
     }
+}
+
+/// A refusal is kept with its body for every later reader: which face it names doesn't depend on
+/// whether the job that found it had been stopped, whose probes would all be refused.
+#[test]
+fn a_stopped_job_does_not_decide_which_face_a_refusal_names() {
+    let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let why = solidcraft_smlib::Error::Argument;
+    let plain = crate::body::Refusal::of(body.record(), &why);
+    assert_eq!(plain.face, None, "every face of a box is taken on its own");
+    let stop = crate::Stop::new();
+    stop.stop();
+    let stopped = stop.within(|| crate::body::Refusal::of(body.record(), &why));
+    assert_eq!(stopped.face, plain.face);
 }

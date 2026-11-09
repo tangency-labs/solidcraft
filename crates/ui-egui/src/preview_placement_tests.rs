@@ -99,7 +99,7 @@ fn assert_tool_at(built: &crate::preview::Built, want: [f64; 3], buggy: [f64; 3]
 fn extrude_cut_preview_on_a_face_sketch_in_a_translated_component_sits_at_the_sketch() {
     let (mut s, component, occurrence) = ear(false);
     let (commands, sketch) = two_circle_cut_on_face(&mut s, component, occurrence, [30.0, 30.0, 10.0]);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark());
     let built = crate::preview::compute(&s, &commands, colors).unwrap();
     // Placed: the local top-face centre (20, 10, 10) plus [10, 20, 0]; the tool cuts 5 mm down.
     assert_tool_at(&built, [30.0, 30.0, 7.5], [20.0, 10.0, 7.5]);
@@ -115,7 +115,7 @@ fn extrude_cut_preview_on_a_face_sketch_in_a_translated_component_sits_at_the_sk
 fn extrude_cut_preview_on_a_face_sketch_in_a_mirrored_component_sits_at_the_sketch() {
     let (mut s, component, occurrence) = ear(true);
     let (commands, sketch) = two_circle_cut_on_face(&mut s, component, occurrence, [30.0, 30.0, 10.0]);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark());
     let built = crate::preview::compute(&s, &commands, colors).unwrap();
     assert_tool_at(&built, [30.0, 30.0, 7.5], [20.0, 10.0, 7.5]);
     let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else { panic!("a sketch on a face") };

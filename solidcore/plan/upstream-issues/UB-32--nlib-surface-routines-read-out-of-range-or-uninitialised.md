@@ -1,0 +1,16 @@
+#### UB-32. NLib surface routines read out of range or uninitialised data
+- **Severity:** Crash / undefined behaviour
+- **Area:** NLib: curves, fitting, surfaces
+- **Location:**
+  - `NL_SrfAdv.cpp:696` `ST_surxsdr`: the degree-1 reflection fallback reads `Rw[ii][kby ± 2]` outside its row. Also reached through `N_SrfExtendByDist` (`:661`).
+  - `:10401` `N_CreateSkinSpine`: reads `pSpineParams[-1]` for one profile with end derivatives.
+  - `:17403` `N_ApproxCrossBoundaryDerivs`: ignores the `N_VectorsAngle` status, then inserts an uninitialised knot `UX[0]`.
+  - `:13262` `N_CreateSkinSrfBoundaryContinuity`: uses an uninitialised derivative curve with `NL_UVDIR`.
+- **What happens:** Out-of-range or uninitialised reads. Upstream then "succeeds" with whatever it read.
+- **Trigger:** G1/G2 extension in a degree-1 direction with a degenerate first reflection normal; `eps = 0` with an exactly aligned end tangent.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput` or the angle error.
+- **Fuzz sweep trigger (2026-10-20):** a curve control point coordinate or weight of `1e300` / `1e-300`, or a start derivative `-1e300` (`nlib.srf_adv_p4` `fuzz00511`, `fuzz00921`, `fuzz01441`, `fuzz01762`): C++ returned a curve, Rust the angle error. Also an end angle exactly equal to `eps` or NaN leaves the knot uninitialised. The `nlib.srf_adv_p4` FFI now replays `N_VectorsAngle` in upstream's operation order and rejects the first-pass inputs that hit either case (`approx_angles_ok`). Confirmed: no (no crash).
+- **Fuzz sweep trigger (2026-10-20):** a surface weight of `0.0` or `-0.0` (`nlib.srf_adv_p2` `fuzz01654`, `fuzz00394`): a zero weight makes Euclidean points infinite, the reflection plane cannot be normalised and C++ reads past its scratch rows and returns a surface; Rust errors. The `nlib.srf_adv_p1`/`p2`/`p3` FFIs require surface weights all `NOW` or all positive (`p4`: curve weights). Confirmed: no (no crash).

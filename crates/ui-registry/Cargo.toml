@@ -1,0 +1,12 @@
+[package]
+name = "solidcraft-ui-registry"
+description = "Names UI widgets and records where they were drawn this frame (handles, rects, counts) for UI tests, scenarios and the control channel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }

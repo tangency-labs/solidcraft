@@ -13,6 +13,12 @@ cursor, replacing selected text and keeping what you typed, so typing `10 + ` an
 the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
+![The Parameters dialog, numbered 1 to 5](../media/parameters/dialog.png)
+
+**1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
+**3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
+**5** The value it works out to
+
 ## Naming a value as you type it
 
 Any value input can name its value: type `width = 40` (or `#width = 40`) for a dimension, a
@@ -39,6 +45,11 @@ Scripts, the control channel and MCP tools take the same form in any expression 
 In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user and model
 parameter editor. The **Configurations** button in CONFIGURATIONS opens the configuration table;
 **Configure** remains in the dropdown for configuring columns.
+
+The **Filter** box lists the parameters whose name, expression, comment or group contains what
+you type, in any case. It also finds a name by the starts of its words, in order: `toodia`,
+`toofla` and `outdia` all find `tooth_outward_flange_diameter`. Underscores, hyphens and
+camelCase (`boltHoleDepth`) separate the words. Autocomplete offers parameters the same way.
 
 Press **Enter** in the new parameter's name, expression or comment field to add it.
 Valid entries return focus to the name field for the next parameter; invalid entries remain
@@ -91,6 +102,13 @@ an unchanged field cannot reinterpret it. Computed sizes and tolerances keep the
 precision when written back into editable fields, independently of display precision.
 
 Parameters export to and import from CSV or JSON (`parameters.export`, `parameters.import`).
+In a CSV, a value that a spreadsheet would run as a formula is written with a `'` before it, so the
+spreadsheet shows it as text. That is a value that starts with `=`, `+`, `-` or `@`, their full-width
+forms, a tab or a line break, after any spaces and `'`; a plain number such as `-5` is left as it is.
+The import takes the `'` off again. A spreadsheet that saves the file again as CSV can drop the `'`
+(Excel does), so export again from SolidCraft instead of passing that file on. Earlier versions of
+SolidCraft wrote every value unchanged, so in a CSV from one of them, a value whose first character
+really was a `'` typed before a formula character (`'=x`) now imports without it (`=x`).
 **Configurations** (`config.*`) keep a table of rows, each with its own parameter values and
 suppressed features, physical materials and body appearances, switched with `config.activate`.
 The table's Library picker selects material or appearance values. Choose **Follow material**

@@ -34,7 +34,7 @@ pub struct CloudFile {
     pub colors: Vec<u8>,
     /// Points in the file.
     pub source_points: u64,
-    /// The file's other properties of the points (PLY).
+    /// Segments, triangles and the file's other properties (PLY).
     pub complex: solidcraft_doc::point_cloud::Complex,
     pub warnings: Vec<String>,
 }
@@ -50,9 +50,17 @@ struct Keep {
 }
 
 impl Keep {
-    fn push(&mut self, [x, y, z]: [f64; 3], rgb: Option<[u8; 3]>) {
+    fn scaled_point(&self, [x, y, z]: [f64; 3]) -> Option<Vec3> {
         let p = Vec3::new(x, y, z) * self.scale;
-        if ![p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= MAX_COORD) || self.out.points.len() / 3 >= self.max {
+        [p.x, p.y, p.z].iter().all(|v| v.is_finite() && v.abs() <= MAX_COORD).then_some(p)
+    }
+
+    fn push(&mut self, coordinates: [f64; 3], rgb: Option<[u8; 3]>) {
+        let Some(p) = self.scaled_point(coordinates) else {
+            self.bad += 1;
+            return;
+        };
+        if self.out.points.len() / 3 >= self.max {
             self.bad += 1;
             return;
         }
@@ -83,15 +91,25 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
         stride = r.vertices.div_ceil(r.positions.len().max(1) as u64).max(1);
         keep.colored = r.colors.is_some();
         let colors = r.colors.unwrap_or_default();
+        let mut read = Vec::with_capacity(r.positions.len());
         for (i, p) in r.positions.iter().enumerate() {
+            let bad = keep.bad;
             keep.push(*p, colors.get(i).copied());
+            read.push(keep.bad == bad);
         }
-        // A point left out would shift every number after it.
-        if keep.bad > 0 && !r.complex.is_empty() {
-            return Err(IoError::Invalid(format!("{} point(s) are not finite numbers within range", keep.bad)));
+        // A point left out takes with it its numbers and whatever ends on it.
+        let (complex, cut) = if keep.bad > 0 { r.complex.induced(&read) } else { (r.complex, 0) };
+        if cut > 0 {
+            keep.out.warnings.push(format!("{cut} segment(s) and triangle(s) left out, since a point they end on could not be read"));
+        }
+        if r.bad_faces > 0 {
+            keep.out.warnings.push(format!("{} face(s) could not be read and were left out", r.bad_faces));
+        }
+        if r.cells_left_out > 0 {
+            keep.out.warnings.push(format!("{} edge(s) and face(s) left out, since thinning the points would cut them", r.cells_left_out));
         }
         keep.out.source_points = r.vertices;
-        keep.out.complex = r.complex;
+        keep.out.complex = complex;
     } else {
         stride = read_xyz(bytes, &mut keep)?;
     }
@@ -129,12 +147,19 @@ fn numbers(line: &str, out: &mut Vec<f64>) -> bool {
 /// Read an XYZ file into `keep`; returns the thinning stride.
 fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
     let text = String::from_utf8_lossy(bytes);
-    let lines = bytes.iter().filter(|b| **b == b'\n').count() as u64 + 1;
-    let stride = lines.div_ceil(keep.max as u64).max(1);
     let mut v = Vec::with_capacity(16);
+    // Count point rows when the physical lines could exceed the cap. A PTS count line,
+    // comments, blank lines and invalid rows are not part of the sampling stride.
+    let stride = if text.lines().nth(keep.max).is_some() {
+        let points = text.lines().filter(|line| numbers(line, &mut v) && v.len() >= 3 && keep.scaled_point([v[0], v[1], v[2]]).is_some()).count();
+        points.div_ceil(keep.max).max(1) as u64
+    } else {
+        1
+    };
     // Where the colour is: after x, y, z (6 numbers), or after an intensity too (7, as PTS).
     let mut rgb_at: Option<Option<usize>> = None;
     let mut data = 0u64;
+    let mut eligible = 0u64;
     for line in text.lines() {
         if !numbers(line, &mut v) {
             if !line.trim().is_empty() && !line.trim_start().starts_with('#') && !line.trim_start().starts_with("//") {
@@ -149,14 +174,19 @@ fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
             }
             continue;
         }
+        data += 1;
+        if keep.scaled_point([v[0], v[1], v[2]]).is_none() {
+            keep.bad += 1;
+            continue;
+        }
         let at = *rgb_at.get_or_insert(match v.len() {
             6 => Some(3),
             n if n >= 7 => Some(4),
             _ => None,
         });
         keep.colored = at.is_some();
-        data += 1;
-        if !(data - 1).is_multiple_of(stride) {
+        eligible += 1;
+        if !(eligible - 1).is_multiple_of(stride) {
             continue;
         }
         let rgb = at.and_then(|i| {
@@ -171,6 +201,8 @@ fn read_xyz(bytes: &[u8], keep: &mut Keep) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use solidcraft_doc::point_cloud::On;
+
     use super::*;
 
     fn ply_points(n: usize) -> Vec<u8> {
@@ -195,9 +227,41 @@ mod tests {
         assert_eq!(&c.points[3..6], &[2000.0, 0.0, 0.0]);
         assert!(c.colors.is_empty());
         assert_eq!(c.warnings.len(), 1, "{:?}", c.warnings);
+        // A thinned file leaves out the edges thinning would cut, and says so.
+        let edged = "ply\nformat ascii 1.0\nelement vertex 4\nproperty float x\nproperty float y\nproperty float z\n\
+            element edge 2\nproperty int vertex1\nproperty int vertex2\nend_header\n0 0 0\n1 0 0\n2 0 0\n3 0 0\n0 1\n2 3\n";
+        let e = read_point_cloud(edged.as_bytes(), "path.ply", 1.0, 2).unwrap();
+        assert_eq!((e.points.len(), e.complex.segment_count()), (6, 0));
+        assert!(e.warnings.iter().any(|w| w.starts_with("2 edge(s) and face(s) left out")), "{:?}", e.warnings);
         let all = read_point_cloud(&ply_points(10), "scan.PLY", 1.0, DEFAULT_MAX_POINTS).unwrap();
         assert_eq!((all.points.len(), all.warnings.len()), (30, 0));
         assert!(read_point_cloud(&ply_points(10), "scan.ply", 0.0, 5).is_err());
+    }
+
+    #[test]
+    fn a_point_that_cannot_be_read_takes_only_what_ends_on_it() {
+        let text = "ply\nformat ascii 1.0\ncomment role: 7 wall\nelement vertex 5\nproperty float x\nproperty float y\nproperty float z\nproperty float t\n\
+            element edge 3\nproperty int vertex1\nproperty int vertex2\nproperty int role\n\
+            element face 2\nproperty list uchar int vertex_indices\nproperty int layer\nend_header\n\
+            0 0 0 10\nnan 0 0 11\n2 0 0 12\n3 0 0 13\n4 0 0 14\n0 1 7\n2 3 8\n3 4 9\n3 0 2 3 5\n3 1 2 3 6\n";
+        let c = read_point_cloud(text.as_bytes(), "path.ply", 1.0, DEFAULT_MAX_POINTS).unwrap();
+        assert_eq!(c.points, [0., 0., 0., 2., 0., 0., 3., 0., 0., 4., 0., 0.]);
+        assert_eq!(&*c.complex.segments.0, &[1, 2, 2, 3], "numbered among the points that are left");
+        assert_eq!(&*c.complex.triangles.0, &[0, 1, 2]);
+        assert_eq!(&*c.complex.column("t", On::Point).unwrap().values.0, &[10., 12., 13., 14.]);
+        assert_eq!(&*c.complex.column("role", On::Segment).unwrap().values.0, &[8., 9.]);
+        assert_eq!(&*c.complex.column("layer", On::Triangle).unwrap().values.0, &[5.]);
+        assert_eq!(c.complex.names("role").and_then(|n| n.name(7)), Some("wall"));
+        c.complex.check(4).unwrap();
+        assert_eq!(
+            c.warnings,
+            ["2 segment(s) and triangle(s) left out, since a point they end on could not be read", "1 point(s) could not be read and were left out"]
+        );
+        // Edges alone, no numbers on the points: the same, not a refused file.
+        let edged = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\n\
+            element edge 2\nproperty int vertex1\nproperty int vertex2\nend_header\nnan 0 0\n1 0 0\n2 0 0\n0 1\n1 2\n";
+        let e = read_point_cloud(edged.as_bytes(), "path.ply", 1.0, DEFAULT_MAX_POINTS).unwrap();
+        assert_eq!((e.points.len(), &*e.complex.segments.0), (6, &[0u32, 1][..]));
     }
 
     #[test]
@@ -216,6 +280,42 @@ mod tests {
         assert!((c.points[3] - 25.4).abs() < 1e-6);
         let plain = read_point_cloud(b"0 0 0\n1 0 0\n", "a.xyz", 1.0, 1).unwrap();
         assert_eq!(plain.points.len(), 3, "thinned to one point");
+    }
+
+    #[test]
+    fn pts_thinning_counts_points_without_headers_comments_or_blank_lines() {
+        let pts = b"3\n# scan\n0 0 0 -200 255 0 0\n\n20 0 0 -150 0 255 0\n// end of scan\n40 0 0 -100 0 0 255\n";
+        let full = read_point_cloud(pts, "scan.pts", 1.0, 3).unwrap();
+        assert_eq!(full.source_points, 3);
+        assert_eq!(full.points, [0., 0., 0., 20., 0., 0., 40., 0., 0.]);
+        assert_eq!(full.colors, [255, 0, 0, 0, 255, 0, 0, 0, 255]);
+        assert!(full.warnings.is_empty());
+
+        let thinned = read_point_cloud(pts, "scan.pts", 1.0, 2).unwrap();
+        assert_eq!(thinned.source_points, 3);
+        assert_eq!(thinned.points, [0., 0., 0., 40., 0., 0.]);
+        assert_eq!(thinned.colors, [255, 0, 0, 0, 0, 255]);
+        assert_eq!(thinned.warnings, ["2 of the file's 3 points kept (one in 2)"]);
+    }
+
+    #[test]
+    fn pts_thinning_samples_only_finite_points_within_the_scaled_range() {
+        for (invalid, scale) in [("NaN", 1.), ("inf", 1.), ("1e309", 1.), ("1000000001", 1.), ("1000000", 1e6), ("1e308", 1e6)] {
+            let pts = format!("4\n{invalid} 0 0 -200 255 0 0\n1 0 0 -150 0 255 0\n{invalid} 0 0 -200 255 0 0\n2 0 0 -100 0 0 255\n# scan\n");
+            let full = read_point_cloud(pts.as_bytes(), "scan.pts", scale, 2).unwrap();
+            assert_eq!(full.source_points, 4);
+            assert_eq!(full.origin, Vec3::new(scale, 0., 0.));
+            assert_eq!(full.points, [0., 0., 0., scale as f32, 0., 0.]);
+            assert_eq!(full.colors, [0, 255, 0, 0, 0, 255]);
+            assert_eq!(full.warnings, ["2 point(s) could not be read and were left out"]);
+        }
+
+        let pts = b"5\nNaN 0 0\n1 0 0 -150 0 255 0\nNaN 0 0\n2 0 0 -100 0 0 255\n3 0 0 -50 255 0 0\n# scan\n";
+        let thinned = read_point_cloud(pts, "scan.pts", 1., 2).unwrap();
+        assert_eq!(thinned.source_points, 5);
+        assert_eq!(thinned.points, [0., 0., 0., 2., 0., 0.]);
+        assert_eq!(thinned.colors, [0, 255, 0, 255, 0, 0]);
+        assert_eq!(thinned.warnings, ["2 point(s) could not be read and were left out", "2 of the file's 5 points kept (one in 2)"]);
     }
 
     #[test]

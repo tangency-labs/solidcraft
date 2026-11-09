@@ -65,7 +65,7 @@ pub(crate) fn progress_text(work: Option<(&str, usize, usize)>) -> String {
         "dxf_write" => "dxf.progress.write",
         _ => "dxf.progress.meshes",
     };
-    format!("{}: {done}/{total}", crate::i18n::tr_label(label))
+    format!("{}: {done}/{total}", solidcraft_ui_text::tr_label(label))
 }
 
 #[cfg(test)]

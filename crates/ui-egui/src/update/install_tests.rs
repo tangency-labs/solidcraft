@@ -326,7 +326,7 @@ fn installation_refreshes_the_release_and_verifies_the_final_package() {
         assert_eq!(used_fallback, fallback, "{case}");
         assert_eq!(
             p.message(),
-            crate::i18n::format(if fallback { "update.refresh_fallback" } else { "update.refresh_selected" }, &[("version", expected)]),
+            solidcraft_ui_text::format(if fallback { "update.refresh_fallback" } else { "update.refresh_selected" }, &[("version", expected)]),
             "{case}"
         );
         if corrupt {

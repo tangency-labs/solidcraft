@@ -1,6 +1,7 @@
 //! Analytic rounded annular sectors, following the board's offset-and-round construction.
-use crate::{context_menu::Item, theme::Tokens};
+use super::Item;
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2, vec2};
+use solidcraft_theme::Tokens;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 pub(crate) const RADIAL_RADIUS: f32 = 150.0;
@@ -90,7 +91,7 @@ fn paint_sector(p: &egui::Painter, center: Pos2, k: usize, fill: Color32, stroke
 
 pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option<usize>) -> Option<Item> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     let mut picked = None;
     for (k, item) in items.iter().take(8).enumerate() {
         let enabled = item.enabled && ui.is_enabled();
@@ -109,23 +110,23 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         let a = -FRAC_PI_2 + k as f32 * FRAC_PI_4;
         let at = center + unit(a) * 104.0;
         let target = Rect::from_center_size(at, vec2(t.space_24 * 2.0 + t.space_12, t.space_24 + t.space_16 + t.space_2));
-        let response = ui.interact(target, ui.id().with(("radial", k)), Sense::hover());
-        crate::scenario::publish_target(&format!("radial:{}", item.id), target);
+        let response = ui.interact(target, ui.scope_id().with(("radial", k)), Sense::hover());
+        solidcraft_ui_registry::publish_target(&format!("radial:{}", item.id), target);
         let ink = if lit { accent.ink } else { t.form_ink };
         crate::icons::paint_accented(
             &painter,
             Rect::from_center_size(at - vec2(0.0, t.space_6), vec2(t.space_24, t.space_24)),
             &item.icon,
-            crate::theme::TabAccent::current_icon_accent(ui.ctx()),
+            solidcraft_theme::TabAccent::current_icon_accent(ui.ctx()),
             1.0,
         );
-        let label = crate::i18n::tr_label(&item.label);
+        let label = solidcraft_ui_text::tr_label(&item.label);
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), FontId::proportional(t.font_small), ink);
         job.wrap.max_width = 74.0;
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
         painter.galley(at + vec2(-galley.size().x / 2.0, t.space_10), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         if lit && ui.input(|i| i.pointer.primary_clicked() && i.pointer.interact_pos().is_some_and(|p| contains(k, p - center))) {
             picked = Some(item.clone());
         }
@@ -136,14 +137,14 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         p.text(
             center - vec2(0.0, t.space_6),
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.label),
+            solidcraft_ui_text::tr_label(&item.label),
             FontId::proportional(t.font_label),
             t.form_ink,
         );
         p.text(
             center + vec2(0.0, t.space_14),
             Align2::CENTER_CENTER,
-            crate::i18n::tr_label(&item.shortcut),
+            solidcraft_ui_text::tr_label(&item.shortcut),
             FontId::monospace(t.font_small),
             t.form_dim,
         );
@@ -198,7 +199,7 @@ mod tests {
     #[test]
     fn theme_corner_extremes_keep_radial_geometry_finite_and_clicks_in_their_sectors() {
         for radius in [0, 1, 2, 16, 32] {
-            let _theme = crate::theme::scoped_tokens(Tokens { radius_xl: radius, ..Tokens::dark() });
+            let _theme = solidcraft_theme::scoped_tokens(Tokens { radius_xl: radius, ..Tokens::dark() });
             for k in 0..8 {
                 let (outer, inner) = boundaries(k);
                 assert_eq!(outer.len(), inner.len());

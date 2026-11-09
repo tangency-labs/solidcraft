@@ -725,6 +725,33 @@ fn a_design_closed_while_its_history_computes_holds_up_nothing() {
     assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.extrude"));
 }
 
+/// Closing a design or replacing it stops the kernel work still computing for it; showing another
+/// tab doesn't, since that design is still there to come back to.
+#[test]
+fn closing_a_design_stops_what_it_has_computing_and_a_tab_switch_does_not() {
+    let mut h = block_boss_hole();
+    let first = h.app.session.stop_token();
+    let copy = h.app.session.ahead();
+    crate::documents::new_tab(&mut h.app);
+    assert!(!first.is_stopped(), "only another tab shown");
+    let second = h.app.session.stop_token();
+    assert!(!second.is_stopped());
+    crate::documents::close(&mut h.app, 0, true);
+    assert!(first.is_stopped(), "the first design closed");
+    assert!(!second.is_stopped(), "this design goes on");
+    assert!(
+        copy.replies(&[("solid.box".to_string(), json!({"length": 1, "width": 1, "height": 1}))]).iter().all(Result::is_err),
+        "its job gets nowhere"
+    );
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run("file.new", json!({})).unwrap();
+    assert!(second.is_stopped(), "replaced in its tab");
+    assert!(!h.app.session.stop_token().is_stopped());
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    crate::documents::close(&mut h.app, 0, true);
+    assert!(!h.app.session.stop_token().is_stopped(), "the blank design that took the last tab's place");
+}
+
 /// A design's history command stays with its tab: another tab doesn't wait for it and doesn't get
 /// its result, even once it is in. Shown again, the design picks it up.
 #[test]

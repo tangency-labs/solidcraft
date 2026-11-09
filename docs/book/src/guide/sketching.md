@@ -10,6 +10,50 @@ plane the sketch will lie on before you click.
 keeping what changed since the sketch was created or opened for editing: a new sketch is removed,
 an edited one goes back to how it was, as one step that Undo brings back.
 
+## Step by step
+
+A first sketch: a 60 × 40 mm outline with a 12 mm hole in it, on the Top plane.
+
+**1. Start the sketch.** Click **New Sketch**. Each origin plane lights up as the pointer passes
+over it; click the flat one (Top, XY). The sketch opens with the view facing it.
+
+<video src="../media/sketching/create.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Clicking New Sketch, hovering two origin planes so each lights up, then clicking the Top plane: the view turns to face the new sketch"></video>
+
+**2. Draw.** Pick **Rectangle**, click the origin for the first corner and type the sides: 60,
+Tab, 40. Click (or press Enter) to place it. Then pick **Circle**, click a centre inside the
+rectangle, type 12 for the diameter and click. Each value you type becomes a dimension.
+
+<video src="../media/sketching/draw.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Drawing a rectangle from the origin with 60 and 40 typed into its value boxes, then a circle inside it with a 12 mm diameter typed"></video>
+
+**3. Dimension.** The rectangle is pinned by the origin and its two sides, but the circle can
+still move. Pick **Dimension**, click the circle's centre, then the left side, click where the
+dimension goes and type 20. Do the same from the bottom side. With nothing left free, the sketch
+is fully constrained and its curves turn white.
+
+<video src="../media/sketching/dimension.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Dimensioning the circle's centre 20 mm from the left side and 20 mm from the bottom side; the sketch becomes fully constrained"></video>
+
+**4. Finish.** Click **Finish Sketch** to go back to the model; the shaded region is a profile
+that Extrude can use ([Solid features](features.md)).
+
+![The finished sketch, numbered 1 to 5](../media/sketching/parts.png)
+
+**1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
+**4** The sketch's state · **5** Finish Sketch
+
+**Two more tools.** **Offset** (O) draws a copy of curves at a distance: click one side of the
+rectangle and the whole outline comes along (**Chain**), type 4 and press Enter for a wall 4 mm
+inside it. The distance is a dimension like any other.
+
+<video src="../media/sketching/offset.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Offsetting the rectangle's outline 4 mm inward with one click on its bottom side"></video>
+
+**Trim** (T) removes the piece of a curve between the curves that cross it. With a circle drawn
+on the top side, click the piece of the side inside the circle, then the half of the circle
+outside the rectangle: what's left is a notch.
+
+<video src="../media/sketching/trim.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Trimming a notch: removing the piece of the top side inside a circle, then the circle's upper half"></video>
+
+## Working in a sketch
+
 Opening a sketch turns the view to face it; to keep the view as it is and face the sketch only with **Look At**, turn off Preferences › Sketch › **Turn to face a sketch when it opens**. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
 
 In an assembly a new sketch belongs to the active component and is listed in its Sketches
@@ -166,7 +210,9 @@ zero-based index. For example:
 
 Polygon tools show their edge outline while positioning the second point, so the orientation
 can be checked before placement. Inscribed and circumscribed polygons retain their support
-circle and update the outline when the inline **Sides** value changes.
+circle and update the outline when the inline **Sides** value changes. A polygon drawn **By side**
+has a **Length** box for the side from the first click and the same **Sides** box; a typed length
+becomes a dimension of that side, and the other sides stay equal to it.
 
 **Text** is set in the built-in font (Liberation Sans) unless it is given another: `sketch.text` and
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
@@ -343,7 +389,16 @@ The solver is SolidCraft's own (damped Gauss–Newton with degree-of-freedom ana
 coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, collinear,
 midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) adds linear,
 aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, circle-to-circle,
-radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points. Each is a parameter
+radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points.
+An ellipse is drawn with its major and minor axes as construction lines through its centre
+(Preferences › Sketch › Draw ellipses with their axes; turned off, the ellipse is drawn alone,
+and D on an ellipse gives its minor radius wherever the value is pulled, as before).
+As with a Center Rectangle's diagonals, trim, extend and break stop at them, and they stay when the
+ellipse is deleted.
+Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
+end of the major axis for the minor half-axis, also on an ellipse whose axis lines were deleted;
+once one half-axis has a dimension, the next click on the ellipse gives the other;
+click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
 **Concentric** accepts two circles or arcs, or a circle or arc and a sketch point (including the
@@ -358,6 +413,11 @@ in one step. While you type, the dimension text follows the cursor, and Enter pl
 it there (or in its default place if you haven't moved the cursor) as one undo step. Esc
 cancels the dimension.
 
+The first length dimension of a sketch with nothing sized yet scales the drawing it measures
+to its value, so the shape stays as drawn; separate shapes that nothing joins keep their
+size. To have the first dimension size only what it measures, turn off **The first dimension
+scales the drawing** in Preferences › Sketch.
+
 You can still place the text first. Before you type, a click on empty sketch space puts the
 text there and keeps the value box focused; a click on another point or line makes the
 dimension a distance or angle instead; Tab leaves the picks waiting for a click to place the
@@ -367,6 +427,16 @@ To change a dimension you already have, double-click it, or, with Sketch Dimensi
 nothing picked yet, click it once: its value box opens with the value selected, Enter applies,
 and the tool stays on for the next dimension. The dimension's text always takes the click; its
 lines take it only away from sketch points and curves, which still start a new dimension.
+
+To type values in a small window instead, set **Preferences › Sketch › Dimension values** to
+**In a window**. The Dimension tool then places the text first: click what you want to
+measure, then where the text goes, and the window opens there (double-clicking a dimension
+opens it too). Its field takes the same numbers, units, expressions and parameter names as the
+box, and the sketch shows the value as you type. The arrows beside the field, Up and Down, and
+the mouse wheel over the field step a number by **Window steps** (1 mm and 1° unless you change
+them; Shift steps ten times as far, Alt a tenth), keeping the unit it is written in. The check
+(or Enter) applies the value as one undo step and the tool stays on for the next dimension; the
+cross (or Esc) drops this dimension only, and Esc with no window open puts the tool down.
 
 To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
 Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw
@@ -480,6 +550,12 @@ shared tool window. Click an input to change it; click a selected object again o
 it to remove it. Each input has its own Clear button. Source inputs show a count, and single
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
+
+If your preselection includes exactly one straight construction line of the active sketch,
+opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction
+lines in the sketch do not count unless selected. With none or multiple selected construction
+lines, choose the reference manually. You can clear or replace the line. To always choose it
+manually, turn off **Preferences > Sketch > Use the preselected construction line for Mirror**.
 
 Proposed sketch geometry appears **green** before confirmation. Change the inputs or values to
 update the preview, then press **OK**. **Cancel** discards the preview. A circular pattern centre

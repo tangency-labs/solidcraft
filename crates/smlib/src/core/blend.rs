@@ -1,7 +1,7 @@
 //! Fillets and chamfers on solidcore: the C API's composition round SMLib's fillet executive,
 //! ported from the fork's `capi/src/smlib_ops.cpp` (`blend_call`, `round_edges`,
-//! `chamfer_offsets`, `chamfer_edges`, `chamfer_radius`, `outer_faceuse`, `face_frame`,
-//! `sides_offsets`, `blend_failure`, `setbacks_fit`, `overflow_first`, `Picked`,
+//! `chamfer_edges`, `outer_faceuse`, `face_frame`,
+//! `blend_failure`, `setbacks_fit`, `overflow_first`, `Picked`,
 //! `size_ok`, `points_ok`, `tolerance_ok`, `law_ok`, `law_pinches`, `law_along`, `finish`,
 //! `smlib_fillet`, `smlib_chamfer`, `smlib_blend`, `smlib_blend_dropping`, `smlib_blend_setback`,
 //! `smlib_blend_setback_open`, `smlib_fillet_variable`, `smlib_chamfer_sides`) and
@@ -25,6 +25,7 @@ use std::sync::PoisonError;
 use solidcore::EntityRef;
 use solidcore::SolidError;
 use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::p3::{ErrorInfo, FitKind, NoRoomReason};
@@ -40,6 +41,7 @@ use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, Canon
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::query::brep::evaluate_surface_normal;
+use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2 as brep_p2;
 use solidcore::topology::brep::p2::ArenaNotifyState;
@@ -53,7 +55,7 @@ use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, VertexId, edge, vertex};
 
 use super::{Body, answer};
-use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result};
+use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
 /// (`fixes.fillet_refuse_mixed_corner_crossing_rails`, [`MIXED_CORNER_RAILS_CROSS`]): it builds no
@@ -222,41 +224,24 @@ fn mid(b: &Brep, e: EdgeId) -> solidcore::Result<f64> {
     Ok(b.edge(e)?.interval.evaluate(0.5))
 }
 
-/// `chamfer_radius`: the radius of the ball whose tangent points on the two faces of `e` lie
-/// `distance` back from the edge at its midpoint, `distance * tan(a / 2)` with `a` the angle
-/// between the directions into the faces; at a cusp (a knife edge) `distance` itself, the ball
-/// whose contacts the chamfer joins. `None` where the capi's returns false.
-fn chamfer_radius(k: &Kernel, b: &mut Brep, e: EdgeId, distance: f64) -> solidcore::Result<Option<f64>> {
-    let Some(u0) = edge::blend_edgeuse(k, b, e)? else { return Ok(None) };
-    let Some(u1) = eu_p1::radial(b, u0)? else { return Ok(None) };
-    let t = mid(b, e)?;
-    let options = BinormalOptions::default();
-    let Some(e0) = answer(evaluate_binormal(k, b, u0, t, false, &options))? else { return Ok(None) };
-    let Some(e1) = answer(evaluate_binormal(k, b, u1, t, false, &options))? else { return Ok(None) };
-    // Unitize's failure (a zero vector) is the capi's `return false`.
-    let (Ok(n0), Ok(b0), Ok(b1)) = (e0.face_normal.unitize(), e0.binormal.unitize(), e1.binormal.unitize()) else { return Ok(None) };
-    let c = b0.dot(b1).clamp(-1.0, 1.0);
-    // At a cusp (a knife edge: the faces tangent within the half degree `GetBlendEdgeuse` calls
-    // tangent, folded back on each other, the binormals the same way) a is 0 and no ball lies
-    // `distance` back along both: the chamfer is the chord between the contacts of the ball of
-    // radius `distance` (fork e96898d).
-    let cusp = c > 0.0 && b1.dot(n0).abs() < (0.5 * std::f64::consts::PI / 180.0).sin();
-    let radius = if cusp { distance } else { distance * ((1.0 - c) / (1.0 + c)).sqrt() };
-    Ok((radius.is_finite() && radius > 0.0).then_some(radius))
-}
-
-/// What `round_edges` makes: the capi's kinds less the chamfer, which `chamfer_offsets` makes.
+/// What `round_edges` makes.
 #[derive(Clone, Copy, PartialEq)]
 enum Section<'a> {
-    Round,
+    /// A circular section of constant radius (or of a variable radius's law), the turns of two
+    /// such rounds at a side edge as the [`Turn`] says (`SetSweptTurns`).
+    Round(Turn),
     /// The curvature-continuous section (`SM_FSG_BLEND_CURVE`): the Gⁿ generator's order 2 at the
     /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261 under
     /// `fillet_gn_section_generator`), which takes off what the ball's circle does.
     Curvature,
     Chord,
-    /// A chamfer, with each edge's offset of its second surface (`chamfer_offsets`' `second`;
-    /// the sizes are the first's).
-    Chamfer(&'a [f64]),
+    /// A chamfer of the sizes asked: one for all the edges or one per edge, and for each edge
+    /// the face its first size is along (empty: the blend edge use's). The kernel makes their
+    /// offsets, one pair for a tangent chain of one size.
+    Chamfer {
+        sizes: &'a [ChamferSize],
+        along: &'a [FaceId],
+    },
 }
 
 /// The faces of `b`, for `made_faces`: a face whose id is new after the operation was made by
@@ -338,6 +323,23 @@ fn room_reason(r: NoRoomReason) -> Option<crate::RoomReason> {
     })
 }
 
+/// The refusal of a swept turn `CreateFilletCorners` noted at its vertex (`SmBlendCorner::Classify`
+/// with `GetSweptTurns()`): [`Error::TurnRefused`] with solidcore's reason, without its "Fillet
+/// Error: " prefix, and where it is; `None` for a note of another kind.
+fn turn_refusal(info: &ErrorInfo<FilletObject>) -> Option<Error> {
+    let room = match info.code {
+        c if c == FilletErrorType::NoRoom as i32 => true,
+        c if c == FilletErrorType::CornerUnsupported as i32 => false,
+        _ => return None,
+    };
+    let why = info.comment.trim();
+    if why.is_empty() {
+        return None;
+    }
+    let why = why.strip_prefix("Fillet Error:").map_or(why, str::trim_start).to_owned();
+    Some(Error::TurnRefused { room, why, at: info.location.map(|p| [p.x, p.y, p.z]) })
+}
+
 /// [`blend_failure`] where solidcore gives no size.
 fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: bool) -> Error {
     if e.is_unported() {
@@ -354,13 +356,23 @@ fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: 
 }
 
 /// `e` ([`Error::TooLarge`]) with the point at the middle of `edge` of `b`, the edge its size was
-/// found for; an equal chamfer's size (its ball's radius, [`chamfer_radius`]) as its distance.
-/// Where the edge or its point can't be read the size stays as it is, with no point (a chamfer's
-/// size then is not a distance, so it is left a plain refusal).
-fn sized_on(k: &Kernel, b: &mut Brep, edge: Option<EdgeId>, section: Section<'_>, e: Error) -> solidcore::Result<Error> {
+/// found for; an equal chamfer's size (an offset, [`Section::Chamfer`]) as its distance, by the
+/// edge's own ratio of the distance asked to the offset the kernel made of it (`chamfered`: per
+/// edge of an equal chamfer, the two). Where the edge or its point can't be read the size stays
+/// as it is, with no point (a chamfer's size then is not a distance, so it is left a plain
+/// refusal).
+fn sized_on(
+    k: &Kernel,
+    b: &mut Brep,
+    edge: Option<EdgeId>,
+    section: Section<'_>,
+    chamfered: &[(EdgeId, f64, f64)],
+    e: Error,
+) -> solidcore::Result<Error> {
     let Error::TooLarge { size, kind, why, .. } = e else { return Ok(e) };
+    let chamfer = matches!(section, Section::Chamfer { .. }) && kind == crate::FitKind::Radius;
     let Some(edge) = edge else {
-        return Ok(if matches!(section, Section::Chamfer(_)) && kind == crate::FitKind::Radius { Error::NoRoom } else { e });
+        return Ok(if chamfer { Error::NoRoom } else { e });
     };
     let at = match b.edge(edge) {
         Ok(rec) => match rec.curve.as_ref() {
@@ -369,11 +381,13 @@ fn sized_on(k: &Kernel, b: &mut Brep, edge: Option<EdgeId>, section: Section<'_>
         },
         Err(_) => None,
     };
-    if matches!(section, Section::Chamfer(_)) && kind == crate::FitKind::Radius {
-        // The ball's radius is linear in the chamfer's distance along an edge.
-        return Ok(match chamfer_radius(k, b, edge, 1.0)? {
-            Some(per_mm) => Error::TooLarge { size: size / per_mm, kind: crate::FitKind::Distance, at, why },
-            None => Error::NoRoom,
+    if chamfer {
+        // The offset is linear in the distance along an edge.
+        return Ok(match chamfered.iter().find(|(e, ..)| *e == edge) {
+            Some(&(_, distance, offset)) if offset > 0.0 => {
+                Error::TooLarge { size: size / offset * distance, kind: crate::FitKind::Distance, at, why }
+            }
+            _ => Error::NoRoom,
         });
     }
     Ok(Error::TooLarge { size, kind, at, why })
@@ -431,15 +445,20 @@ fn blend_edges_stopping(
     let before = face_set(b)?;
     // The edge a sized refusal names ([`blend_failure`]), read after the session lets `b` go.
     let mut fit_edge = None;
+    // An equal chamfer's edges, each with its distance and the offset the kernel made of it.
+    let mut chamfered: Vec<(EdgeId, f64, f64)> = Vec::new();
     let done = {
         let mut s = FilletSession::new(k, b)?;
+        // `SetSweptTurns`: read as the corners are made (`fixes.fillet_blend_corner`).
+        let swept = section == Section::Round(Turn::Swept);
+        s.set_swept_turns(swept);
         // `SetFilletParameters(b, es, sections, solvers, values, laws, -1, -1, -1, -1,
         // continuity 1, thumbweight 1)`: the session sets the executive's global merge first, as
         // `SmApiFilletEdges` does, and `SetFilletParameters` resets it, as in the capi.
         let prepared = match (section, law) {
-            (Section::Round, None) => s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
+            (Section::Round(_), None) => s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
             // The size is the start radius (`smlib_fillet_variable`).
-            (Section::Round, Some(law)) => match sizes.first() {
+            (Section::Round(_), Some(law)) => match sizes.first() {
                 Some(&size) => s.prepare_variable_radius_edges(k, edges, size, law, 1, 1),
                 None => return Ok(Err(Err(Error::Argument))),
             },
@@ -449,17 +468,29 @@ fn blend_edges_stopping(
                 s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::BlendCurve], 2, GN_THUMBWEIGHT_EQUAL_AREA)
             }
             (Section::Chord, _) => s.prepare_per_edge_constant_distance(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
-            (Section::Chamfer(second), _) => chamfer_parameters(k, &mut s, edges, sizes, second),
+            (Section::Chamfer { sizes, along }, _) => s.prepare_chamfers_along(k, edges, sizes, along).map(|offsets| {
+                for (i, (&e, [r, _])) in edges.iter().zip(offsets).enumerate() {
+                    let size = sizes.get(if sizes.len() == 1 { 0 } else { i });
+                    if let Some(&ChamferSize::Distances([d, d2])) = size
+                        && d == d2
+                    {
+                        chamfered.push((e, d, r));
+                    }
+                }
+            }),
         };
         // `AddSetBackVertex` for each set-back vertex, before the corners are made: a set-back
         // vertex is no Ball (`IsSetBackVertex`, read by `ClassifyBall`), so its corner is the one
         // the setback is set on.
-        if !matches!(section, Section::Chamfer(_)) {
+        if !matches!(section, Section::Chamfer { .. }) {
             for sb in setbacks {
                 s.add_set_back_vertex(sb.vertex);
             }
         }
+        let prepared_ok = prepared.is_ok();
         let mut step = prepared.and_then(|()| s.create_corners(k, None)).map(|()| Ok(Vec::new()));
+        // A swept turn `CreateFilletCorners` refused, with solidcore's reason ([`turn_refusal`]).
+        let refused_turn = if swept && prepared_ok && step.is_err() { turn_refusal(s.error_info()) } else { None };
         // A vertex `CreateFilletCorners` made no corner for, noted before a later step notes its
         // own failure over it ([`blend_failure`]).
         let corner = step.is_ok() && s.error_info().code == FilletErrorType::CornerUnsupported as i32;
@@ -488,11 +519,14 @@ fn blend_edges_stopping(
                 }
             },
             Ok(Err(refusal)) => Ok(Err(refusal)),
-            Err(e) => {
-                let (why, edge) = blend_failure(&s, e, corner);
-                fit_edge = edge;
-                Ok(Err(Err(why)))
-            }
+            Err(e) => match refused_turn {
+                Some(why) => Ok(Err(Err(why))),
+                None => {
+                    let (why, edge) = blend_failure(&s, e, corner);
+                    fit_edge = edge;
+                    Ok(Err(Err(why)))
+                }
+            },
         }
     };
     let done: solidcore::Result<std::result::Result<(Vec<usize>, Vec<(usize, FaceId)>), std::result::Result<usize, Error>>> = done;
@@ -501,7 +535,7 @@ fn blend_edges_stopping(
         Err(refusal) => {
             b.refresh_cached_topology();
             return Ok(Err(match refusal {
-                Err(e @ Error::TooLarge { .. }) => Err(sized_on(k, b, fit_edge, section, e)?),
+                Err(e @ Error::TooLarge { .. }) => Err(sized_on(k, b, fit_edge, section, &chamfered, e)?),
                 r => r,
             }));
         }
@@ -543,16 +577,6 @@ fn blend_edges_stopping(
     Ok(Ok(()))
 }
 
-/// `chamfer_offsets`' `SetFilletParameters(b, es, kinds, solvers, first, NULL, -1, -1, -1, -1,
-/// 1, 1.0, &second)` with every kind `SM_FSG_LINEAR` and every solver `SM_FS_CONST_RADIUS`, as the
-/// fork's `SetFilletParameters` runs it (its `pOptSecondRadii`, fork f653ac9).
-fn chamfer_parameters(k: &mut Kernel, s: &mut FilletSession<'_>, edges: &[EdgeId], first: &[f64], second: &[f64]) -> solidcore::Result<()> {
-    if edges.is_empty() {
-        return Ok(());
-    }
-    s.prepare_per_edge_constant_radius_with_second(k, edges, first, second, &[FilletSurfaceGeneratorType::Linear], 1, 1.0)
-}
-
 /// The corners' part of `round_edges` / `chamfer_offsets`: a chamfer's corners bevelled; each
 /// setback set on its vertex's corner (`GetFilletCornerOfVertex`), which must be an
 /// `SM_FCR_N_x_N_CONVEX` corner or a blend corner whose event is the setback (`SM_FCR_BLEND` with
@@ -564,7 +588,7 @@ fn corners(
     setbacks: &[SetBack],
 ) -> solidcore::Result<std::result::Result<Vec<usize>, std::result::Result<usize, Error>>> {
     let ids = s.fillet_corners()?;
-    if matches!(section, Section::Chamfer(_)) {
+    if matches!(section, Section::Chamfer { .. }) {
         for id in ids {
             s.set_corner_bevel(id, true)?;
         }
@@ -825,9 +849,9 @@ pub(crate) fn blend(
 
 /// `smlib_blend_dropping`: [`blend`] with one size per point, no corners, and per point whether it
 /// picked an edge that a larger round, overflowing its faces, removed whole.
-pub(crate) fn blend_dropping(body: &Body, kind: Blend, points: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Body, Vec<bool>)> {
+pub(crate) fn blend_dropping(body: &Body, kind: Blend, turn: Turn, points: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Body, Vec<bool>)> {
     let mut dropped = vec![false; points.len()];
-    let (b, _) = blend_call(body, kind, points, sizes, tolerance, &[], &[], Corners::Filled, &mut dropped)?;
+    let (b, _) = blend_call(body, kind, turn, points, sizes, tolerance, &[], &[], Corners::Filled, &mut dropped)?;
     Ok((b, dropped))
 }
 
@@ -846,15 +870,17 @@ pub(crate) fn blend_holes(
     setbacks: &[f64],
     open: Corners,
 ) -> Result<(Body, Vec<Hole>)> {
-    blend_call(body, kind, points, sizes, tolerance, corners, setbacks, open, &mut vec![false; points.len()])
+    blend_call(body, kind, Turn::Mitre, points, sizes, tolerance, corners, setbacks, open, &mut vec![false; points.len()])
 }
 
 /// `blend_call`: [`blend_holes`], with per point in `dropped` whether it picked an edge an
-/// overflowing round removed whole ([`overflow_first`]).
+/// overflowing round removed whole ([`overflow_first`]), and the rounds' turns at side edges as
+/// `turn` says (a swept turn is for [`Blend::Round`] only).
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
 fn blend_call(
     body: &Body,
     kind: Blend,
+    turn: Turn,
     points: &[[f64; 3]],
     sizes: &[f64],
     tolerance: f64,
@@ -869,6 +895,7 @@ fn blend_call(
         || !(one_size || sizes.len() == points.len())
         || !points_ok(corners, true)
         || setbacks.len() != corners.len()
+        || (turn == Turn::Swept && kind != Blend::Round)
     {
         return Err(Error::Argument);
     }
@@ -898,23 +925,18 @@ fn blend_call(
         }
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let section = match kind {
-            Blend::Round => Section::Round,
+            Blend::Round => Section::Round(turn),
             // Every edge of one call takes the equal-area thumbweight of the first's wedge
             // (solidcore#2250's comment 6563419897): edges of other wedges would take off another
             // area than their own, so they are not built together.
             Blend::Curvature if !one_wedge(k, &mut w, &picked)? => return Ok(Err(Error::Unported(CURVATURE_MIXED_WEDGES))),
             Blend::Curvature => Section::Curvature,
             Blend::Chord => Section::Chord,
-            // `chamfer_edges`: each edge's offsets from its setback at its midpoint.
+            // `chamfer_edges`: the sizes asked; the kernel makes each edge's offsets.
             Blend::Chamfer => {
-                let mut radii = Vec::with_capacity(picked.len());
-                for (&e, &d) in picked.iter().zip(&each) {
-                    match chamfer_radius(k, &mut w, e, d)? {
-                        Some(r) => radii.push(r),
-                        None => return Ok(Err(Error::Status(INVALID_INPUT))),
-                    }
-                }
-                return Ok(match blend_edges(k, &mut w, &picked, &radii, Section::Chamfer(&radii), None, &[], None)? {
+                let chamfers: Vec<ChamferSize> = each.iter().map(|&d| ChamferSize::Distances([d, d])).collect();
+                let section = Section::Chamfer { sizes: &chamfers, along: &[] };
+                return Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
                     Ok(()) => finish(w, solid_in)?,
                     Err(Ok(_)) => Err(Error::Unsupported),
                     Err(Err(e)) => Err(e),
@@ -1134,39 +1156,6 @@ fn face_frame(k: &Kernel, b: &mut Brep, u: EdgeuseId) -> solidcore::Result<Optio
     Ok(Some((normal * (sign / len), at.binormal)))
 }
 
-/// `sides_offsets`: the surface offsets of `e` (its blend edge use's surface first) at which
-/// `chamfer_offsets` cuts a chamfer `d1` back along the face whose outward normal at the edge's
-/// midpoint leans most along `up`, and `second` back along the other (or at the angle `second`
-/// to the first face). With b0, b1 the directions into the faces and θ the angle between them,
-/// setbacks s0, s1 lie at offsets r0 = (s1 - s0 cos θ) / sin θ and r1 = (s0 - s1 cos θ) / sin θ;
-/// an angle φ to the first face gives s1 = s0 sin φ / sin(θ + φ).
-fn sides_offsets(k: &Kernel, b: &mut Brep, e: EdgeId, d1: f64, second: ChamferSecond, up: Vec3) -> solidcore::Result<Option<(f64, f64)>> {
-    let Some(u0) = edge::blend_edgeuse(k, b, e)? else { return Ok(None) };
-    let Some(u1) = eu_p1::radial(b, u0)? else { return Ok(None) };
-    let (Some((n0, b0)), Some((n1, b1))) = (face_frame(k, b, u0)?, face_frame(k, b, u1)?) else { return Ok(None) };
-    let c = b0.dot(b1).clamp(-1.0, 1.0);
-    let sn = (1.0 - c * c).max(0.0).sqrt();
-    if !(sn > 1e-6) {
-        return Ok(None);
-    }
-    let mut s0 = d1;
-    let mut s1 = match second {
-        ChamferSecond::Distance(d) => d,
-        ChamferSecond::Angle(phi) => {
-            let d = (c.acos() + phi).sin();
-            if !(d > 1e-9) {
-                return Ok(None);
-            }
-            d1 * phi.sin() / d
-        }
-    };
-    if n1.dot(up) > n0.dot(up) {
-        std::mem::swap(&mut s0, &mut s1);
-    }
-    let (r0, r1) = ((s1 - s0 * c) / sn, (s0 - s1 * c) / sn);
-    Ok((r0.is_finite() && r1.is_finite() && r0 > 0.0 && r1 > 0.0).then_some((r0, r1)))
-}
-
 /// `smlib_chamfer_sides`: the edges nearest `points` chamfered `distance` back along the face
 /// whose outward normal leans most along `first`, and by `second` on the other, with bevelled
 /// corners.
@@ -1188,17 +1177,20 @@ pub(crate) fn chamfer_sides(body: &Body, points: &[[f64; 3]], tolerance: f64, di
             Err(m) => return Ok(Err(edge_miss(m))),
         };
         let solid_in = brep_p2::is_manifold_solid(&w)?;
-        let (mut r0, mut r1) = (Vec::with_capacity(picked.len()), Vec::with_capacity(picked.len()));
+        // The first size is along the face leaning most along `up`.
+        let mut along = Vec::with_capacity(picked.len());
         for &e in &picked {
-            match sides_offsets(k, &mut w, e, distance, second, up)? {
-                Some((a, b)) => {
-                    r0.push(a);
-                    r1.push(b);
-                }
+            match answer(faces_along(k, &mut w, e, up))? {
+                Some([(f0, l0), (f1, l1)]) => along.push(if l1 > l0 { f1 } else { f0 }),
                 None => return Ok(Err(Error::Status(INVALID_INPUT))),
             }
         }
-        Ok(match blend_edges(k, &mut w, &picked, &r0, Section::Chamfer(&r1), None, &[], None)? {
+        let size = match second {
+            ChamferSecond::Distance(d) => ChamferSize::Distances([distance, d]),
+            ChamferSecond::Angle(angle) => ChamferSize::DistanceAngle { distance, angle },
+        };
+        let section = Section::Chamfer { sizes: std::slice::from_ref(&size), along: &along };
+        Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
             Ok(()) => finish(w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
@@ -1380,7 +1372,7 @@ pub(crate) fn fillet_variable(
         // (`NoRoomReason::BallsFold`), [`Error::NoRoom`].
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let (r0, r1) = (radii.first().copied().unwrap_or(0.0), radii.last().copied().unwrap_or(0.0));
-        Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round, Some(law), &[], None)? {
+        Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round(Turn::Mitre), Some(law), &[], None)? {
             Ok(()) => finish(w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
