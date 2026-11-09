@@ -1,0 +1,45 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 40,
+    "height": 10,
+    "body_name": "Base"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     100,
+     0,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.align",
+   "params": {
+    "bodies": [
+     "Block"
+    ],
+    "from_face": [
+     105,
+     5,
+     0
+    ],
+    "to_face": [
+     20,
+     20,
+     10
+    ]
+   }
+  }
+ ]
+}

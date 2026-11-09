@@ -1,0 +1,786 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4163",
+  "why": "UI only: keyboard shortcut editor"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4164",
+  "why": "no geometry: the settings file damaged by two windows saving (app)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4184",
+  "why": "no reproduction: Split Body of a user's part by a plane (0.16.2, 88 bodies), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4190",
+  "why": "UI only: a request to look like another CAD program"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4193",
+  "why": "no geometry: sketch Mirror about an origin axis (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4195",
+  "why": "no reproduction: a join of four flush profiles on a user's part with 26 cylinder faces, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4210",
+  "why": "duplicate of booleans/831-tapered-extrude-d-shape-arc-meets-line: a tapered cut whose arcs meet lines at corners (0.16.2)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4211",
+  "why": "no reproduction: last command only (a 10 mm join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4213",
+  "why": "no reproduction: last command only, the unexpected result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4214",
+  "why": "UI only: the viewport grid fade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4218",
+  "why": "no reproduction: Combine of columns with a wall shown by screenshot, no message"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4224",
+  "why": "no kernel geometry: a cut reaching a hidden body (target choice, dup of #3961)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4240",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4249",
+  "why": "no reproduction: last command and a screenshot of an unknown part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4259",
+  "why": "no geometry: an offset plane can't attach to a face whose history is ambiguous (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4262",
+  "why": "no reproduction: last command only, the unexpected result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4273",
+  "why": "no geometry: posted by mistake, empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4278",
+  "why": "no reproduction: last command only (a face cut on an unknown 3-feature part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4287",
+  "why": "UI only: a selection size readout (dup of #2314)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4289",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4316",
+  "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4317",
+  "why": "no reproduction: a ring cut by two inner parts, no sizes or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4348",
+  "why": "no reproduction: no message, no command and no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4355",
+  "why": "no geometry: a cut in a component other than the active one (document, dup of #4639)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4361",
+  "why": "needs the user design: a revolved and lofted leaf-blower body with 25 features; no small stand-in shows the same geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4383",
+  "why": "no reproduction: last command only (a cut leaving touching lumps, 0.17.0), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4384",
+  "why": "UI only: one position input for features placed on a face (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4388",
+  "why": "UI only: a selection size readout (dup of #2314)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4394",
+  "why": "no geometry: the macOS disk image freezes Finder"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4401",
+  "why": "no reproduction: last command only, and the reporter says it no longer fails that way"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4408",
+  "why": "no reproduction: last command only (a 38 mm join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4412",
+  "why": "UI only: no preview while dragging a sketch pattern's spacing"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4413",
+  "why": "no geometry: a cut in a component other than the active one (document, dup of #4639)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4417",
+  "why": "UI only: browser hover highlight"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4421",
+  "why": "no geometry: renames lose plastic rules and hidden state (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4424",
+  "why": "no geometry: a cut in a component other than the active one (document, dup of #4639)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4433",
+  "why": "no geometry: a sheet-metal hole the flat pattern can't keep is refused by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4434",
+  "why": "duplicate of the rig's join-that-meets-nothing case (#2896): a join apart from the body keeps it as a lump, without a warning"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4435",
+  "why": "no geometry: a sketch pattern's count parameter link not kept (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4437",
+  "why": "no reproduction: a screenshot of an unknown part, no message"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4443",
+  "why": "no geometry: a saved model cache refused after a boolean retry (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4448",
+  "why": "no reproduction: a body patterned about a tilted axis, the body and the wrong result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4458",
+  "why": "no reproduction: a mirror redefined on an unknown part, the result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4477",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4481",
+  "why": "no reproduction: last command only (a hole), the unexpected result not described"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4488",
+  "why": "no kernel geometry: Emboss refuses a concave cylinder face (the emboss command's stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4489",
+  "why": "UI only: Move point-to-point takes the rim point of a picked circle"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4502",
+  "why": "render: the sketch viewport turns blue on old Intel graphics"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4509",
+  "why": "no geometry: an offset plane can't attach to a face whose history is ambiguous (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4516",
+  "why": "no reproduction: a sketch loop past the profile curve budget; 400- and 600-segment loops extrude, the sketch is not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4523",
+  "why": "no geometry: a join onto a mesh body is refused by design (dup of #3038)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4530",
+  "why": "no reproduction: last command only (a join of two bodies), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4532",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4534",
+  "why": "no reproduction: \"profile loop is not closed\" on an unknown sketch"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4544",
+  "why": "UI only: a Norwegian translation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4551",
+  "why": "no reproduction: last command and a screenshot of an unknown part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4557",
+  "why": "no reproduction: STL export T-junctions on a user's STEP-imported part (the file is the reporter's)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4563",
+  "why": "UI only: a section hatch option"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4572",
+  "why": "no kernel geometry: a join from a sketch on a face defaults to that face's body (target choice)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4582",
+  "why": "UI only: shortcut names"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4584",
+  "why": "no geometry: an offset plane can't attach to a face whose history is ambiguous (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4589",
+  "why": "UI only: expression suggestions over a slider"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4593",
+  "why": "no geometry: a Rib can't be patterned yet (a stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4594",
+  "why": "no reproduction: a projected-face warning in a sketch, no steps or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4597",
+  "why": "no reproduction: last command only (a 20 mm cut), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4600",
+  "why": "no reproduction: last command only (a 20 mm cut), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4619",
+  "why": "no kernel geometry: Emboss on a cylinder takes lines square to the axis only (the emboss command's stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4621",
+  "why": "render: section caps of touching bodies drawn in patches"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4624",
+  "why": "no reproduction: last command only (a two-sided join), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4636",
+  "why": "UI only: 3D mouse navigation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4639",
+  "why": "no geometry: a cut in a component other than the active one (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4643",
+  "why": "UI only: extrude dialog keyboard focus after a profile click"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4658",
+  "why": "UI only: ribbon recomputes its panels every frame"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4685",
+  "why": "needs the user design: a 20-feature shelled part cut by a 2.7 mm3 body; no small stand-in"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4706",
+  "why": "needs the user design: a housing of tangent arcs with cut pockets; no small stand-in shows the same geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4714",
+  "why": "no reproduction: Snap Fit on one half of a split user part, the position not on the named body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4723",
+  "why": "no geometry: holes on an unfolded sheet-metal flat pattern are refused by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4728",
+  "why": "no reproduction: a test hinge of two bodies from one sketch, screenshots only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4731",
+  "why": "no geometry: a sheet-metal cut the flat pattern can't keep is refused by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4733",
+  "why": "no reproduction: last command only (a face cut on an unknown part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4741",
+  "why": "no geometry: a construction axis as the pattern axis (command parameters, dup of #2885)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4750",
+  "why": "no geometry: a two-curve sketch extend (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4753",
+  "why": "no geometry: five text profiles were picked where one was meant (user selection)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4755",
+  "why": "no reproduction: last command only (a fender cut on an unknown part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4756",
+  "why": "no reproduction: a DXF logo cut from a user's curved face (105 freeform faces), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4760",
+  "why": "no geometry: a sketch weld tool (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4761",
+  "why": "no kernel geometry: Emboss refuses a conical face (the emboss command's stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4763",
+  "why": "no kernel geometry: path pattern copies placed in the wrong frame (pattern placement, engine)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4783",
+  "why": "no geometry: material name and density looked up apart (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4798",
+  "why": "no geometry: an edge-midpoint rectangle (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4800",
+  "why": "no reproduction: a cut not updating after a sketch edit, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4803",
+  "why": "no reproduction: the second defect is shown only by screenshots of the user's part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4805",
+  "why": "no geometry: an offset plane can't attach to a face whose history is ambiguous (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4807",
+  "why": "UI only: a placed hole shows a drag cursor"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4810",
+  "why": "no geometry: no circle-to-circle sketch dimension (dup of #4064)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4818",
+  "why": "UI only: first-run setup (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4826",
+  "why": "no geometry: user error (a line not horizontal), withdrawn"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4827",
+  "why": "UI only: draft corner rules in the dialog (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4831",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4852",
+  "why": "no reproduction: a screw-hole cut in a user's part shown by screenshot; the design is off GitHub"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4853",
+  "why": "no geometry: sketch edits on a turned component are slow (evaluation frames)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4856",
+  "why": "no geometry: an M2 thread in a 2 mm hole is refused by design (tap drill 1.6)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4862",
+  "why": "UI only: sketch-on-face contrast"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4865",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4881",
+  "why": "no reproduction: an extrude to an imported STEP made from a mesh in another CAD program, no file"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4883",
+  "why": "no reproduction: \"couldn't extrude after a loft and patch\", no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4885",
+  "why": "UI only: positioning a hole while placing it (dup of #4384)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4910",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4911",
+  "why": "no geometry: a join to-object where a cut was meant (\"nothing lies between\"), user error"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4917",
+  "why": "no reproduction: an extrude to a curved face on an unknown part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4921",
+  "why": "no reproduction: a 0.6 mm join on a 44-feature user part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4922",
+  "why": "UI only: theme corner radii"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4928",
+  "why": "no geometry: plugin commands (RFC)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4937",
+  "why": "no geometry: a Mirror feature can't itself be mirrored yet (a stated limit, dup of #395)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4943",
+  "why": "no reproduction: last command only (a 4 mm cut of two profiles), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4945",
+  "why": "no reproduction: last command only (a 10 mm join), no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4955",
+  "why": "UI only: moving a placed hole (dup of #5399)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4957",
+  "why": "no geometry: body auto-names reused after a rename (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4967",
+  "why": "UI only: sketch snap to curve intersections"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4974",
+  "why": "UI only: a construction plane can't be picked as an extrude's To Object (the command takes it)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5002",
+  "why": "no reproduction: Split Body by an offset plane leaving touching lumps, a user's roof part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5032",
+  "why": "no geometry: sketch mirror lines not offered after the sketch is finished (UI)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5039",
+  "why": "no reproduction: a cylinder joined on a user's swept body; the design was mailed, not attached"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5040",
+  "why": "no geometry: an offset plane can't attach to a face after a draft and a shell (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5044",
+  "why": "no reproduction: Draft pick point misses the face on a user's 3-body part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5066",
+  "why": "no geometry: sketch pattern counts lose their parameter (sketch, dup of #5231)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5072",
+  "why": "no reproduction: last command only (a 2 mm cut on 0.16.2), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5073",
+  "why": "no reproduction: a slow join of two bodies of a user's part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5075",
+  "why": "no geometry: a cut into a mesh body is refused by design (the part was opened from STL)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5078",
+  "why": "UI only: the Parameters window's size"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5080",
+  "why": "UI only: reordering ribbon drop-downs"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5082",
+  "why": "UI only: Combine's body inputs not filling (screenshot)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5089",
+  "why": "no geometry: render settings validation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5106",
+  "why": "no reproduction: four circles cut into a user's cylinder at once compute for long, no sizes"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5111",
+  "why": "render: Direct3D 12 glitches on a GTX 1060"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5123",
+  "why": "no reproduction: a 5 mm join that never finishes on a user's part, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5135",
+  "why": "no geometry: a construction axis as the pattern axis (command parameters, fixed in 0.20.0)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5136",
+  "why": "no reproduction: Split Body of a user's profile part by a plane, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5142",
+  "why": "UI only: Combine doesn't take bodies picked in the browser (dup of #4452)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5156",
+  "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5171",
+  "why": "no reproduction: last command only (a 26 mm cut on a 56-feature part), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5172",
+  "why": "no kernel geometry: extrude without profiles takes every region, islands included (command default)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5175",
+  "why": "no geometry: a joint origin's name given as a face (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5180",
+  "why": "no reproduction: a cut on a user's 20 m model never finishes, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5185",
+  "why": "no geometry: joint solver work while dragging (performance)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5198",
+  "why": "no kernel geometry: a face name stored on one kernel resolves to another face on the other (naming across kernels; the rig runs one kernel)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5199",
+  "why": "UI only: dragging sketch points and dimension numbers"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5201",
+  "why": "no kernel geometry: Deboss needs a complete cylinder or coaxial sleeve (the emboss command's stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5222",
+  "why": "no reproduction: cuts on a user's STEP freeze on 0.19.0; they work on 0.20.0 with the file from #5344"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5225",
+  "why": "no geometry: a cut into a mesh body is refused by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5226",
+  "why": "no geometry: a request to normalise sheet-metal cut faces (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5227",
+  "why": "UI only: the web build takes the browser's tab shortcuts"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5231",
+  "why": "no geometry: a sketch pattern's spacing parameter link lost (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5234",
+  "why": "no reproduction: a cut through a surface body shown by screenshot, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5239",
+  "why": "no reproduction: Split Face fails, no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5266",
+  "why": "no reproduction: a cut on a user's part with 94 cylinder faces, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5276",
+  "why": "no geometry: a face profile from a repeated component needs its occurrence active (document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5280",
+  "why": "no geometry: a sketch pattern past the solver's 4000 unknowns (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5284",
+  "why": "needs the user design: a ring nozzle swept and chamfered, joined on coincident cone/cylinder/torus faces"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5285",
+  "why": "no geometry: the report arrived empty (a screenshot)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5288",
+  "why": "UI only: Mirror's feature input cleared on switching type"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5289",
+  "why": "no geometry: sketch Mirror about an origin axis (dup of #4193)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5297",
+  "why": "UI only: sketch snap to line intersections (dup of #4678)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5302",
+  "why": "no kernel geometry: projected face edges split a sketch's region, the extrude takes one (profile picking)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5304",
+  "why": "UI only: undo while drawing a spline"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5305",
+  "why": "UI only: a selection length readout (dup of #2314)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5313",
+  "why": "no geometry: a sketch pattern's seed entities can't be changed (sketch, by design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5327",
+  "why": "no geometry: sketch pattern counts and spacing as parameters (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5336",
+  "why": "UI only: the sketch stays hidden while editing its extrude"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5344",
+  "why": "no geometry: an imported STEP cut that works on 0.20.0 (the reporter confirms; dup of #5222)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5348",
+  "why": "no reproduction: a join refused by the volume check on a part shown by screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5351",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5358",
+  "why": "no kernel geometry: Emboss of text on a cylinder (lines square to the axis only, a stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5369",
+  "why": "UI only: Wayland by default"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5374",
+  "why": "no geometry: projecting a face seen edge-on (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5385",
+  "why": "UI only: sketch palette layout"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5386",
+  "why": "UI only: an Onshape-style shortcut set (declined)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5390",
+  "why": "no geometry: a zero move of a body (moving holes, dup of #5399)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5392",
+  "why": "UI only: a design's own units vs the preference"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5394",
+  "why": "UI only: shortcut recording (dup of #1809)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5396",
+  "why": "no geometry: moving a hole after it's made (feature request, dup of #5399)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5399",
+  "why": "no geometry: moving a hole after it's made (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5400",
+  "why": "no reproduction: last command only (a face cut on an unknown part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5402",
+  "why": "no geometry: a Mirror feature can't itself be mirrored yet (dup of #395)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5403",
+  "why": "no reproduction: a cut whose facets cross \"could not be intersected\", a user's hinge, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5405",
+  "why": "duplicate of #5403: the same combine cut warning, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5408",
+  "why": "no reproduction: last command only (a cut leaving touching lumps), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5414",
+  "why": "no reproduction: Extrude To Body shown by screenshots only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5418",
+  "why": "no reproduction: last command only (a cut leaving touching lumps), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5431",
+  "why": "UI only: base planes not pickable behind a body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5433",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5434",
+  "why": "no geometry: no profile picked and a design from a newer file format (user error)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5447",
+  "why": "UI only: error messages are not translated"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5452",
+  "why": "no reproduction: a through-all cut of a part from two sketches, screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5457",
+  "why": "UI only: a revolute joint's axis can't be set along an edge (joint dialog)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5458",
+  "why": "UI only: tab management"
+ }
+]

@@ -2,8 +2,9 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use super::{
-    ConvertParams, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FoldParams, FoldPoints, FoldPosition, HeightFromParam,
-    HemParams, PerforateParams, PerforationPattern, ReliefShapeParam, SheetPoints, ThenSteps, UnfoldParams,
+    BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam,
+    FlatPatternParams, FlatPatternResult, FoldParams, FoldPoints, FoldPosition, HeightFromParam, HemParams, PathFlangeParams, PerforateParams,
+    PerforationPattern, ReliefShapeParam, SheetEdgePoint, SheetPoints, ThenSteps, UnfoldParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -64,11 +65,14 @@ fn schemas_and_the_key_check_agree() {
             "type",
         ]),
     );
-    assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch"]));
+    assert_keys(input_schema_for::<PerforateParams>(), &keys(&["body", "diameter", "margin", "pattern", "pitch", "profiles", "sketch"]));
     assert_keys(input_schema_for::<HemParams>(), &keys(&["body", "edges", "flip", "gap", "length"]));
     assert_keys(input_schema_for::<FoldParams>(), &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch"]));
     assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));
     assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "face", "rule"]));
+    assert_keys(input_schema_for::<PathFlangeParams>(), &keys(&["body", "curves", "edge", "radius", "sketch"]));
+    assert_keys(input_schema_for::<FlatPatternParams>(), &["body"]);
+    assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
 }
 
 fn parse<T: DeserializeOwned>(v: Value) -> Option<T> {
@@ -157,6 +161,7 @@ fn the_value_types_match_the_readers() {
     }
     for (v, ok) in [(json!([1, 2, 3]), true), (json!({"x": 1, "y": 2, "z": 3}), true), (json!([1, 2]), false), (json!(null), false)] {
         assert_eq!(takes::<FixedPoint>(&v), ok, "{v}");
+        assert_eq!(takes::<SheetEdgePoint>(&v), ok, "{v}");
     }
     for (v, ok) in [
         (json!("staggered"), true),
@@ -185,6 +190,17 @@ fn the_value_types_match_the_readers() {
     words(&["outer", " Inner ", "TANGENT"], &[json!("sharp"), json!(""), json!(5)], &|v| parse::<HeightFromParam>(v).is_some());
     words(&["centerline", "Start", "END", "mould", "Mold"], &[json!("center"), json!("side"), json!(null)], &|v| parse::<FoldPosition>(v).is_some());
     words(&["notch", " Round ", "rectangular", "TEAR"], &[json!("oval"), json!(""), json!(5)], &|v| parse::<ReliefShapeParam>(v).is_some());
+    // A bend table's format: what the handler reads, in any case but without blanks.
+    let formats = ["csv", "CSV", "Json", "jSoN"];
+    words(&formats, &[json!(" csv"), json!("xml"), json!(""), json!(5), json!(null)], &|v| parse::<BendTableFormatParam>(v).is_some());
+    for f in formats {
+        assert!(crate::cmd::bend_table_format(f).is_some(), "{f}");
+    }
+    for f in [" csv", "csv ", "xml", "", "ｃｓｖ"] {
+        assert!(crate::cmd::bend_table_format(f).is_none(), "{f}");
+    }
+    let format = input_schema_for::<BendTableFormatParam>();
+    assert_eq!(format.as_value()["pattern"], "^([Cc][Ss][Vv]|[Jj][Ss][Oo][Nn])$");
 }
 
 #[test]
@@ -218,6 +234,14 @@ fn strict_keeps_todays_errors() {
         ("sheet.fold", json!({"points": [[0, 0, 0], [10, 0, 0]], "fixed": null})),
         ("sheet.fold", json!({"sketch": true, "curve": "l1"})),
         ("sheet.convert", json!({"body": "Nothing", "face": [0, 0, 0]})),
+        ("sheet.path_flange", json!({"edge": [1, 2], "sketch": "Path", "curves": ["p1"]})),
+        ("sheet.path_flange", json!({"edge": null, "sketch": "Path", "curves": ["p1"]})),
+        ("sheet.path_flange", json!({"edge": [1, 0, 20], "sketch": true, "curves": ["p1"]})),
+        ("sheet.flat_pattern", json!({})),
+        ("sheet.flat_pattern", json!({"body": "Nothing"})),
+        ("sheet.export_bend_table", json!({"format": "xml"})),
+        ("sheet.export_bend_table", json!({"format": " csv", "body": "Nothing"})),
+        ("sheet.export_bend_table", json!({"format": "JSON", "body": "Nothing"})),
     ]);
     // Calls that get past the handler's first checks only on a sheet.
     for (id, p) in [
@@ -227,6 +251,10 @@ fn strict_keeps_todays_errors() {
         ("sheet.convert", json!({"body": "Plate", "face": [50, 130, 2.5], "bends": [[1, 2]]})),
         ("sheet.convert", json!({"body": "Plate", "face": ""})),
         ("sheet.convert", json!({"body": "Plate", "face": true})),
+        ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": []})),
+        ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": vec!["l1"; 65]})),
+        ("sheet.path_flange", json!({"edge": [50, 0, 2.5], "sketch": "Base", "curves": ["l1"], "radius": "2 deg"})),
+        ("sheet.export_bend_table", json!({"format": "yaml"})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = sheet();
@@ -354,4 +382,308 @@ fn replies_match_the_output_schema() {
     let r = s.execute("sheet.unfold", &json!({"bodies": "x"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.get("param_warnings").is_some(), "{r}");
     check(r);
+}
+
+#[test]
+fn rule_commands_publish_contracts_and_refuse_unknown_keys() {
+    for id in ["sheet.rules", "sheet.manage_rules"] {
+        let spec = crate::command_specs().into_iter().find(|c| c.id == id).unwrap();
+        assert!(spec.contract.is_some() && spec.output.is_some(), "{id}: input schema missing");
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        let p = if id == "sheet.rules" { json!({"unknown_key": true}) } else { json!({"name": "Test", "thikness": 1}) };
+        assert!(s.execute(id, &p).is_err(), "{id}: unknown key accepted");
+        assert!(s.doc.sheet.rules.is_empty());
+    }
+}
+
+#[test]
+fn rule_contract_keys_and_readers_match() {
+    use super::{AngleDisplayParam, ManageRulesParams, RuleName, RulesParams};
+    assert_keys(input_schema_for::<RulesParams>(), &[]);
+    assert_keys(
+        input_schema_for::<ManageRulesParams>(),
+        &[
+            "active",
+            "angle_display",
+            "bend_radius",
+            "corner_relief",
+            "corner_relief_shape",
+            "delete",
+            "gap",
+            "hem_gap",
+            "k_factor",
+            "name",
+            "relief_depth",
+            "relief_width",
+            "thickness",
+        ],
+    );
+    for (text, valid) in [("bend", true), (" INCLUDED ", true), ("\u{2003}BeNd\u{2003}", true), ("outside", false)] {
+        assert_eq!(parse::<AngleDisplayParam>(json!(text)).is_some(), valid);
+    }
+    assert!(parse::<AngleDisplayParam>(json!(false)).is_none());
+    for v in [json!(null), json!(false), json!(1), json!(""), json!(" \n "), json!("a".repeat(129)), json!("é".repeat(65))] {
+        assert!(parse::<RuleName>(v).is_none());
+    }
+    assert_eq!(parse::<RuleName>(json!("  My rule  ")).unwrap().0, "My rule");
+    assert!(parse::<RuleName>(json!("é".repeat(64))).is_some());
+    let pattern = input_schema_for::<AngleDisplayParam>();
+    assert!(pattern.as_value()["pattern"].as_str().unwrap().contains(&super::blanks()));
+    assert_strict_keeps_todays_errors(&[
+        ("sheet.manage_rules", json!({"name": null})),
+        ("sheet.manage_rules", json!({"name": true})),
+        ("sheet.manage_rules", json!({"name": "  "})),
+        ("sheet.manage_rules", json!({"name": "a".repeat(129)})),
+        ("sheet.manage_rules", json!({"name": "R", "angle_display": "outer"})),
+        ("sheet.manage_rules", json!({"name": "R", "angle_display": 5})),
+        ("sheet.manage_rules", json!({"name": "R", "corner_relief_shape": "oval"})),
+        ("sheet.manage_rules", json!({"name": "R", "thickness": -1})),
+        ("sheet.manage_rules", json!({"name": "R", "k_factor": 2})),
+        ("sheet.manage_rules", json!({"name": "Missing", "delete": true})),
+    ]);
+}
+
+/// Run all rule forms in Warn, compare with Off, and pin the successful reply shapes.
+#[test]
+fn rule_replies_match_the_output_schemas_without_warnings() {
+    use super::{ManageRulesResult, RulesResult};
+    let mut off = Session::default();
+    let mut warn = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let calls = [
+        ("sheet.rules", json!({})),
+        (
+            "sheet.manage_rules",
+            json!({"name": "  Metric  ", "thickness": 2, "k_factor": "0.4", "bend_radius": "Thickness / 2",
+            "relief_width": 1, "relief_depth": "Thickness", "corner_relief": 3, "corner_relief_shape": " Round ",
+            "hem_gap": 0.1, "gap": "Thickness / 2", "angle_display": " INCLUDED ", "active": true}),
+        ),
+        (
+            "sheet.manage_rules",
+            json!({"name": "Metric", "thickness": "3 mm", "k_factor": 0.5, "bend_radius": 1,
+            "relief_width": "1 mm", "relief_depth": 2, "corner_relief": "3 mm", "corner_relief_shape": "tear",
+            "hem_gap": "0.2 mm", "gap": 2, "angle_display": "BeNd", "active": false, "delete": false}),
+        ),
+        ("sheet.manage_rules", json!({"name": "Other"})),
+        (
+            "sheet.manage_rules",
+            json!({"name": "Other", "thickness": null, "k_factor": null, "bend_radius": null,
+            "relief_width": null, "relief_depth": null, "corner_relief": null, "corner_relief_shape": null,
+            "hem_gap": null, "gap": null, "angle_display": null, "active": null, "delete": null}),
+        ),
+        ("sheet.rules", json!({})),
+        ("sheet.manage_rules", json!({"name": "Other", "active": true})),
+        ("sheet.manage_rules", json!({"name": "Metric", "delete": true})),
+        ("sheet.manage_rules", json!({"name": "Other", "delete": true})),
+        ("sheet.rules", json!({})),
+    ];
+    for (id, p) in calls {
+        let a = off.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        let b = warn.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert_eq!(a, b, "{id} {p}");
+        assert!(b.get("param_warnings").is_none(), "{id} {p}: {b}");
+        let schema = if id == "sheet.rules" { output_schema_for::<RulesResult>() } else { output_schema_for::<ManageRulesResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &b), "{id}: {b}");
+        if let Some(rule) = b.get("rule") {
+            let saved = off.doc.sheet.rules.iter().find(|r| json!(r.name) == rule["name"]).unwrap();
+            let mut old = json!(saved);
+            old["angle_display"] = json!(saved.angle_display);
+            assert_eq!(*rule, old);
+            let (vals, _) = off.doc.param_values();
+            assert_eq!(b["values"], json!(off.doc.rule_values(&vals, saved).unwrap()));
+            assert_eq!(b["errors"], json!([]));
+        }
+    }
+    // Saved rules whose expressions no longer evaluate are still listed, with null values.
+    warn.doc_mut().sheet.rules.push(solidcraft_doc::sheet::SheetRule {
+        name: "Invalid".into(),
+        thickness: "Missing".into(),
+        ..solidcraft_doc::sheet::SheetRule::steel()
+    });
+    let reply = warn.execute("sheet.rules", &json!({})).unwrap();
+    assert_eq!(reply["rules"][0]["values"], Value::Null);
+    let schema = output_schema_for::<RulesResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+}
+
+#[test]
+fn rule_warnings_match_the_output_schema_and_strict_does_not_mutate() {
+    use super::{ManageRulesResult, RulesResult};
+    for (id, p) in [("sheet.rules", json!({"naem": "R"})), ("sheet.manage_rules", json!({"name": "R", "thikness": 1}))] {
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        assert!(s.execute(id, &p).is_err());
+        assert!(s.doc.sheet.rules.is_empty());
+        s.param_check = ParamCheck::Warn;
+        let reply = s.execute(id, &p).unwrap();
+        assert!(!reply["param_warnings"].as_array().unwrap().is_empty());
+        let schema = if id == "sheet.rules" { output_schema_for::<RulesResult>() } else { output_schema_for::<ManageRulesResult>() };
+        assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+    }
+}
+
+/// Runs `id` in `s` and returns its reply, which carries no warnings.
+fn quiet(s: &mut Session, id: &str, p: Value) -> Value {
+    let r = s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    assert_eq!(r.get("param_warnings"), None, "{id} {p}: {r}");
+    r
+}
+
+/// The wall bracket of the path flange tests in `cmd/sheet_tests.rs`, in Warn: a 150 × 100 base
+/// of a 2 mm rule with a 40 mm wall up its edge at x = 0, and the lines `p1` and `p2` of sketch
+/// `Path` drawn across the wall's end edge (y = 0) at half its height.
+fn path_bracket() -> Session {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    for (id, p) in [
+        (
+            "sheet.manage_rules",
+            json!({"name": "Demo", "thickness": "2 mm", "bend_radius": "2 mm", "gap": "0.5 mm", "k_factor": "0.4", "active": true}),
+        ),
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [150, 100]})),
+        ("sketch.finish", json!({})),
+        ("sheet.flange", json!({"sketch": "Base"})),
+        ("sheet.flange", json!({"edges": [[0, 50, 2]], "height": 40})),
+        ("sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Path"})),
+        ("sketch.line", json!({"points": [[0, 0], [20, -20], [100, -20]], "ids": ["p1", "p2"]})),
+        ("sketch.finish", json!({})),
+    ] {
+        quiet(&mut s, id, p);
+    }
+    s
+}
+
+#[test]
+fn path_flange_replies_match_the_output_schema() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    // Each form, in Warn, without warnings. The path's two lines make two bends besides the
+    // wall's; one line makes one.
+    for (p, bends) in [
+        (json!({"edge": [1, 0, 20], "sketch": "Path", "curves": ["p1", "p2"]}), 3),
+        (json!({"edge": {"x": 1, "y": 0, "z": 20}, "sketch": "Path", "curves": "p1", "radius": "1 mm", "body": "?", "name": "Flap"}), 2),
+        (json!({"edge": [1, 0, 20], "sketch": "Path", "curves": ["p2", "p1"], "radius": null, "body": null}), 3),
+    ] {
+        let mut s = path_bracket();
+        let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+        let mut p = p;
+        if p["body"] == "?" {
+            p["body"] = json!(body);
+        }
+        let r = quiet(&mut s, "sheet.path_flange", p.clone());
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        let flat = quiet(&mut s, "sheet.flat_pattern", json!({}));
+        assert_eq!(flat["bends"].as_array().map(Vec::len), Some(bends), "{p}: {flat}");
+    }
+    // A misspelt key: the call runs, and the reply carrying its warning still matches.
+    let mut s = path_bracket();
+    let r = s
+        .execute("sheet.path_flange", &json!({"edge": [1, 0, 20], "sketch": "Path", "curves": ["p1"], "radiuss": 1}))
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_some(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r}");
+}
+
+/// The 100 × 60 sheet with a flange up its edge at y = 0, a 6 mm hole at (30, 30), a 1 mm deep
+/// pocket from below, a perforation field and a 1.5 mm bore into its rim at x = 100; in Warn.
+fn worked_sheet() -> Session {
+    let mut s = sheet();
+    for (id, p) in [
+        ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})),
+        ("solid.hole", json!({"position": [30, 30, 2.5], "direction": [0, 0, -1], "diameter": 6})),
+        ("sketch.create", json!({"plane": "XY", "name": "Pocket"})),
+        ("sketch.rectangle.two_point", json!({"p0": [60, 20], "p1": [70, 30]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"sketch": "Pocket", "distance": 1, "operation": "cut"})),
+        ("sheet.perforate", json!({"diameter": 2, "pitch": 6})),
+        ("solid.hole", json!({"position": [100, 45, 1.25], "direction": [-1, 0, 0], "diameter": 1.5})),
+    ] {
+        if let Err(e) = s.execute(id, &p) {
+            panic!("{id}: {e}");
+        }
+    }
+    s.param_check = ParamCheck::Warn;
+    s
+}
+
+#[test]
+fn flat_pattern_replies_match_the_output_schema() {
+    let schema = output_schema_for::<FlatPatternResult>();
+    let schema = schema.as_value();
+    let mut s = worked_sheet();
+    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let f = quiet(&mut s, "sheet.flat_pattern", json!({}));
+    assert!(conforms(schema, schema, &f), "{f} doesn't match {schema}");
+    // Every part of the reply is there, from the features above.
+    assert_eq!(f["body"], json!(body));
+    assert_eq!(f["rule"], STEEL);
+    assert_eq!(f["unfolded"], false);
+    assert_eq!(f["bends"].as_array().map(Vec::len), Some(1), "{f}");
+    assert_eq!((&f["bends"][0]["angle_deg"], &f["bends"][0]["included_angle_deg"]), (&json!(90.0), &json!(90.0)), "{f}");
+    let circles: Vec<&Value> = f["cutout_shapes"].as_array().into_iter().flatten().filter_map(|c| c.get("circle")).collect();
+    assert_eq!(circles.len(), 1, "{f}");
+    assert!((circles[0]["radius"].as_f64().unwrap_or_default() - 3.0).abs() < 1e-9, "{f}");
+    assert_eq!(f["pockets"].as_array().map(Vec::len), Some(1), "{f}");
+    assert_eq!((&f["pockets"][0]["side"], &f["pockets"][0]["depth_mm"]), (&json!("bottom"), &json!(1.0)), "{f}");
+    assert!(f["pockets"][0]["cutout_shapes"].is_array(), "{f}");
+    let perforation = &f["perforations"][0];
+    let count = perforation["count"].as_f64().unwrap_or_default();
+    assert!(count > 0.0, "{f}");
+    assert_eq!(perforation["pattern"], "staggered");
+    assert!((perforation["open_area_mm2"].as_f64().unwrap_or_default() - count * std::f64::consts::PI).abs() < 1e-6, "{f}");
+    assert_eq!(f["bores"].as_array().map(Vec::len), Some(1), "{f}");
+    assert!((f["bores"][0]["diameter"].as_f64().unwrap_or_default() - 1.5).abs() < 1e-9, "{f}");
+    assert_eq!(f["bend_zones"].as_array().map(Vec::len), Some(1), "{f}");
+    // The same sheet by name, and with a null body.
+    assert_eq!(quiet(&mut s, "sheet.flat_pattern", json!({"body": body})), f);
+    assert_eq!(quiet(&mut s, "sheet.flat_pattern", json!({"body": null})), f);
+    // Unfolded, and a plain sheet without bores, which the reply leaves out.
+    quiet(&mut s, "sheet.unfold", json!({}));
+    let unfolded = quiet(&mut s, "sheet.flat_pattern", json!({}));
+    assert_eq!(unfolded["unfolded"], true);
+    assert!(conforms(schema, schema, &unfolded), "{unfolded}");
+    let mut plain = sheet();
+    plain.param_check = ParamCheck::Warn;
+    let r = quiet(&mut plain, "sheet.flat_pattern", json!({}));
+    assert!(r.get("bores").is_none(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r}");
+    // A misspelt key: the call runs, and the reply carrying its warning still matches.
+    let r = plain.execute("sheet.flat_pattern", &json!({"bodyy": body})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_some(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r}");
+}
+
+#[test]
+fn bend_table_replies_match_the_output_schema() {
+    let schema = output_schema_for::<BendTableResult>();
+    let schema = schema.as_value();
+    let mut s = worked_sheet();
+    let body = s.model.state().sheets.first().map(|sh| sh.body.clone()).unwrap_or_default();
+    let flat = quiet(&mut s, "sheet.flat_pattern", json!({}));
+    let rows = flat["bends"].as_array().map_or(0, Vec::len);
+    let table = |s: &mut Session, p: Value| {
+        let r = quiet(s, "sheet.export_bend_table", p);
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r["bends"], json!(rows), "{r}");
+        r
+    };
+    // csv: a header and a row per bend.
+    let csv = table(&mut s, json!({}));
+    assert_eq!(csv["format"], "csv");
+    let text = csv["text"].as_str().unwrap_or_default().to_string();
+    assert_eq!(text.matches("\r\n").count(), rows + 1, "{text}");
+    assert_eq!(table(&mut s, json!({"format": "CSV", "path": "  ", "body": null})), csv);
+    // json: the flat pattern as text.
+    let json = table(&mut s, json!({"format": "Json", "body": body}));
+    assert_eq!(json["format"], "json");
+    assert_eq!(serde_json::from_str::<Value>(json["text"].as_str().unwrap_or_default()).ok(), Some(flat));
+    // To a file: the reply names it, and the file holds the text.
+    let path = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-bend-table-{}.csv", std::process::id()));
+    let path = path.to_string_lossy().to_string();
+    let written = table(&mut s, json!({"format": null, "path": path}));
+    assert_eq!((written.get("text"), &written["path"], &written["format"]), (None, &json!(path), &json!("csv")), "{written}");
+    assert_eq!(std::fs::read_to_string(&path).ok(), Some(text));
+    let _ = std::fs::remove_file(&path);
+    // A misspelt key: the call runs, and the reply carrying its warning still matches.
+    let r = s.execute("sheet.export_bend_table", &json!({"formatt": "json"})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_some(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r}");
 }

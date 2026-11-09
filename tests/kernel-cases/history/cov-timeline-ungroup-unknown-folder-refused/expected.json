@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.ungroup of a folder that does not exist",
+ "source": "invariants",
+ "method": "no folder 99: a clean refusal",
+ "outcome": "refused",
+ "refusal": "no timeline folder 99"
+}

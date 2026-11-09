@@ -1,6 +1,15 @@
+use crate::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::Vec3;
+use solidcore_record::Vec3;
+
+#[cfg(test)]
+thread_local! {
+    /// The edges [`Mesh::tangent_chain`] looked at to extend a chain, on this thread: the work a
+    /// scan of every edge for every edge made quadratic (#3745), counted for the test that checks
+    /// it stays linear, whatever else the machine is doing (#9901).
+    pub(crate) static CHAIN_CANDIDATES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Axis-aligned bounding box.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -314,6 +323,118 @@ pub struct MassProperties {
 }
 
 impl Mesh {
+    /// Generate angle-weighted corner normals without changing positions or connectivity.
+    /// Only opposite, two-face manifold edges join a smoothing fan. A group of zero
+    /// stays flat; different groups, boundaries and creases never share a normal.
+    /// Degenerate faces do not join or weight a fan; their corner metadata uses
+    /// a unit fallback so mesh-body validation can discard repeated-index faces.
+    /// `groups == None` is an explicitly requested crease policy for unannotated meshes.
+    pub fn crease_corner_normals(&self, angle: f64, groups: Option<&[u32]>) -> Result<Vec<[Vec3; 3]>, String> {
+        if !angle.is_finite() || !(0.0..=std::f64::consts::PI).contains(&angle) || groups.is_some_and(|g| g.len() != self.triangles.len()) {
+            return Err("invalid mesh smoothing angle or group count".into());
+        }
+        let corners = self.triangles.len().checked_mul(3).ok_or("mesh smoothing size overflow")?;
+        let mut parent = Vec::new();
+        parent.try_reserve_exact(corners).map_err(|_| "could not reserve mesh smoothing fans")?;
+        parent.extend(0..corners);
+        let mut weld = std::collections::HashMap::new();
+        weld.try_reserve(self.positions.len()).map_err(|_| "could not reserve mesh smoothing vertices")?;
+        let mut canonical = Vec::new();
+        canonical.try_reserve_exact(self.positions.len()).map_err(|_| "could not reserve mesh smoothing vertex indices")?;
+        for p in &self.positions {
+            if !p.is_finite() {
+                return Err("non-finite mesh smoothing position".into());
+            }
+            let next = weld.len();
+            canonical.push(*weld.entry([(p.x + 0.0).to_bits(), (p.y + 0.0).to_bits(), (p.z + 0.0).to_bits()]).or_insert(next));
+        }
+        let mut normals = Vec::new();
+        normals.try_reserve_exact(self.triangles.len()).map_err(|_| "could not reserve mesh smoothing normals")?;
+        // A third incident face makes an edge non-manifold and prevents a join.
+        let mut edges = std::collections::HashMap::<(usize, usize), (usize, Option<usize>, usize)>::new();
+        edges.try_reserve(corners).map_err(|_| "could not reserve mesh smoothing edges")?;
+        for (i, t) in self.triangles.iter().enumerate() {
+            let [a, b, c] = t.map(|v| self.positions.get(v as usize).copied());
+            let (Some(a), Some(b), Some(c)) = (a, b, c) else { return Err("mesh smoothing index is missing".into()) };
+            let n = (b - a)
+                .cross(c - a)
+                .normalized()
+                .filter(|n| n.is_finite() && [b - a, c - b, a - c].iter().all(|edge| edge.normalized().is_some_and(|v| v.is_finite())));
+            let Some(n) = n else {
+                // An unusable face must not turn its neighbours' shared edge into
+                // a non-manifold edge or contribute a fabricated fan direction.
+                normals.push(Vec3::ZERO);
+                continue;
+            };
+            normals.push(n);
+            for k in 0..3 {
+                let (a, b) = (canonical[t[k] as usize], canonical[t[(k + 1) % 3] as usize]);
+                edges
+                    .entry((a.min(b), a.max(b)))
+                    .and_modify(|e| {
+                        e.1 = Some(i * 3 + k);
+                        e.2 += 1;
+                    })
+                    .or_insert((i * 3 + k, None, 1));
+            }
+        }
+        fn root(parent: &mut [usize], mut k: usize) -> usize {
+            while parent[k] != k {
+                parent[k] = parent[parent[k]];
+                k = parent[k];
+            }
+            k
+        }
+        let cosine = angle.cos();
+        for (_, (first, second, count)) in edges {
+            let Some(second) = second.filter(|_| count == 2) else { continue };
+            let (a, b) = (first / 3, second / 3);
+            if normals[a].dot(normals[b]) < cosine || groups.is_some_and(|g| g[a] == 0 || g[a] != g[b]) {
+                continue;
+            }
+            let (ak, bk) = (first % 3, second % 3);
+            // Consistent winding is required; do not smooth across an ambiguous join.
+            if canonical[self.triangles[a][ak] as usize] != canonical[self.triangles[b][(bk + 1) % 3] as usize]
+                || canonical[self.triangles[a][(ak + 1) % 3] as usize] != canonical[self.triangles[b][bk] as usize]
+            {
+                continue;
+            }
+            for (x, y) in [(first, b * 3 + (bk + 1) % 3), (a * 3 + (ak + 1) % 3, second)] {
+                let (x, y) = (root(&mut parent, x), root(&mut parent, y));
+                parent[y] = x;
+            }
+        }
+        let mut sums = Vec::new();
+        sums.try_reserve_exact(corners).map_err(|_| "could not reserve mesh smoothing sums")?;
+        sums.resize(corners, Vec3::ZERO);
+        for (i, t) in self.triangles.iter().enumerate() {
+            if normals[i] == Vec3::ZERO {
+                continue;
+            }
+            for k in 0..3 {
+                let p = self.positions[t[k] as usize];
+                let a = (self.positions[t[(k + 1) % 3] as usize] - p).normalized().ok_or("degenerate smoothing corner")?;
+                let b = (self.positions[t[(k + 2) % 3] as usize] - p).normalized().ok_or("degenerate smoothing corner")?;
+                let weight = a.dot(b).clamp(-1.0, 1.0).acos();
+                let r = root(&mut parent, i * 3 + k);
+                sums[r] += normals[i] * weight;
+            }
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.triangles.len()).map_err(|_| "could not reserve mesh shading result")?;
+        for (i, n) in normals.into_iter().enumerate() {
+            if n == Vec3::ZERO {
+                out.push([Vec3::Z; 3]);
+                continue;
+            }
+            out.push(std::array::from_fn(|k| {
+                let r = root(&mut parent, i * 3 + k);
+                sums[r].normalized().filter(|v| v.dot(n) > 0.0).unwrap_or(n)
+            }));
+        }
+        Ok(out)
+    }
+
     /// [`MassProperties`] of a closed mesh, by the divergence theorem over the tetrahedra its
     /// triangles make with the origin. `None` unless every edge (by vertex index: weld first) is
     /// shared by exactly two triangles that cross it in opposite directions (closed, consistently
@@ -548,6 +669,8 @@ impl Mesh {
             near.sort_unstable();
             near.dedup();
             for i in near {
+                #[cfg(test)]
+                CHAIN_CANDIDATES.with(|n| n.set(n.get() + 1));
                 if in_chain.contains(&i) || !self.edge_pickable(i) || self.smooth_seam(i, cos) {
                     continue;
                 }
@@ -600,33 +723,10 @@ impl Mesh {
         self.edges.extend(o.edges.iter().cloned());
     }
 
-    /// Number of triangles a ray crosses (for inside/outside tests on closed meshes).
+    /// Number of triangles a ray crosses (for inside/outside tests on closed meshes), each
+    /// crossing counted once ([`ray_crosses`]).
     pub fn ray_crossings(&self, o: Vec3, dir: Vec3) -> usize {
-        let mut n = 0;
-        for t in &self.triangles {
-            let Some([a, b, c]) = self.tri(t) else { continue };
-            let (e1, e2) = (b - a, c - a);
-            let p = dir.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < 1e-14 {
-                continue;
-            }
-            let inv = 1.0 / det;
-            let s = o - a;
-            let u = s.dot(p) * inv;
-            if !(0.0..1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = dir.dot(q) * inv;
-            if v < 0.0 || u + v >= 1.0 {
-                continue;
-            }
-            if e2.dot(q) * inv > 0.0 {
-                n += 1;
-            }
-        }
-        n
+        self.triangles.iter().filter_map(|t| self.tri(t)).filter(|&[a, b, c]| ray_crosses(a, b, c, o, dir)).count()
     }
 
     /// Point inside a closed mesh (majority vote of three skewed rays).
@@ -854,37 +954,35 @@ impl InsideIndex<'_> {
             return 0;
         }
         let Some(list) = g.cells.get(gx * g.n.1 + gy) else { return 0 };
-        let dir = g.dir;
-        let mut n = 0;
-        for &i in list {
-            let Some(t) = self.mesh.triangles.get(i as usize) else { continue };
-            let Some([a, b, c]) = self.mesh.tri(t) else { continue };
-            let (e1, e2) = (b - a, c - a);
-            let p = dir.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < 1e-14 {
-                continue;
-            }
-            let inv = 1.0 / det;
-            let s = o - a;
-            let u = s.dot(p) * inv;
-            if !(0.0..1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = dir.dot(q) * inv;
-            if v < 0.0 || u + v >= 1.0 {
-                continue;
-            }
-            if e2.dot(q) * inv > 0.0 {
-                n += 1;
-            }
-        }
-        n
+        list.iter()
+            .filter_map(|&i| self.mesh.triangles.get(i as usize))
+            .filter_map(|t| self.mesh.tri(t))
+            .filter(|&[a, b, c]| ray_crosses(a, b, c, o, g.dir))
+            .count()
     }
 
     /// Same answer as `Mesh::contains`.
     pub fn contains(&self, p: Vec3) -> bool {
         self.rays.iter().filter(|g| self.crossings(g, p) % 2 == 1).count() >= 2
     }
+}
+
+/// Whether the ray from `o` along `dir` crosses the triangle `a b c` in front of `o`. Watertight:
+/// a ray through an edge two triangles share crosses exactly one of them. Each edge's side of the
+/// ray is the signed volume `dir · ((p - o) × (q - o))`, exactly antisymmetric in floating point
+/// (swapping `p` and `q` negates every rounded term), so both triangles see one value with
+/// opposite signs; a ray exactly on the edge's line is put on one side by the edge's endpoints
+/// in lexicographic order, the same for both. A triangle the ray runs along is not crossed.
+fn ray_crosses(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
+    let side = |p: Vec3, q: Vec3| {
+        let v = dir.dot((p - o).cross(q - o));
+        if v != 0.0 { v > 0.0 } else { (p.x, p.y, p.z) < (q.x, q.y, q.z) }
+    };
+    let normal = (b - a).cross(c - a);
+    let along = dir.dot(normal);
+    if along == 0.0 || !along.is_finite() {
+        return false;
+    }
+    let s = side(a, b);
+    side(b, c) == s && side(c, a) == s && (a - o).dot(normal) / along > 0.0
 }

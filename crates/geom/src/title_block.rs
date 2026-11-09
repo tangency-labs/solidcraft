@@ -18,10 +18,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::Aabb2;
 use crate::cell::{self, Content, Fit, HAlign};
 use crate::drawing_sheet::SheetLayout;
 use crate::paper::MAX_LINE_MM;
-use crate::{Aabb2, Vec2};
+use solidcore_record::Vec2;
 
 /// The most cells a block may have.
 pub const MAX_CELLS: usize = 64;

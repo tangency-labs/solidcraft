@@ -6,7 +6,8 @@
 use image::ImageDecoder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_render::{
     lighting::{DecodedHdr, HdrDecodeTask, HdrSource, HdrTaskPoll},
     surface::unit_direction,

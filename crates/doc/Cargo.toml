@@ -9,9 +9,12 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcore-record = { workspace = true }
+solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
+solidcraft-profile = { workspace = true }
 solidcraft-render = { workspace = true }
 solidcraft-derive = { workspace = true }
 serde = { workspace = true }

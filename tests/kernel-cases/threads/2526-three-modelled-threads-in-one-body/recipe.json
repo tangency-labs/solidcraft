@@ -1,0 +1,94 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -20,
+     -20,
+     0
+    ],
+    "length": 40,
+    "width": 40,
+    "height": 20,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 10,
+    "base": [
+     0,
+     0,
+     20
+    ],
+    "operation": "join",
+    "targets": [
+     "Block"
+    ]
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     0,
+     0,
+     30
+    ],
+    "diameter": 6.75
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     15,
+     20
+    ],
+    "diameter": 3.3
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     3.375,
+     0,
+     29
+    ],
+    "designation": "M8",
+    "length": 8,
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     16.65,
+     15,
+     10
+    ],
+    "designation": "M4",
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     10,
+     0,
+     29
+    ],
+    "designation": "M20",
+    "length": 6,
+    "modeled": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "the concave edge where a pipe dips into a plate chamfered 2: the chord between the contact lines on the plane and on the pipe",
+ "source": "analytic",
+ "method": "plate 60x40x10 (z 0..10) joined to a pipe R10 along x (0..60) whose axis is at (y, z) = (20, 16): the pipe dips 4 into the plate and leaves it along y = 20 +- 8, z = 10, the edges ending on the planar faces x = 0 and 60. V0 = 24000 + 60 (100 pi - (100 acos 0.6 - 48)) = 40165.7846. The concave edge y = 28: in a plane x = const, the point at distance d from both faces is (20 + g, 10 + d), g = sqrt(64 + 32 d); its feet are F1 = (20 + g, 10) on the plate and F2 = (20 + 10 g / (10 + d), 26 - 160 / (10 + d)) on the pipe. The chamfer 2 back from the edge rolls the ball of radius 2 sqrt((1 - c) / (1 + c)) = 1 (c = 0.6, the cosine between the faces' directions (1, 0) and (0.6, 0.8) away from the edge): the chord between F1(1) = (29.797959, 10) and F2(1) = (28.907235, 11.454545) adds the area between it, the plate and the pipe (Green's theorem along the plate, the chord and the pipe's arc) 1.265531: V = 40165.7846 + 60 * 1.265531 = 40241.7165. Both seams G0.",
+ "body_count": 1,
+ "volume_mm3": 40241.7164766411,
+ "continuity": {
+  "order": "g0",
+  "exact": true
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

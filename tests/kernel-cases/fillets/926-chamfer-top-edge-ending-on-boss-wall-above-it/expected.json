@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#926",
+  "tangency-labs/solidcraft#556"
+ ],
+ "what": "the top edge x = 40, z = 20 of #556's box (40x40x20 joined with an R12 boss 40 high on its side) chamfered 0.8: it runs into the boss's wall, which rises above the box, and ends on it",
+ "source": "analytic",
+ "method": "V0 = 32000 + pi 144 40 - pi 144/2 20 = 45571.680264. The edge runs from the front face y = 0 to the boss's wall y = 20 - sqrt(144 - (x-40)^2) (8 at x = 40). The chamfer's section, x 39.2..40 above the line (40-x) + (20-z) = 0.8: h = x - 39.2, is swept along y to the wall: removed = Int_39.2^40 h(x) (20 - sqrt(144 - (x-40)^2)) dx = 2.561423. V = 45569.118841",
+ "body_count": 1,
+ "volume_mm3": 45569.11884065282,
+ "continuity": {
+  "order": "g0"
+ }
+}

@@ -2,8 +2,9 @@
 //! side and turned the same way, as the design's parameters change.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{Snap, XRef};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::tests::{occ, place, run};
 use crate::Session;

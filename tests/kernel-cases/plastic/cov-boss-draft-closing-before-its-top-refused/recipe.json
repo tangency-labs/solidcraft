@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 60,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.boss",
+   "params": {
+    "position": [
+     30,
+     30,
+     3
+    ],
+    "diameter": 2,
+    "height": 12,
+    "draft": "5 deg"
+   }
+  }
+ ]
+}

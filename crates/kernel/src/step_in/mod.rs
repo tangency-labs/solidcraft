@@ -1,28 +1,23 @@
 //! STEP import (ISO 10303-21 files, AP203/AP214/AP242 geometry).
 //!
 //! Our own reader, written from the public standards: [`p21`] parses the exchange structure,
-//! [`geom`] and [`brep`] turn geometry and topology into kernel solids, and this module walks
-//! the product structure (products, shape representations, assemblies with their placements,
-//! units, colours). STEP files are untrusted: every count and nesting depth is capped, every
-//! truck call runs under [`guard`], and what cannot be read becomes a warning rather than a
-//! failure wherever the rest of the file is still usable.
+//! [`solidcraft_step::topology`] reads each solid into its schema 4 record, which SMLib takes
+//! as the body ([`parallel`]), and this module walks the product structure (products, shape
+//! representations, assemblies with their placements, units, colours). STEP files are
+//! untrusted: every count and nesting depth is capped, and what cannot be read becomes a
+//! warning rather than a failure wherever the rest of the file is still usable.
 
-mod brep;
-pub(crate) mod geom;
 pub(crate) mod p21;
 mod parallel;
-pub(crate) mod split;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use mt::EuclideanSpace as _;
 use serde::{Deserialize, Serialize};
-use truck_modeling as mt;
+use solidcraft_step::read::R;
 
 use crate::body::Body;
-use crate::{KernelError, Result, guard};
-use geom::R;
+use crate::{KernelError, Result};
 use p21::{Entity, Exchange, Param};
 
 /// Deepest assembly nesting followed.
@@ -58,9 +53,12 @@ pub struct ImportedBody {
     pub instance: Option<String>,
     /// The body is a closed solid (false: faces were left out, or the file had a surface model).
     pub closed: bool,
-    /// Faces read from the file. The body can have more: a face that wraps all the way around
-    /// a closed surface is split in two for the kernel.
+    /// Faces read from the file (each body face is one of them: `face_origin`).
     pub file_faces: usize,
+    /// No B-rep could be made of the whole solid, and this is why (the import's warnings say so
+    /// too, naming each face left out): `body` is an open surface body of the solid's exact faces
+    /// but those.
+    pub refused: Option<String>,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -84,6 +82,8 @@ pub struct StepImport {
     pub tree: Vec<StepNode>,
     /// What could not be read (unsupported entities, faces left out…).
     pub warnings: Vec<String>,
+    /// The same, by kind and part, with what came in of the file's parts: for a summary in words.
+    pub report: ImportReport,
     /// FILE_SCHEMA (e.g. `AUTOMOTIVE_DESIGN`, `CONFIG_CONTROL_DESIGN`, `AP242_…`).
     pub schema: String,
     /// FILE_NAME originating system.
@@ -92,6 +92,70 @@ pub struct StepImport {
     pub preprocessor: String,
     /// FILE_DESCRIPTION text.
     pub description: String,
+}
+
+/// What an import warning is about, so a window can word a summary of them (the warning's
+/// text is the detail).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueKind {
+    /// The part could not be read from the file: it is not in the design.
+    NotImported,
+    /// The kernel refuses the part's B-rep, its faces' too: it is not in the design, and the
+    /// warning gives the kernel's reason.
+    Refused,
+    /// No solid could be made of the part: it came in as surfaces of its faces.
+    ImportedAsSurfaces,
+    /// A face of the part could not be read or made, and is left out.
+    FaceLeftOut,
+    /// The part's shell is not closed: it came in as an open body.
+    OpenBody,
+    /// Faces of the part could not be meshed and are not shown.
+    FacesNotShown,
+    /// SMLib refuses the part: modelling operations on it fail until it is repaired.
+    NeedsRepair,
+    /// Something was repaired on the way (edges split at a pole, faces turned, gaps covered).
+    Repaired,
+    /// The file as a whole: its assembly structure, its limits, its entity ids.
+    File,
+}
+
+/// One import warning: what it is about and the part it concerns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImportIssue {
+    pub kind: IssueKind,
+    /// The STEP item of the part (`None`: the file as a whole).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<u64>,
+    /// The part's name in the file (empty: it has none).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub part: String,
+    /// Faces it concerns: one for a face left out, the count for faces not shown, else 0.
+    #[serde(default)]
+    pub faces: usize,
+    /// How many times it came (a part not imported says so at each of its instances).
+    pub times: usize,
+    /// The warning as [`StepImport::warnings`] words it.
+    pub detail: String,
+}
+
+/// What an import made of the file's parts, and its warnings by kind and part.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImportReport {
+    /// Parts (distinct solid items) the file places.
+    pub parts: usize,
+    /// Parts that came in as closed solids.
+    pub solids: usize,
+    /// In the order of [`StepImport::warnings`].
+    pub issues: Vec<ImportIssue>,
+}
+
+/// A warning kept by [`Reader::note`]: what it is about and how often it came.
+struct Noted {
+    kind: IssueKind,
+    item: Option<u64>,
+    faces: usize,
+    times: usize,
 }
 
 /// A solid the walk found, converted later.
@@ -103,142 +167,21 @@ struct Planned {
 
 /// Where the solids of a batch go: their placement and names.
 struct Batch {
-    m: mt::Matrix4,
+    m: M4,
     path: Vec<String>,
     product: String,
     instance: Option<String>,
 }
 
-/// Reading context: the file and the units of the representation being read.
-pub(crate) struct Ctx<'a> {
-    pub ex: &'a Exchange,
-    /// Millimetres per file length unit.
-    pub len: f64,
-    /// Radians per file angle unit.
-    pub ang: f64,
-    /// Vertex-on-curve tolerance (mm).
-    pub tol: f64,
-    /// Farthest an edge's vertex may sit off its curve and still be moved onto it (mm, at least
-    /// `tol`): see [`snap_limit`].
-    pub snap: f64,
-}
+/// The units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT) and its distance
+/// uncertainty (mm) as the file states it.
+type Units = solidcraft_step::units::Context;
 
-#[derive(Clone, Copy)]
-struct Units {
-    len: f64,
-    ang: f64,
-    tol: f64,
-    snap: f64,
-}
-
-const DEFAULT_UNITS: Units = Units { len: 1.0, ang: 1.0, tol: 0.01, snap: 0.01 };
-
-/// Largest tolerance a file can ask for (mm), however coarse the accuracy it declares.
-const MAX_TOL: f64 = 1.0;
-
-/// Gap between an edge's vertex and its curve that is still read as the same point, as a share
-/// of the model's size: the chord error the kernel's own coarse meshes allow at that size
-/// (`Body::size() * 1e-3`), so moving the vertex onto the curve changes the shape by less than
-/// those meshes already do.
-const SNAP_SHARE: f64 = 1e-3;
-
-/// Farthest a vertex may sit off its edge's curve and be moved onto it (mm): the file's own
-/// tolerance `tol`, or up to [`SNAP_SHARE`] of the model's size `extent` (mm) when that is
-/// larger. Some exporters write vertices further off than the accuracy they declare (a surface
-/// export may declare 0.01 mm and join two curves 0.38 mm apart at a vertex between them).
-/// Never more than [`MAX_TOL`], so a far stray point cannot turn the check off.
-fn snap_limit(tol: f64, extent: f64) -> f64 {
-    let share = if extent.is_finite() { extent * SNAP_SHARE } else { 0.0 };
-    tol.max(share.min(MAX_TOL))
-}
-
-fn si_prefix(p: Option<&Param>) -> f64 {
-    match p.and_then(Param::as_enum) {
-        Some("EXA") => 1e18,
-        Some("PETA") => 1e15,
-        Some("TERA") => 1e12,
-        Some("GIGA") => 1e9,
-        Some("MEGA") => 1e6,
-        Some("KILO") => 1e3,
-        Some("HECTO") => 1e2,
-        Some("DECA") => 1e1,
-        Some("DECI") => 1e-1,
-        Some("CENTI") => 1e-2,
-        Some("MILLI") => 1e-3,
-        Some("MICRO") => 1e-6,
-        Some("NANO") => 1e-9,
-        Some("PICO") => 1e-12,
-        Some("FEMTO") => 1e-15,
-        Some("ATTO") => 1e-18,
-        _ => 1.0,
-    }
-}
-
-/// A unit's size: millimetres for lengths, radians for plane angles.
-fn unit_factor(ex: &Exchange, id: u64, depth: usize) -> Option<(&'static str, f64)> {
-    if depth > 4 {
-        return None;
-    }
-    let e = ex.get(id)?;
-    let kind = if e.has("LENGTH_UNIT") {
-        "length"
-    } else if e.has("PLANE_ANGLE_UNIT") {
-        "angle"
-    } else {
-        "other"
-    };
-    if let Some(si) = e.record("SI_UNIT") {
-        let base = match si.get(1).and_then(Param::as_enum) {
-            Some("METRE") => 1000.0,
-            Some("RADIAN") => 1.0,
-            _ => return Some((kind, 1.0)),
-        };
-        return Some((kind, si_prefix(si.first()) * base));
-    }
-    if let Some(cb) = e.record("CONVERSION_BASED_UNIT") {
-        let m = ex.get(cb.get(1)?.as_ref_id()?)?;
-        let mp = m.params();
-        let v = mp.first()?.as_f64()?;
-        let (_, f) = unit_factor(ex, mp.get(1)?.as_ref_id()?, depth + 1)?;
-        let x = v * f;
-        return (x.is_finite() && x > 0.0).then_some((kind, x));
-    }
-    Some((kind, 1.0))
-}
-
-/// Units of a representation context (GLOBAL_UNIT_ASSIGNED_CONTEXT, uncertainty).
+/// Units of a representation context, read by [`solidcraft_step::units::context`] (millimetres
+/// and radians when the file names none).
 fn context_units(ex: &Exchange, ctx: Option<u64>, cache: &mut HashMap<u64, Units>) -> Units {
-    let Some(id) = ctx else { return DEFAULT_UNITS };
-    if let Some(u) = cache.get(&id) {
-        return *u;
-    }
-    let mut u = DEFAULT_UNITS;
-    let mut tol_file = None;
-    if let Some(e) = ex.get(id) {
-        if let Some(units) = e.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").and_then(|r| r.first()).and_then(Param::as_list) {
-            for uid in units.iter().filter_map(Param::as_ref_id) {
-                match unit_factor(ex, uid, 0) {
-                    Some(("length", f)) if f.is_finite() && f > 0.0 => u.len = f,
-                    Some(("angle", f)) if f.is_finite() && f > 0.0 => u.ang = f,
-                    _ => {}
-                }
-            }
-        }
-        if let Some(unc) = e.record("GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT").and_then(|r| r.first()).and_then(Param::as_list) {
-            for uid in unc.iter().filter_map(Param::as_ref_id) {
-                if let Some(m) = ex.get(uid)
-                    && let Some(v) = m.params().first().and_then(Param::as_f64)
-                {
-                    let f = m.params().get(1).and_then(Param::as_ref_id).and_then(|x| unit_factor(ex, x, 0)).map(|x| x.1);
-                    tol_file = Some(v * f.unwrap_or(u.len));
-                }
-            }
-        }
-    }
-    u.tol = tol_file.filter(|t| t.is_finite() && *t > 0.0).map(|t| (t * 10.0).max(1e-3)).unwrap_or(u.len * 1e-2).clamp(1e-4, MAX_TOL);
-    u.snap = snap_limit(u.tol, ex.vertex_extent() * u.len);
-    cache.insert(id, u);
-    u
+    let Some(id) = ctx else { return Units::default() };
+    *cache.entry(id).or_insert_with(|| solidcraft_step::units::context(ex, id))
 }
 
 /// Items and context of a representation entity.
@@ -255,24 +198,68 @@ fn representation(e: &Entity) -> Option<(Vec<u64>, Option<u64>)> {
     Some((items, p.get(2).and_then(Param::as_ref_id)))
 }
 
-fn mat_mul(a: &mt::Matrix4, b: &mt::Matrix4) -> mt::Matrix4 {
-    a * b
+/// A placement: a column-major 4×4 matrix (columns 0–2 the images of x, y and z, column 3 the
+/// translation), millimetres.
+type M4 = [[f64; 4]; 4];
+
+const IDENTITY: M4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+
+/// `a · b`.
+fn mat_mul(a: &M4, b: &M4) -> M4 {
+    let mut out = [[0.0; 4]; 4];
+    for (col, out_col) in out.iter_mut().enumerate() {
+        for (row, cell) in out_col.iter_mut().enumerate() {
+            *cell = (0..4).map(|k| a[k][row] * b[col][k]).sum();
+        }
+    }
+    out
 }
 
-fn to_array(m: &mt::Matrix4) -> [[f64; 4]; 4] {
-    [[m.x.x, m.x.y, m.x.z, m.x.w], [m.y.x, m.y.y, m.y.z, m.y.w], [m.z.x, m.z.y, m.z.z, m.z.w], [m.w.x, m.w.y, m.w.z, m.w.w]]
+/// The determinant of a placement's linear part (its first three columns).
+fn linear_det(m: &M4) -> f64 {
+    let [a, b, c] = [m[0], m[1], m[2]];
+    a[0] * (b[1] * c[2] - b[2] * c[1]) - b[0] * (a[1] * c[2] - a[2] * c[1]) + c[0] * (a[1] * b[2] - a[2] * b[1])
 }
 
-/// Inverse of a rigid placement matrix (orthonormal rotation + translation).
-fn rigid_inverse(m: &mt::Matrix4) -> mt::Matrix4 {
-    use mt::SquareMatrix;
-    m.invert().unwrap_or_else(mt::Matrix4::identity)
+/// The inverse of a placement: a rotation, scaled (a transformation operator may scale), and a
+/// translation. Its linear part is inverted by its adjugate, and the translation taken back
+/// through that. Placements are checked non-singular where they are read
+/// ([`Reader::placement_matrix`]; a frame's axes are orthonormal).
+fn placement_inverse(m: &M4) -> M4 {
+    let det = linear_det(m);
+    let [a, b, c] = [m[0], m[1], m[2]];
+    // The rows of the inverse are the cross products of the columns, over the determinant.
+    let cross = |u: [f64; 4], v: [f64; 4]| [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    let rows = [cross(b, c), cross(c, a), cross(a, b)];
+    let mut out = IDENTITY;
+    for (i, row) in rows.iter().enumerate() {
+        for (j, col) in out.iter_mut().take(3).enumerate() {
+            col[i] = row[j] / det;
+        }
+    }
+    // The translation taken back through the inverted linear part.
+    let back: [f64; 3] = std::array::from_fn(|i| -(0..3).map(|k| out[k][i] * m[3][k]).sum::<f64>());
+    out[3][..3].copy_from_slice(&back);
+    out
+}
+
+#[cfg(test)]
+fn translation(t: [f64; 3]) -> M4 {
+    let mut m = IDENTITY;
+    m[3] = [t[0], t[1], t[2], 1.0];
+    m
+}
+
+/// The matrix of an AXIS2_PLACEMENT: its frame's axes and origin.
+fn frame_matrix(p: &solidcraft_step::geom::Placement) -> M4 {
+    let (x, y, z, o) = (p.ref_direction, p.y(), p.axis, p.origin);
+    [[x[0], x[1], x[2], 0.0], [y[0], y[1], y[2], 0.0], [z[0], z[1], z[2], 0.0], [o[0], o[1], o[2], 1.0]]
 }
 
 struct Reader {
     ex: Arc<Exchange>,
     units: HashMap<u64, Units>,
-    warnings: BTreeMap<String, usize>,
+    warnings: BTreeMap<String, Noted>,
     /// Representation → its items and context.
     reps: HashMap<u64, (Vec<u64>, Option<u64>)>,
     /// Plain representation relationships (same product, no placement).
@@ -295,7 +282,7 @@ struct Reader {
     once: HashSet<u64>,
     /// An item placed more than once: its first instance's display, shared by every instance
     /// (with the placement that first instance had), so the part is meshed once.
-    shown: HashMap<u64, (Arc<crate::body::SharedDisplay>, mt::Matrix4)>,
+    shown: HashMap<u64, (Arc<crate::body::SharedDisplay>, M4)>,
     /// How many planned solids place each item.
     uses: HashMap<u64, usize>,
     /// An item placed more than once: read and oriented where the file defines it, so each
@@ -308,6 +295,8 @@ struct Reader {
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
+    /// Items sent into SMLib as an operation would send them, to say which need repair.
+    modelling_checked: HashSet<u64>,
     bodies: Vec<ImportedBody>,
     /// Solids the walk found, in file order, to be converted into bodies afterwards (so the
     /// conversion, the long part, can be done a piece at a time: [`StepReading`]).
@@ -349,6 +338,7 @@ impl Reader {
             node_items: HashSet::new(),
             visits: 0,
             unmeshed_checked: HashSet::new(),
+            modelling_checked: HashSet::new(),
             bodies: Vec::new(),
             plan: Vec::new(),
             batches: Vec::new(),
@@ -376,8 +366,26 @@ impl Reader {
         false
     }
 
+    /// `item`'s part is not in the design: the kernel refuses its B-rep, for `why`.
+    fn refused(&mut self, item: u64, why: &str) {
+        let label = self.label(item);
+        self.note(IssueKind::Refused, Some(item), 0, format!("{label}: not imported: {why}"));
+    }
+
+    /// A warning about the file as a whole.
     fn warn(&mut self, msg: impl Into<String>) {
-        *self.warnings.entry(msg.into()).or_default() += 1;
+        self.note(IssueKind::File, None, 0, msg);
+    }
+
+    /// A warning of `kind` about `item`'s part (`faces`: the faces it concerns), counted when it
+    /// comes again.
+    fn note(&mut self, kind: IssueKind, item: Option<u64>, faces: usize, msg: impl Into<String>) {
+        self.warnings.entry(msg.into()).or_insert(Noted { kind, item, faces, times: 0 }).times += 1;
+    }
+
+    /// The part's own name in the file (empty: it has none).
+    fn part_name(&self, item: u64) -> String {
+        self.ex.get(item).and_then(|e| e.params().first()).and_then(Param::as_str).unwrap_or("").trim().to_string()
     }
 
     fn index(&mut self) {
@@ -587,44 +595,44 @@ impl Reader {
         context_units(&self.ex, ctx, &mut self.units)
     }
 
-    fn placement_matrix(&mut self, item: u64, u: Units) -> R<mt::Matrix4> {
-        let cx = Ctx { ex: &self.ex, len: u.len, ang: u.ang, tol: u.tol, snap: u.snap };
-        let e = geom::entity(&cx, item)?;
+    /// The placement an item states: an AXIS2_PLACEMENT's frame, or a
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes, scales and origin (an
+    /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
+    /// first).
+    fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
+        let reader = solidcraft_step::read::Reader::new(&self.ex, u.units);
+        let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
             let p = e.params();
-            let o = geom::point(&cx, p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            let direction = |i: usize, fallback: mt::Vector3| -> R<mt::Vector3> {
+            let o = reader.point(p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
+            let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
                 match p.get(i) {
-                    None | Some(Param::Null) => Ok(fallback),
-                    Some(Param::Ref(id)) => geom::direction(&cx, *id),
+                    None | Some(Param::Null) => Ok(global),
+                    Some(Param::Ref(id)) => reader.direction(*id),
                     _ => Err("invalid transformation direction".into()),
                 }
             };
-            let scale = |i: usize, fallback: f64| -> R<f64> {
+            let scale = |i: usize, default: f64| -> R<f64> {
                 match p.get(i) {
-                    None | Some(Param::Null) => Ok(fallback),
+                    None | Some(Param::Null) => Ok(default),
                     Some(v) => v.as_f64().filter(|x| x.is_finite() && *x != 0.0).ok_or_else(|| "invalid transformation scale".into()),
                 }
             };
             let sx = scale(5, 1.0)?;
             let (sy, sz) = (scale(7, sx)?, scale(8, sx)?);
-            let m = mt::Matrix4::from_cols(
-                (direction(2, mt::Vector3::unit_x())? * sx).extend(0.0),
-                (direction(3, mt::Vector3::unit_y())? * sy).extend(0.0),
-                (direction(6, mt::Vector3::unit_z())? * sz).extend(0.0),
-                o.to_homogeneous(),
-            );
-            if !to_array(&m).iter().flatten().all(|x| x.is_finite()) {
+            let (x, y, z) = (direction(2, [1.0, 0.0, 0.0])?, direction(3, [0.0, 1.0, 0.0])?, direction(6, [0.0, 0.0, 1.0])?);
+            let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
+            let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
+            if !m.iter().flatten().all(|x| x.is_finite()) {
                 return Err("invalid transformation scale".into());
             }
-            use mt::SquareMatrix as _;
-            let det = m.determinant();
+            let det = linear_det(&m);
             if !det.is_finite() || det == 0.0 {
                 return Err("singular transformation".into());
             }
             return Ok(m);
         }
-        Ok(geom::frame(&cx, item)?.matrix())
+        Ok(frame_matrix(&reader.frame(item)?))
     }
 
     /// Representations of a product (its own shape representations and those linked to them).
@@ -657,12 +665,12 @@ impl Reader {
     }
 
     fn label(&self, item: u64) -> String {
-        let name = self.ex.get(item).and_then(|e| e.params().first()).and_then(Param::as_str).unwrap_or("").trim().to_string();
+        let name = self.part_name(item);
         if name.is_empty() { format!("solid #{item}") } else { format!("solid '{name}'") }
     }
 
     /// Bodies of a representation's items (following mapped items), placed by `m`.
-    fn rep_bodies(&mut self, rep: u64, m: &mt::Matrix4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
+    fn rep_bodies(&mut self, rep: u64, m: &M4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
         if depth > MAX_ASSEMBLY_DEPTH {
             self.warn("mapped items nested too deeply");
             return;
@@ -707,10 +715,22 @@ impl Reader {
                             self.warn(format!("more than {MAX_BODIES} bodies: the rest are left out"));
                             return;
                         }
-                        // The node lists the planned solid; it becomes a body index once converted.
-                        out.push(self.plan.len());
-                        self.plan.push(Planned { item, units: u, batch: id });
-                        *self.uses.entry(item).or_default() += 1;
+                        // The node lists the planned solids (a surface model's closed shells
+                        // beside its sheet are solids of their own, in the model's colour); each
+                        // becomes a body index once converted.
+                        for piece in solidcraft_step::topology::items(&self.ex, item) {
+                            if piece != item {
+                                if let Some(c) = self.colors.get(&item).copied() {
+                                    self.colors.entry(piece).or_insert(c);
+                                }
+                                if let Some(o) = self.opacity.get(&item).copied() {
+                                    self.opacity.entry(piece).or_insert(o);
+                                }
+                            }
+                            out.push(self.plan.len());
+                            self.plan.push(Planned { item: piece, units: u, batch: id });
+                            *self.uses.entry(piece).or_default() += 1;
+                        }
                     }
                 }
                 "MAPPED_ITEM" => {
@@ -725,7 +745,7 @@ impl Reader {
                     let mu = self.units_of(mapped);
                     match (self.placement_matrix(target, u), self.placement_matrix(origin, mu)) {
                         (Ok(t), Ok(o)) => {
-                            let mm = mat_mul(m, &mat_mul(&t, &rigid_inverse(&o)));
+                            let mm = mat_mul(m, &mat_mul(&t, &placement_inverse(&o)));
                             for r in self.rep_closure(&[mapped]) {
                                 self.rep_bodies(r, &mm, path, product, instance, out, depth + 1);
                             }
@@ -755,45 +775,67 @@ impl Reader {
         let first = self.converted;
         // The next solids, across instances and parts, converted together: parts still to
         // orient are shared out between the workers. A part that comes back within the window
-        // waits for the next one, which places the orientation its first instance found.
-        let mut last = first + 1;
-        if !single {
-            let mut fresh: HashSet<u64> = self.plan.get(first).map(|p| p.item).into_iter().collect();
-            while let Some(p) = self.plan.get(last)
-                && last - first < MAX_WINDOW
-            {
-                if !self.oriented.contains_key(&p.item) && !fresh.insert(p.item) {
-                    break;
-                }
-                last += 1;
-            }
-        }
+        // is placed once its first instance is read, from the orientation that instance found.
+        let last = if single { first + 1 } else { (first + MAX_WINDOW).min(self.plan.len()) };
         self.converted = last;
         let ex = self.ex.clone();
+        // Each planned solid of the window, with its job (`None`: a later instance of a part an
+        // earlier job of the window reads, placed after it).
         let mut sources = Vec::new();
         let mut jobs = Vec::new();
+        let mut reading = HashSet::new();
         for i in first..last {
             self.made.push(None);
             let Some(p) = self.plan.get(i) else { continue };
             let (item, units) = (p.item, p.units);
+            let placement = self.batches.get(p.batch).map_or(IDENTITY, |b| b.m);
+            if reading.contains(&item) {
+                sources.push((i, item, placement, None));
+                continue;
+            }
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
-                    let label = self.label(item);
-                    self.warn(format!("{label}: not imported: {msg}"));
+                    self.refused(item, &msg);
                 }
                 continue;
             }
             let source = match self.oriented.get(&item) {
                 Some(part) => parallel::Source::Oriented(part.clone()),
-                None => parallel::Source::Item { item, units },
+                None => {
+                    reading.insert(item);
+                    parallel::Source::Item { item, units }
+                }
             };
-            let placement = self.batches.get(p.batch).map_or(mt::Matrix4::from_scale(1.0), |b| b.m);
-            sources.push((i, item));
-            jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item), tol: units.tol });
+            sources.push((i, item, placement, Some(jobs.len())));
+            jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
         // Reading and orienting new parts is shared out between the workers.
-        let prepared = parallel::bodies(&ex, &jobs, self.workers);
-        for ((i, item), made) in sources.into_iter().zip(prepared) {
+        let mut prepared: Vec<Option<_>> = parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect();
+        for (i, item, placement, job) in sources {
+            let made = match job {
+                Some(j) => match prepared.get_mut(j).and_then(Option::take) {
+                    Some(made) => made,
+                    None => continue,
+                },
+                // A later instance of a part read in this window: as it would be in the next
+                // window, after its first instance.
+                None => {
+                    if let Some(again) = self.unreadable.get(&item) {
+                        if let Some(msg) = again.clone() {
+                            self.refused(item, &msg);
+                        }
+                        continue;
+                    }
+                    let source = match self.oriented.get(&item) {
+                        Some(part) => parallel::Source::Oriented(part.clone()),
+                        None => match self.plan.get(i) {
+                            Some(p) => parallel::Source::Item { item, units: p.units },
+                            None => continue,
+                        },
+                    };
+                    parallel::prepare(&ex, &parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) })
+                }
+            };
             let Some(e) = ex.get(item) else { continue };
             let Some(batch) = self.plan.get(i).and_then(|p| self.batches.get(p.batch)) else { continue };
             let (m, path, product, instance) = (batch.m, batch.path.clone(), batch.product.clone(), batch.instance.clone());
@@ -802,11 +844,18 @@ impl Reader {
                     // What the read of the item found, reported once.
                     if let Some(failed) = read {
                         let label = self.label(item);
-                        for f in &failed {
-                            self.warn(format!("{label}: {f}"));
+                        if let Some(why) = &part.refused {
+                            self.note(IssueKind::ImportedAsSurfaces, Some(item), 0, format!("{label}: imported as surfaces: {why}"));
                         }
-                        if !part.closed {
-                            self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
+                        for f in &failed {
+                            let (kind, faces, f) = match f {
+                                parallel::Note::LeftOut(f) => (IssueKind::FaceLeftOut, 1, f),
+                                parallel::Note::Repaired(f) => (IssueKind::Repaired, 0, f),
+                            };
+                            self.note(kind, Some(item), faces, format!("{label}: {f}"));
+                        }
+                        if !part.closed && part.refused.is_none() {
+                            self.note(IssueKind::OpenBody, Some(item), 0, format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
                     if !self.once.contains(&item) {
@@ -817,7 +866,12 @@ impl Reader {
                     let name = if own.is_empty() { product.clone() } else { own };
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
                     if self.unmeshed_checked.insert(item) && missing > 0 {
-                        self.warn(format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"));
+                        self.note(
+                            IssueKind::FacesNotShown,
+                            Some(item),
+                            missing,
+                            format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"),
+                        );
                     }
                     if let Some(slot) = self.made.get_mut(i) {
                         *slot = Some(self.bodies.len());
@@ -842,14 +896,23 @@ impl Reader {
                     // Every instance of a part placed more than once shows its first instance's
                     // mesh, placed (the first one too: meshing its own would mesh the part twice).
                     let body = match self.shown.get(&item) {
-                        Some((shared, first)) => body.with_display_of(shared.clone(), to_array(&mat_mul(&m, &rigid_inverse(first)))),
+                        Some((shared, first)) => body.with_display_of(shared.clone(), mat_mul(&m, &placement_inverse(first))),
                         None if self.uses.get(&item).is_some_and(|n| *n > 1) => {
                             let shared = Arc::new(crate::body::SharedDisplay::new(body.clone()));
                             self.shown.insert(item, (shared.clone(), m));
-                            body.with_display_of(shared, to_array(&mt::Matrix4::from_scale(1.0)))
+                            body.with_display_of(shared, IDENTITY)
                         }
                         None => body,
                     };
+                    // A part SMLib refuses cannot be modelled on: found now (its first instance,
+                    // sent as an operation would send it), not at the first operation.
+                    if self.modelling_checked.insert(item)
+                        && let Some(refused) = body.smlib_refusal()
+                    {
+                        let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
+                        let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
+                        self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
+                    }
                     self.bodies.push(ImportedBody {
                         name,
                         body,
@@ -860,11 +923,16 @@ impl Reader {
                         file_faces,
                         source_item: item,
                         face_origin,
+                        refused: part.refused.clone(),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {
-                    let label = self.label(item);
-                    self.warn(format!("{label}: not imported: {msg}"));
+                    if read {
+                        let label = self.label(item);
+                        self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
+                    } else {
+                        self.refused(item, &msg);
+                    }
                     // Later instances don't read the item again.
                     if !self.oriented.contains_key(&item) {
                         self.unreadable.insert(item, (!read).then_some(msg));
@@ -873,6 +941,27 @@ impl Reader {
             }
         }
         true
+    }
+
+    /// The warnings (worded as `warnings`, in their order) by kind and part, and how many of the
+    /// file's parts came in as closed solids.
+    fn report(&self, warnings: &[String]) -> ImportReport {
+        let parts = self.plan.iter().map(|p| p.item).collect::<HashSet<_>>().len();
+        let solids = self.bodies.iter().filter(|b| b.closed && b.refused.is_none()).map(|b| b.source_item).collect::<HashSet<_>>().len();
+        let issues = self
+            .warnings
+            .values()
+            .zip(warnings)
+            .map(|(n, detail)| ImportIssue {
+                kind: n.kind,
+                item: n.item,
+                part: n.item.map(|i| self.part_name(i)).unwrap_or_default(),
+                faces: n.faces,
+                times: n.times,
+                detail: detail.clone(),
+            })
+            .collect();
+        ImportReport { parts, solids, issues }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices, leaving out
@@ -907,10 +996,10 @@ impl Reader {
     }
 
     /// Placement of a child occurrence in its parent.
-    fn occurrence_matrix(&mut self, nauo: u64, child_reps: &[u64]) -> mt::Matrix4 {
-        let Some(&rel) = self.placements.get(&nauo) else { return mt::Matrix4::from_scale(1.0) };
+    fn occurrence_matrix(&mut self, nauo: u64, child_reps: &[u64]) -> M4 {
+        let Some(&rel) = self.placements.get(&nauo) else { return IDENTITY };
         let ex = self.ex.clone();
-        let r = (|| -> R<mt::Matrix4> {
+        let r = (|| -> R<M4> {
             let e = ex.get(rel).ok_or("missing placement")?;
             let rr = e.record("REPRESENTATION_RELATIONSHIP").ok_or("placement without representations")?;
             let (r1, r2) =
@@ -932,7 +1021,7 @@ impl Reader {
                 let m2 = self.placement_matrix(i2, u2)?;
                 // rep_1 is normally the component: map its item onto the assembly's item.
                 let child_is_1 = child_reps.contains(&r1) || !child_reps.contains(&r2);
-                Ok(if child_is_1 { mat_mul(&m2, &rigid_inverse(&m1)) } else { mat_mul(&m1, &rigid_inverse(&m2)) })
+                Ok(if child_is_1 { mat_mul(&m2, &placement_inverse(&m1)) } else { mat_mul(&m1, &placement_inverse(&m2)) })
             } else {
                 self.placement_matrix(op, u2)
             }
@@ -941,23 +1030,14 @@ impl Reader {
             Ok(m) => m,
             Err(e) => {
                 self.warn(format!("component placement #{rel}: {e} (placed at the origin)"));
-                mt::Matrix4::from_scale(1.0)
+                IDENTITY
             }
         }
     }
 
-    fn node(
-        &mut self,
-        pd: u64,
-        local: mt::Matrix4,
-        world: mt::Matrix4,
-        path: &[String],
-        instance: Option<&str>,
-        depth: usize,
-        stack: &mut Vec<u64>,
-    ) -> StepNode {
+    fn node(&mut self, pd: u64, local: M4, world: M4, path: &[String], instance: Option<&str>, depth: usize, stack: &mut Vec<u64>) -> StepNode {
         let name = self.product_name(pd);
-        let mut node = StepNode { name: name.clone(), transform: to_array(&local), bodies: Vec::new(), children: Vec::new() };
+        let mut node = StepNode { name: name.clone(), transform: local, bodies: Vec::new(), children: Vec::new() };
         if self.stop() {
             return node;
         }
@@ -996,96 +1076,29 @@ impl Reader {
     }
 }
 
-/// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
-/// names a defined entity, nothing but root entities (relationships, definitions,
-/// presentation) is left unreferenced, and ids are dense (`#1`…`#n`). Returns the entity count.
-/// Faces whose boundary runs the wrong way round their normal, as a strict reader
-/// sees them: each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO
-/// 10303-42), reversed when `same_sense` is false, and the outer loop must run counter-clockwise
-/// seen from that side. Checked on faces whose loop spans a clear direction (patches, not bands
-/// around a closed surface). Returns one message per bad face.
+/// Faces whose boundary runs the wrong way round their normal, as a strict reader sees them:
+/// each face's normal is its surface's own parametric normal (∂S/∂u × ∂S/∂v, ISO 10303-42),
+/// reversed when `same_sense` is false, and the outer loop must run counter-clockwise seen from
+/// that side. These are the faces the STEP reader turns over ([`solidcraft_step::topology`]),
+/// numbered as the solid's body numbers them. Returns one message per bad face; an error when
+/// the file does not parse or has no solid the reader can read.
 pub fn step_orientation_errors(text: &str) -> std::result::Result<Vec<String>, String> {
-    use mt::{BoundedCurve, InnerSpace, ParametricCurve, ParametricSurface3D, SearchNearestParameter};
-    let imp = step_import(text).map_err(|e| e.to_string())?;
+    let ex = p21::parse(text)?;
+    let read = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    if read.solids.is_empty() {
+        return Err(read.failures.first().map_or_else(|| "the file has no solids".into(), |f| format!("solid #{}: {}", f.item, f.message)));
+    }
     let mut out = Vec::new();
-    for b in &imp.bodies {
-        let r = guard("orientation check", || {
-            let mut bad = Vec::new();
-            for (fi, f) in b.body.solid.face_iter().enumerate() {
-                let bounds = f.boundaries();
-                // Patches only: a face with several loops (a band between two rings, a face with
-                // holes) has no single loop direction to compare.
-                let [w] = bounds.as_slice() else { continue };
-                // Only revolutions (cylinders, cones, spheres, tori: closed surfaces, where a loop
-                // read the wrong way round silently gives the rest of the surface). On free-form
-                // strips the loop's normals vary too much for this test; the round trips' volume
-                // checks cover those.
-                if !matches!(f.surface(), mt::Surface::RevolutedCurve(_)) {
-                    continue;
-                }
-                // A loop through a vertex twice (a figure eight round a pole) has no single direction.
-                let fronts: std::collections::HashSet<_> = w.edge_iter().map(|e| e.front().id()).collect();
-                if fronts.len() != w.len() {
-                    continue;
-                }
-                let pts: Vec<mt::Point3> = w
-                    .edge_iter()
-                    .flat_map(|e| {
-                        let c = e.oriented_curve();
-                        let (t0, t1) = c.range_tuple();
-                        (0..16).map(move |i| c.subs(t0 + (t1 - t0) * i as f64 / 16.0)).collect::<Vec<_>>()
-                    })
-                    .collect();
-                let n = pts.len();
-                if n < 3 {
-                    continue;
-                }
-                let mut newell = mt::Vector3::new(0.0, 0.0, 0.0);
-                let mut c = mt::Vector3::new(0.0, 0.0, 0.0);
-                let mut span: f64 = 0.0;
-                for i in 0..n {
-                    let (Some(a), Some(q)) = (pts.get(i), pts.get((i + 1) % n)) else { continue };
-                    newell += (a.to_vec()).cross(q.to_vec());
-                    c += a.to_vec();
-                    span = span.max((a - pts[0]).magnitude());
-                }
-                let c = mt::Point3::from_vec(c / n as f64);
-                // Bands round a closed surface have no clear loop direction.
-                if !(newell.magnitude() > 0.05 * span * span) {
-                    continue;
-                }
-                // The face normal averaged along the loop (each loop point is on the surface;
-                // the loop's centroid can be nearer the wrong side of a curved face).
-                let s = f.oriented_surface();
-                let mut normal = mt::Vector3::new(0.0, 0.0, 0.0);
-                let mut count = 0usize;
-                for p in &pts {
-                    if let Some(uv) = s.search_nearest_parameter(*p, None, 100) {
-                        let n = s.normal(uv.0, uv.1);
-                        if n.x.is_finite() && n.y.is_finite() && n.z.is_finite() {
-                            normal += n;
-                            count += 1;
-                        }
-                    }
-                }
-                let _ = c;
-                // Only patches clearly to one side of their loop are judged: a loop on a closed
-                // surface (a sphere's cube-face square) bounds either part.
-                if count == 0 || normal.magnitude() < 0.7 * count as f64 {
-                    continue;
-                }
-                if normal.dot(newell) < 0.0 {
-                    bad.push(format!("{}: face {fi} runs clockwise around its normal", b.name));
-                }
-            }
-            Ok(bad)
-        })
-        .map_err(|e| e.to_string())?;
-        out.extend(r);
+    for solid in &read.solids {
+        let name = if solid.name.trim().is_empty() { format!("solid #{}", solid.item) } else { solid.name.trim().to_string() };
+        out.extend(solid.turned.iter().map(|f| format!("{name}: face {f} runs clockwise around its normal")));
     }
     Ok(out)
 }
 
+/// Check a STEP file's structure: it parses, no entity id is defined twice, every reference
+/// names a defined entity, nothing but root entities (relationships, definitions,
+/// presentation) is left unreferenced, and ids are dense (`#1`…`#n`). Returns the entity count.
 pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
     let ex = p21::parse(text)?;
     if let Some(d) = ex.duplicates.first() {
@@ -1208,6 +1221,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
 }
 
 fn step_import_with_workers(text: &str, workers: usize) -> Result<StepImport> {
+    let _span = solidcraft_profile::span("import", "step.import");
     let mut reading = StepReading::with_workers(text, workers)?;
     while reading.step() {}
     reading.finish()
@@ -1234,10 +1248,12 @@ impl StepReading {
     }
 
     fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
+        let _span = solidcraft_profile::span("import", "step.read_structure");
         let key = text_key(text);
         let watch = crate::watch::current();
         let cancelled = || watch.as_ref().is_some_and(|w| w.cancelled());
-        let ex = match p21::parse(text) {
+        let parsed = solidcraft_profile::scope("import", "step.parse", || p21::parse(text));
+        let ex = match parsed {
             Ok(ex) => Arc::new(ex),
             Err(_) if cancelled() => return Err(crate::watch::cancelled_error("STEP import")),
             Err(e) => return Err(KernelError::Invalid(e)),
@@ -1249,14 +1265,14 @@ impl StepReading {
             .filter(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
             .count();
         rd.watch = watch.clone();
-        rd.index();
+        solidcraft_profile::scope("import", "step.index", || rd.index());
         // Roots: product definitions that are nobody's component.
         let child_pds: HashSet<u64> =
             rd.children.values().flatten().filter_map(|n| ex.get(*n).and_then(|e| e.params().get(4)).and_then(Param::as_ref_id)).collect();
         let mut roots: Vec<u64> =
             ex.entities.iter().filter(|(id, e)| e.name() == "PRODUCT_DEFINITION" && !child_pds.contains(id)).map(|(id, _)| *id).collect();
         roots.sort();
-        let identity = mt::Matrix4::from_scale(1.0);
+        let identity = IDENTITY;
         let mut tree = Vec::new();
         for pd in roots {
             tree.push(rd.node(pd, identity, identity, &[], None, 0, &mut Vec::new()));
@@ -1282,7 +1298,7 @@ impl StepReading {
             for r in loose {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: "Import".into(), transform: to_array(&identity), bodies, children: Vec::new() });
+            tree.push(StepNode { name: "Import".into(), transform: identity, bodies, children: Vec::new() });
         }
         let single = workers <= 1;
         Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
@@ -1291,6 +1307,7 @@ impl StepReading {
     /// Convert the next solid (or batch of solids); false once all are converted (or the
     /// watch cancelled the import).
     pub fn step(&mut self) -> bool {
+        let _span = solidcraft_profile::span("import", "step.convert_batch");
         self.rd.convert_next(self.single)
     }
 
@@ -1302,6 +1319,7 @@ impl StepReading {
     /// The import, once [`Self::step`] has converted every solid.
     pub fn finish(mut self) -> Result<StepImport> {
         while self.step() {}
+        let _span = solidcraft_profile::span("import", "step.finish");
         let rd = &mut self.rd;
         // Cancelled: what was read so far is dropped here, not cached.
         if rd.cancelled || rd.watch.as_ref().is_some_and(|w| w.cancelled()) {
@@ -1316,7 +1334,8 @@ impl StepReading {
         if let Some(first) = ex.duplicates.first() {
             rd.warn(format!("{} entity ids are defined twice (first #{first}); the first definitions were used", ex.duplicates.len()));
         }
-        let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if *n > 1 { format!("{m} (×{n})") } else { m.clone() }).collect();
+        let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
+        let report = rd.report(&warnings);
         if rd.bodies.is_empty() {
             let why = warnings.first().cloned().unwrap_or_else(|| "the file has no solids".into());
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));
@@ -1326,6 +1345,7 @@ impl StepReading {
             bodies,
             tree,
             warnings,
+            report,
             schema: ex.schemas.join(", "),
             system: ex.originating_system.clone(),
             preprocessor: ex.preprocessor.clone(),

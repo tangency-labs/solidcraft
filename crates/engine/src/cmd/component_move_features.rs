@@ -93,6 +93,15 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
             FeatureKind::Sketch { plane, .. } => {
                 if let Some(anchor) = crate::cmd::sketch::face::anchor_mut(plane) {
                     let moved_body = moved_bodies.contains(&anchor.target.body);
+                    let author_delta = if authored_here {
+                        let old = s.doc.feature(f.id).ok_or_else(|| bad(cmd, "attached sketch no longer exists"))?;
+                        mat_mul(&to_dest, &s.doc.component_transform(old.component))
+                    } else {
+                        solidcraft_doc::IDENTITY
+                    };
+                    let source_delta =
+                        if moved_body { mat_mul(&to_dest, &s.doc.component_transform(anchor.component)) } else { solidcraft_doc::IDENTITY };
+                    anchor.reframe_placement(&author_delta, &source_delta)?;
                     rewrite(&anchor.target.body, &mut anchor.path, &mut anchor.author_path);
                     if moved_body {
                         anchor.component = dest;

@@ -1,14 +1,15 @@
 //! Associative trace definitions and dependency checks. Sampling uses the existing motion
 //! driver on a scratch session; only a changed generated wire is handed to the evaluator.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, JointOrigin, Snap};
 use solidcraft_doc::motion::{MotionTrace, TraceMotion};
 use solidcraft_doc::{IDENTITY, apply_point};
-use solidcraft_geom::Vec3;
 
 use crate::params::{bad, bool_};
 use crate::{Result, Session};
@@ -376,6 +377,7 @@ pub(crate) fn refresh(s: &mut Session) {
     }
     if changed {
         s.model.evaluate(&s.doc);
+        s.evaluations = s.evaluations.saturating_add(1);
         s.revision += 1;
     }
     for t in &traces {

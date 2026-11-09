@@ -1,9 +1,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::Plane;
 use solidcraft_doc::construct::ConstructGeom;
 use solidcraft_doc::{Document, FeatureKind, PlaneRef};
-use solidcraft_geom::Plane;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|e| panic!("{command} {params}: {e}"))

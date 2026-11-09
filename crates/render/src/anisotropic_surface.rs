@@ -15,9 +15,10 @@
 //! Consumers retain geometric normals for ray spawning and optical boundaries.
 //! No shading-normal energy correction, multiple scattering or transmission is modeled.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::surface::{MIN_ROUGHNESS, OpaqueSurface, SurfaceError, unit_direction};
 
@@ -110,7 +111,8 @@ impl VisualFrame {
     }
 }
 
-/// A bounded opaque response with two perceptual roughness axes in [0.045, 1].
+/// An opaque response whose public constructor admits two roughness axes in [0.045, 1].
+/// The crate-private isotropic optical adapter also retains validated aging finishes down to 0.02.
 /// Alpha is roughness squared, matching [`OpaqueSurface`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnisotropicSurface {
@@ -140,6 +142,14 @@ impl AnisotropicSurface {
             return Err(SurfaceError::Roughness.into());
         }
         Ok(Self { base, roughness_y })
+    }
+
+    /// Reuse one validated opaque optical finish for an isotropic VNDF. The
+    /// authored runtime finish may have roughness 0.02; independently authored
+    /// anisotropic axes continue through new() with their unchanged 0.045 bound.
+    #[cfg(any(feature = "raytrace-cpu", test))]
+    pub(crate) fn from_isotropic_optical(base: OpaqueSurface) -> Self {
+        Self { base, roughness_y: base.roughness() }
     }
 
     /// Admitted perceptual roughness along visual X and Y.

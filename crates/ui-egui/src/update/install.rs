@@ -157,10 +157,11 @@ impl Progress {
     pub fn message(&self) -> String {
         let selected = self.selected.lock().unwrap_or_else(|e| e.into_inner());
         match selected.as_ref() {
-            None => crate::i18n::tr("update.refresh_checking").to_string(),
-            Some((release, fallback)) => {
-                crate::i18n::format(if *fallback { "update.refresh_fallback" } else { "update.refresh_selected" }, &[("version", release.version())])
-            }
+            None => solidcraft_ui_text::tr("update.refresh_checking").to_string(),
+            Some((release, fallback)) => solidcraft_ui_text::format(
+                if *fallback { "update.refresh_fallback" } else { "update.refresh_selected" },
+                &[("version", release.version())],
+            ),
         }
     }
 }
@@ -170,6 +171,19 @@ pub struct Net {
     pub get: super::HttpGet,
     pub download: HttpDownload,
     pub feed: Option<PathBuf>,
+}
+
+/// GET `url` unless Cancel was pressed; check again after the response so a cancel during the
+/// wait still ends the install without starting the package download (#8908).
+fn get_unless_cancelled(net: &Net, progress: &Progress, url: &str) -> Result<Vec<u8>, FetchError> {
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err(FetchError::Failed("cancelled".into()));
+    }
+    let body = (net.get)(url)?;
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err(FetchError::Failed("cancelled".into()));
+    }
+    Ok(body)
 }
 
 /// Refresh the feed, then download, verify and apply the newest release for `method`, falling
@@ -184,6 +198,11 @@ pub fn run(
     staging: &Path,
     progress: &Progress,
 ) -> Result<Outcome, String> {
+    // Honour Cancel before each network wait: feed refresh and checksum fetches used to run
+    // without looking at the flag, so Cancel looked dead until the body download started (#8908).
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
     // The release shown may be stale by now: install the newest one the feed names, or the one
     // shown when the feed can't be read.
     let (release, fallback) = match super::fetch_latest(net.feed.as_deref(), Some(&net.get)) {
@@ -200,7 +219,7 @@ pub fn run(
         return Err(format!("{} is too large ({} bytes)", asset.name, asset.size));
     }
     let sums_url = release.assets.iter().find(|a| a.name == SUMS).map(|a| a.url.clone()).ok_or_else(|| format!("this release has no {SUMS}"))?;
-    let sums = (net.get)(&sums_url).map_err(|e| format!("{SUMS}: {e}"))?;
+    let sums = get_unless_cancelled(net, progress, &sums_url).map_err(|e| format!("{SUMS}: {e}"))?;
     if let Some(key) = PUBLIC_KEY {
         let sig_url = release
             .assets
@@ -208,7 +227,7 @@ pub fn run(
             .find(|a| a.name == SUMS_SIG)
             .map(|a| a.url.clone())
             .ok_or_else(|| format!("this release isn't signed (no {SUMS_SIG})"))?;
-        let sig = (net.get)(&sig_url).map_err(|e| format!("{SUMS_SIG}: {e}"))?;
+        let sig = get_unless_cancelled(net, progress, &sig_url).map_err(|e| format!("{SUMS_SIG}: {e}"))?;
         verify_signature(&sums, &String::from_utf8_lossy(&sig), key, &release.tag)?;
     }
     let sums = String::from_utf8_lossy(&sums);

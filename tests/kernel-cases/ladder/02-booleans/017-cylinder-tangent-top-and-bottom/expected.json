@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a cylinder r10 along X tangent to both the top and bottom faces, cut: two pieces with zero-angle cusps",
+ "source": "analytic",
+ "method": "the cylinder (axis y=20, z=10) spans the full height at y=20: removed pi r^2 60; the halves meet only along the lines y=20, z=0 and z=20: two solids",
+ "body_count": 2,
+ "volume_mm3": 29150.444078461
+}

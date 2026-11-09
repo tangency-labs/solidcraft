@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = ["crates/solidcore", "crates/solidcore-record", "crates/solidcore-convert", "crates/solidcore-tess", "crates/goldens", "crates/nurbs-grid-mesh", "crates/ssi", "crates/solidcore-ssi", "crates/step-brep", "crates/step-export", "crates/step-import", "crates/xtask", "crates/solidcore-ops", "crates/diagnostics"]
+default-members = ["crates/solidcore"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
+rust-version = "1.85"
+
+[workspace.dependencies]
+thiserror = "2"
+
+# Lints shared by every crate that opts in with `[lints] workspace = true`.
+# No crate contains `unsafe` (forbidden). Test code may unwrap/expect/panic/index: see
+# clippy.toml.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "allow"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Library code must not abort on input-derived data: return SolidError instead.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+# Eager `ok_or(SolidError::unported(..))` built every error on every call (batch 50b).
+or_fun_call = "warn"
+# Justified pedantic allows (port fidelity):
+# - upstream compares doubles exactly (e.g. against SM_UNDEF_DOUBLE); keep its semantics
+float_cmp = "allow"
+# - upstream math uses u, v, w, i, j, k, dU, dV ... naming; renaming hurts traceability
+many_single_char_names = "allow"
+similar_names = "allow"
+# - upstream constants are copied digit-for-digit
+unreadable_literal = "allow"
+excessive_precision = "allow"
+# - integer/float conversions are pervasive in ported index/knot arithmetic
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# - ported functions keep upstream structure, which is often long
+too_many_lines = "allow"
+too_many_arguments = "allow"
+# - suggests f64::midpoint, which changes numerics vs upstream (a+b)/2
+manual_midpoint = "allow"
+# - every fallible fn returns SolidError; a per-fn "# Errors" section is noise
+missing_errors_doc = "allow"
+# - modules mirror upstream names (nurbs::NurbsCurve etc.)
+module_name_repetitions = "allow"
+# - thousands of ported getters; #[must_use] is added deliberately where it matters
+must_use_candidate = "allow"
+
+# The goldens profile runs optimised (FP results are unchanged: Rust never contracts or
+# reassociates floating point; the goldens agree at opt-level 1 and 3) but keeps overflow
+# checks and debug assertions as a safety net. CI's tests use it too.
+[profile.goldens]
+inherits = "release"
+opt-level = 3
+overflow-checks = true
+debug-assertions = true
+incremental = true
+
+# The goldens crate itself (runners, fixtures, checks; ~300k lines) is glue: at opt-level
+# 3 it took ~5 of CI's ~6 build minutes, at 0 about 1.5, and a full run is ~4% slower in
+# total (the kernel, solidcore, stays fully optimised). Outputs are identical at either
+# level.
+[profile.goldens.package.goldens]
+opt-level = 0

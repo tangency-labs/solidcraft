@@ -20,6 +20,23 @@ cargo run --release -p solidcraft -- --sample   # opens with a sample part
 `solidcraft design.sc` opens a saved design. Windows builds cross-compile from Linux with
 `cargo xwin build --release --target x86_64-pc-windows-msvc -p solidcraft`.
 
+### The start page
+
+SolidCraft opens on the start page; the house at the top left brings it back.
+
+![The start page, numbered 1 to 6](../media/getting-started/start.png)
+
+**1** A new design in millimetres (or inches, beside it) · **2** Open a saved design ·
+**3** Import a STEP, IGES or mesh file as a new design · **4** Designs you opened recently ·
+**5** Samples to explore · **6** The File menu: save, export, preferences, shortcuts
+
+A sample opens as an ordinary design you can change; a click on its tile is enough.
+
+<video src="../media/getting-started/sample.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Clicking the Sample Plate tile on the start page: the sample opens, and the view turns to look round it"></video>
+
+From there, [A tour of the window](ui-tour.md) shows what's where, and
+[Sketching step by step](sketching.md#step-by-step) starts a part of your own.
+
 ### macOS
 
 Open the release `.dmg` and drag `SolidCraft.app` onto Applications.
@@ -110,9 +127,14 @@ The same app runs in the browser: [open SolidCraft on the web](../app/) (`?sampl
 part, `?webgl` forces WebGL2 where WebGPU is missing or misbehaves; the browser remembers it until
 `?webgpu`, and an app installed from Chrome or Edge starts with it too). Designs are saved in the
 browser's private file storage, which needs HTTPS or localhost.
-Planned worker and tiered-storage integration is
-described in [web-runtime.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/web-runtime.md)
-(design; not yet wired in the shipped wasm build).
+
+The web app at `/app/` is always the latest release. Two more builds are there to try early:
+the [release candidate](../app-rc/) (the newest `-rc` pre-release; a page saying so appears
+until the first one is out) and the [edge build](../app-edge/) (the current `main`, rebuilt on
+every change). **Both can break, and a design saved in them may not open in the release.** Each
+keeps its designs, settings and recovery copies apart from the release's, so trying one never
+changes what the release sees, and nothing is copied between them: to move a design, save it to
+a file in one and open the file in the other. Search engines are told to skip both.
 
 After the first visit the web app works offline: the browser keeps a copy of it. Online, each
 launch gets the latest published build (the browser downloads it once when it changes); offline,
@@ -165,6 +187,20 @@ the ribbon, file menus, or start page:
 Embedded designs do not save designs, preferences, or recovery copies to browser
 storage and do not ask before unloading. **Open in SolidCraft** opens the same link
 in the full app in a new tab. `?embed` without `open` keeps the normal app layout.
+
+Use `embed=editor` instead for a page that keeps the designs itself and has people model in
+the frame. It needs no `open`:
+
+```html
+<iframe src="https://docs.solidcraft.io/app/?embed=editor"
+        width="1280" height="800" title="Modelling"></iframe>
+```
+
+The ribbon, browser tree, timeline and properties stay; the application bar and start page
+do not. Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+W and Ctrl+, do nothing there, because those belong to
+the page; Ctrl+Z and Ctrl+Y still undo and redo. As with `embed`, nothing is kept in browser
+storage: the page moves the design in and out with the `document.export` and
+`document.import` control methods.
 
 ### Self-hosting with Docker
 
@@ -312,6 +348,15 @@ rebuilds it; `run` then exits with status 1, lists the failing features and writ
 its `--out` and `--save` files, because the bodies lack what those features should have made.
 `--allow-errors` writes them anyway.
 
+`--quality standard|fine|finest` sets how closely an STL, OBJ or 3MF written by `--out`
+follows curved faces, as `file.export`'s `quality` does: a chord tolerance of 2e-4, 5e-5 or
+1e-5 of each body's size, though never under 1 µm, so on a small body `fine` and `finest`
+can come out the same. The default is `standard`.
+
+```sh
+solidcraft-cli run --in part.sc --out part.stl --quality fine
+```
+
 `--param-check warn|strict` checks each step against its command's parameter contract, for the
 commands that have one (`describe_command` in the MCP server shows them); the default, `off`,
 checks nothing. A misspelt optional key, such as `operaton` for `solid.box`'s `operation`, is
@@ -333,7 +378,10 @@ cargo run --release -p solidcraft-cli -- eval examples/bracket.json --json-out m
 To find the slow steps of a script, `--timings` prints how long each command took instead of
 the measurement: `{"timings": [{"index", "command", "ms"}], "total_ms"}`, with `index` counted
 from 0. `--profile` adds each command's `profile: {"boolean_ms", "tessellate_ms", "other_ms"}`,
-its wall time in the kernel's booleans, in tessellation and in everything else. With
+its wall time in the kernel's booleans, in tessellation and in everything else, and prints the
+profiler's table on stderr: where the time went, the kernel's calls to the commands
+(`docs/perf.md`, "Where the time goes"); `--profile-out trace.json` also writes the spans as a
+Chrome trace. `--profile` works on a design or STEP file too. With
 `--results` as well, the results go in the same object as `results`; `--results` alone still
 prints a plain array.
 

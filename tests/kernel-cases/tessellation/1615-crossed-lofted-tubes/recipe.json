@@ -1,0 +1,17 @@
+{"commands": [
+ {"command": "sketch.create", "params": {"plane": "XY", "offset": -50, "name": "VBottom"}},
+ {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "sketch.create", "params": {"plane": "XY", "offset": 50, "name": "VTop"}},
+ {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "solid.loft", "params": {"sections": [{"sketch": "VBottom"}, {"sketch": "VTop"}], "operation": "new", "body_name": "Vertical"}},
+ {"command": "sketch.create", "params": {"plane": "YZ", "offset": -50, "name": "HLeft"}},
+ {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "sketch.create", "params": {"plane": "YZ", "offset": 50, "name": "HRight"}},
+ {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}},
+ {"command": "sketch.finish", "params": {}},
+ {"command": "solid.loft", "params": {"sections": [{"sketch": "HLeft"}, {"sketch": "HRight"}], "operation": "new", "body_name": "Horizontal"}},
+ {"command": "solid.combine", "params": {"target": "Vertical", "tools": ["Horizontal"], "operation": "join"}}
+]}

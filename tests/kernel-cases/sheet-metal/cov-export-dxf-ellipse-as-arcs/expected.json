@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "sheet.export_dxf with curves: arcs of a 100 x 60 x 2 plate with a 20 x 12 elliptical cut-out: the ellipse becomes tangent arcs",
+ "source": "analytic",
+ "method": "curves: arcs writes the ellipse as tangent arcs and lines within 0.001 mm, for machines that read only those: on layer CUT no ELLIPSE and no SPLINE, and their length is the ellipse's perimeter 51.053998 (within 0.001 mm of the curve, the length to 1e-3 relative)",
+ "body_count": 1,
+ "files": [
+  {
+   "path": "flat.dxf",
+   "dxf": {
+    "CUT": {
+     "ELLIPSE": 0,
+     "SPLINE": 0,
+     "length_mm": 51.053997725577524
+    },
+    "OUTLINE": {
+     "LINE": 4,
+     "length_mm": 320.0
+    }
+   }
+  }
+ ]
+}

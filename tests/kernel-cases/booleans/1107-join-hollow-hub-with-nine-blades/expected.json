@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1107"
+ ],
+ "what": "a hollow hub (tube r 21.5..23) joined with nine disjoint blades whose roots lie wholly in the wall: one valid solid, the cavity stays the hub's. Blades here are r1 round bars (the report's are lofted fan blades)",
+ "source": "analytic",
+ "method": "tube V = pi(23^2-21.5^2)*20 = 4194.03. Each blade is a round bar r=1, axis radial, from radial distance 22.2 to 37.2, z centre 10; its root disk (radius at most 22.22) lies in the wall 21.5..23, so only the part beyond the hub's outer cylinder adds: along the bar at tangential offset s the cylinder wall is at radial distance sqrt(23^2-s^2), so one blade adds Int_-1^1 2 sqrt(1-s^2) (37.2 - sqrt(529-s^2)) ds = 44.6277 (python quadrature, 2000-point Simpson in s=sin a). Bars are 40 deg apart (>2 mm clear), none touches the cavity. V = 4194.03 + 9*44.6277 = 4595.675; one body",
+ "body_count": 1,
+ "volume_mm3": 4595.6754,
+ "center_of_mass": [
+  0,
+  0,
+  10
+ ]
+}

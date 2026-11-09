@@ -1,0 +1,11 @@
+#### UB-112. `SmPrimitiveCreation::CreateTaperExtrude` crashes on a profile curve below about twice the zone tolerance
+- **Severity:** Crash / undefined behaviour
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp:3604` `SmPrimitiveCreation::CreateTaperExtrude` (chains the curves with `SmCurve::FixChainCurvesList(.., 2*dZoneTol, TRUE)` at `:3672`, then uses them unchecked); reached from `SmApiCreateDraftSweep` and `SmApiCreateTaperExtrude`.
+- **What happens:** A profile made of a short curve segfaults. Which dereference fails was not located (the chaining step may drop the short curve and leave `NULL` entries that later code dereferences).
+- **Trigger:** `SmApiCreateDraftSweep` / `SmApiCreateTaperExtrude` (height `1`, angle `7.04`, caps `3`) with one `SmLine` of length `1e-5` or `1.2e-5` (length `2e-5` works), a four-line square of side `1e-6`, or an `SmApiCreateCircle` circle of radius `1.72e-6` with height `7.05e-6` (radius `2e-6` with height `1` works).
+- **How found:** generated difftest case (`sweep.api_brep`), then adversarial probes.
+- **Confirmed:** yes.
+- **Severity:** crash.
+- **Rust port:** The wrappers are stubs until `primitive.primitive_creation_p2` lands. The FFI rejects draft / taper profiles with a curve extent below `2e-5`; the generator keeps those profiles at scale `>= 1e-3`.
+- **Fuzz sweep trigger (2026-10-20):** an open four-line square profile with one line endpoint z at `9223372036854775807` / `-9223372036854775808` (`SmApiCreateTaperExtrude`, angle 5, caps -5 or 3; `SmApiCreateDraftSweep`, angle 90, caps 3), and a profile of two identical `SmCircle`s (centre `(2.10, 1.35, 0.65)`, radius `6.89`; taper angle `-2.85`, height `30.2`, caps 1, fillet). `sweep.api_brep` `fuzz00538`, `fuzz01054`, `fuzz01493`, `fuzz01538`. Confirmed: yes (segfault). Not guarded yet.

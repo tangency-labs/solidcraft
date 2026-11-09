@@ -1,0 +1,218 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#142",
+  "why": "no concrete recipe: a general saddle/four-face corner construction request; its geometry is exercised by case 1494"
+ },
+ {
+  "source": "tangency-labs/solidcraft#209",
+  "why": "no geometry given (a screenshot and 'the shell removed everything'); needs the user's design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1379",
+  "why": "needs the user's design; the refusal ('rim would have no thickness': round r2 tangent to the open face, shell 2 mm) is also the intended clean refusal, so no wrong result is recorded"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1969",
+  "why": "needs the user's design (a sphere split into 6 faces picked by point); a closed hollow sphere is the same operation as case 4009"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1996",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (offset of a snap-fit bottom face in an 8-body design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2259",
+  "why": "needs the eight-command script of #2258 (a shelled arched block, two cylinder cuts); neither it nor the arch dimensions are in the PR, and the failure hangs on 2e-6 mm vertex gaps that a re-guessed profile would not reproduce"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2421",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2432",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2445",
+  "why": "no body or recipe given (a screenshot only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2452",
+  "why": "no body or recipe given ('complex body' only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2478",
+  "why": "not geometry: construction-plane attachment to a face that cannot keep its name (history/attachment), no wrong shape"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2480",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (a revolved profile with a freeform face)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2493",
+  "why": "not geometry: construction-plane attachment to a face that cannot keep its name (history/attachment)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2556",
+  "why": "empty report: no body, pick or error given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2557",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (error: move larger than the wall; thickness 12 on an 8-body design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2745",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (error: move larger than the wall; thickness 11)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2761",
+  "why": "other area: 2D sketch offset of text outlines (sketch.offset), not a solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2795",
+  "why": "not geometry: UI, the plane editor says 'select a plane first' when editing an offset plane"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2886",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2905",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (shell .125 in on an 8-feature part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2917",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2935",
+  "why": "empty report: no body, pick or error given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2978",
+  "why": "not geometry: UI, the mouse position is offset from the buttons"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3000",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (shell direction both)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3031",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3074",
+  "why": "needs the user's design (2 bodies, the face pick is not resolved: 'select at least one face'); a pick-resolution defect, not a shape with a known answer"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3105",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (two opposite faces of a box in a 2-body design; the pick missed the faces)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3158",
+  "why": "empty report: no body, pick or error given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3159",
+  "why": "other area: 2D sketch offset of a spline (sketch.offset), not a solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3161",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3163",
+  "why": "empty report: no body, pick or error given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3181",
+  "why": "empty report: no body, pick or error given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3290",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (offset face on a 13-feature, 2-body design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3341",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3346",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3492",
+  "why": "not geometry: UI, 'select the curves to offset first' (sketch offset with an empty selection)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3524",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (a 3 mm shell of a body with 41 cylinder faces; the failure is in an internal boolean cut)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3567",
+  "why": "not geometry: construction-plane editing, 'plane offsets nested too deeply'"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3574",
+  "why": "other area: 2D sketch offset of a spline (sketch.offset), not a solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3585",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3603",
+  "why": "not geometry: construction-plane attachment to a face that cannot keep its name (history/attachment)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3621",
+  "why": "not geometry: construction-plane attachment to a face that cannot keep its name (history/attachment)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3672",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (surface.thicken of a 9-feature body)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3721",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (filleted extruded box in a 2-body design)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3742",
+  "why": "other area: 2D sketch offset (sketch.offset, 'collapses an arc'), not a solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3774",
+  "why": "not geometry: a feature request (clearance input on Combine cut)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3795",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (two faces, 4 mm; only a screenshot of the result)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3828",
+  "why": "other area: 2D sketch offset of splines (sketch.offset), not a solid operation"
+ },
+ {
+  "source": "tangency-labs/solidcraft#3933",
+  "why": "needs the user's design; the refusal ('rim would have no thickness': round r2 tangent to the open face, shell 2 mm) is also the intended clean refusal"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4029",
+  "why": "not geometry: construction-plane attachment jumps to another face after editing the offset"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4052",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (0.1 mm shell of a chamfered and filleted part)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4073",
+  "why": "empty report: no body, pick or error given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4120",
+  "why": "needs the user's design (3-body design; the pick is not resolved: 'select at least one face')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4144",
+  "why": "needs the user's design (only the failing pick and error text are given); no synthetic geometry can be inferred (three faces, 2 mm; move larger than the wall)"
+ }
+]

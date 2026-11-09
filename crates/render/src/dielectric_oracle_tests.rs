@@ -76,3 +76,52 @@ fn hostile_optics_are_rejected_without_clamping() {
     assert!(refract(Vec3::ZERO, Vec3::Z, 1.0, 1.5).is_err());
     assert!(refract(Vec3::Z, Vec3::Z, 1.0, 1.5).is_err());
 }
+
+#[test]
+fn zero_thickness_matched_sheet_transmits_at_exact_grazing() {
+    let sheet = Transmission::new(Vec3::new(100.0, 10.0, 1.0), Some(0.0)).unwrap();
+    for index in [1.0, 1.33, 1.5, 3.0] {
+        for cosine in [0.0, f64::EPSILON, 0.5, 1.0] {
+            let (reflected, transmitted) = slab(sheet, 0.0, cosine, index, index).unwrap();
+            assert_eq!(reflected, Vec3::ZERO);
+            assert_eq!(transmitted, Vec3::new(1.0, 1.0, 1.0));
+        }
+        // Positive physical thickness requires an actual crossing direction.
+        assert_eq!(slab(sheet, 1.0, 0.0, index, index), Err(TransmissionError::Angle));
+    }
+    // Zero thickness does not override total internal reflection.
+    let (reflected, transmitted) = slab(sheet, 0.0, 0.5, 1.5, 1.0).unwrap();
+    assert_eq!(reflected, Vec3::new(1.0, 1.0, 1.0));
+    assert_eq!(transmitted, Vec3::ZERO);
+}
+
+#[test]
+fn slab_energy_and_beer_order_hold_across_the_admitted_optical_domain() {
+    let clear = Transmission::new(Vec3::ZERO, None).unwrap();
+    let tinted = Transmission::new(Vec3::new(0.001, 0.1, 100.0), None).unwrap();
+    for outside in [1.0, 1.33, 1.5, 3.0] {
+        for inside in [1.0, 1.33, 1.5, 3.0] {
+            for cosine in [0.0, 1e-12, 0.01, 0.5, 0.9, 1.0] {
+                for thickness in [0.0, 1e-12, 1.0, 10000.0] {
+                    if cosine == 0.0 && outside == inside && thickness > 0.0 {
+                        continue;
+                    }
+                    let (r0, t0) = slab(clear, thickness, cosine, outside, inside).unwrap();
+                    let (r, t) = slab(tinted, thickness, cosine, outside, inside).unwrap();
+                    for (reflectance, transmittance, lossless_r, lossless_t) in
+                        [(r.x, t.x, r0.x, t0.x), (r.y, t.y, r0.y, t0.y), (r.z, t.z, r0.z, t0.z)]
+                    {
+                        assert!(reflectance.is_finite() && transmittance.is_finite());
+                        assert!((0.0..=1.0).contains(&reflectance));
+                        assert!((0.0..=1.0).contains(&transmittance));
+                        assert!((lossless_r + lossless_t - 1.0).abs() < 1e-12);
+                        assert!(reflectance <= lossless_r + 1e-12);
+                        assert!(transmittance <= lossless_t + 1e-12);
+                        assert!(reflectance + transmittance <= 1.0 + 1e-12);
+                    }
+                    assert!(t.x >= t.y && t.y >= t.z);
+                }
+            }
+        }
+    }
+}

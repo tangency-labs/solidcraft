@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a web along the sketch normal: two 10 mm lines on a plane 20 mm in front of a block, each a wall grown to the block",
+ "source": "analytic",
+ "method": "each wall runs along +Y from y=-20 to the block face y=0: 10 long, 2 thick in the plane, 20 deep: 400 each; V = 24000 + 800",
+ "body_count": 1,
+ "volume_mm3": 24800.0,
+ "bbox": {
+  "min": [
+   0,
+   -20,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ }
+}

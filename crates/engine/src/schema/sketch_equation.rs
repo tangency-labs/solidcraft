@@ -68,6 +68,33 @@ impl JsonSchema for Tolerance {
     }
 }
 
+/// What the curve's variable is in its formulas.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VariableUnitParam(pub solidcraft_sketch::VariableUnit);
+
+impl<'de> Deserialize<'de> for VariableUnitParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_str()
+            .and_then(solidcraft_sketch::VariableUnit::parse)
+            .map(VariableUnitParam)
+            .ok_or_else(|| D::Error::custom("must be \"number\" or \"range\""))
+    }
+}
+
+impl JsonSchema for VariableUnitParam {
+    fn schema_name() -> Cow<'static, str> {
+        "EquationVariableUnit".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "What the variable is in the formulas. \"number\": a plain number. \"range\": a length, as the range is; start and end must then both be lengths, or one a length and the other a plain number, which is in the design's unit. Default \"number\".",
+            "type": "string",
+            "enum": ["number", "range"]
+        })
+    }
+}
+
 /// An equation curve's id.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurveId(pub String);
@@ -113,6 +140,9 @@ pub struct EquationCurveParams {
     /// How far (mm) the curve may stray from its formulas. Default 0.01.
     #[serde(default)]
     pub tolerance: Option<Tolerance>,
+    /// What the variable is in the formulas. Default "number".
+    #[serde(default)]
+    pub variable_unit: Option<VariableUnitParam>,
     /// Make it construction geometry. Default false.
     #[serde(default)]
     pub construction: Option<bool>,
@@ -147,6 +177,9 @@ pub struct EquationEditParams {
     /// How far (mm) the curve may stray from its formulas. Kept when left out.
     #[serde(default)]
     pub tolerance: Option<Tolerance>,
+    /// What the variable is in the formulas. Kept when left out.
+    #[serde(default)]
+    pub variable_unit: Option<VariableUnitParam>,
     /// The sketch (default: the one being edited).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "SketchRef")]

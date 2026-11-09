@@ -3,7 +3,8 @@
 //! stays exact; the pieces replace the original curve.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::add_c;
@@ -57,8 +58,12 @@ fn cuts(sk: &Sketch, ci: usize, segs: &[Seg2], only_freeform: bool) -> Vec<(f64,
         let (t, u) = ((c - a).cross(s) / den, (c - a).cross(r) / den);
         ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then(|| a + r * t)
     };
+    // An ellipse's own axes end on it and cut it nowhere, as a Center Rectangle's diagonals end
+    // at its corners.
+    let (major, minor) = sk.ellipse_axis_lines(ci).unwrap_or((None, None));
+    let own_axes = [major.map(|(l, _)| l), minor.map(|(l, ..)| l)];
     for (oi, curve) in sk.curves.iter().enumerate() {
-        if oi == ci || (only_freeform && !curve.kind.is_freeform()) {
+        if oi == ci || (only_freeform && !curve.kind.is_freeform()) || own_axes.contains(&Some(oi)) {
             continue;
         }
         let other = sk.polyline(oi);
@@ -156,22 +161,22 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<
             Seg2::Line { .. } => CurveKind::Line { a: prev, b: to },
             Seg2::Cubic { p1, p2, .. } => {
                 let (c1, c2) = (sk.add_point(p1, None)?, sk.add_point(p2, None)?);
-                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false }
+                CurveKind::Spline { pts: vec![prev, c1, c2, to], control: true, degree: 3, periodic: false, nurbs: None }
             }
             Seg2::Conic { apex, w, .. } => {
                 let x = sk.add_point(apex, None)?;
                 CurveKind::Conic { a: prev, b: to, apex: x, rho: w / (1.0 + w) }
             }
             Seg2::Bezier { n, p } => {
-                let k = (n as usize).clamp(1, solidcraft_geom::MAX_BEZIER_DEGREE);
+                let k = (n as usize).clamp(1, solidcore_record::MAX_BEZIER_DEGREE);
                 let mut pts = vec![prev];
                 for q in p.iter().take(k).skip(1) {
                     pts.push(sk.add_point(*q, None)?);
                 }
                 pts.push(to);
-                CurveKind::Spline { pts, control: true, degree: n, periodic: false }
+                CurveKind::Spline { pts, control: true, degree: n, periodic: false, nurbs: None }
             }
-            Seg2::Arc { .. } => return Err(bad("trim", "unexpected arc piece")),
+            Seg2::Arc { .. } => return Err(bad("sketch.trim", "unexpected arc piece")),
         };
         let c = sk.add_curve(kind, None)?;
         if let Some(cu) = sk.curves.get_mut(c) {

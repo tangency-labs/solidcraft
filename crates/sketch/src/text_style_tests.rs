@@ -1,7 +1,7 @@
 //! Text styles: alignment, letter and line spacing, a made-up italic, a bold the font lacks, and
 //! text that follows a curve of its sketch; and text measured (`TextMetrics`) by the rule that draws it.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use super::*;
 use crate::{CurveKind, Sketch, font_data};

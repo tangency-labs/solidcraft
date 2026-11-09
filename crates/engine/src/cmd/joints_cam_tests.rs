@@ -158,7 +158,9 @@ fn picked_edges_give_the_sketch_s_table() {
         s.doc.assembly.links.first().map(|l| (l.lift.clone(), l.offset)).unwrap_or_default()
     };
     let (sketch, a) = table(json!({"sketch": "CamSketch"}));
-    let (edges, b) = table(json!({"edges": [[E + R, 0, 5]]}));
+    // Picked on the rim a quarter turn from where the extruded circle's seam meets it: a pick on
+    // that vertex could be either edge.
+    let (edges, b) = table(json!({"edges": [[E, R, 5]]}));
     assert_eq!((sketch.len(), edges.len()), (360, 360));
     assert!(sketch.iter().zip(&edges).all(|(x, y)| close(*x, *y, 1e-3)) && close(a, b, 1e-3));
     // A second disc of the cam's component touching it in the same plane is not part of its loop.
@@ -171,7 +173,7 @@ fn picked_edges_give_the_sketch_s_table() {
     assert!(touching.len() == 360 && touching.iter().zip(&sketch).all(|(x, y)| close(*x, *y, 1e-3)), "{touching:?}");
     let mut s = cam_on_base();
     tappet(&mut s, 0.0, E + R);
-    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"edges": [[E + R, 0, 5]]}}));
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"edges": [[E, R, 5]]}}));
     assert!(matches!(
         s.doc.assembly.links.first().and_then(|l| l.coupling.clone()),
         Some(Coupling::Cam(c)) if matches!(&c.profile, CamProfile::Edges { names, .. } if names.first().is_some_and(|n| !n.is_empty()))

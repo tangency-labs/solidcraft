@@ -1,6 +1,6 @@
-//! Portable built-in surface intent. Targets use definition/feature/occurrence identity,
-//! never a captured mesh ordinal. Frames are definition-local millimetres. Encoded map
-//! hashes pin the installed built-in resource revision; no paths or device objects are saved.
+//! Portable opaque surface intent with built-in or design-owned encoded sources.
+//! Targets use definition/feature/occurrence identity, never a captured mesh ordinal.
+//! Frames are definition-local millimetres; no paths or device objects are saved.
 use crate::{DocError, Result, render_resources::HdrId};
 use serde::{Deserialize, Serialize};
 use solidcraft_render::job::textures::PlanarFrame;
@@ -72,9 +72,73 @@ impl BuiltinSurfaceSource {
 #[serde(deny_unknown_fields)]
 pub struct SavedSurface {
     pub target: RenderBodyTarget,
-    pub source: BuiltinSurfaceSource,
+    pub source: SurfaceSource,
     pub local_frame: PlanarFrame,
     pub normal_strength: f64,
+}
+
+/// Built-in records retain their original wire shape. Embedded records explicitly
+/// identify each role; one digest may have several independently prepared uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SurfaceSource {
+    Builtin(BuiltinSurfaceSource),
+    Embedded(EmbeddedSurfaceSource),
+}
+impl From<BuiltinSurfaceSource> for SurfaceSource {
+    fn from(source: BuiltinSurfaceSource) -> Self {
+        Self::Builtin(source)
+    }
+}
+impl SurfaceSource {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Builtin(source) => source.validate(),
+            Self::Embedded(source) => source.validate(),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EmbeddedSurfaceKind {
+    Embedded,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbeddedSurfaceSource {
+    pub kind: EmbeddedSurfaceKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_color: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_open_gl: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roughness: Option<HdrId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metallic: Option<HdrId>,
+    #[serde(default)]
+    pub flip_v: bool,
+}
+impl EmbeddedSurfaceSource {
+    pub fn role_resources(&self) -> impl Iterator<Item = (solidcraft_render::texture_input::MapRole, HdrId)> + '_ {
+        use solidcraft_render::texture_input::MapRole;
+        [
+            (MapRole::BaseColor, self.base_color),
+            (MapRole::NormalOpenGl, self.normal_open_gl),
+            (MapRole::Roughness, self.roughness),
+            (MapRole::Metallic, self.metallic),
+        ]
+        .into_iter()
+        .filter_map(|(role, id)| id.map(|id| (role, id)))
+    }
+    pub fn resources(&self) -> impl Iterator<Item = HdrId> + '_ {
+        [self.base_color, self.normal_open_gl, self.roughness, self.metallic].into_iter().flatten()
+    }
+    pub fn validate(&self) -> Result<()> {
+        if self.resources().next().is_none() {
+            return Err(invalid("an embedded surface requires at least one explicit map role"));
+        }
+        Ok(())
+    }
 }
 impl SavedSurface {
     pub fn validate(&self) -> Result<()> {
@@ -190,7 +254,8 @@ mod tests {
                 normal_sha256: HdrId::of(b"normal"),
                 roughness_sha256: HdrId::of(b"rough"),
                 metallic_sha256: HdrId::of(b"metal"),
-            },
+            }
+            .into(),
             local_frame: PlanarFrame { origin: [1., 2., 3.], u: [100., 0., 0.], v: [0., 100., 0.] },
             normal_strength: 0.75,
         }
@@ -249,5 +314,67 @@ mod tests {
         target.component = 1;
         target.occurrence_path = vec![2, 2];
         assert!(target.validate().is_err());
+    }
+    #[test]
+    fn saved_cpu_surface_maps_roundtrip_for_opaque_direct_and_path_and_preserve_unsupported_intent() {
+        use crate::render_settings::{CpuJob, RenderJob, RenderSetup};
+        let mut options = CpuJob::default();
+        let mut setup = RenderSetup {
+            job: Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) }),
+            ..Default::default()
+        };
+        setup.surfaces.set(fixture(), false).unwrap();
+        setup.validate().unwrap();
+        let mut direct_document = crate::Document::default();
+        std::sync::Arc::make_mut(&mut direct_document.render).setups.insert("Maps".into(), setup.clone());
+        assert_eq!(crate::Document::from_json(&direct_document.to_json()).unwrap(), direct_document);
+        options.progressive = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: 16, seed: 9 });
+        options.shadows = true;
+        options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3 });
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
+        setup.validate().unwrap();
+        let mut document = crate::Document::default();
+        std::sync::Arc::make_mut(&mut document.render).setups.insert("Maps".into(), setup.clone());
+        assert_eq!(crate::Document::from_json(&document.to_json()).unwrap(), document);
+        options.path = None;
+        let saved_options_wire = serde_json::to_value(&options).unwrap();
+        let mut runtime = options.to_runtime(0.0).unwrap();
+        runtime.reflections = Some(solidcraft_render::job::ReflectionOptions {
+            bodies: vec![solidcraft_render::job::ReflectionBody { body: "Panel".into(), mode: solidcraft_render::job::ReflectionMode::Mirror }],
+            samples: 1,
+            max_bounces: 2,
+        });
+        runtime.validate().unwrap();
+        let runtime_wire = serde_json::to_value(&runtime).unwrap();
+        let error = solidcraft_render::job::textures::validate_cpu_options(&runtime).unwrap_err();
+        assert!(error.message.contains("selected reflections"));
+        assert_eq!(serde_json::to_value(&runtime).unwrap(), runtime_wire, "map refusal preserves the exact runtime selected override");
+        assert_eq!(serde_json::to_value(&options).unwrap(), saved_options_wire, "runtime overrides do not rewrite saved CPU fields");
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
+        setup.validate().unwrap();
+        let mut unknown = serde_json::to_value(&setup).unwrap();
+        unknown["job"]["options"]["reflections"] = serde_json::to_value(&runtime.reflections).unwrap();
+        let error = serde_json::from_value::<RenderSetup>(unknown).unwrap_err();
+        assert!(error.to_string().contains("reflections"), "saved CPU intent must not silently discard runtime-only selected overrides");
+        // Prove the saved field is supported in fixed mode before checking
+        // its incompatibility with still-authored progressive sampling.
+        let mut fixed = options.clone();
+        fixed.progressive = None;
+        fixed.primary_samples = 4;
+        fixed.validate_surface_maps(0.0).unwrap();
+        let surfaces = setup.surfaces.clone();
+        options.primary_samples = 4;
+        setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options) });
+        let wire = serde_json::to_value(&setup).unwrap();
+        assert!(setup.validate().unwrap_err().to_string().contains("CPU progressive requires"));
+        assert_eq!(serde_json::to_value(&setup).unwrap(), wire);
+        assert_eq!(setup.surfaces, surfaces);
+        assert_eq!(setup.surfaces.len(), 1);
+        for job in [None, Some(RenderJob::Raster { transparent_background: false })] {
+            setup.job = job;
+            assert!(setup.validate().is_err());
+            assert_eq!(setup.surfaces, surfaces);
+            assert_eq!(setup.surfaces.len(), 1);
+        }
     }
 }

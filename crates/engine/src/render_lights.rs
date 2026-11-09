@@ -1,9 +1,13 @@
 //! Shared light inspection and numerical adapters; no document or view-state mutation.
 use crate::schema::render_lights::{Geometry, Light};
+use solidcore_record::Vec3;
 use solidcraft_doc::render_settings::{RenderJob, RenderSetup};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 use solidcraft_render::job::LightingPreset;
-use solidcraft_render::job::{AreaLight, AreaLights, DirectionalLightOptions, PunctualLightOptions, RectangleLightOptions, SpotConeOptions, Sun};
+use solidcraft_render::job::{
+    AreaLight, AreaLights, DirectionalLightOptions, DirectionalLights, PunctualLightOptions, PunctualLights, RectangleLightOptions, SpotConeOptions,
+    Sun,
+};
 
 pub fn parse_id(id: &str) -> Result<(&str, usize), String> {
     if id.len() > 16 {
@@ -81,6 +85,8 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
         (edit.height_mm, 0.000002, 2e6),
         (edit.reference_distance_mm, 0.001, 1e6),
         (edit.minimum_distance_mm, 0.001, 1e6),
+        (edit.inner_half_angle_radians, 0.0, std::f64::consts::FRAC_PI_2),
+        (edit.outer_half_angle_radians, 0.0, std::f64::consts::FRAC_PI_2),
     ] {
         if value.is_some_and(|v| !v.is_finite() || !(low..=high).contains(&v)) {
             return Err("light edit exceeds finite numerical bounds".into());
@@ -89,6 +95,7 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
     for (value, low, high) in [
         (edit.position_mm, -1e12, 1e12),
         (edit.direction, -1e6, 1e6),
+        (edit.emitted_axis, -1e9, 1e9),
         (edit.edge_u_mm, -2e6, 2e6),
         (edit.edge_v_mm, -2e6, 2e6),
         (edit.radiance, 0.0, 1e8),
@@ -115,15 +122,25 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
         Geometry::Area { edge_u_mm, .. } => vector(edge_u_mm).len(),
         _ => 10.0,
     };
+    let old_punctual = match light.geometry {
+        Geometry::Point { position_mm, reference_distance_mm, minimum_distance_mm }
+        | Geometry::Spot { position_mm, reference_distance_mm, minimum_distance_mm, .. } => {
+            Some((position_mm, reference_distance_mm, minimum_distance_mm))
+        }
+        _ => None,
+    };
+    let (punctual_position, punctual_reference, punctual_minimum) = old_punctual.unwrap_or((array(point), distance, 0.001));
     let type_changed = edit.kind.as_ref().is_some_and(|kind| kind != light.geometry.kind());
     if let Some(kind) = edit.kind.as_ref().filter(|_| type_changed) {
         light.geometry = match kind.as_str() {
             "directional" => Geometry::Directional { direction: array(direction), angular_radius_rad: None },
-            "point" => Geometry::Point { position_mm: array(point), reference_distance_mm: distance, minimum_distance_mm: 0.001 },
+            "point" => {
+                Geometry::Point { position_mm: punctual_position, reference_distance_mm: punctual_reference, minimum_distance_mm: punctual_minimum }
+            }
             "spot" => Geometry::Spot {
-                position_mm: array(point),
-                reference_distance_mm: distance,
-                minimum_distance_mm: 0.001,
+                position_mm: punctual_position,
+                reference_distance_mm: punctual_reference,
+                minimum_distance_mm: punctual_minimum,
                 emitted_axis: array(-direction),
                 inner_half_angle_radians: 0.2,
                 outer_half_angle_radians: 0.5,
@@ -143,7 +160,7 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
     }
     if let Some(rgb) = edit.radiance {
         if !matches!(light.geometry, Geometry::Area { .. } | Geometry::Directional { angular_radius_rad: Some(_), .. }) {
-            return Err("radiance requires an area light or GPU sun".into());
+            return Err("radiance requires an area light or finite Sun".into());
         }
         (light.intensity, light.colour) = radiance(rgb);
     }
@@ -159,6 +176,14 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
     }
     if !matches!(light.geometry, Geometry::Directional { .. }) && edit.direction.is_some() {
         return Err("direction requires a directional light".into());
+    }
+    if !matches!(light.geometry, Geometry::Spot { .. })
+        && (edit.emitted_axis.is_some() || edit.inner_half_angle_radians.is_some() || edit.outer_half_angle_radians.is_some())
+    {
+        return Err("cone angles and emitted axis require a spot light".into());
+    }
+    if edit.emitted_axis.is_some() && edit.aim_at.is_some() {
+        return Err("choose a spot emitted axis or an aim point, not both".into());
     }
     let moved = type_changed || edit.azimuth_deg.is_some() || edit.elevation_deg.is_some() || edit.distance_mm.is_some() || edit.aim_at.is_some();
     match &mut light.geometry {
@@ -181,7 +206,14 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
             if edit.softness.is_some() || edit.size_mm.is_some() {
                 return Err("point/spot lights have no finite emitter size or soft shadows".into());
             }
-            if moved {
+            if moved
+                && !(type_changed
+                    && old_punctual.is_some()
+                    && edit.azimuth_deg.is_none()
+                    && edit.elevation_deg.is_none()
+                    && edit.distance_mm.is_none()
+                    && edit.aim_at.is_none())
+            {
                 *position_mm = array(point);
             }
             if let Some(position) = edit.position_mm {
@@ -235,7 +267,60 @@ pub fn patch(light: &mut Light, edit: &crate::schema::render_lights::LightPatch,
     {
         *emitted_axis = array(solidcraft_render::surface::unit_direction(vector(aim) - vector(*position_mm)).unwrap_or(-Vec3::Z));
     }
+    if let Geometry::Spot { emitted_axis, inner_half_angle_radians, outer_half_angle_radians, .. } = &mut light.geometry {
+        if let Some(axis) = edit.emitted_axis {
+            *emitted_axis = axis;
+        }
+        if let Some(inner) = edit.inner_half_angle_radians {
+            *inner_half_angle_radians = inner;
+        }
+        if let Some(outer) = edit.outer_half_angle_radians {
+            *outer_half_angle_radians = outer;
+        }
+    }
     Ok(())
+}
+
+fn same_vector_bits(a: [f64; 3], b: [f64; 3]) -> bool {
+    a.into_iter().zip(b).all(|(a, b)| a.to_bits() == b.to_bits())
+}
+
+// IDs refer to the original family slots until write publishes the new order.
+// Preserve an untouched authored source's raw radiance rather than performing an
+// unrelated divide/multiply round trip through the common intensity/colour UI.
+fn original_sun(lighting: solidcraft_render::job::StudioLighting, light: &Light) -> Option<Sun> {
+    original_sun_value(lighting.sun?, light)
+}
+fn original_sun_value(original: Sun, light: &Light) -> Option<Sun> {
+    if light.id != "directional:0" {
+        return None;
+    }
+    let Geometry::Directional { direction, angular_radius_rad: Some(radius) } = light.geometry else {
+        return None;
+    };
+    let (intensity, colour) = radiance(original.radiance);
+    (same_vector_bits(direction, original.direction)
+        && radius.to_bits() == original.angular_radius_rad.to_bits()
+        && light.intensity.to_bits() == intensity.to_bits()
+        && same_vector_bits(light.colour, colour))
+    .then_some(original)
+}
+fn original_area(lighting: solidcraft_render::job::StudioLighting, light: &Light) -> Option<AreaLight> {
+    let (kind, index) = parse_id(&light.id).ok()?;
+    if kind != "area" {
+        return None;
+    }
+    let original = *lighting.area_lights.iter().nth(index)?;
+    let Geometry::Area { position_mm, edge_u_mm, edge_v_mm } = light.geometry else {
+        return None;
+    };
+    let (intensity, colour) = radiance(original.radiance);
+    (same_vector_bits(position_mm, original.center)
+        && same_vector_bits(edge_u_mm, original.u.map(|x| x * 2.0))
+        && same_vector_bits(edge_v_mm, original.v.map(|x| x * 2.0))
+        && light.intensity.to_bits() == intensity.to_bits()
+        && same_vector_bits(light.colour, colour))
+    .then_some(original)
 }
 
 /// Materializes a canonical rig in a cloned setup. Caller validates and publishes
@@ -251,23 +336,28 @@ pub fn write(setup: &mut RenderSetup, lights: &[Light]) -> Result<(), String> {
         return Err("light family limit exceeded (8 directional, 8 punctual, 4 area)".into());
     }
     match setup.job.as_mut() {
-        Some(RenderJob::CpuRaytrace { options }) => {
-            if directional.iter().any(|light| matches!(light.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. })) {
-                return Err("CPU directional lights have hard shadows; softness is not supported".into());
+        Some(RenderJob::CpuRaytrace { options, .. }) => {
+            let mut sun = None;
+            let mut hard = Vec::new();
+            for light in directional {
+                if let Geometry::Directional { direction, angular_radius_rad } = light.geometry {
+                    if let Some(angular_radius_rad) = angular_radius_rad {
+                        if sun.is_some() {
+                            return Err("lighting supports one finite Sun; use hard directionals for additional distant sources".into());
+                        }
+                        sun = Some(options.sun.and_then(|sun| original_sun_value(sun, light)).unwrap_or(Sun {
+                            direction,
+                            angular_radius_rad,
+                            radiance: light.colour.map(|value| value * light.intensity),
+                        }));
+                    } else {
+                        hard.push(DirectionalLightOptions { direction, color: light.colour, intensity: light.intensity });
+                    }
+                }
             }
+            options.sun = sun;
             options.preset = None;
-            options.lights = Some(
-                directional
-                    .into_iter()
-                    .map(|l| {
-                        let direction = match l.geometry {
-                            Geometry::Directional { direction, .. } => direction,
-                            _ => [0.0, 0.0, 1.0],
-                        };
-                        DirectionalLightOptions { direction, color: l.colour, intensity: l.intensity }
-                    })
-                    .collect(),
-            );
+            options.lights = Some(hard);
             options.punctual_lights = Some(
                 punctual
                     .into_iter()
@@ -318,25 +408,69 @@ pub fn write(setup: &mut RenderSetup, lights: &[Light]) -> Result<(), String> {
             }
         }
         Some(RenderJob::GpuPath { options, .. }) => {
-            if !punctual.is_empty() || directional.len() > 1 {
-                return Err("GPU lighting supports one Sun and four Areas; choose an explicit studio before editing legacy default lights".into());
-            }
             let mut lighting = options.lighting.unwrap_or_default();
-            lighting.sun = directional.first().and_then(|l| match l.geometry {
-                Geometry::Directional { direction, angular_radius_rad } => {
-                    Some(Sun { direction, angular_radius_rad: angular_radius_rad.unwrap_or(0.02), radiance: l.colour.map(|c| c * l.intensity) })
+            let mut sun = None;
+            let mut hard = Vec::new();
+            for light in directional {
+                if let Geometry::Directional { direction, angular_radius_rad } = light.geometry {
+                    if let Some(angular_radius_rad) = angular_radius_rad {
+                        if sun.is_some() {
+                            return Err("GPU lighting supports one finite Sun; use hard directional lights for additional distant sources".into());
+                        }
+                        sun = Some(original_sun(lighting, light).unwrap_or(Sun {
+                            direction,
+                            angular_radius_rad,
+                            radiance: light.colour.map(|c| c * light.intensity),
+                        }));
+                    } else {
+                        hard.push(DirectionalLightOptions { direction, color: light.colour, intensity: light.intensity });
+                    }
                 }
-                _ => None,
-            });
+            }
+            let punctual: Vec<_> = punctual
+                .into_iter()
+                .filter_map(|light| {
+                    let (position_mm, reference_distance_mm, minimum_distance_mm, cone) = match light.geometry {
+                        Geometry::Point { position_mm, reference_distance_mm, minimum_distance_mm } => {
+                            (position_mm, reference_distance_mm, minimum_distance_mm, None)
+                        }
+                        Geometry::Spot {
+                            position_mm,
+                            reference_distance_mm,
+                            minimum_distance_mm,
+                            emitted_axis,
+                            inner_half_angle_radians,
+                            outer_half_angle_radians,
+                        } => (
+                            position_mm,
+                            reference_distance_mm,
+                            minimum_distance_mm,
+                            Some(SpotConeOptions { emitted_axis, inner_half_angle_radians, outer_half_angle_radians }),
+                        ),
+                        _ => return None,
+                    };
+                    Some(PunctualLightOptions {
+                        position_mm,
+                        reference_distance_mm,
+                        minimum_distance_mm,
+                        cone,
+                        color: light.colour,
+                        intensity: light.intensity,
+                    })
+                })
+                .collect();
+            lighting.punctual_lights = PunctualLights::new(&punctual).map_err(|e| e.to_string())?;
+            lighting.sun = sun;
+            lighting.directional_lights = DirectionalLights::new(&hard).map_err(|e| e.to_string())?;
             let areas: Vec<_> = area
                 .into_iter()
                 .filter_map(|l| match l.geometry {
-                    Geometry::Area { position_mm, edge_u_mm, edge_v_mm } => Some(AreaLight {
+                    Geometry::Area { position_mm, edge_u_mm, edge_v_mm } => Some(original_area(lighting, l).unwrap_or(AreaLight {
                         center: position_mm,
                         u: edge_u_mm.map(|v| v * 0.5),
                         v: edge_v_mm.map(|v| v * 0.5),
                         radiance: l.colour.map(|c| c * l.intensity),
-                    }),
+                    })),
                     _ => None,
                 })
                 .collect();
@@ -380,7 +514,7 @@ pub fn inspect(setup: &RenderSetup) -> Result<Vec<Light>, String> {
     setup.validate().map_err(|e| e.to_string())?;
     let mut lights = Vec::new();
     match &setup.job {
-        Some(RenderJob::CpuRaytrace { options }) => {
+        Some(RenderJob::CpuRaytrace { options, .. }) => {
             let implicit = options.lights.is_none();
             let defaults;
             let directional = match &options.lights {
@@ -390,10 +524,21 @@ pub fn inspect(setup: &RenderSetup) -> Result<Vec<Light>, String> {
                     &defaults
                 }
             };
+            if let Some(sun) = options.sun {
+                let (intensity, colour) = radiance(sun.radiance);
+                push(
+                    &mut lights,
+                    0,
+                    false,
+                    intensity,
+                    colour,
+                    Geometry::Directional { direction: sun.direction, angular_radius_rad: Some(sun.angular_radius_rad) },
+                );
+            }
             for (index, light) in directional.iter().enumerate() {
                 push(
                     &mut lights,
-                    index,
+                    index + usize::from(options.sun.is_some()),
                     implicit,
                     light.intensity,
                     light.color,
@@ -441,6 +586,34 @@ pub fn inspect(setup: &RenderSetup) -> Result<Vec<Light>, String> {
                         colour,
                         Geometry::Directional { direction: sun.direction, angular_radius_rad: Some(sun.angular_radius_rad) },
                     );
+                }
+                for (index, light) in lighting.directional_lights.iter().enumerate() {
+                    push(
+                        &mut lights,
+                        index + usize::from(lighting.sun.is_some()),
+                        false,
+                        light.intensity,
+                        light.color,
+                        Geometry::Directional { direction: light.direction, angular_radius_rad: None },
+                    );
+                }
+                for (index, light) in lighting.punctual_lights.iter().enumerate() {
+                    let geometry = match light.cone {
+                        Some(cone) => Geometry::Spot {
+                            position_mm: light.position_mm,
+                            reference_distance_mm: light.reference_distance_mm,
+                            minimum_distance_mm: light.minimum_distance_mm,
+                            emitted_axis: cone.emitted_axis,
+                            inner_half_angle_radians: cone.inner_half_angle_radians,
+                            outer_half_angle_radians: cone.outer_half_angle_radians,
+                        },
+                        None => Geometry::Point {
+                            position_mm: light.position_mm,
+                            reference_distance_mm: light.reference_distance_mm,
+                            minimum_distance_mm: light.minimum_distance_mm,
+                        },
+                    };
+                    push(&mut lights, index, false, light.intensity, light.color, geometry);
                 }
                 for (index, light) in lighting.area_lights.iter().enumerate() {
                     let (intensity, colour) = radiance(light.radiance);

@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3665",
+    "tangency-labs/solidcraft#3666"
+  ],
+  "what": "a join extrude of a column standing on a channel's flat floor and lying along both its curved walls (column circle tangent to both walls)",
+  "source": "analytic",
+  "method": "housing 60x60x20 = 72000 minus the annular channel r16..24, 10 deep: pi(24^2-16^2)*10; the column r=4 centred on the channel's mid circle (r=20) is tangent to both walls and stands 6 mm on the floor: + pi*16*6. V = 72000 - 3200pi + 96pi",
+  "body_count": 1,
+  "volume_mm3": 62248.4964
+}

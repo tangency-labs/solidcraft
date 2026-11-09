@@ -1,0 +1,66 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      10
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      40,
+      0
+     ],
+     [
+      40,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      40,
+      10
+     ],
+     [
+      30,
+      30
+     ],
+     [
+      10,
+      30
+     ],
+     [
+      0,
+      10
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  }
+ ]
+}

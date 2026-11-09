@@ -7,7 +7,8 @@
 //! are ~1. Dragging an endpoint of `l1` must keep the sketch solved: the cursor may not leave the
 //! constraint manifold, and the rank analysis may not hide `l1`'s coupling below its tolerance.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::{Analysis, ConstraintKind, Hold, Sketch, move_point_towards, solve_with};
 
@@ -59,4 +60,42 @@ fn dragging_the_midpoint_line_end_keeps_the_sketch_solved() {
     let at = sk.points[e1].pos;
     let off = (at.y.atan2(at.x) - 50f64.to_radians()).abs();
     assert!(off < 1e-3, "l1.end went to {at:?} (off its line by {off} rad)");
+}
+
+/// An infinite reference can have very close defining points in a saved sketch. Its
+/// horizontal/vertical constraint still fixes its visible direction, not just the tiny
+/// distance between the defining points (#11001).
+#[test]
+fn an_angle_keeps_a_short_infinite_reference_horizontal_or_vertical() {
+    for (vertical, sign, origin) in [
+        (false, 1.0, v(0.0, 0.0)),
+        (true, 1.0, v(0.0, 0.0)),
+        (false, -1.0, v(0.0, 0.0)),
+        (true, -1.0, v(0.0, 0.0)),
+        (false, 1.0, v(25.0, -17.0)),
+        (true, 1.0, v(25.0, -17.0)),
+    ] {
+        for length in [6.36e-8, 1.0] {
+            let mut sk = Sketch::new();
+            sk.points[0].pos = origin;
+            let direction = (if vertical { v(0.0, 1.0) } else { v(1.0, 0.0) }) * sign;
+            let end = sk.add_point(origin + direction * length, None).unwrap();
+            let arm_end = sk.add_point(origin + (if vertical { v(-10.0, 12.0) } else { v(12.0, 10.0) }) * sign, None).unwrap();
+            let axis = sk.add_line_pts(0, end, Some("axis")).unwrap();
+            sk.curves[axis].infinite = true;
+            sk.curves[axis].construction = true;
+            let arm = sk.add_line_pts(0, arm_end, Some("arm")).unwrap();
+            let constraint = if vertical { ConstraintKind::Vertical { l: axis } } else { ConstraintKind::Horizontal { l: axis } };
+            sk.add_constraint(constraint, None).unwrap();
+            sk.add_constraint(ConstraintKind::Angle { a: axis, b: arm, value: 30f64.to_radians(), flip: false }, None).unwrap();
+
+            let report = crate::solve(&mut sk);
+            assert!(report.ok(), "vertical={vertical}, length={length}: {report:?}");
+            let actual = (sk.points[end].pos - origin).normalized().expect("the reference retains a direction");
+            assert!(actual.dist(direction) < 1e-6, "vertical={vertical}, length={length}: reference rotated to {actual:?}");
+            let arm_direction = (sk.points[arm_end].pos - origin).normalized().unwrap();
+            let angle = actual.cross(arm_direction).atan2(actual.dot(arm_direction));
+            assert!((angle - 30f64.to_radians()).abs() < 1e-6, "the free line must satisfy the angle: {angle}");
+        }
+    }
 }

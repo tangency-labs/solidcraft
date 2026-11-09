@@ -1,0 +1,20 @@
+{
+ "base": "../../12-sheet-metal/001-base-flange",
+ "commands": [
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "edges": [
+     [
+      50.0,
+      0,
+      2.0
+     ]
+    ],
+    "height": 20.0,
+    "angle": 90
+   }
+  }
+ ]
+}

@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::{RuledCorners, RuledMode, SheetSection};
-use solidcraft_geom::Seg2;
+use solidcore_record::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
@@ -20,6 +20,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if !edges.is_empty() {
                 let i = body_at(st, body, &crate::plain(edges))?;
                 let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid("body".into()))?;
+                // A design may carry an order the fill does not build yet: refused, not built lower.
+                for g in std::iter::once(continuity.all).chain(continuity.edges.iter().map(|e| e.g)) {
+                    g.built_by(kernel::Construction::Patch)?;
+                }
                 let spec = kernel::PatchSpec {
                     continuity: continuity.all,
                     edges: continuity.edges.iter().map(|e| (e.edge.0, e.g)).collect(),
@@ -59,13 +63,16 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let t = val(vals, thickness, Kind::Length)?;
             let mut tools = Vec::new();
             for n in bodies {
-                let b = st.body(n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
-                tools.push(kernel::thicken(&b.body, t, *symmetric)?);
+                let b = st.body(n).cloned().ok_or_else(|| DocError::Unknown(format!("body `{n}`")))?;
+                // Kept face, offset and edge walls. Carry that history so a sketch can attach
+                // to the solid's faces and follow the thickness (#7641).
+                let thickened = kernel::thicken(&b.body, t, *symmetric)?;
+                tools.push(Traced::step(thickened, &[&b.traced()]));
             }
             if tools.is_empty() {
                 return Err(DocError::Invalid("pick the surfaces to thicken".into()));
             }
-            apply_op(doc, st, f, tools, *operation, &crate::plain(targets))
+            apply_traced(doc, st, f, tools, *operation, &crate::plain(targets))
         }
         FeatureKind::SurfaceTrim { body, plane, tool, keep, keep_more, curves, with, keep_with, stitch, extend } => {
             let i = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -229,7 +236,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 return Err(DocError::Invalid("a match needs a chain of the target's edges".into()));
             }
             // Picked by a point on the face; without picks, the body's first face.
-            let picked: Vec<solidcraft_geom::Vec3> = if faces.is_empty() {
+            let picked: Vec<solidcore_record::Vec3> = if faces.is_empty() {
                 let faces = mb.body.faces(mb.body.size() * 1e-2)?;
                 vec![faces.first().ok_or_else(|| DocError::Invalid(format!("`{body}` has no face to match")))?.centroid]
             } else {
@@ -304,7 +311,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f.component,
             )?;
-            let (o, d) = revolve_axis(&ss, axis, &super::axis_state(doc, st, f.component, axis), &|name| {
+            let (o, d) = revolve_axis(vals, &ss, axis, &*super::axis_state(doc, st, f.component, axis)?, &|name| {
                 construction_axis_in(Some(doc), st, name, f.component)
             })?;
             let a = val(vals, angle, Kind::Angle)?;
@@ -371,17 +378,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
             let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
             let body = match path_points(ps, path, start)? {
-                Some(pts) => {
+                Some(path) => {
+                    let pts = path.points();
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, pts.first().copied().unwrap_or(start))?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                     kernel::sweep_sheet_points_with(&ss.plane, &chains, &pts, &ctl)?
                 }
                 None => {
-                    let segs = path_segments(ps, path, start)?;
-                    let path_start = match segs.first() {
-                        Some(kernel::PathSeg::Line { a, .. } | kernel::PathSeg::Arc { a, .. }) => *a,
-                        None => start,
-                    };
+                    let segs = path_segments_at(ps, path, start, Some(&ss.plane))?;
+                    let path_start = segs.first().map_or(start, kernel::PathSeg::start);
                     let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                     let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
                     kernel::sweep_sheet_with(&ss.plane, &chains, &segs, &ctl)?
@@ -432,7 +437,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 kernel::loft_sheet_with_rails(&secs, &rails, crate::eval::kernel_rail_fit(*rail_fit))?
             };
             // Each wall named by the section curves it runs between, as a loft's sides are.
-            let loops: Vec<solidcraft_geom::Loop2> = secs.iter().map(|(_, c)| solidcraft_geom::Loop2 { segs: c.clone() }).collect();
+            let loops: Vec<solidcore_record::Loop2> = secs.iter().map(|(_, c)| solidcore_record::Loop2 { segs: c.clone() }).collect();
             let traced = crate::lineage::SectionRoles { sections: sketches.iter().zip(&loops).map(|(s, lp)| (s, vec![lp])).collect() }.tool(body);
             push_sheet(st, f, traced);
             Ok(())
@@ -459,7 +464,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
             Ok(())
         }
-        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face } => {
+        FeatureKind::SurfaceRuled { body, edges, distance, mode, angle, direction, flip, corners, face, far } => {
             let d = val(vals, distance, Kind::Length)?;
             let mode = match mode {
                 RuledMode::Normal => kernel::RuledMode::Normal,
@@ -478,7 +483,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = kernel::Ruled { distance: d, mode, flip: *flip, corners, face: face.map(Vec3::from) };
-            let made = Traced::step(kernel::ruled_surface(&mb.body, &crate::plain(edges), &r)?, &[&mb.traced()]);
+            let handles: Vec<Option<Vec<Vec3>>> = far.iter().map(|h| h.as_ref().map(|pts| crate::plain(pts))).collect();
+            let made = Traced::step(kernel::ruled_surface_with(&mb.body, &crate::plain(edges), &r, &handles)?, &[&mb.traced()]);
             let name = new_name(st, f, 0);
             st.bodies.push(ModelBody::traced_new(name, made, f.id));
             Ok(())
@@ -569,7 +575,7 @@ fn loop_patch(ss: &SolvedSketch, curves: &[String]) -> Result<kernel::Body> {
 
 /// A network curve resolved in the feature's frame, owning what it is built from.
 enum NetSource {
-    Sketch(solidcraft_geom::Plane, Vec<Seg2>),
+    Sketch(solidcore_record::Plane, Vec<Seg2>),
     Points(Vec<Vec3>),
     Edges(kernel::Body, Vec<Vec3>),
     Point(Vec3),
@@ -611,7 +617,7 @@ fn network_sources(
             // 3D sketch curves are followed through their points; planar ones exactly.
             let mapped = path_in_frame(doc, raw, f.component)?;
             match path_points(&mapped, &c.curves, Vec3::new(f64::NAN, f64::NAN, f64::NAN))? {
-                Some(pts) => NetSource::Points(pts),
+                Some(path) => NetSource::Points(path.points()),
                 None => {
                     let ss = sketch_in_feature_frame(doc, raw, f.component)?;
                     let mut chains = curve_chains(&ss, &c.curves)?.into_iter();
@@ -659,7 +665,7 @@ fn boundary_frames(
     use solidcraft_kernel::{Boundary, Frame};
     // The stations along each curve, evenly in its own arclength, so every side carries the same
     // number of frames and the patch's net is square.
-    let mut sides: Vec<Vec<solidcraft_geom::Vec3>> = Vec::with_capacity(curves.len());
+    let mut sides: Vec<Vec<solidcore_record::Vec3>> = Vec::with_capacity(curves.len());
     for id in curves {
         let ci = ss.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("sketch curve `{id}`")))?;
         let pieces = ss.sketch.exact_pieces(ci);
@@ -687,7 +693,7 @@ fn boundary_frames(
     }
     // The middle of the loop, so every side leaves towards the inside of the patch.
     let count = sides.iter().map(Vec::len).sum::<usize>().max(1) as f64;
-    let centre = sides.iter().flatten().fold(solidcraft_geom::Vec3::ZERO, |a, p| a + *p) * (1.0 / count);
+    let centre = sides.iter().flatten().fold(solidcore_record::Vec3::ZERO, |a, p| a + *p) * (1.0 / count);
     let mut out = Vec::with_capacity(sides.len());
     for (side, pts) in sides.iter().enumerate() {
         let mut frames = Vec::with_capacity(pts.len());
@@ -826,8 +832,8 @@ fn loft_blend(
 ) -> Result<()> {
     /// One section: a chain of sketch curves in its plane, or a body's edge chain.
     enum Piece {
-        Sketch(solidcraft_geom::Plane, Vec<solidcraft_geom::Seg2>),
-        Body(String, Vec<solidcraft_geom::Vec3>),
+        Sketch(solidcore_record::Plane, Vec<solidcore_record::Seg2>),
+        Body(String, Vec<solidcore_record::Vec3>),
     }
     let mut pieces = Vec::with_capacity(sections.len());
     let mut centres = Vec::with_capacity(sections.len());
@@ -837,7 +843,7 @@ fn loft_blend(
                 return Err(DocError::Invalid("a loft section picked from a body needs a chain of its edges".into()));
             }
             let n = sec.edges.len() as f64;
-            centres.push(sec.edges.iter().fold(solidcraft_geom::Vec3::ZERO, |a, p| a + **p) * (1.0 / n));
+            centres.push(sec.edges.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + **p) * (1.0 / n));
             pieces.push(Piece::Body(name.to_string(), crate::plain(&sec.edges)));
             continue;
         }
@@ -855,7 +861,7 @@ fn loft_blend(
             return Err(DocError::Invalid("each loft section must be one chain: one profile without holes, or curves meeting end to end".into()));
         };
         let pts: Vec<Vec2> = chain.iter().flat_map(|s| s.polyline(1e-2)).collect();
-        let centre = pts.iter().fold(solidcraft_geom::Vec3::ZERO, |a, p| a + ss.plane.to_world(*p)) * (1.0 / pts.len().max(1) as f64);
+        let centre = pts.iter().fold(solidcore_record::Vec3::ZERO, |a, p| a + ss.plane.to_world(*p)) * (1.0 / pts.len().max(1) as f64);
         centres.push(centre);
         pieces.push(Piece::Sketch(ss.plane, chain));
     }
@@ -867,7 +873,7 @@ fn loft_blend(
         let (from, to) = if i < last { (i, i + 1) } else { (last, last.saturating_sub(1)) };
         let leave = match (centres.get(from), centres.get(to)) {
             (Some(a), Some(b)) => *b - *a,
-            _ => solidcraft_geom::Vec3::ZERO,
+            _ => solidcore_record::Vec3::ZERO,
         };
         match piece {
             Piece::Body(name, edges) => {
@@ -886,9 +892,9 @@ fn loft_blend(
 /// The frames of one sketch chain, sampled by arclength at `stations` stations: a sketch has no
 /// face behind it, so the surface leaves along the run with no curvature to repeat there.
 fn chain_frames(
-    plane: &solidcraft_geom::Plane,
-    chain: &[solidcraft_geom::Seg2],
-    leave: solidcraft_geom::Vec3,
+    plane: &solidcore_record::Plane,
+    chain: &[solidcore_record::Seg2],
+    leave: solidcore_record::Vec3,
     stations: usize,
 ) -> Vec<kernel::Frame> {
     let mut pts: Vec<Vec2> = Vec::new();
@@ -917,14 +923,19 @@ fn chain_frames(
         }
         let (Some(a), Some(b)) = (pts.get(k).copied(), pts.get(k + 1).copied()) else {
             if let Some(p) = pts.get(k).copied() {
-                out.push(kernel::Frame { p: plane.to_world(p), leave, bend: solidcraft_geom::Vec3::ZERO, bend_change: solidcraft_geom::Vec3::ZERO });
+                out.push(kernel::Frame {
+                    p: plane.to_world(p),
+                    leave,
+                    bend: solidcore_record::Vec3::ZERO,
+                    bend_change: solidcore_record::Vec3::ZERO,
+                });
             }
             continue;
         };
         let span = (b - a).len();
         let t = if span > 1e-12 { ((want - walked) / span).clamp(0.0, 1.0) } else { 0.0 };
         let p = a * (1.0 - t) + b * t;
-        out.push(kernel::Frame { p: plane.to_world(p), leave, bend: solidcraft_geom::Vec3::ZERO, bend_change: solidcraft_geom::Vec3::ZERO });
+        out.push(kernel::Frame { p: plane.to_world(p), leave, bend: solidcore_record::Vec3::ZERO, bend_change: solidcore_record::Vec3::ZERO });
     }
     out
 }

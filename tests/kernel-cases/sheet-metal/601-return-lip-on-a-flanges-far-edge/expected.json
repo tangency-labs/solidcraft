@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#593",
+  "tangency-labs/solidcraft#601"
+ ],
+ "what": "an edge flange stands on the far edge of another edge flange (a lip turned in over the base), both 90 degrees",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.5, setback R + T = 4 at each 90 degree bend. Base 100 x 60 trimmed to 100 x 56; wall 20 high to its outer face: straight 20 - 4 (its own bend) - 4 (the return's setback) = 12; return 10 high: straight 10 - 4 = 6; every panel 100 wide. Two 90 degree bends, each (pi/2)((R+T)^2 - R^2)*100/2 = 942.478. V = 2*100*(56 + 12 + 6) + 2*942.478",
+ "body_count": 1,
+ "volume_mm3": 16684.955592153878
+}

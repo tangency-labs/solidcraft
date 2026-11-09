@@ -1,0 +1,10 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#4095"
+  ],
+  "what": "a slab cut whose +x face stands 6.73e-05 mm (0.90 x the coincidence tolerance 7.48e-05) off a through-bore's wall (R=10), beside the bore",
+  "source": "analytic",
+  "method": "plate 60x40x20 minus the bore pi R^2*20 minus the notch (the slab 6x16 from z=12 up through the top z=20: 6*16*8 = 768), which the bore beside it does not change. V = 60*40*20 - pi*10^2*20 - 768. The bug removed about 5% too much with no warning",
+  "body_count": 1,
+  "volume_mm3": 40948.8147
+}

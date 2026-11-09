@@ -1,0 +1,42 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 30,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      5,
+      0,
+      30
+     ]
+    ],
+    "distance": 1
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     5,
+     0,
+     15
+    ],
+    "modeled": true,
+    "designation": "M10"
+   }
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "config.activate of a row the table does not have",
+ "source": "invariants",
+ "method": "no row Nope: a clean refusal naming it",
+ "outcome": "refused",
+ "refusal": "configuration `Nope`"
+}

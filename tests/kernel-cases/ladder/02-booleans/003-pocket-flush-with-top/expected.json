@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 20x20x10 pocket whose tool's top is the stock's top face",
+ "source": "analytic",
+ "method": "V = 48000 - 20*20*10; faces: 6 + 4 pocket walls + pocket floor",
+ "body_count": 1,
+ "volume_mm3": 44000,
+ "faces": 11
+}

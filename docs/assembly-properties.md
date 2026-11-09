@@ -40,6 +40,16 @@ null center of mass and bounding box. A failed body measurement returns an error
 presenting an incomplete assembly total. These commands leave geometry, pending placements
 and undo history unchanged.
 
+Sheet-metal perforation fields contribute their physical holes to volume, mass, surface area
+and center of mass even though they do not cut the B-rep. Hole centers follow the panels when
+folded or unfolded and follow each occurrence's placement. Measure and component/occurrence
+Properties use the same correction. Bounding boxes and B-rep topology still describe the
+uncut body. A failed perforation calculation returns an error rather than an uncorrected total.
+The inertia tensor also removes each analytic hole cylinder, including its offset from the
+sheet's center of mass.
+Measuring a perforated sheet after scaling or shearing its metadata is not supported and
+returns an error. Rigid and mirrored placements preserve the analytic hole dimensions.
+
 ## Moment of inertia
 
 Each closed body's entry has `inertia_g_mm2`: its inertia tensor about its own center of mass,
@@ -69,3 +79,32 @@ quality. Each body is tessellated once, however many times the assembly places i
 turns its tensor. A closed body whose mesh does not close has `inertia_g_mm2: null`, and so does
 the total. Open bodies have no volume, so they have no tensor either, and the total leaves them
 out.
+
+## Per occurrence and per rigid group
+
+`assembly.mass_properties` (no parameters) gives what a dynamics solver needs of each moving
+part, measured as above, in kg, mm and kg·mm²:
+
+```json
+{"command":"assembly.mass_properties","params":{}}
+```
+
+- `occurrences`: the design's own bodies (`occurrence: 0`) and then every occurrence, each with
+  its `frame` (origin and unit axes in world coordinates), its own bodies (material, density,
+  volume and mass), and `mass`: its bodies' total `mass_kg`, `center_of_mass_mm` (world) and
+  `center_of_mass_local_mm` (in its frame), and the tensor about that centre in world axes
+  (`inertia_world_kg_mm2`) and in its frame's axes (`inertia_local_kg_mm2`). Only the bodies the
+  occurrence's component owns count, not those of occurrences nested in it.
+- `groups`: occurrences that move as one body, each with the occurrences it holds, the same
+  `mass` totals (combined with the parallel-axis theorem) in the frame of its lowest
+  occurrence (`frame_occurrence`; 0 is the world), and `fixed` when it holds the design itself
+  or a grounded occurrence. An unsuppressed rigid joint (Rigid Group makes them) puts its two
+  occurrences in one group, and a nested occurrence that no joint places goes with the
+  occurrence it sits in, since the joint solver leaves it where its parent puts it.
+- `warnings`: open bodies (no mass), closed bodies whose mesh does not close (`inertia_*: null`),
+  scaled placements (no tensor in their own axes) and subassemblies placed more than once (the
+  occurrences inside them are listed at the first placement, where joints place them).
+
+A body without a material assignment has the default material's density, as Properties shows.
+Pending occurrence moves count. Rust callers get the same numbers, typed, from
+`Session::mass_properties()`.

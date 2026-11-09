@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.suppress of a feature the design does not have",
+ "source": "invariants",
+ "method": "no feature named Nope: a clean refusal naming it",
+ "outcome": "refused",
+ "refusal": "no feature `Nope`"
+}

@@ -1,7 +1,8 @@
 //! Original fixed direct-light studio used by opaque product preview consumers.
 //! Relative linear radiance, not a calibrated illuminance or an HDRI environment.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::surface::{OpaqueSurface, SurfaceError, unit_direction};
 

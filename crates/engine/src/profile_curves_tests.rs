@@ -14,7 +14,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn volumes(s: &Session) -> Vec<f64> {
-    s.model.state().bodies.iter().map(|b| b.body.tessellate(1e-2).unwrap().measure().volume).collect()
+    s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume).collect()
 }
 
 fn last_error(s: &Session) -> Option<String> {
@@ -68,7 +68,7 @@ fn a_profile_picked_by_curves_follows_a_parameter_change() {
     if let Some(f) = s.doc_mut().feature_mut(id)
         && let FeatureKind::Extrude { profiles, .. } = &mut f.kind
     {
-        *profiles = ProfileSel::Points { points: vec![solidcraft_geom::Vec2::new(25.0, 10.0)] };
+        *profiles = ProfileSel::Points { points: vec![solidcore_record::Vec2::new(25.0, 10.0)] };
     }
     s.refresh();
     assert!((volumes(&s)[0] - 6000.0).abs() < 1.0);

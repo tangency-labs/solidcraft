@@ -8,7 +8,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::types::{ConstructionCommon, GeoRefParam, NumberExpr, PlaneCommon, Point3, feature_common, present};
+use super::types::{AngleExpr, ConstructionCommon, GeoRefParam, NumberExpr, PlaneCommon, Point3, feature_common, present};
 
 /// Add a construction axis along the axis of a cylinder, cone or torus face, or of a circular
 /// edge.
@@ -175,6 +175,18 @@ pub struct PlaneTwoEdgesParams {
     pub common: PlaneCommon,
 }
 
+/// Add a construction plane containing an axis and a point off that axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneAxisPointParams {
+    /// An origin axis, construction axis, straight edge or sketch line reference.
+    pub axis: GeoRefParam,
+    /// A vertex, sketch point, construction point or fixed point, not on the axis.
+    pub point: GeoRefParam,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
 /// Add a construction plane through three points.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -202,6 +214,14 @@ pub struct PlaneTangentParams {
     /// otherwise.
     #[serde(default)]
     pub at: Option<Point3>,
+    /// A plane or planar face to line the plane up with: it touches where the face turns
+    /// towards the reference, parallel to it, on the side of `at`.
+    #[serde(default)]
+    pub reference: Option<GeoRefParam>,
+    /// With `reference`, how far the plane is turned from it about the face's axis. Not on a
+    /// sphere. Default: 0 deg.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }
