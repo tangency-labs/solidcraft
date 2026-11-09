@@ -3273,6 +3273,65 @@ fn running_is_asked_at_once_behind_a_request_still_running() {
     assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "still outstanding: {e}");
 }
 
+/// #14007: over stdio, a `running` call sent while a long `batch` is still in the app is
+/// answered at once, on a connection of its own, not after the batch. The fake app holds the
+/// batch until it has been asked `control.running` (or 10 s pass), so before the fix, when stdin
+/// was read only between calls, the batch ran out its wait and `running` came after it.
+#[test]
+fn running_answers_at_once_while_a_long_batch_runs() {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    let asked = std::sync::Arc::new(AtomicBool::new(false));
+    let seen_running = asked.clone();
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let start = Instant::now();
+            while !seen_running.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let held = seen_running.load(Ordering::SeqCst);
+            json!({"ok": true, "result": {"ok": true, "results": [{"ok": true, "result": {"running_seen": held}}]}})
+        }
+        Some("control.running") => {
+            seen_running.store(true, Ordering::SeqCst);
+            json!({"ok": true, "result": {"running": [{"id": 1, "method": "engine.batch", "steps": 1, "self": false}]}})
+        }
+        _ => json!({"ok": true, "result": null}),
+    });
+    let (reader, mut writer) = std::io::pipe().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut s = Server::new(Box::new(crate::Remote::new(&addr, None)));
+        let mut out = Vec::new();
+        s.serve(std::io::BufReader::new(reader), &mut out).unwrap();
+        out
+    });
+    let call =
+        |id: u64, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
+    let steps = json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}], "verbose": false});
+    writeln!(writer, "{}", call(1, "batch", steps)).unwrap();
+    // Send `running` once the batch is in the app.
+    let start = Instant::now();
+    while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    writeln!(writer, "{}", call(2, "running", json!({}))).unwrap();
+    // Wait for both replies before closing stdin.
+    while !asked.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(15) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    drop(writer);
+    let text = String::from_utf8(server.join().unwrap()).unwrap();
+    let replies: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(replies.iter().map(|r| r["id"].clone()).collect::<Vec<_>>(), [json!(2), json!(1)], "`running` first: {text}");
+    assert_ne!(replies[0]["result"]["isError"], true, "{text}");
+    assert!(replies[0]["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("engine.batch"), "{text}");
+    assert_ne!(replies[1]["result"]["isError"], true, "{text}");
+    assert!(text.contains("running_seen"), "{text}");
+    let seen = seen.lock().unwrap();
+    assert!(seen.0 >= 2, "`running` went on a connection of its own: {} connections", seen.0);
+}
+
 /// A request still running after the wait is left to the `pending` tool: the error says so
 /// (and that it will still apply, or only write its file), later calls are not sent behind it, and `pending` returns
 /// its result once it lands, on the same connection.
