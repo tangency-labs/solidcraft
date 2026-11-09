@@ -46,6 +46,7 @@ pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_object, edge_ref_form, explicit_plane, plane_name_problem, sketch_key};
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub(crate) use features::{rail_fit_form, sweep_orientation};
+pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub use file::open_steps::OpenSteps;
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};

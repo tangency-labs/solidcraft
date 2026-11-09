@@ -1,7 +1,7 @@
 //! Persistent viewport status content. The caller owns items and dispatches returned actions.
 use super::{Button, Container, Surface};
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use egui::{Id, Rect, Response, RichText, Ui, vec2};
 use solidcraft_theme::Tokens;
 
@@ -199,7 +199,7 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
         .show_frame(ui, frame, ui.max_rect(), |ui| {
             // Bound the cross-axis before laying out any part. Otherwise a later native
             // button can grow the row after its earlier, shorter contents were positioned.
-            let name_height = ui.painter().layout_no_wrap(item.name.clone(), crate::fonts::semibold(t.font_label), t.text).size().y;
+            let name_height = ui.painter().layout_no_wrap(item.name.clone(), crate::ui_kit::type_face::semibold(t.font_label), t.text).size().y;
             let setting_height = ui.painter().layout_no_wrap(item.setting.clone(), egui::FontId::monospace(t.font_small), t.text_dim).size().y;
             let height = t.control_height.max(ui.spacing().interact_size.y).max(name_height).max(setting_height);
             let size = vec2(ui.available_width(), height);
@@ -357,7 +357,7 @@ pub(crate) fn viewport_status_summary(
                     |ui, _| {
                         let extra =
                             solidcraft_ui_text::format("ui.viewport_status_summary_more", &[("count", &items.len().saturating_sub(1).to_string())]);
-                        let name = ui.painter().layout_no_wrap(latest.name.clone(), crate::fonts::semibold(t.font_label), t.text);
+                        let name = ui.painter().layout_no_wrap(latest.name.clone(), crate::ui_kit::type_face::semibold(t.font_label), t.text);
                         let count = ui.painter().layout_no_wrap(extra, egui::FontId::monospace(t.font_small), t.text_dim);
                         let attention = items.iter().any(|item| item.kind == StatusKind::Attention);
                         let width = name.size().x + count.size().x + t.space_24 * 2.0 + t.space_8 * 4.0 + if attention { t.space_12 } else { 0.0 };

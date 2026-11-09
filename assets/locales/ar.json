@@ -1509,6 +1509,7 @@
   "cmd.timeline_stop": "إيقاف السجل",
   "cmd.timeline_suppress": "تعطيل الميزة",
   "cmd.ui.assistant": "إظهار المساعد أو إخفاؤه",
+  "cmd.ui.palette": "البحث في الأوامر",
   "cmd.view.navigator": "متصفح العرض المخصص",
   "cmd.view.render_browser": "مستعرض التصيير",
   "cmd.view.render_dock": "نقل لوحة التصيير",
