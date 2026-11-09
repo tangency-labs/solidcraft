@@ -1,4 +1,5 @@
-//! The ribbon from plain data, no app: how groups fit, and what a click on the row returns.
+//! The ribbon from plain data, no app: how groups fit, and what a click on the tab row or the
+//! panel row returns.
 use super::*;
 
 fn sizes(buttons: &[usize]) -> Vec<PanelSize> {
@@ -296,4 +297,87 @@ fn a_group_that_does_not_fit_is_in_the_more_menu() {
     assert_eq!((id.as_str(), *place), ("b.on", Place::More));
     open_b();
     assert_eq!(rig.click(rig.at("t:more_row:b.off")), Vec::new(), "a disabled row runs nothing");
+}
+
+const TAB_HANDLES: TabHandles<'static> = TabHandles { tab: "t:tab:", tab_rect: "t:tab_rect:", add: "t:add", action: "t:action:" };
+
+/// A tab row with three tabs (the last contextual, under an alias), the + button and two buttons
+/// after the search field, one of them not ready.
+struct TabsRig {
+    ctx: egui::Context,
+    time: std::cell::Cell<f64>,
+}
+
+impl TabsRig {
+    fn new() -> TabsRig {
+        let rig = TabsRig { ctx: crate::fonts::test_context(), time: std::cell::Cell::new(0.0) };
+        rig.frame(Vec::new());
+        rig
+    }
+
+    fn frame(&self, events: Vec<egui::Event>) -> Vec<TabAction> {
+        solidcraft_ui_registry::clear_handles();
+        self.time.set(self.time.get() + 1.0 / 60.0);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 400.0))),
+            time: Some(self.time.get()),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let t = Tokens::get();
+        let accent = TabAccent::for_tab(&t, "MODEL");
+        let row = Tabs {
+            tabs: vec![
+                Tab { id: "ONE", label: "One", accent, contextual: false, aliases: &[] },
+                Tab { id: "TWO", label: "Two", accent, contextual: false, aliases: &[] },
+                Tab { id: "EDIT", label: "Edit", accent, contextual: true, aliases: &["OLD"] },
+            ],
+            active: "ONE",
+            add: Some("Tabs"),
+            menu_open_from: &|_| false,
+            search_width: 120.0,
+            buttons: vec![TabButton { id: "go", label: "Go", ready: Ok(()) }, TabButton { id: "stop", label: "Stop", ready: Err("Nothing runs") }],
+            floating: false,
+            underline: None,
+            handles: TAB_HANDLES,
+        };
+        let mut actions = Vec::new();
+        crate::test_support::frame(&self.ctx, input, |ui| {
+            actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, TAB_ROW_HEIGHT))).actions;
+        });
+        actions
+    }
+
+    fn press(&self, at: egui::Pos2, button: egui::PointerButton) -> Vec<TabAction> {
+        self.time.set(self.time.get() + 1.0);
+        let event = |pressed| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)]));
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)]));
+        actions
+    }
+
+    fn click(&self, name: &str) -> Vec<TabAction> {
+        let at = solidcraft_ui_registry::rect_of(name).map(|r| r.center()).or_else(|| solidcraft_ui_registry::handle_at(name));
+        self.press(at.unwrap_or_else(|| panic!("{name} is drawn")), egui::PointerButton::Primary)
+    }
+}
+
+/// A click on a tab selects it (saying whether it was the selected one), a right-click asks for
+/// the menu, the + button for its menu at its rect, and a button that is ready runs while one
+/// that is not runs nothing; an alias is published at its tab.
+#[test]
+fn the_tab_row_returns_what_was_clicked() {
+    let rig = TabsRig::new();
+    assert_eq!(rig.click("t:tab_rect:TWO"), vec![TabAction::Select { index: 1, already: false }]);
+    assert_eq!(rig.click("t:tab_rect:ONE"), vec![TabAction::Select { index: 0, already: true }]);
+    let edit = solidcraft_ui_registry::rect_of("t:tab_rect:EDIT").expect("the contextual tab is drawn");
+    assert_eq!(solidcraft_ui_registry::handle_at("t:tab:OLD"), Some(edit.center()), "its alias is published at it");
+    let actions = rig.press(edit.center(), egui::PointerButton::Secondary);
+    assert!(matches!(actions.as_slice(), [TabAction::Menu { .. }]), "{actions:?}");
+    let add = solidcraft_ui_registry::rect_of("t:add").expect("the + button is drawn");
+    assert_eq!(rig.click("t:add"), vec![TabAction::Add { rect: add }]);
+    assert_eq!(rig.click("t:action:go"), vec![TabAction::Run { id: "go".into() }]);
+    assert_eq!(rig.click("t:action:stop"), Vec::new(), "a button that is not ready runs nothing");
 }

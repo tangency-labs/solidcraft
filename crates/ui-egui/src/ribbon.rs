@@ -1,4 +1,4 @@
-//! The ribbon's panel row as a component: groups of command buttons, each with its label under
+//! The ribbon as components: its tab row ([`tabs`]) and its panel row: groups of command buttons, each with its label under
 //! them, fitted to the room there is ([`fit`]): buttons narrow, groups hand buttons to their menu
 //! and collapse, and the last groups go into a » menu. The app describes the groups as plain data
 //! ([`Row`]); [`show`] draws them and returns what was chosen ([`Action`]) with what the app
@@ -912,6 +912,229 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
         });
     }
     out
+}
+
+/// The tab row's height.
+pub const TAB_ROW_HEIGHT: f32 = 30.0;
+
+/// Where the tab row publishes its parts: each prefix is followed by a tab's id (or alias) or an
+/// action's id.
+#[derive(Clone, Copy, Debug)]
+pub struct TabHandles<'a> {
+    /// A tab's rect as a target, and the centre of each of its aliases.
+    pub tab: &'a str,
+    /// A tab's rect.
+    pub tab_rect: &'a str,
+    /// The + button.
+    pub add: &'a str,
+    /// Each action button after the search field.
+    pub action: &'a str,
+}
+
+/// One tab.
+#[derive(Clone, Copy, Debug)]
+pub struct Tab<'a> {
+    /// Its name in handles and ids.
+    pub id: &'a str,
+    /// Its label, already translated.
+    pub label: &'a str,
+    pub accent: TabAccent,
+    /// It stands for what is being edited (a sketch): set apart and drawn loudest when selected.
+    pub contextual: bool,
+    /// Other names it is published under (tabs it took over).
+    pub aliases: &'a [&'a str],
+}
+
+/// A button after the search field, with its label; `ready` says why it can't run now.
+#[derive(Clone, Copy, Debug)]
+pub struct TabButton<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub ready: Result<(), &'a str>,
+}
+
+/// The tab row as the app describes it this frame.
+pub struct Tabs<'a> {
+    pub tabs: Vec<Tab<'a>>,
+    /// The selected tab's id.
+    pub active: &'a str,
+    /// The + button after the last tab, with its hover text (None: no + button).
+    pub add: Option<&'a str>,
+    /// Whether the app's menu is open from this rect now: the + button then shows held.
+    pub menu_open_from: &'a dyn Fn(Rect) -> bool,
+    /// Room kept at the right for the search field (0: the field is elsewhere).
+    pub search_width: f32,
+    /// Buttons after the search field.
+    pub buttons: Vec<TabButton<'a>>,
+    /// The ribbon is a floating card: rounder tabs, concentric with its corners.
+    pub floating: bool,
+    /// The row's bottom edge as a 2 px line in this colour (a contextual tab is selected), or
+    /// the quiet separator.
+    pub underline: Option<Color32>,
+    pub handles: TabHandles<'a>,
+}
+
+/// What the user chose on the tab row this frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TabAction {
+    /// Tab `index` was clicked; `already`: it was the selected one.
+    Select { index: usize, already: bool },
+    /// A tab's menu, at `at`.
+    Menu { at: Pos2 },
+    /// The + button, at `rect`: open (or close) the app's menu from it.
+    Add { rect: Rect },
+    /// A button after the search field.
+    Run { id: String },
+}
+
+/// The tab row drawn: what was chosen, and where the search field goes.
+pub struct TabsOut {
+    pub actions: Vec<TabAction>,
+    pub search: Rect,
+}
+
+/// How one tab is painted: its fill, its label colour and an outline (`Color32::TRANSPARENT` for
+/// none).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabStyle {
+    pub fill: Color32,
+    pub ink: Color32,
+    pub outline: Color32,
+}
+
+/// A contextual tab is the loudest tab when it is selected: the solid accent pill. Unselected,
+/// it looks like any unselected tab with its accent as an outline, so it still marks the context
+/// without outshining the selected tab. Ordinary tabs use the soft accent when selected and the
+/// hover colour when hovered.
+pub fn tab_style(t: &Tokens, accent: TabAccent, contextual: bool, active: bool, hovered: bool) -> TabStyle {
+    let idle = if hovered { t.hover } else { Color32::TRANSPARENT };
+    let (fill, ink, outline) = match (contextual, active) {
+        (true, true) => (accent.color, accent.on_fill(t), Color32::TRANSPARENT),
+        (true, false) => (idle, t.text, accent.color),
+        (false, true) => (accent.soft, accent.ink, Color32::TRANSPARENT),
+        (false, false) => (idle, t.text, Color32::TRANSPARENT),
+    };
+    TabStyle { fill, ink, outline }
+}
+
+/// The width of a tab or tab-row button labelled `label`.
+fn tab_width(ui: &egui::Ui, label: &str) -> f32 {
+    let t = Tokens::get();
+    ui.painter().layout_no_wrap(label.to_string(), crate::ui_kit::type_face::semibold(t.font_button), t.text).size().x + 24.0
+}
+
+/// Draws the tab row in `row`: the tabs (scrolled sideways when they don't fit), the + button,
+/// room for the search field and the buttons after it.
+pub fn tabs(ui: &mut egui::Ui, row_data: &Tabs, row: Rect) -> TabsOut {
+    let t = Tokens::get();
+    let h = &row_data.handles;
+    let widths: Vec<f32> = row_data.tabs.iter().map(|tab| tab_width(ui, tab.label)).collect();
+    let inset = CARD_INSET;
+    let add_size = TAB_ROW_HEIGHT - 2.0 * inset;
+    let tabs_width: f32 = widths.iter().sum::<f32>()
+        + row_data.tabs.len().saturating_sub(1) as f32 * 2.0
+        + row_data.tabs.iter().filter(|tab| tab.contextual).count() as f32 * 6.0
+        + if row_data.add.is_some() { 2.0 + add_size } else { 0.0 };
+    // The first tab and the search field sit the same distance from the card's top, left and right
+    // edges, so their outer corners are concentric with the card's corners.
+    let corner = if row_data.floating { t.radius_lg.saturating_sub(inset as u8).max(t.radius_sm / 2) } else { t.control_radius.saturating_sub(1) };
+    let button_widths: Vec<f32> = row_data.buttons.iter().map(|b| tab_width(ui, b.label)).collect();
+    let buttons_width = if row_data.buttons.is_empty() { 0.0 } else { button_widths.iter().sum::<f32>() + 2.0 * t.space_2 };
+    let search = Rect::from_min_size(
+        pos2(row.right() - row_data.search_width - inset - buttons_width, row.top() + inset),
+        vec2(row_data.search_width, TAB_ROW_HEIGHT - 2.0 * inset),
+    );
+    let mut actions = Vec::new();
+    let mut x = search.right() + t.space_2;
+    for (b, width) in row_data.buttons.iter().zip(button_widths) {
+        let rect = Rect::from_min_size(pos2(x, row.top() + inset), vec2(width, search.height()));
+        let response = crate::ui_kit::button_at(ui, b.id, rect, b.label, crate::ui_kit::Button::Enabled(b.ready.is_ok()));
+        solidcraft_ui_registry::publish_target(&handle(h.action, b.id), response.rect);
+        if response.clicked() {
+            actions.push(TabAction::Run { id: b.id.to_string() });
+        }
+        if let Err(reason) = b.ready {
+            response.backing_on_disabled_hover_text(reason);
+        }
+        x += width + t.space_2;
+    }
+    // The selected tab is scrolled into view when it or the row's width changes.
+    let changed = ui.ctx().data_mut(|d| {
+        let id = ui.scope_id().with("visible_tab");
+        let state = (row_data.active.to_string(), row.width());
+        let changed = d.get_temp::<(String, f32)>(id) != Some(state.clone());
+        d.insert_temp(id, state);
+        changed
+    });
+    let end = if row_data.search_width > 0.0 { search.left() - 6.0 } else { row.right() - inset };
+    let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2(end.max(row.left() + inset), row.bottom()));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
+        ui.set_clip_rect(span);
+        egui::ScrollArea::horizontal()
+            .id_salt("ribbon_tabs")
+            .animated(false)
+            .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                let (all, _) = ui.allocate_exact_size(vec2(tabs_width, TAB_ROW_HEIGHT), Sense::hover());
+                let mut x = all.left();
+                for (index, (tab, width)) in row_data.tabs.iter().zip(widths).enumerate() {
+                    if tab.contextual {
+                        x += 6.0;
+                    }
+                    let tr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(width, TAB_ROW_HEIGHT - 2.0 * inset));
+                    let active = row_data.active == tab.id;
+                    if active && changed {
+                        ui.scroll_to_rect(tr, Some(egui::Align::Center));
+                    }
+                    let response = ui.interact(tr, ui.scope_id().with(("tab", tab.id)), Sense::click());
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tab.label));
+                    let style = tab_style(&t, tab.accent, tab.contextual, active, response.hovered());
+                    ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
+                    text(ui, tr.center(), tab.label, t.font_button, style.ink, active || tab.contextual);
+                    if ui.clip_rect().contains(tr.center()) {
+                        solidcraft_ui_registry::publish_target(&handle(h.tab, tab.id), tr);
+                        solidcraft_ui_registry::publish_rect(&handle(h.tab_rect, tab.id), tr);
+                        for alias in tab.aliases {
+                            solidcraft_ui_registry::publish_handle(&handle(h.tab, alias), tr.center());
+                        }
+                    }
+                    if response.clicked() {
+                        actions.push(TabAction::Select { index, already: active });
+                    }
+                    if response.secondary_clicked() {
+                        actions.push(TabAction::Menu { at: response.interact_pointer_pos().unwrap_or(tr.left_bottom()) });
+                    }
+                    x += width + 2.0;
+                }
+                if let Some(tip) = row_data.add {
+                    let pr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(add_size, add_size));
+                    if (row_data.menu_open_from)(pr) && !ui.rect_contains_pointer(pr) {
+                        ui.painter().rect_filled(pr, t.control_radius, t.hover);
+                    }
+                    let response = crate::ui_kit::quiet_icon_button_at(ui, pr, "plus", tip);
+                    if ui.clip_rect().contains(pr.center()) {
+                        solidcraft_ui_registry::publish_target(h.add, pr);
+                    }
+                    if response.clicked() {
+                        // A click leaves no keyboard focus here, as on the tabs, so single-key
+                        // shortcuts still work afterwards.
+                        response.surrender_focus();
+                        actions.push(TabAction::Add { rect: pr });
+                    }
+                }
+            });
+    });
+    if let Some(color) = row_data.underline {
+        ui.painter().line_segment([row.left_bottom() - vec2(0.0, 1.0), row.right_bottom() - vec2(0.0, 1.0)], Stroke::new(2.0, color));
+    } else {
+        t.secondary_line(
+            ui.painter(),
+            [row.left_bottom() - vec2(0.0, 0.5), row.right_bottom() - vec2(0.0, 0.5)],
+            t.toolbar.lerp_to_gamma(t.border, 0.5),
+        );
+    }
+    TabsOut { actions, search }
 }
 
 #[cfg(test)]

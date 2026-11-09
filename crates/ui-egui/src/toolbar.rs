@@ -25,9 +25,7 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
     crate::workspace::panels(tab)
 }
 
-pub const TAB_ROW_HEIGHT: f32 = 30.0;
-/// Distance from the ribbon card's edges to the first tab and the search field.
-const RIBBON_TAB_INSET: f32 = 4.0;
+pub use crate::ribbon::TAB_ROW_HEIGHT;
 pub const RIBBON_HEIGHT: f32 = TAB_ROW_HEIGHT + GROUP_HEIGHT + 1.0;
 pub(crate) const WORKSPACE_WIDTH: f32 = 88.0;
 
@@ -1002,190 +1000,92 @@ pub(crate) fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
     tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
 }
 
-/// How one ribbon tab is painted: its fill, its label colour and an outline
-/// (`Color32::TRANSPARENT` for none).
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct RibbonTabStyle {
-    fill: Color32,
-    ink: Color32,
-    outline: Color32,
+/// The names a tab is also published under: the tabs it took over.
+fn tab_aliases(tab: &str) -> &'static [&'static str] {
+    match tab {
+        "MODEL" => &["SOLID", "PLASTIC"],
+        "SURFACE" => &["MESH"],
+        "MANAGE" => &["UTILITIES"],
+        _ => &[],
+    }
 }
 
-/// A contextual tab (Sketch while editing, Sheet Metal for a sheet body) is the loudest tab
-/// when it is selected: the solid accent pill. Unselected, it looks like any unselected tab
-/// with its accent as an outline, so it still marks the context without outshining the
-/// selected tab. Ordinary tabs use the soft accent when selected and the hover colour when
-/// hovered.
-fn ribbon_tab_style(t: &Tokens, tab: &str, contextual: bool, active: bool, hovered: bool) -> RibbonTabStyle {
-    let accent = solidcraft_theme::TabAccent::for_tab(t, tab);
-    let idle = if hovered { t.hover } else { Color32::TRANSPARENT };
-    let (fill, ink, outline) = match (contextual, active) {
-        (true, true) => (accent.color, accent.on_fill(t), Color32::TRANSPARENT),
-        (true, false) => (idle, t.text, accent.color),
-        (false, true) => (accent.soft, accent.ink, Color32::TRANSPARENT),
-        (false, false) => (idle, t.text, Color32::TRANSPARENT),
-    };
-    RibbonTabStyle { fill, ink, outline }
-}
+/// Where SolidCraft's tab row publishes its parts (scripts and scenarios use these names).
+const TAB_HANDLES: ribbon::TabHandles<'static> =
+    ribbon::TabHandles { tab: "tab:", tab_rect: "toolbar_tab:", add: "ribbon:add_tab", action: "ribbon:" };
+
+/// The Render workspace's job buttons after the search field.
+const RENDER_JOBS: [&str; 2] = ["render.start", "render.cancel"];
 
 /// Returns `Some(already shown)` when a tab was clicked.
 fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool> {
     let t = Tokens::get();
-    let tabs = crate::workspace::visible_tabs(app);
-    let widths: Vec<_> = tabs
-        .iter()
-        .map(|tab| {
-            ui.painter()
-                .layout_no_wrap(ribbon_label(app, tab), crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button), t.text)
-                .size()
-                .x
-                + 24.0
-        })
-        .collect();
-    // A plus after the last tab opens the toolbar's menu, so tabs can be shown or hidden without
-    // knowing about the right-click; it stays when every tab is hidden. The Render workspace's
-    // one tab can't be hidden.
-    let add = !crate::render_workspace::active(app);
-    let add_size = TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET;
-    let tabs_width: f32 = widths.iter().sum::<f32>()
-        + tabs.len().saturating_sub(1) as f32 * 2.0
-        + tabs.iter().filter(|tab| contextual_tab(app, tab)).count() as f32 * 6.0
-        + if add { 2.0 + add_size } else { 0.0 };
+    let ids = crate::workspace::visible_tabs(app);
+    let labels: Vec<String> = ids.iter().map(|tab| ribbon_label(app, tab)).collect();
+    let render = crate::render_workspace::active(app);
     // The application bar may hold the search field instead ([`HeaderLayout`]): the tabs then
     // run to the row's end.
     let in_ribbon = !search_in_header(app);
-    let search_width =
-        if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx(), crate::keymap::display_for(app, "ui.palette").as_deref()) } else { 0.0 };
-    // The first tab and the search field sit the same distance from the card's top, left and right
-    // edges, so their outer corners are concentric with the card's corners.
-    let floating = Container::for_layout(app.ui.layout, Surface::Panel).floating();
-    let inset = RIBBON_TAB_INSET;
-    let corner = if floating { t.radius_lg.saturating_sub(inset as u8).max(t.radius_sm / 2) } else { t.control_radius.saturating_sub(1) };
-    let render = crate::render_workspace::active(app);
-    let action_labels = [app.tr_label("Render").to_string(), app.tr_label("Cancel").to_string()];
-    let action_widths = action_labels
-        .each_ref()
-        .map(|label| ui.painter().layout_no_wrap(label.clone(), crate::ui_kit::type_face::semibold(t.font_button), t.text).size().x + 24.0);
-    let action_width = if render { action_widths.iter().sum::<f32>() + 2.0 * t.space_2 } else { 0.0 };
-    let search = Rect::from_min_size(
-        pos2(row.right() - search_width - inset - action_width, row.top() + inset),
-        vec2(search_width, TAB_ROW_HEIGHT - 2.0 * inset),
-    );
-    if render {
-        let mut x = search.right() + t.space_2;
-        for ((id, label), width) in ["render.start", "render.cancel"].into_iter().zip(action_labels).zip(action_widths) {
-            let rect = Rect::from_min_size(pos2(x, row.top() + inset), vec2(width, search.height()));
-            let ready = crate::render_workspace::job_ready(app, id);
-            let response = crate::ui_kit::button_at(ui, id, rect, label, crate::ui_kit::Button::Enabled(ready.is_ok()));
-            crate::scenario::publish_target(&format!("ribbon:{id}"), response.rect);
-            if response.clicked() {
-                app.start(id);
-            }
-            if let Err(reason) = ready {
-                response.backing_on_disabled_hover_text(reason);
-            }
-            x += width + t.space_2;
-        }
-    }
+    let job_labels = [app.tr_label("Render").to_string(), app.tr_label("Cancel").to_string()];
+    let jobs: Vec<(&str, &str, Result<(), String>)> = if render {
+        RENDER_JOBS.iter().zip(&job_labels).map(|(id, label)| (*id, label.as_str(), crate::render_workspace::job_ready(app, id))).collect()
+    } else {
+        Vec::new()
+    };
+    let add_tip = app.tr("prefs.toolbar_tabs").to_string();
+    let out = {
+        let row_data = ribbon::Tabs {
+            tabs: ids
+                .iter()
+                .zip(&labels)
+                .map(|(id, label)| ribbon::Tab {
+                    id,
+                    label,
+                    accent: solidcraft_theme::TabAccent::for_tab(&t, id),
+                    contextual: contextual_tab(app, id),
+                    aliases: tab_aliases(id),
+                })
+                .collect(),
+            active: &app.ui.tab,
+            // A plus after the last tab opens the toolbar's menu, so tabs can be shown or hidden
+            // without knowing about the right-click; it stays when every tab is hidden. The
+            // Render workspace's one tab can't be hidden.
+            add: (!render).then_some(add_tip.as_str()),
+            menu_open_from: &|rect| crate::context_menu::open_from(app, rect, &crate::context_menu::Target::Toolbar),
+            search_width: if in_ribbon { crate::ui_kit::CommandSearch::closed_width(ui.ctx(), crate::keymap::display_for(app, "ui.palette").as_deref()) } else { 0.0 },
+            buttons: jobs
+                .iter()
+                .map(|(id, label, ready)| ribbon::TabButton { id, label, ready: ready.as_ref().map(|_| ()).map_err(String::as_str) })
+                .collect(),
+            floating: Container::for_layout(app.ui.layout, Surface::Panel).floating(),
+            underline: matches!(app.ui.tab.as_str(), "SKETCH" | "SHEET METAL").then(|| panel_accent(&t, &app.ui.tab, "")),
+            handles: TAB_HANDLES,
+        };
+        ribbon::tabs(ui, &row_data, row)
+    };
     // The single editor is drawn on the foreground layer by shortcut_box::show, so it
     // can grow over the ribbon without being clipped to the tab row.
     if in_ribbon {
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), out.search));
     }
-    let changed = ui.ctx().data_mut(|d| {
-        let id = egui::Id::unique("sc_ribbon_visible_tab");
-        let state = (app.ui.tab.clone(), row.width());
-        let changed = d.get_temp::<(String, f32)>(id) != Some(state.clone());
-        d.insert_temp(id, state);
-        changed
-    });
-    let end = if in_ribbon { search.left() - 6.0 } else { row.right() - inset };
-    let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2(end.max(row.left() + inset), row.bottom()));
     let mut clicked = None;
-    ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
-        ui.set_clip_rect(span);
-        egui::ScrollArea::horizontal()
-            .id_salt("ribbon_tabs")
-            .animated(false)
-            .auto_shrink([false, false])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
-            .show(ui, |ui| {
-                let (all, _) = ui.allocate_exact_size(vec2(tabs_width, TAB_ROW_HEIGHT), Sense::hover());
-                let mut x = all.left();
-                for (tab, width) in tabs.into_iter().zip(widths) {
-                    let contextual = contextual_tab(app, tab);
-                    if contextual {
-                        x += 6.0;
-                    }
-                    let tr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(width, TAB_ROW_HEIGHT - 2.0 * inset));
-                    let active = app.ui.tab == tab;
-                    if active && changed {
-                        ui.scroll_to_rect(tr, Some(egui::Align::Center));
-                    }
-                    let response = ui.interact(tr, ui.scope_id().with(("tab", tab)), Sense::click());
-                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, ribbon_label(app, tab)));
-                    let style = ribbon_tab_style(&t, tab, contextual, active, response.hovered());
-                    ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
-                    ribbon::text(ui, tr.center(), &ribbon_label(app, tab), t.font_button, style.ink, active || contextual);
-                    if ui.clip_rect().contains(tr.center()) {
-                        crate::scenario::publish_target(&format!("tab:{tab}"), tr);
-                        crate::scenario::publish_rect(&format!("toolbar_tab:{tab}"), tr);
-                        let aliases: &[&str] = match tab {
-                            "MODEL" => &["SOLID", "PLASTIC"],
-                            "SURFACE" => &["MESH"],
-                            "MANAGE" => &["UTILITIES"],
-                            _ => &[],
-                        };
-                        for alias in aliases {
-                            crate::scenario::publish_handle(&format!("tab:{alias}"), tr.center());
-                        }
-                    }
-                    if response.clicked() {
-                        clicked = Some(active);
-                        app.ui.tab = tab.to_string();
-                        // Floating ribbons draw after the viewport. An instant surface switch
-                        // needs one more pass too; settled tabs never schedule their own frames.
-                        ui.ctx().request_repaint();
-                    }
-                    if response.secondary_clicked() {
-                        crate::context_menu::open_for(
-                            app,
-                            response.interact_pointer_pos().unwrap_or(tr.left_bottom()),
-                            crate::context_menu::Target::Toolbar,
-                        );
-                    }
-                    x += width + 2.0;
+    for action in out.actions {
+        match action {
+            ribbon::TabAction::Select { index, already } => {
+                if let Some(tab) = ids.get(index) {
+                    clicked = Some(already);
+                    app.ui.tab = tab.to_string();
+                    // Floating ribbons draw after the viewport. An instant surface switch
+                    // needs one more pass too; settled tabs never schedule their own frames.
+                    ui.ctx().request_repaint();
                 }
-                if add {
-                    let pr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(add_size, add_size));
-                    let open = crate::context_menu::open_from(app, pr, &crate::context_menu::Target::Toolbar);
-                    if open && !ui.rect_contains_pointer(pr) {
-                        ui.painter().rect_filled(pr, t.control_radius, t.hover);
-                    }
-                    let response = crate::ui_kit::quiet_icon_button_at(ui, pr, "plus", app.tr("prefs.toolbar_tabs"));
-                    if ui.clip_rect().contains(pr.center()) {
-                        crate::scenario::publish_target("ribbon:add_tab", pr);
-                    }
-                    if response.clicked() {
-                        // A click leaves no keyboard focus here, as on the tabs, so single-key
-                        // shortcuts such as S still work afterwards.
-                        response.surrender_focus();
-                        crate::context_menu::toggle_for(app, pr, pr.left_bottom(), crate::context_menu::Target::Toolbar);
-                    }
-                }
-            });
-    });
-    if matches!(app.ui.tab.as_str(), "SKETCH" | "SHEET METAL") {
-        ui.painter().line_segment(
-            [row.left_bottom() - vec2(0.0, 1.0), row.right_bottom() - vec2(0.0, 1.0)],
-            Stroke::new(2.0, panel_accent(&t, &app.ui.tab, "")),
-        );
-    } else {
-        t.secondary_line(
-            ui.painter(),
-            [row.left_bottom() - vec2(0.0, 0.5), row.right_bottom() - vec2(0.0, 0.5)],
-            t.toolbar.lerp_to_gamma(t.border, 0.5),
-        );
+            }
+            ribbon::TabAction::Menu { at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Toolbar),
+            ribbon::TabAction::Add { rect } => {
+                crate::context_menu::toggle_for(app, rect, rect.left_bottom(), crate::context_menu::Target::Toolbar);
+            }
+            ribbon::TabAction::Run { id } => app.start(&id),
+        }
     }
     clicked
 }
@@ -3957,7 +3857,7 @@ mod header_report_tests {
         let rect = |name: &str| crate::scenario::rect_of(name).unwrap_or_else(|| panic!("{name}"));
         let search = rect("ribbon:search");
         assert!(search.top() >= APP_BAR_HEIGHT, "search is in the ribbon: {search:?}");
-        assert_eq!(search.height(), TAB_ROW_HEIGHT - 2.0 * RIBBON_TAB_INSET);
+        assert_eq!(search.height(), TAB_ROW_HEIGHT - 2.0 * ribbon::CARD_INSET);
         assert_eq!(search.width(), crate::ui_kit::CommandSearch::closed_width(&h.ctx, Some("S")));
         assert!(crate::scenario::rect_of("titlebar:search").is_none());
         let report = rect("titlebar:report");
@@ -5136,10 +5036,16 @@ mod ribbon_label_tests {
             for tab in ["SKETCH", "SHEET METAL"] {
                 let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
                 for hovered in [false, true] {
-                    let active = ribbon_tab_style(&t, tab, true, true, hovered);
-                    let inactive = ribbon_tab_style(&t, tab, true, false, hovered);
-                    assert_eq!(active, RibbonTabStyle { fill: accent.color, ink: accent.on_fill(&t), outline: Color32::TRANSPARENT });
-                    assert_eq!(inactive, RibbonTabStyle { outline: accent.color, ..ribbon_tab_style(&t, tab, false, false, hovered) });
+                    let active = ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), true, true, hovered);
+                    let inactive = ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), true, false, hovered);
+                    assert_eq!(active, ribbon::TabStyle { fill: accent.color, ink: accent.on_fill(&t), outline: Color32::TRANSPARENT });
+                    assert_eq!(
+                        inactive,
+                        ribbon::TabStyle {
+                            outline: accent.color,
+                            ..ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, false, hovered)
+                        }
+                    );
                     assert!(solidcraft_theme::contrast_ratio(active.ink, active.fill) >= 4.5, "{tab}: selected text must remain readable");
                     // The selected contextual tab is the solid pill; the unselected one never is.
                     assert!(
@@ -5159,9 +5065,15 @@ mod ribbon_label_tests {
                 let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
                 for hovered in [false, true] {
                     let none = Color32::TRANSPARENT;
-                    assert_eq!(ribbon_tab_style(&t, tab, false, true, hovered), RibbonTabStyle { fill: accent.soft, ink: accent.ink, outline: none });
+                    assert_eq!(
+                        ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, true, hovered),
+                        ribbon::TabStyle { fill: accent.soft, ink: accent.ink, outline: none }
+                    );
                     let idle = if hovered { t.hover } else { none };
-                    assert_eq!(ribbon_tab_style(&t, tab, false, false, hovered), RibbonTabStyle { fill: idle, ink: t.text, outline: none });
+                    assert_eq!(
+                        ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, false, hovered),
+                        ribbon::TabStyle { fill: idle, ink: t.text, outline: none }
+                    );
                 }
             }
         }
