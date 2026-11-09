@@ -1,0 +1,18 @@
+{
+  "en": {
+    "Set Current Pose as Rest": "Set Current Pose as Rest",
+    "Reset to Rest": "Reset to Rest",
+    "Set Current Pose as Rest for All Joints": "Set Current Pose as Rest for All Joints",
+    "Reset All Joints to Rest": "Reset All Joints to Rest",
+    "cmd.joint_set_rest": "Set Rest Position",
+    "cmd.joint_reset": "Reset to Rest Position"
+  },
+  "de": {
+    "Set Current Pose as Rest": "Aktuelle Pose als Ruhelage festlegen",
+    "Reset to Rest": "Auf Ruhelage zurücksetzen",
+    "Set Current Pose as Rest for All Joints": "Aktuelle Pose als Ruhelage aller Gelenke festlegen",
+    "Reset All Joints to Rest": "Alle Gelenke auf Ruhelage zurücksetzen",
+    "cmd.joint_set_rest": "Ruhelage festlegen",
+    "cmd.joint_reset": "Auf Ruhelage zurücksetzen"
+  }
+}

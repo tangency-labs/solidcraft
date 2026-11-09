@@ -2178,6 +2178,9 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     } else if r.fold || r.clicked {
         toggle(app, key, start_open);
     }
+    if let Some(at) = r.secondary {
+        crate::context_menu::open_for(app, at, crate::context_menu::Target::JointsFolder);
+    }
     if !open {
         return;
     }

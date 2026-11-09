@@ -1025,6 +1025,9 @@ pub struct ListedJoint {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointExpressions")]
     pub expressions: Option<JointExprs>,
+    /// The rest position `joint.reset` puts it back to. Left out when none is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rest: Option<Vec<NamedValue>>,
 }
 
 /// A named joint origin.
@@ -2533,3 +2536,58 @@ pub struct CamResult {
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;
+
+/// Store the joints' current values as their rest position (`joint.set_rest`), or put them
+/// back to it (`joint.reset`). One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct JointRestParams {
+    /// The joint, by id or name. Default: every joint.
+    #[serde(default)]
+    pub joint: Option<JointKey>,
+    /// Leave out `dof` and `fixed` in `joint.reset`'s reply. Default: false.
+    #[serde(default)]
+    pub quiet: Option<bool>,
+}
+
+/// A joint's rest position as `joint.set_rest` stored it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RestJoint {
+    /// The joint, by id.
+    pub id: u64,
+    /// Its name.
+    pub name: String,
+    /// The values stored as its rest position.
+    pub rest: Vec<NamedValue>,
+}
+
+/// What `joint.set_rest` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SetRestResult {
+    /// The joints whose rest position was set.
+    pub joints: Vec<RestJoint>,
+}
+
+/// A joint `joint.reset` left where it was.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SkippedJoint {
+    /// The joint, by id.
+    pub id: u64,
+    /// Its name.
+    pub name: String,
+    /// Why: no rest position set, or a rigid joint.
+    pub reason: String,
+}
+
+/// What `joint.reset` returns: the solve after the joints went back to rest.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ResetJointsResult {
+    #[serde(flatten)]
+    pub solved: SolveReport,
+    /// The joints put back to their rest position, by id.
+    pub reset: Vec<u64>,
+    /// The joints left as they were.
+    pub skipped: Vec<SkippedJoint>,
+    /// Whether any occurrence moved.
+    pub moved: bool,
+}

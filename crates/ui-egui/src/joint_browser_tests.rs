@@ -425,3 +425,32 @@ fn edit_joint_limits_opens_the_limits_and_has_its_own_id() {
         assert_eq!(h.widget("Angle limits").is_some(), limits, "{item}: the Limits section open");
     }
 }
+
+#[test]
+fn the_joint_and_joints_folder_menus_set_and_reset_rest_positions() {
+    // #14275: a joint's menu sets its rest position and resets it; the Joints folder's menu
+    // resets every joint.
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let run = |h: &mut Harness, target: &Target, label: &str| {
+        let items = context_menu::items(&h.app, target);
+        let item = items.iter().find(|i| i.label == label).unwrap_or_else(|| panic!("no {label} in {items:?}")).clone();
+        assert!(item.enabled, "{label} is enabled");
+        context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+    };
+    let value = |h: &Harness| h.app.session.doc.assembly.joints.iter().find(|j| j.id == hinge).map(|j| j.values[0]).unwrap_or(f64::NAN);
+    // No rest yet: Reset is greyed out in both menus.
+    let items = context_menu::items(&h.app, &Target::Joint { id: hinge });
+    assert!(items.iter().any(|i| i.label == "Reset to Rest" && !i.enabled), "{items:?}");
+    let items = context_menu::items(&h.app, &Target::JointsFolder);
+    assert!(items.iter().any(|i| i.label == "Reset All Joints to Rest" && !i.enabled), "{items:?}");
+    run(&mut h, &Target::Joint { id: hinge }, "Set Current Pose as Rest");
+    let rest = value(&h);
+    h.app.run("joint.drive", json!({"joint": hinge, "value": 40})).unwrap();
+    assert!((value(&h) - rest).abs() > 0.1);
+    run(&mut h, &Target::Joint { id: hinge }, "Reset to Rest");
+    assert!((value(&h) - rest).abs() < 1e-9);
+    h.app.run("joint.drive", json!({"joint": hinge, "value": 70})).unwrap();
+    run(&mut h, &Target::JointsFolder, "Reset All Joints to Rest");
+    assert!((value(&h) - rest).abs() < 1e-9);
+}

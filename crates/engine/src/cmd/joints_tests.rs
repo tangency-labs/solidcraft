@@ -192,6 +192,53 @@ fn slider_limits_clamp() {
 }
 
 #[test]
+fn joints_reset_to_their_rest_positions() {
+    // #14275: a joint stores a rest position, and one joint or every joint goes back to it.
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    let b = Vec3::new(25.0, 5.0, 0.0);
+    // No rest position yet: a reset leaves the joint where it is and says why.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    let r = run(&mut s, "joint.reset", json!({}));
+    assert_eq!(r["reset"], json!([]), "{r}");
+    assert_eq!(r["skipped"][0]["name"], json!("Rail"), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+    // Set the pose at 3 mm as rest, drive away, and reset this one joint.
+    let r = run(&mut s, "joint.set_rest", json!({"joint": "Rail"}));
+    assert_eq!(r["joints"][0]["rest"][0]["value"], json!(3.0), "{r}");
+    let listed = run(&mut s, "joint.list", json!({}));
+    assert_eq!(listed["joints"][0]["rest"][0]["value"], json!(3.0), "{listed}");
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 9}));
+    let r = run(&mut s, "joint.reset", json!({"joint": "Rail"}));
+    assert_eq!((&r["moved"], r["reset"].as_array().map(Vec::len)), (&json!(true), Some(1)), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+    // Undo puts it back where it was driven.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 19.0)));
+    // The rest position is saved with the design; reset all after reopening.
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    *s.doc_mut() = doc;
+    run(&mut s, "joint.solve", json!({}));
+    let r = run(&mut s, "joint.reset", json!({}));
+    assert_eq!(r["skipped"], json!([]), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+}
+
+#[test]
+fn a_design_without_rest_positions_loads_unchanged() {
+    // A file saved before rest positions has no `rest`: it loads with the same values, and a
+    // joint with none saves without the key.
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 4}));
+    let json = s.doc.to_json();
+    assert!(!json.contains("\"rest\""), "no rest key without a rest position");
+    let doc = solidcraft_doc::Document::from_json(&json).unwrap();
+    assert_eq!(doc.assembly.joints[0].rest, None);
+    assert_eq!(doc.assembly.joints[0].values, s.doc.assembly.joints[0].values);
+}
+
+#[test]
 fn rigid_cycles_solve_and_conflicts_report() {
     let mut s = two_cubes();
     run(&mut s, "component.activate", json!({"component": "root"}));

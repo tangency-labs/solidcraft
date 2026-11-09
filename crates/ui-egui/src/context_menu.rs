@@ -87,6 +87,8 @@ pub enum Target {
     Joint {
         id: u64,
     },
+    /// The browser's Joints folder: rest positions for every joint.
+    JointsFolder,
     /// A command (toolbar button, panel drop-down row, S box row).
     ToolbarCommand {
         id: String,
@@ -360,6 +362,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section => crate::browser::section_items(app),
         Target::Joint { id } => joint_items(app, *id),
+        Target::JointsFolder => joints_folder_items(app),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
@@ -932,11 +935,24 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.findJoint", "Find in Window", "fit").with(json!({ "joint": id })),
         cmd(app, "joint.edit", if j.suppressed { "Unsuppress" } else { "Suppress" }).with(json!({ "joint": id, "suppressed": !j.suppressed })),
         Item::sep(),
+        cmd(app, "joint.set_rest", "Set Current Pose as Rest").with(json!({ "joint": id })).on(!rigid),
+        cmd(app, "joint.reset", "Reset to Rest").with(json!({ "joint": id })).on(!rigid && j.rest.is_some()),
+        Item::sep(),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "joints": [id] })),
         act("ui.rename", "Rename", "rename").with(json!({ "joint": id })),
         Item::sep(),
         // Hiding a joint hides only its glyph: it still constrains and moves the parts.
         act("browser.visibility", "Show/Hide", "eye").key("V").with(json!({ "joints": joints, "visible": hidden })),
+    ]
+}
+
+/// The Joints folder's menu: store every joint's pose as its rest position, or put every joint
+/// back to its own (joints with none stay where they are).
+fn joints_folder_items(app: &SolveApp) -> Vec<Item> {
+    let any_rest = app.session.doc.assembly.joints.iter().any(|j| j.rest.is_some());
+    vec![
+        cmd(app, "joint.set_rest", "Set Current Pose as Rest for All Joints").with(json!({})),
+        cmd(app, "joint.reset", "Reset All Joints to Rest").with(json!({})).on(any_rest),
     ]
 }
 
@@ -2339,6 +2355,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             component(*id) && ["bodies", "sketches", "construction"].contains(&folder.as_str()) && crate::browser::scope_shows(app, scope, *id)
         }
         Target::Joint { id } => doc.assembly.joints.iter().any(|j| j.id == *id),
+        Target::JointsFolder => !doc.assembly.joints.is_empty(),
         Target::ToolbarCommand { id } => solidcraft_engine::find_command(id).is_some(),
         Target::NamedView { name } => {
             doc.named_views.iter().any(|v| v.name == *name) || crate::browser::STANDARD_VIEWS.iter().any(|(label, _)| label == name)

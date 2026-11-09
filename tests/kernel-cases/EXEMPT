@@ -93,6 +93,8 @@ inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
+joint.reset                       assemblies: joint values only; crates/engine/src/cmd/joints_tests.rs
+joint.set_rest                    assemblies: joint values only; crates/engine/src/cmd/joints_tests.rs
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
 layout.get                        application panel layout; no geometry (engine/UI/MCP tests)
 layout.reset                      application panel layout; no geometry (engine/UI/MCP tests)

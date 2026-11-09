@@ -337,6 +337,11 @@ pub struct Joint {
     /// again whenever the design changes, so a joint follows the parameters it is defined by.
     #[serde(default, skip_serializing_if = "JointExprs::is_empty")]
     pub exprs: JointExprs,
+    /// The rest position: values `joint.reset` puts the joint back to (set by
+    /// `joint.set_rest`). None in files from before rest positions: such a joint keeps its
+    /// values when the joints are reset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rest: Option<Vec<f64>>,
 }
 
 /// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
@@ -2408,6 +2413,7 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                rest: None,
             })
             .collect();
         let links =

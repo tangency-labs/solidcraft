@@ -18,10 +18,10 @@ use crate::params::{bad, bool_, num, str_, vec3};
 use crate::schema::joints::{
     AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
     DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
-    InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
+    InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, JointRestParams, LimitSide, LimitStop, LinkInfo,
     ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
-    NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult,
-    ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
+    NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, ResetJointsResult, RestJoint,
+    RigidGroupParams, RigidGroupResult, ScrewParams, SetRestResult, SkippedJoint, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -43,6 +43,7 @@ const GEAR_CONTRACT: TypedContract<GearParams> = TypedContract::new();
 const RACK_PINION_CONTRACT: TypedContract<RackPinionParams> = TypedContract::new();
 const SCREW_CONTRACT: TypedContract<ScrewParams> = TypedContract::new();
 const CAM_CONTRACT: TypedContract<CamParams> = TypedContract::new();
+const REST_CONTRACT: TypedContract<JointRestParams> = TypedContract::new();
 
 #[path = "joints_inspect.rs"]
 mod inspect;
@@ -163,6 +164,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&LIMITS_CONTRACT)
         .output(output_schema_for::<SolveResult>)
         .params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
+    CommandSpec::new("joint.set_rest", "Set Rest Position", crate::checked!("joint.set_rest", set_rest))
+        .icon("joint")
+        .contract(&REST_CONTRACT)
+        .output(output_schema_for::<SetRestResult>)
+        .params("joint?: id|name (default: every joint) → joints: [{id, name, rest}]: the current values become the rest position joint.reset puts the joint back to; saved with the design"),
+    CommandSpec::new("joint.reset", "Reset to Rest Position", crate::checked!("joint.reset", reset))
+        .icon("drive")
+        .contract(&REST_CONTRACT)
+        .output(output_schema_for::<ResetJointsResult>)
+        .params(
+            "joint?: id|name (default: every joint); quiet? → reset: [ids], skipped: [{id, name, reason}] (no rest position set, or rigid: left as they are), moved, \
+             conflicts, errors, dof: each joint goes back to the rest position joint.set_rest stored (clamped to its limits); the values reset drop their expressions",
+        ),
     CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
@@ -1084,6 +1098,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         angle: angle.unwrap_or(0.0),
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        rest: None,
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
@@ -1129,6 +1144,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        rest: None,
     };
     add_joint(s, j, p)
 }
@@ -1745,6 +1761,66 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
 }
 
+/// The joints a rest command acts on: the one named by `joint`, or every joint.
+fn rest_targets(s: &Session, p: &Value, cmd: &str) -> Result<Vec<u64>> {
+    match p.get("joint") {
+        Some(v) if !v.is_null() => Ok(vec![joint_id(s, Some(v), cmd)?]),
+        _ => Ok(s.doc.assembly.joints.iter().map(|j| j.id).collect()),
+    }
+}
+
+/// Store the joints' current values (as the solver places them) as their rest position.
+fn set_rest(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.set_rest";
+    let ids = rest_targets(s, p, cmd)?;
+    let current = joints::joint_values(&s.doc.assembly);
+    let doc = s.doc_mut();
+    let mut out = Vec::new();
+    for j in doc.assembly.joints.iter_mut().filter(|j| ids.contains(&j.id)) {
+        let mut q = current.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+        q.resize(j.kind.dofs().len(), 0.0);
+        out.push(RestJoint { id: j.id, name: j.name.clone(), rest: named_value_list(j, &q) });
+        j.rest = Some(q);
+    }
+    reply(cmd, SetRestResult { joints: out })
+}
+
+/// Put the joints back to their rest positions. A joint with none (a design from before rest
+/// positions, or never set) keeps its values and is listed in `skipped`, as is a rigid joint.
+fn reset(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.reset";
+    let ids = rest_targets(s, p, cmd)?;
+    let before = super::motion::positions(s);
+    let doc = s.doc_mut();
+    let mut done = Vec::new();
+    let mut skipped = Vec::new();
+    for j in doc.assembly.joints.iter_mut().filter(|j| ids.contains(&j.id)) {
+        let rest = match (&j.rest, j.kind) {
+            (_, JointKind::Rigid) => Err("a rigid joint does not move"),
+            (None, _) => Err("no rest position set (joint.set_rest)"),
+            (Some(r), _) => Ok(r.clone()),
+        };
+        let mut q = match rest {
+            Ok(q) => q,
+            Err(why) => {
+                skipped.push(SkippedJoint { id: j.id, name: j.name.clone(), reason: why.into() });
+                continue;
+            }
+        };
+        q.resize(j.kind.dofs().len(), 0.0);
+        joints::clamp(j, &mut q);
+        j.values = q;
+        // Reset moves the joint by hand, as joint.drive does: its values drop their expressions.
+        for i in 0..j.kind.dofs().len() {
+            j.exprs.set_value(i, None);
+        }
+        done.push(j.id);
+    }
+    let sol = resolve(s);
+    let moved = super::motion::moved(&before, &super::motion::positions(s)).next().is_some();
+    reply(cmd, ResetJointsResult { solved: solve_report(&sol, p), reset: done, skipped, moved })
+}
+
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.edit";
     let id = joint_id(s, p.get("joint"), cmd)?;
@@ -1915,6 +1991,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
                 frame_a: world(&j.a),
                 frame_b: world(&j.b),
                 expressions: (!j.exprs.is_empty()).then(|| j.exprs.clone()),
+                rest: j.rest.as_ref().map(|r| named_value_list(j, r)),
             }
         })
         .collect();
