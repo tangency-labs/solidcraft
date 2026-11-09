@@ -1382,6 +1382,26 @@ mod tests {
         assert_eq!(face_name_end(pair, end + 1), Some(pair.len()), "the second face of a pair ends at the end of the text");
     }
 
+    /// A curve id may hold a character outside ASCII (`F2:side:曲`), and the name of a blend face
+    /// holds the curve id of the edge it replaced (`F5:blend(F2:side:曲|F2:top)`). The name was
+    /// read a byte at a time, which cut that character in half and panicked; `blend_seams` reads
+    /// the name of every blend face, so it panicked on any body that had one.
+    #[test]
+    fn blend_seams_reads_a_face_name_with_a_non_ascii_curve_id() {
+        for curve in ["曲", "é"] {
+            let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+            let mut body = ModelBody::new("Blend".into(), body, 1);
+            let faces = face_count(&body);
+            // The blend face names the edge it replaced; the other faces are the sides of it.
+            let mut names = vec![format!("F2:side:{curve}"); faces];
+            names[0] = format!("F5:blend(F2:side:{curve}|F2:top)");
+            body.names = NameCell::known(Arc::new(names));
+            let seams = blend_seams(&body);
+            assert!(!seams.is_empty(), "the blend face meets the faces it rounded");
+            assert!(seams.iter().all(|s| s.kind == BlendSeamKind::Contact), "a blend face meets the face it rounded: {seams:?}");
+        }
+    }
+
     /// The `:blend` mark is the outer face's role. A name that holds a blend inside it (an inner
     /// face naming a blend) is not a blend face, and the edge it holds is not one it replaced.
     #[test]
