@@ -15,6 +15,10 @@ on:
       - "Cargo.lock"
       - "**/Cargo.toml"
       - "vendor/**"
+      # solidcore's licence files are embedded in THIRD-PARTY-LICENSES.txt.
+      - "solidcore/LICENSE"
+      - "solidcore/NOTICE"
+      - "solidcore/ATTRIBUTION.md"
       - "assets/fonts/**"
       - "crates/engine/**"
       - "apps/solidcraft-cli/**"

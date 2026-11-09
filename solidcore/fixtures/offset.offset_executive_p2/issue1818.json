@@ -1,0 +1,31 @@
+{
+ "coverage": "tangency-labs/solidcore#1818: SmApiShellBrepFull 1 inward (extended convex edges, merged results, offset solid made) on a ruled loft from a 40 x 40 square at z = 0 to a circle r 15 at z = 60 (each section four curves, the circle's quarter arcs starting at -135 degrees), open at its top. The source data/issue1818_square_to_circle_loft.smb is a Rust-written ASCII .smb (data flows Rust to C++ only; each side reads the file with its own reader): crates/solidcore/tests/issue_1818_mated_shell_wall.rs (ignored test write_issue_1818_operand) builds it with create_skin_primitive (degree 1, capped) and writes it with write_brep_to_file(ascii). The selected face is the planar top face z = 60, at the index that test prints. Default fixes: upstream refuses the shell (1001 in the merge's make_faceuse); the issue's false success needs the opt-in offset_extended_edges_mated.",
+ "cases": [
+  {
+   "name": "issue1818_square_to_circle_loft_api_shell_1_top",
+   "upstream_ref": "tangency-labs/solidcore#1818 (operand: issue_1818_mated_shell_wall.rs)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue1818_square_to_circle_loft.smb"
+     }
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 5
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  }
+ ]
+}

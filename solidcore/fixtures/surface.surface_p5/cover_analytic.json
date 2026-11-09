@@ -1,0 +1,4057 @@
+{
+ "cases": [
+  {
+   "name": "cover_analytic_cyl_full_vs_cyl_part",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        90.0
+       ],
+       "height": [
+        0.2,
+        0.6
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_full_vs_cyl_part_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        90.0
+       ],
+       "height": [
+        0.2,
+        0.6
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_full_vs_cyl_part_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        90.0
+       ],
+       "height": [
+        0.2,
+        0.6
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_part_vs_cyl_full",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       90.0
+      ],
+      "height": [
+       0.2,
+       0.6
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_part_vs_cyl_full_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       90.0
+      ],
+      "height": [
+       0.2,
+       0.6
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_part_vs_cyl_full_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       90.0
+      ],
+      "height": [
+       0.2,
+       0.6
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_half_vs_cyl_half_overlap",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        90.0,
+        270.0
+       ],
+       "height": [
+        0.5,
+        1.5
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_half_vs_cyl_half_overlap_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        90.0,
+        270.0
+       ],
+       "height": [
+        0.5,
+        1.5
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_half_vs_cyl_half_overlap_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       180.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        90.0,
+        270.0
+       ],
+       "height": [
+        0.5,
+        1.5
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_cyl_other_radius",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.5,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_cyl_other_radius_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.5,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_cyl_other_radius_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.5,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cone_vs_cone_sub",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cone",
+      "apex": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       2.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 30.0,
+       "height": [
+        1.0,
+        1.5
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cone_vs_cone_sub_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cone",
+      "apex": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       2.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 30.0,
+       "height": [
+        1.0,
+        1.5
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cone_vs_cone_sub_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cone",
+      "apex": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       2.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 30.0,
+       "height": [
+        1.0,
+        1.5
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cone_vs_cone_other_angle",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cone",
+      "apex": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       2.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 40.0,
+       "height": [
+        0.5,
+        2.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cone_vs_cone_other_angle_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cone",
+      "apex": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       2.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 40.0,
+       "height": [
+        0.5,
+        2.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cone_vs_cone_other_angle_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cone",
+      "apex": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "half_angle_deg": 30.0,
+      "height": [
+       0.5,
+       2.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 40.0,
+       "height": [
+        0.5,
+        2.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_band_vs_sphere_quarter",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "lon": [
+        0.0,
+        90.0
+       ],
+       "lat": [
+        -30.0,
+        30.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_band_vs_sphere_quarter_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "lon": [
+        0.0,
+        90.0
+       ],
+       "lat": [
+        -30.0,
+        30.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_band_vs_sphere_quarter_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "lon": [
+        0.0,
+        90.0
+       ],
+       "lat": [
+        -30.0,
+        30.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_quarter_vs_sphere_band",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       90.0
+      ],
+      "lat": [
+       -30.0,
+       30.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "lon": [
+        0.0,
+        360.0
+       ],
+       "lat": [
+        -60.0,
+        60.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_quarter_vs_sphere_band_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       90.0
+      ],
+      "lat": [
+       -30.0,
+       30.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "lon": [
+        0.0,
+        360.0
+       ],
+       "lat": [
+        -60.0,
+        60.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_quarter_vs_sphere_band_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       90.0
+      ],
+      "lat": [
+       -30.0,
+       30.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "lon": [
+        0.0,
+        360.0
+       ],
+       "lat": [
+        -60.0,
+        60.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_vs_sphere_other_radius",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.2,
+       "lon": [
+        0.0,
+        360.0
+       ],
+       "lat": [
+        -60.0,
+        60.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_vs_sphere_other_radius_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.2,
+       "lon": [
+        0.0,
+        360.0
+       ],
+       "lat": [
+        -60.0,
+        60.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_vs_sphere_other_radius_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "sphere",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.2,
+       "lon": [
+        0.0,
+        360.0
+       ],
+       "lat": [
+        -60.0,
+        60.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_vs_torus_part",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "torus",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "major_radius": 2.0,
+       "minor_radius": 0.5,
+       "major": [
+        0.0,
+        90.0
+       ],
+       "minor": [
+        0.0,
+        180.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_vs_torus_part_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "torus",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "major_radius": 2.0,
+       "minor_radius": 0.5,
+       "major": [
+        0.0,
+        90.0
+       ],
+       "minor": [
+        0.0,
+        180.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_vs_torus_part_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "torus",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "major_radius": 2.0,
+       "minor_radius": 0.5,
+       "major": [
+        0.0,
+        90.0
+       ],
+       "minor": [
+        0.0,
+        180.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_part_vs_torus_part_overlap",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "torus",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "major_radius": 2.0,
+       "minor_radius": 0.5,
+       "major": [
+        90.0,
+        270.0
+       ],
+       "minor": [
+        0.0,
+        360.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_part_vs_torus_part_overlap_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "torus",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "major_radius": 2.0,
+       "minor_radius": 0.5,
+       "major": [
+        90.0,
+        270.0
+       ],
+       "minor": [
+        0.0,
+        360.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_part_vs_torus_part_overlap_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       180.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "torus",
+       "center": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "major_radius": 2.0,
+       "minor_radius": 0.5,
+       "major": [
+        90.0,
+        270.0
+       ],
+       "minor": [
+        0.0,
+        360.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_cyl",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_cyl_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_cyl_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_plane",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_plane_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_plane_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_plane_coincident",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        1.0,
+        2.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_plane_coincident_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        1.0,
+        2.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_plane_coincident_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        1.0,
+        2.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_bilinear_coincident",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_bilinear_coincident_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_plane_vs_bilinear_coincident_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "n": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_bilinear_vs_plane_coincident",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_bilinear_vs_plane_coincident_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_bilinear_vs_plane_coincident_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "plane": {
+       "o": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "n": [
+        0.0,
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_bilinear_vs_cyl",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_bilinear_vs_cyl_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_bilinear_vs_cyl_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "bspline": {
+      "net": [
+       [
+        [
+         0.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1.0,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.0,
+         1.0,
+         0.0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 1.0,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        0.0,
+        1.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_bilinear",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_bilinear_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_cyl_vs_bilinear_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "angle": [
+       0.0,
+       360.0
+      ],
+      "height": [
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "bspline": {
+       "net": [
+        [
+         [
+          0.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_vs_cone",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 30.0,
+       "height": [
+        0.5,
+        2.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_vs_cone_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 30.0,
+       "height": [
+        0.5,
+        2.0
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_sphere_vs_cone_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "sphere",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "radius": 1.0,
+      "lon": [
+       0.0,
+       360.0
+      ],
+      "lat": [
+       -60.0,
+       60.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cone",
+       "apex": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "half_angle_deg": 30.0,
+       "height": [
+        0.5,
+        2.0
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_vs_cyl",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 2.5,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        -0.5,
+        0.5
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_vs_cyl_tol1e-3",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 2.5,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        -0.5,
+        0.5
+       ]
+      }
+     },
+     "tol": 0.001,
+     "merged": false
+    }
+   }
+  },
+  {
+   "name": "cover_analytic_torus_vs_cyl_merged",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:8327-8484 (CoverOtherCoincidentSurface: planes, bilinear, SM_CAST_PTR(SmBSplineSurface), fallback)",
+   "inputs": {
+    "surface": {
+     "analytic": {
+      "kind": "torus",
+      "center": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "x": [
+       1.0,
+       0.0,
+       0.0
+      ],
+      "y": [
+       0.0,
+       1.0,
+       0.0
+      ],
+      "major_radius": 2.0,
+      "minor_radius": 0.5,
+      "major": [
+       0.0,
+       360.0
+      ],
+      "minor": [
+       0.0,
+       360.0
+      ]
+     }
+    },
+    "op": {
+     "op": "cover",
+     "other": {
+      "analytic": {
+       "kind": "cylinder",
+       "origin": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "x": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "y": [
+        0.0,
+        1.0,
+        0.0
+       ],
+       "radius": 2.5,
+       "angle": [
+        0.0,
+        360.0
+       ],
+       "height": [
+        -0.5,
+        0.5
+       ]
+      }
+     },
+     "tol": 1e-06,
+     "merged": true
+    }
+   }
+  }
+ ]
+}

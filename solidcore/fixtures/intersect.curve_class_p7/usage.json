@@ -1,0 +1,2690 @@
+{
+ "cases": [
+  {
+   "name": "seam_mates_closed_curve",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:3369, :8132 (GetPointClassMateByIndex callers)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "bspline": {
+        "dim": 3,
+        "oob": false,
+        "p": 3,
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.4,
+         0.7,
+         1,
+         1,
+         1,
+         1
+        ],
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1,
+          1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1,
+          -1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          -1,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.3,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 1e-09
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.3,
+          "gap": 0.0
+         }
+        ]
+       },
+       {
+        "a": 0.3,
+        "b": 0.7,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.3,
+          "gap": 0.0
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.7,
+          "gap": 2e-06
+         }
+        ]
+       },
+       {
+        "a": 0.7,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.7,
+          "gap": 2e-06
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 1.0,
+          "gap": 1e-09
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "mate",
+      "t": 0,
+      "j": 0
+     },
+     {
+      "op": "mate",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "mate",
+      "t": 0,
+      "j": 3
+     },
+     {
+      "op": "pc_by_index",
+      "t": 0,
+      "j": 0
+     },
+     {
+      "op": "pc_by_index",
+      "t": 0,
+      "j": 3
+     },
+     {
+      "op": "crossing_face",
+      "t": 0,
+      "face": 2
+     },
+     {
+      "op": "crossing_face",
+      "t": 0,
+      "face": null
+     },
+     {
+      "op": "near_misses",
+      "t": 0,
+      "b": false
+     },
+     {
+      "op": "touches",
+      "t": 0,
+      "targets": []
+     },
+     {
+      "op": "partial",
+      "t": 0,
+      "own": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapse_snapped_interval_zero",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8207-8328 (CollapseInterval in the interval squeeze)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "oob": false,
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          10,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10,
+          10,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ]
+      }
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 2,
+          "t": 0.4,
+          "gap": 3e-07
+         }
+        ]
+       },
+       {
+        "a": 0.4,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 2,
+          "t": 0.4,
+          "gap": 3e-07
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.4,
+          "gap": 1e-08
+         }
+        ]
+       },
+       {
+        "a": 0.4,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.4,
+          "gap": 1e-08
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 1.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "collapse",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "pc_by_index",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "collapse",
+      "t": 0,
+      "j": 0
+     },
+     {
+      "op": "coin_maybe",
+      "t": 0,
+      "j": 0,
+      "own": true,
+      "report": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapse_snapped_interval_tolerance",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8207-8328 (CollapseInterval in the interval squeeze)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "oob": false,
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          10,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10,
+          10,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ]
+      }
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 2,
+          "t": 0.4,
+          "gap": 3e-07
+         }
+        ]
+       },
+       {
+        "a": 0.4,
+        "b": 0.4000001,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 2,
+          "t": 0.4,
+          "gap": 3e-07
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.4,
+          "gap": 1e-08
+         }
+        ]
+       },
+       {
+        "a": 0.4000001,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.4,
+          "gap": 1e-08
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 1.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "collapse",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "pc_by_index",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "collapse",
+      "t": 0,
+      "j": 0
+     },
+     {
+      "op": "coin_maybe",
+      "t": 0,
+      "j": 0,
+      "own": true,
+      "report": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "collapse_snapped_interval_long",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8207-8328 (CollapseInterval in the interval squeeze)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "bsurf": {
+       "oob": false,
+       "p": 1,
+       "q": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "net": [
+        [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          10,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          10,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          10,
+          10,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ]
+      }
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.4,
+        "pcs": [
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 2,
+          "t": 0.4,
+          "gap": 3e-07
+         }
+        ]
+       },
+       {
+        "a": 0.4,
+        "b": 0.41000000000000003,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 2,
+          "t": 0.4,
+          "gap": 3e-07
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.4,
+          "gap": 1e-08
+         }
+        ]
+       },
+       {
+        "a": 0.41000000000000003,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.4,
+          "gap": 1e-08
+         },
+         {
+          "class": 107,
+          "obj": 1,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 106,
+          "obj": 0,
+          "t": 1.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": null,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": []
+     }
+    ],
+    "ops": [
+     {
+      "op": "collapse",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "pc_by_index",
+      "t": 0,
+      "j": 1
+     },
+     {
+      "op": "collapse",
+      "t": 0,
+      "j": 0
+     },
+     {
+      "op": "coin_maybe",
+      "t": 0,
+      "j": 0,
+      "own": true,
+      "report": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_crossed",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "crossed_by_edge",
+      "t": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_edges",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "find_edge",
+      "t": 0,
+      "target": null,
+      "flag": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_vertices",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "find_vertex",
+      "t": 0,
+      "target": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_coincident_maybe",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "coin_maybe",
+      "t": 1,
+      "j": 1,
+      "own": false,
+      "report": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_partial",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "partial",
+      "t": 1,
+      "own": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_fillet",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "fillet",
+      "t": 0,
+      "j": 1,
+      "todo": 2
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_near_misses",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "near_misses",
+      "t": 0,
+      "b": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "rectangle_crossing_touches",
+   "upstream_ref": "tests/SM_API_test (TestSmCreateRectangle); SmTopologyIntersector.cpp:4181 (TestForPartialCoincidentEdges)",
+   "inputs": {
+    "objects": [
+     {
+      "curve": {
+       "line": {
+        "p": [
+         0,
+         0,
+         0
+        ],
+        "v": [
+         10,
+         0,
+         0
+        ],
+        "domain": [
+         0,
+         1
+        ],
+        "scale": 1.0,
+        "inside_out": false
+       }
+      }
+     },
+     {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     {
+      "face": 1
+     },
+     "vertex",
+     "vertex",
+     {
+      "edge": 0
+     },
+     {
+      "edge": 0
+     }
+    ],
+    "cc": [
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": true,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 5,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 102,
+          "obj": 2,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 3,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "curve": 0,
+      "s1": 1,
+      "uv1": null,
+      "ignore": false,
+      "tol": 1e-05,
+      "fillet": null,
+      "ivls": [
+       {
+        "a": 0.0,
+        "b": 0.2,
+        "pcs": [
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         }
+        ]
+       },
+       {
+        "a": 0.2,
+        "b": 0.8,
+        "pcs": [
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.5,
+          "gap": 1e-10
+         },
+         {
+          "class": 103,
+          "obj": 6,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         }
+        ]
+       },
+       {
+        "a": 0.8,
+        "b": 1.0,
+        "pcs": [
+         {
+          "class": 104,
+          "obj": 4,
+          "t": 0.0,
+          "gap": 2e-09
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         },
+         {
+          "class": 100,
+          "obj": null,
+          "t": 0.0,
+          "gap": 0.0
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "ops": [
+     {
+      "op": "touches",
+      "t": 0,
+      "targets": []
+     }
+    ]
+   }
+  }
+ ]
+}

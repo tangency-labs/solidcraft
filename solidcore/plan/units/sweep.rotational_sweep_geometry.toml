@@ -1,0 +1,12 @@
+id = "sweep.rotational_sweep_geometry"
+upstream = ["source/SMLib/inc/SmRotationalSweepGeometry.h", "source/SMLib/src/SmRotationalSweepGeometry.cpp"]
+rust_module = "sweep::rotational_sweep_geometry"
+depends_on = ["curve.curve_p2", "geom.axis2_placement", "geom.extent1d", "geom.object", "geom.solution_array", "geom.vector3d", "nurbs.b_spline_surface_p1", "surface.surface_p2", "sweep.topology_sweep", "topology.edge"]
+soft_depends_on = ["curve.curve_p4", "curve.curve_p8", "curve.line", "geom.extent2d", "geom.geom_utility_p1", "geom.tol", "nurbs.b_spline_curve_p1", "nurbs.b_spline_curve_p3", "nurbs.b_spline_surface_p2", "surface.surface_p6", "surface.surface_p7", "topology.brep_p1", "topology.face_p2", "topology.vertex"]
+est_lines = 1542
+layer = 52
+tests = ["prog_test:my_sweep_null_region_counts", "prog_test:my_test_dosweep_null_region", "SM_API_test:TestNonManifoldSweepDistinctTarget", "SM_API_test:TestNonManifoldSweepNullEntry", "SM_API_test:TestNonManifoldSweepStaleEntry", "SM_API_test:TestSmCreateLinearSweepCylinder"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "SurfaceKind::Sphere/Torus (#76 follow-up to #313, 2026-10-21): 761 cases, 761 pass, 0 failed, 0 deferred, max_rel_err 0 (before 759 / 2 deferred on 'SmSphere as SmSurface'); --perturb SENSITIVE 761/761; partial -> green. #76 kernel-aware Surface dispatch (PR #313, 2026-10-21): 761 cases, 725 pass, 0 failed, 36 deferred (surface.sphere 36), max_rel_err 0; before 718 pass / 43 deferred. 16 fns; largest: SmRotationalSweepGeometry::EdgeSweepHigher, SmRotationalSweepGeometry::CheckCurveSweep, sm_CheckEdgeOnAxis, SmRotationalSweepGeometry::EdgeSweepSame; unit-SCC #22 (220 units); 45 upstream test entry points reach this unit; PR #126: 761 cases (361 fixtures, 400 generated), 718 passed, 43 deferred (surface.cone_p2: SmCone::IsNurbSurfaceCone via CopyAndAddAnalytics), max_rel_err 0; 4361 cases with --seeds 4000 also pass (396 deferred). Co-ports SmSweepGeometryCreation members into sweep::topology_sweep; UB-130 (sSolutions[1] with one solution) reads a zero-filled slot"

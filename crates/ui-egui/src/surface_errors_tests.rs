@@ -41,7 +41,7 @@ fn an_error_under_capture_is_returned_not_a_panic() {
 #[test]
 fn a_configure_that_meets_a_lost_device_is_not_taken() {
     // The queue is kept: wgpu calls a destroyed device's lost callback only while it has one.
-    let Some((_, device, _queue)) = crate::gpu::offscreen_device() else { return };
+    let Some((_, device, _queue)) = crate::gpu::offscreen_own_device() else { return };
     let lost = DeviceLost::watch(&device);
     let bad = wgpu::BufferDescriptor { label: Some("bad"), size: 3, usage: wgpu::BufferUsages::MAP_WRITE, mapped_at_creation: true };
     // On a working device a clean configure is taken and a refused one returns its error.
@@ -88,7 +88,7 @@ fn an_acquire_wgpu_refuses_configures_the_surface_again() {
 /// the device goes on working.
 #[test]
 fn an_uncaught_gpu_error_is_not_a_panic() {
-    let Some((_, device, queue)) = crate::gpu::offscreen_device() else { return };
+    let Some((_, device, queue)) = crate::gpu::offscreen_own_device() else { return };
     crate::gpu::log_uncaptured_errors(&device);
     // No error scope around it: mapped at creation with a size that isn't a multiple of 4.
     let _bad =

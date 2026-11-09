@@ -1,0 +1,119 @@
+{
+  "area": "continuity",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "tolerance": 0.00006503124237432847
+      }
+    }
+  ],
+  "case": "g1-patch-g3-at-a-corner-whose-rounds-clash",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "edges": [
+        [
+          34.828,
+          34.828,
+          30.0
+        ],
+        [
+          37.657,
+          37.657,
+          26.0
+        ],
+        [
+          38.828,
+          32.0,
+          28.828
+        ],
+        [
+          32.0,
+          38.828,
+          28.828
+        ]
+      ],
+      "exact": true,
+      "order": "g1"
+    },
+    "method": "box 40x40x30, its vertical edge at (40,40) rounded r8, then the top edges and the arc between them rounded r4; the blend face at the corner deleted (heal false), the four-sided hole patched g3 and stitched in. At each corner of the hole two of its neighbours (the r4 rounds, the r8 round) meet along their own G1 seam, their normal curvatures there differing by 1/4 or 1/8 per mm; a patch smooth at the corner has one curvature there, so it cannot meet both, and the fill asks no more than G1 near such a corner. Each seam's worst G2 station is its end: 0.125 or 0.25 per mm. In the middle of each seam (30-70 %) the patch reaches g3 (kernel test a_corner_of_three_rounds_patched_g3_holds_the_curvature_change_a_g2_patch_does_not).",
+    "source": "analytic",
+    "sources": [],
+    "what": "the hole a three-round corner's blend face leaves, patched g3 (Curvature change): G1 and not G2 over each whole seam, since the faces round the hole meet each other G1 at its corners"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14
+    }
+  },
+  "records": "g1-patch-g3-at-a-corner-whose-rounds-clash.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b15"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7729.698859118993,
+      "body_count": 1,
+      "edges": 22,
+      "faces": 10,
+      "vertices": 14,
+      "volume_mm3": 47330.590000596996
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "the hole a three-round corner's blend face leaves, patched g3 (Curvature change): G1 and not G2 over each whole seam, since the faces round the hole meet each other G1 at its corners",
+  "why_not": []
+}

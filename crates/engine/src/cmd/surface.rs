@@ -14,7 +14,7 @@ use solidcraft_kernel::{Construction, Continuity};
 use super::CommandSpec;
 use super::features::{add_feature, axis_param, check_expr, extent_param, feature_sketch, operation, plane_param, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
-use crate::schema::features::FeatureResult;
+use crate::schema::features::{FeatureResult, SurfaceSweepParams};
 use crate::schema::surface::{FairParams, OffsetParams, ReverseNormalParams, StitchParams, ThickenParams, UnstitchParams, UntrimParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -26,6 +26,7 @@ const THICKEN_CONTRACT: TypedContract<ThickenParams> = TypedContract::new();
 const OFFSET_CONTRACT: TypedContract<OffsetParams> = TypedContract::new();
 const UNTRIM_CONTRACT: TypedContract<UntrimParams> = TypedContract::new();
 const FAIR_CONTRACT: TypedContract<FairParams> = TypedContract::new();
+const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.patch", "Patch", patch)
@@ -60,9 +61,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
         .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
-    CommandSpec::new("surface.sweep", "Surface Sweep", surface_sweep)
+    CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep))
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
+        .contract(&SURFACE_SWEEP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.loft", "Surface Loft", surface_loft)
         .at("SURFACE", "CREATE")

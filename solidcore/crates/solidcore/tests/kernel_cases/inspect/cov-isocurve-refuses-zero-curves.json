@@ -1,0 +1,37 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-isocurve-refuses-zero-curves",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin: a count is a whole number 1 to 100: 0 is refused",
+    "outcome": "refused",
+    "refusal": "`count` must be a whole number of curves each way",
+    "source": "analytic",
+    "sources": [],
+    "what": "isocurves with a count of 0"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1…100",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1…100",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "isocurves with a count of 0",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.isocurve): invalid parameters for `inspect.isocurve`: `count` must be a whole number of curves each way, 1…100"
+  ]
+}

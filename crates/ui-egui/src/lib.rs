@@ -71,6 +71,7 @@ pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
+pub mod history_bar;
 mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
@@ -192,6 +193,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
+mod nav_bar;
 pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
@@ -292,6 +294,7 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
+pub mod start_page;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
@@ -318,6 +321,7 @@ mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
+pub mod view_compass;
 mod view_confirm;
 pub mod view_gizmo;
 pub mod view_pick;
@@ -326,6 +330,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod window_chrome;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -813,7 +818,7 @@ pub struct SolveApp {
     pub(crate) frame_watch: frame_watch::Watch,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
-    /// The language the installed font fallback chain is ordered for (`fonts::fallback_order`);
+    /// The language the installed font fallback chain is ordered for (`ui_kit::type_face::fallback_order`);
     /// changing `preferences.language` re-installs the fonts on the next frame.
     applied_fonts_language: String,
     /// The interface font the fonts were last set up with (`Prefs::ui_font`).

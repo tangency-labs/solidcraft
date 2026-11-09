@@ -712,7 +712,7 @@ fn universal_header_reuses_title_font_and_six_dot_grip_without_idle_control_tile
         for clipped in &output.shapes {
             crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
                 egui::Shape::Text(text) if text.galley.job.text == "Shared title" => {
-                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::fonts::semibold(t.font_heading));
+                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::ui_kit::type_face::semibold(t.font_heading));
                     titles += 1;
                 }
                 egui::Shape::Text(text) if text.galley.job.text == "Shared tab" => {
@@ -754,9 +754,9 @@ fn universal_drag_source_changes_only_label_ink_and_keeps_existing_fonts() {
             t.form_ink
         };
         let font = if title {
-            crate::fonts::semibold(t.font_heading)
+            crate::ui_kit::type_face::semibold(t.font_heading)
         } else if selected {
-            crate::fonts::semibold(t.font_label)
+            crate::ui_kit::type_face::semibold(t.font_label)
         } else {
             egui::FontId::proportional(t.font_label)
         };
@@ -1358,12 +1358,12 @@ fn heading_weight_field_surfaces_and_disclosures_follow_tokens_in_both_themes() 
                     assert_eq!(text.galley.job.sections.first().unwrap().format.font_id.family, egui::FontFamily::Monospace);
                 }
                 if text.galley.job.text == "Fillet" {
-                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::fonts::semibold(t.font_heading));
+                    assert_eq!(text.galley.job.sections.first().unwrap().format.font_id, crate::ui_kit::type_face::semibold(t.font_heading));
                     *title += 1;
                 }
                 if text.galley.job.text == "OPTIONS" {
                     let format = &text.galley.job.sections.first().unwrap().format;
-                    assert_eq!(format.font_id, crate::fonts::semibold(t.font_caption));
+                    assert_eq!(format.font_id, crate::ui_kit::type_face::semibold(t.font_caption));
                     assert!(format.extra_letter_spacing > 0.0);
                     *section += 1;
                 }
