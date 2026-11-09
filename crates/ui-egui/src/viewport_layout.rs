@@ -252,13 +252,13 @@ impl Layout {
         let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
-        let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
+        let axis_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
         let axis_left = |size| {
             if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
         };
-        let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
-        let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
-            Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
+        let top = below_bar(Rect::from_min_size(pos2(axis_left(axis_size), top), vec2(axis_size, axis_size))).top();
+        let mut axis_view = if available.width() >= axis_size && available.bottom() - top >= axis_size {
+            Rect::from_min_size(pos2(axis_left(axis_size), top), vec2(axis_size, axis_size))
         } else {
             Rect::NOTHING
         };
@@ -268,8 +268,8 @@ impl Layout {
             for _ in 0..obstacles.len() {
                 let bottom = obstacles.iter().filter(|dock| axis_view.intersect(**dock).is_positive()).map(Rect::bottom).max_by(f32::total_cmp);
                 let Some(bottom) = bottom else { break };
-                axis_view = if available.bottom() - bottom >= cube_size {
-                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(cube_size, cube_size))
+                axis_view = if available.bottom() - bottom >= axis_size {
+                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(axis_size, axis_size))
                 } else {
                     Rect::NOTHING
                 };
@@ -278,7 +278,7 @@ impl Layout {
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
-            let compact = (navigation.top() - top - 4.0).min(cube_size);
+            let compact = (navigation.top() - top - 4.0).min(axis_size);
             axis_view = if style != crate::prefs::NavigatorStyle::Axes && compact >= 96.0 {
                 Rect::from_min_size(pos2(axis_left(compact), top), vec2(compact, compact))
             } else {

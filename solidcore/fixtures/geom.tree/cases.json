@@ -366,7 +366,7 @@
    }
   },
   {
-   "name": "brep_cache_surface_tree_cube_faces",
+   "name": "brep_cache_surface_tree_navigator_faces",
    "upstream_ref": "source/SMLib/src/SmBrepCache.cpp:269",
    "inputs": {
     "kind": "spatial",

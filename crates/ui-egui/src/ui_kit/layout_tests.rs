@@ -94,7 +94,7 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
                                 paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_viewport::Camera::default()))
                             },
                         },
-                        PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
+                        PictureChoice { key: "custom", label: "Custom", figure: paint_navigation_custom },
                     ],
                 ),
             ] {

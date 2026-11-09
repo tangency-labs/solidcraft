@@ -822,7 +822,7 @@ no box selection.
 | `ui.dialogInput` | `index` | what clicking an input's Select chip does: picks go to that input |
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
 | `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), so it works headless. As `view.pick` through `engine.execute`/`engine.batch`. See `crates/ui-egui/src/view_pick.rs` |
-| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; optional cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible cube faces; Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Cube`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>` |
+| `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; the custom navigator's controls `navigator:control:home` (and other actions); Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Custom`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>` |
 | `ui.editFolder` | `folder` (id or name) | Edit Holes on a History folder that holds holes only: one Hole dialog, filled in from its first hole, whose OK gives every hole in the folder the fields changed there. Replies as `ui.start` does |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode). Replies as `ui.start` does, with the history `marker` |
 | `ui.scroll` | `x`, `y`, `delta?`, `ctrl?`, `unit?`: `point` \| `line` | wheel zoom at the cursor. `ctrl: true` replays a Ctrl+wheel pinch (Ctrl held and the wheel in points); `unit` selects the wheel unit and defaults to points with `ctrl` and lines without it. `delta` is in points either way. Invalid units or coordinates outside the finite screen-coordinate range are rejected before queuing input |
@@ -937,11 +937,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
-- `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
-- `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
-- `navigator_home` (default true: the custom view navigator has the cube's Home button beside it; also `view.navigator {home}`)
-- `navigator_style` (`axes` (default), `cube`, `custom`: the body chosen with `view.navigator`, the cube until one is chosen)
-- `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
+- `navigator_arrows` (default true: the custom view navigator has orbit and roll arrows around its body; also `view.navigator {arrows}`)
+- `navigator_fit` (default false: a view chosen on a view navigator also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
+- `navigator_home` (default true: the custom view navigator has a Home button beside it; also `view.navigator {home}`)
+- `navigator_style` (`axes` (default), `custom`: the body chosen with `view.navigator`, the signed axes until one is chosen; a value this version doesn't know loads as `axes`)
+- `navigator_texture` (`themed` (default): the custom view navigator in the theme's navigator colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
 - `orbit_cursor_wrap` (default true: an orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning)
@@ -1094,57 +1094,42 @@ channel; see [mcp.md](mcp.md).
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```
 
-Preferences → Navigation → View navigator offers **Signed axes** (the original default),
-**Cube** and **Custom**; a right-click anywhere on the navigator offers the same three. This choice is
-saved independently of the mouse preset. The control channel selects it with
-`ui.prefs {"navigator_style":"axes"}`, `"cube"` or `"custom"`. Existing settings without this field
-keep signed axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses
-the view.
+Preferences → Navigation → View navigator offers **Signed axes** (the default) and **Custom**; a
+right-click anywhere on the navigator offers the same two. This choice is saved independently of
+the mouse preset. The control channel selects it with `ui.prefs {"navigator_style":"axes"}` or
+`"custom"`. A saved style this version doesn't know loads as signed axes; `ui.prefs` and
+`view.navigator` refuse one with an error. Existing settings without this field keep signed
+axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses the view.
 
-Custom draws a body in place of the cube, at the cube's size; a click on one of its faces looks
-straight at it, and with `navigator_fit` on it also frames the model, as the cube does. Picking
-Custom from the navigator's menu opens the Custom View Navigator panel, with OK and Cancel: pick
-the body in the view, then its texture (`themed`: the cube's colours; `modeled`: the body's own
-appearance and the view's edge colour) and whether the cube's rotation arrows and Home button go
-around it. The navigator previews the panel's choices while it is open. OK runs
-`view.navigator`, which scripts and `engine.execute` run too without opening anything:
+Custom draws a body in place of the signed axes; a click on one of its faces looks straight at it,
+and with `navigator_fit` on it also frames the model. Picking Custom from the navigator's menu
+opens the Custom View Navigator panel, with OK and Cancel: pick the body in the view, then its
+texture (`themed`: the theme's navigator colours; `modeled`: the body's own appearance and the
+view's edge colour) and whether the rotation arrows and Home button go around it. The navigator
+previews the panel's choices while it is open. OK runs `view.navigator`, which scripts and
+`engine.execute` run too without opening anything:
 `{"style": "custom", "body": "Body1", "texture": "modeled", "arrows": true, "home": false}` (any
-subset; `"body": null` goes back to the cube) returns the whole navigator. A body over 10,000
-triangles is refused, and so is a long or flat one: measured across the axes and the diagonals,
-its thinnest width must be at least a fifth of its widest. The body is kept as a snapshot with the
-preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so it stays across
-runs and designs and travels with an exported profile.
+subset; `"body": null` goes back to the signed axes) returns the whole navigator. A body over
+10,000 triangles is refused, and so is a long or flat one: measured across the axes and the
+diagonals, its thinnest width must be at least a fifth of its widest. The body is kept as a
+snapshot with the preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so
+it stays across runs and designs and travels with an exported profile.
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging either view navigator. Under the default preset,
-Shift+middle also orbits with snapping; middle alone pans. Cube faces choose principal views,
-and corners choose isometric views. The middle of each cube edge belongs to its face. Face names
-follow the up-axis preference; the small X/Y/Z triad shows world axes. Clicking the same face keeps that view.
-The inward-pointing arrows orbit by 90 degrees; the curved arrows at the upper right roll the
-view by 90 degrees. The Home button at the upper left returns to isometric and the lower-right circle
-fits the model.
+Shift+middle also orbits with snapping; middle alone pans. The custom navigator's inward-pointing
+arrows orbit by 90 degrees; the curved arrows at the upper right roll the view by 90 degrees, and
+its Home button at the upper left returns to isometric. View changes ease through intermediate
+orientations when Navigation animated view changes is enabled (the default), at the configured
+animation speed.
 
-The cube is subdued while idle. Hovering its area brightens the cube and navigation bar and
-reveals the surrounding controls; the picked face or corner gets a pale blue fill and
-blue outline. Moving away restores the subdued state. Navigation-bar controls also brighten
-when hovered or when a navigation tool is active.
-
-The cube has six face targets and eight corner targets, with no edge targets. Corner picking
-regions lie on the six flat faces, preserving sharp corners with no permanent subdivision
-lines. Hovering a corner highlights its parts on the adjacent visible faces together.
-
-The cube widget occupies a compact 112-point square in the viewport corner. A straight-on
-cube face is approximately 55 points wide; painting and picking scale together. Face labels
-are stretched vertically. View clicks ease through intermediate orientations when Navigation
-animated view changes is enabled (the default), at the configured animation speed.
-
-The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
+`view.navigate` runs through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
 `down`, `clockwise`, `counterclockwise`, `home`, `fit`). `fit: true` with a `direction` or a
 turn asks for the whole model to be framed from the new direction as well, as `home` does. The
 result contains `camera` and `fit`; UI callers apply the camera with their animation
 preference, without editing the design. The Navigation preference `navigator_fit` (off by
-default) makes every view chosen on the cube or on the axis gizmo frame the model this way:
+default) makes every view chosen on a view navigator frame the model this way:
 looking at its middle from the one distance that fits its bounding sphere, which Home then shares.
 
 Shift-orbit snapping includes 45-degree edge views and isometric corner views, with a

@@ -101,7 +101,7 @@ pub enum Target {
     },
     /// The workspace switcher.
     Workspace,
-    /// The view gizmo (axes, cube or a custom body) at the viewport's corner.
+    /// The view gizmo (axes or a custom body) at the viewport's corner.
     ViewGizmo,
     /// The Named Views folder, and one view (saved or standard) in it.
     NamedViews,

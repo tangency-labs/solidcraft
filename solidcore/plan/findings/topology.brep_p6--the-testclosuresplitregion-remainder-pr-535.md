@@ -44,7 +44,7 @@ cases still pass. Eight `MakeFaceTopology` network fixtures target the remainder
 ray-fire branches: `two_cubes_at_a_vertex` (face uses joined only by a vertex),
 `two_disjoint_cubes` and `cube_in_cube` (shell nesting), `cube_with_wire` and
 `cube_with_inner_wire` (wires), `cube_with_inner_vertex` and `cube_with_outer_vertex`
-(vertex shells), and `cube_faces_6_reversed`. All eight defer at geom.tol
+(vertex shells), and `navigator_faces_6_reversed`. All eight defer at geom.tol
 `GetZoneTol3d(const SmObject*)` in the topology solver (`object_zone_tol_3d` on an
 opaque handle). Wiring its null-object branch to the system tolerance only moves the
 stop to `SmFace::PointClassify` (`query.face_p2`, `face_point_classify`), so those

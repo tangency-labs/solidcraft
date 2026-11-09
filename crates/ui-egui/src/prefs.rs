@@ -478,26 +478,23 @@ pub const MSAA: [u32; 4] = [1, 2, 4, 8];
 /// Supersampling factors (#1288): off, 1.5× and 2× the viewport's pixels each way.
 pub const SUPERSAMPLING: [f32; 3] = [1.0, 1.5, 2.0];
 
-/// Original view navigators, independent of the mouse navigation preset.
+/// View navigators, independent of the mouse navigation preset.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorStyle {
     /// Also what a navigator this version doesn't know reads as (`lenient`).
     #[default]
     Axes,
-    Cube,
-    /// A body of the user's choice, drawn the cube's size ([`crate::view_gizmo`]); the cube
-    /// until one is chosen.
+    /// A body of the user's choice ([`crate::view_gizmo`]); the signed axes until one is chosen.
     Custom,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 3] = [Self::Axes, Self::Cube, Self::Custom];
+    pub const ALL: [Self; 2] = [Self::Axes, Self::Custom];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
-            Self::Cube => "Cube",
             Self::Custom => "Custom",
         }
     }
@@ -507,7 +504,7 @@ impl NavigatorStyle {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorTexture {
-    /// The navigation cube's colours. Also what a value this version doesn't know reads as
+    /// The navigator's colours. Also what a value this version doesn't know reads as
     /// (`lenient`).
     #[default]
     Themed,
@@ -947,13 +944,13 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
-    /// View orientation widget: original signed axes (default) or compact cube.
+    /// View orientation widget: original signed axes (default) or a custom body.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
-    /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
+    /// The custom view gizmo's colours: the theme's (themed) or the body's own (modeled).
     navigator_texture: NavigatorTexture = NavigatorTexture::default(), PAGE_NAVIGATION;
-    /// The custom view gizmo has the cube's orbit and roll arrows around it.
+    /// The custom view gizmo has the orbit and roll arrows around it.
     navigator_arrows: bool = true, PAGE_NAVIGATION;
-    /// The custom view gizmo has the cube's Home button beside it.
+    /// The custom view gizmo has the Home button beside it.
     navigator_home: bool = true, PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
@@ -1394,15 +1391,15 @@ preference_settings! {
     network_hosts: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// What a middle-button double-click in the view does: `home`, `fit` or `off`.
     middle_double_click: String = "home".into(), PAGE_NAVIGATION;
-    /// A view chosen on the navigator (a cube face, corner or arrow, an axis tip) also frames the
+    /// A view chosen on the navigator (a face, corner or arrow, an axis tip) also frames the
     /// whole model, as Home does (#10091). Off by default: the view turns in place, keeping its
     /// target and zoom.
     navigator_fit: bool = false, PAGE_NAVIGATION;
-    /// The view cube's directional arrows orbit the camera the way the arrow points, as in
+    /// The navigator's directional arrows orbit the camera the way the arrow points, as in
     /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
-    /// the cube toward the side it sits on, so the arrow on the left swings the camera left.
+    /// the view toward the side it sits on, so the arrow on the left swings the camera left.
     invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
-    /// The view cube's two curved arrows roll the view the other way: the clockwise arrow rolls
+    /// The navigator's two curved arrows roll the view the other way: the clockwise arrow rolls
     /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
     /// #10483). Off by default: each arrow rolls the view the way it curls.
     invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
@@ -9543,22 +9540,35 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_navigator_style_loads_as_axes_and_is_refused_by_commands() {
+        let saved = json!({"navigator_style":"zigzag", "length_decimals": 4});
+        let p = super::lenient(&saved);
+        assert_eq!(p.navigator_style, NavigatorStyle::Axes);
+        assert_eq!(p.length_decimals, 4, "the rest of the saved preferences are kept");
+        assert!(serde_json::from_value::<NavigatorStyle>(json!("zigzag")).is_err());
+        let mut h = crate::scenario::Harness::new();
+        let before = h.app.preferences.clone();
+        assert!(control(&mut h.app, &json!({"navigator_style":"zigzag"})).is_err());
+        assert_eq!(h.app.preferences, before);
+        assert!(h.app.run("view.navigator", json!({"style":"zigzag"})).is_err());
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
+    }
+
+    #[test]
     fn navigator_picker_preserves_axes_and_follows_preferences_transactions() {
         let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
         assert_eq!(old.navigator_style, NavigatorStyle::Axes);
         let mut h = crate::scenario::Harness::new();
         assert!(crate::scenario::handle_at("axis_view:z").is_some());
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_none());
         let camera = h.app.cam;
         let design = h.app.session.doc.to_json();
         let nav = h.app.preferences.nav.clone();
         h.call("ui.prefs", json!({"open":"Navigation"}));
         super::reveal_preference(&mut h, "prefs:navigator");
-        let cube = crate::scenario::rect_of("prefs:navigator:Cube").unwrap().center();
+        let custom = crate::scenario::rect_of("prefs:navigator:Custom").unwrap().center();
         assert!(crate::scenario::rect_of("prefs:navigator:Signed axes").is_some());
-        h.call("ui.click", json!({"x":cube.x,"y":cube.y}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube);
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_some());
+        h.call("ui.click", json!({"x":custom.x,"y":custom.y}));
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
         assert_eq!(h.app.preferences.nav, nav);
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
@@ -9570,13 +9580,12 @@ mod tests {
         assert_eq!(h.app.preferences, before, "invalid settings must fail atomically");
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
-        assert!(crate::scenario::handle_at("navigation_cube:front").is_none());
-        h.call("ui.prefs", json!({"open":"Navigation","navigator_style":"cube"}));
+        h.call("ui.prefs", json!({"open":"Navigation","navigator_style":"custom"}));
         h.call("ui.prefs", json!({"button":"apply"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Axes);
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube);
+        assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
         h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
         h.call("ui.view", json!({"view":"front"}));
         let axis = crate::scenario::handle_at("axis_view:-y").unwrap();

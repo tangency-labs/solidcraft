@@ -32,7 +32,7 @@ use solidcore::{Brep, Kernel};
 
 /// Adds the six faces of the cube of half side `h` centred on the origin to `b`, each a
 /// separate face of the infinite region over the square `-h..h` of its plane.
-fn add_cube_faces(k: &mut Kernel, b: &mut Brep, h: f64) {
+fn add_navigator_faces(k: &mut Kernel, b: &mut Brep, h: f64) {
     let axes = [
         Vec3::new(1.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
@@ -72,8 +72,8 @@ fn stitched(fix: bool) -> (Kernel, Brep, bool) {
     let mut k = Kernel::default();
     k.fixes.stitch_solid_nests_cavities = fix;
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
-    add_cube_faces(&mut k, &mut b, 5.0);
-    add_cube_faces(&mut k, &mut b, 2.0);
+    add_navigator_faces(&mut k, &mut b, 5.0);
+    add_navigator_faces(&mut k, &mut b, 2.0);
     let r = stitch_into_solid(&mut k, &mut b).unwrap();
     assert_eq!(r.lamina_edges, 0);
     (k, b, r.produces_a_solid)

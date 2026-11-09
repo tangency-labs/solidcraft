@@ -1,7 +1,7 @@
 {"format":1,"unit":"geom.tree"}
 {"case":"boxes_on_split_planes","deferred":null,"error":null,"ints":{"ints":{"blocks":[[285,16125]],"n":82}},"topology":null,"values":{"floats":{"blocks":[[84.0929999999604,84.0929999999604,7924.588499994291]],"n":186}}}
 {"case":"brep_cache_curve_tree_cube_edges","deferred":null,"error":null,"ints":{"ints":{"blocks":[[3529,173597]],"n":74}},"topology":null,"values":{"floats":{"blocks":[[81.0,81.0,6903.2715]],"n":162}}}
-{"case":"brep_cache_surface_tree_cube_faces","deferred":null,"error":null,"ints":{"ints":{"blocks":[[2448,52500]],"n":28}},"topology":null,"values":{"floats":{"blocks":[[39.0,39.0,1545.0]],"n":78}}}
+{"case":"brep_cache_surface_tree_navigator_faces","deferred":null,"error":null,"ints":{"ints":{"blocks":[[2448,52500]],"n":28}},"topology":null,"values":{"floats":{"blocks":[[39.0,39.0,1545.0]],"n":78}}}
 {"case":"brep_cache_vertex_tree_cube","deferred":null,"error":null,"ints":{"ints":{"blocks":[[12234,488384]],"n":46}},"topology":null,"values":{"floats":{"blocks":[[51.0,51.0,2295.0]],"n":102}}}
 {"case":"first_patch_bezier_surface","deferred":null,"error":null,"ints":{"ints":[1]},"topology":null,"values":{"patches":{"blocks":[[51.5,80.0,849.75]],"n":30}}}
 {"case":"gen0000","deferred":null,"error":null,"ints":{"ints":{"blocks":[[12161,206713]],"n":23}},"topology":null,"values":{"floats":{"blocks":[[-1325.0412713191438,10007.435300868368,-11943.19494737783]],"n":18}}}

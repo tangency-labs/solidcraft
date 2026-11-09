@@ -3128,11 +3128,11 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
     }
 }
 
-/// #1454: Fit (F6), a middle double-click, and the axis view's and navigation cube's Home and
+/// #1454: Fit (F6), a middle double-click, and the axis view's and navigator's Home and
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Custom] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -3175,9 +3175,8 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         // The navigator's Home control.
         off(&mut h);
         let handle = match style {
-            crate::prefs::NavigatorStyle::Axes => "axis_view:home",
-            // Custom draws the cube until a body is chosen.
-            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => "navigation_cube:control:home",
+            // Custom draws the signed axes until a body is chosen.
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => "axis_view:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();

@@ -17,7 +17,7 @@ versions. Two preferences opt into holding the model:
   but picks the point each frame because device apps do not report rest.
 
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
-adjust the view with the navigation cube, the cap can rotate it too. Turn on **Turn sketches with
+adjust the view with the view navigator, the cap can rotate it too. Turn on **Turn sketches with
 the 3D mouse** (`space_mouse_sketch_orbit: true`) to let the cap rotate a sketch seen square on as
 well, as the mouse can. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an

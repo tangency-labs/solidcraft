@@ -439,7 +439,7 @@ distance, yaw, pitch, roll, FOV and up axis as view state. It neither edits the 
 nor settles a stale model. The UI honours its up axis in Render; the Design camera
 is restored when returning. The camera moves exactly as in Design: the navigation preset,
 Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 and the axis
-view or navigation cube all work and
+view or axes navigator all work and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
 In the normal workflow, **Fit Product**, entry fit, product drawing, navigation,

@@ -679,7 +679,6 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "model" => &["traced"],
         "view center" | "view centre" => &["classic"],
         "axes" | "axes (signed)" => &["axes", "signed axes", "axes (signed)"],
-        "cube" | "cube (compact)" => &["cube", "cube (compact)"],
         "under cursor" => &["under the cursor"],
         _ => &[],
     }
@@ -1495,7 +1494,6 @@ mod tests {
                 ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
                 ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
                 ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
-                ("Cube", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Cube"),
                 ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
                 ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
                 ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
@@ -1507,8 +1505,7 @@ mod tests {
                 h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> =
-                    hits.iter().enumerate().filter(|(_, hit)| hit.page == page && (query != "Cube" || hit.label == "Cube")).collect();
+                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
                 assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
                 set_cursor(&h.ctx, matching[0].0);
                 h.frames(2);

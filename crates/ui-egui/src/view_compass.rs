@@ -191,7 +191,7 @@ pub struct Orbit {
 
 /// Track a drag on a view navigator. A press may start one (`may_start`: the pointer is over the
 /// view and free to act) where `starts_at` says the navigator is; once the drag is decided each
-/// frame's motion is an [`OrbitStep`]. The cube and the custom body share it.
+/// frame's motion is an [`OrbitStep`]. The custom body uses it.
 pub fn orbit(ui: &egui::Ui, drag: &mut Drag, may_start: bool, starts_at: impl Fn(Pos2) -> bool) -> Orbit {
     let mut out = Orbit::default();
     let (pressed, down, decided, origin, pos, shift) = ui.input(|i| {

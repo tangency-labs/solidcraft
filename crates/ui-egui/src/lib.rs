@@ -1854,7 +1854,7 @@ impl SolveApp {
             }
             return;
         }
-        // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
+        // Front … Isometric (Ctrl+1…7 by default) turn the view as the navigator's faces do. The
         // flat pattern is a 2D page: it has no other side to turn to.
         if solidcraft_engine::standard_view(id).is_some() {
             if !dialogs_sheet::flat_active(self) {
@@ -1924,7 +1924,7 @@ impl SolveApp {
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place, and the ribbon
-        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // where it is: F6, the navigation bar and the navigator never went through `start`, so
         // command search and the VIEW tab's menus must not move the tab either (#10540).
         if matches!(
             id,
@@ -3127,7 +3127,7 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a cube face, corner or arrow, an axis tip): the view turns
+    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
     /// in place, or frames the whole model from the new direction when Preferences › Navigation
     /// asks for it (`navigator_fit`, #10091).
     pub fn animate_turn(&mut self, to: Camera) {
