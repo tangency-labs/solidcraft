@@ -1509,6 +1509,7 @@
   "cmd.timeline_stop": "Dừng lịch sử",
   "cmd.timeline_suppress": "Tạm nén tính năng",
   "cmd.ui.assistant": "Bật/tắt trợ lý",
+  "cmd.ui.palette": "Tìm kiếm lệnh",
   "cmd.view.navigator": "Khối điều hướng góc nhìn tùy chỉnh",
   "cmd.view.render_browser": "Trình duyệt kết xuất",
   "cmd.view.render_dock": "Di chuyển neo kết xuất",

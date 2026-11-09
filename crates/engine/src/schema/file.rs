@@ -235,8 +235,8 @@ pub struct ExportResult {
     pub path: String,
     /// Its size in bytes.
     pub bytes: usize,
-    /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` also StlAscii,
-    /// ThreeMfTagged or Design).
+    /// The format written: Step, StlBinary, ThreeMf or Obj (and for `file.export` and
+    /// `file.save_mesh` also StlAscii or ThreeMfTagged, and for `file.export` also Design).
     pub format: String,
     /// OBJ only: every file written, the material library first and the mesh file last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

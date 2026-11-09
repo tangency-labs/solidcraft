@@ -30,6 +30,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ASSISTANT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
         .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.palette", "Search Commands", crate::checked!("ui.palette", palette))
+        .icon("zoom")
+        .key("S")
+        .noundo()
+        .doc_only()
+        .contract(&PALETTE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::PaletteResult>)
+        .params("Open command search in the app. Headless calls are refused without changing the design"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
         .icon("undo")
         .key("Ctrl+Z")
@@ -255,6 +263,14 @@ const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::Assi
 
 fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
+}
+
+const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::PaletteParams> = crate::schema::TypedContract::new();
+
+/// Command search (#12190) is the app's: it opens in `SolveApp::start`, and its key can be moved
+/// in Preferences › Shortcuts like any other command's.
+fn palette(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.palette opens command search in the app; there is no search box in a headless session".into()))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();

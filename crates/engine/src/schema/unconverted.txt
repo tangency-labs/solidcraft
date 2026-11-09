@@ -10,7 +10,6 @@ face.delete
 file.insert_mesh
 file.insert_step
 file.new
-file.save_mesh
 file.slicers
 motion.export_animation
 motion.trace
@@ -23,7 +22,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-sketch.draw.dimensioned
 solid.align
 solid.coil
 solid.draft
@@ -38,7 +36,6 @@ solid.pattern.path
 solid.pattern.rectangular
 solid.press_pull
 solid.replace_face
-solid.revolve
 solid.shell
 solid.thread
 surface.blend
