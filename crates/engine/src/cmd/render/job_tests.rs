@@ -1990,7 +1990,7 @@ fn cpu_saved_surface_preflight_and_real_factory_render_captured_builtins_after_r
     s.execute("solid.box", &json!({"length":10,"width":10,"height":2,"body_name":"Coupon"})).unwrap();
     let scene = crate::product_scene::extract(&s).unwrap();
     let mut camera = solidcraft_render::Camera::default();
-    camera.fit(&scene.bounds);
+    camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
     s.execute("render.library.surface.bind",&json!({"name":"CPU maps","surface":{"id":"SURF-001","body_index":0,"body_name":"Coupon"},
         "set":{"camera":camera,"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":9},"output":{"linear_exr":true}}}}})).unwrap();
     s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
@@ -2273,7 +2273,7 @@ fn saved_cpu_path_maps_glass_and_targeted_aging_reach_real_preflight_and_render_
     let scene = crate::product_scene::extract(&s).unwrap();
     let mut camera = solidcraft_render::Camera::default();
     camera.set_view(solidcraft_render::StandardView::Top);
-    camera.fit(&scene.bounds);
+    camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
     s.execute(
         "render.settings.set",
         &json!({"name":"Mixed","set":{"camera":camera,"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{

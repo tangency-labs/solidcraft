@@ -101,7 +101,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
             let assembled = crate::view::bounds(&t)?;
             t.pending_moves = exploded_at(moves, 1.0);
             let mut c = crate::view::home_camera(&t)?;
-            c.fit(&assembled.union(&crate::view::bounds(&t)?));
+            c.fit(&solidcraft_render::view_bounds(&assembled.union(&crate::view::bounds(&t)?)));
             Ok(c)
         }
         Motion::Drive(..) => crate::view::home_camera(s),

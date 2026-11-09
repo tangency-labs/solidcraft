@@ -4844,7 +4844,7 @@ pub(crate) fn onto_sketch(mut to: solidcraft_engine::render::Camera, ss: &solidc
         b.add(ss.plane.to_world(p));
     }
     let keep = to.distance;
-    to.fit(&b);
+    to.fit(&solidcraft_engine::render::view_bounds(&b));
     if keep.is_finite() && keep > to.distance {
         to.distance = keep;
     }

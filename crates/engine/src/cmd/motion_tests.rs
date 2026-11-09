@@ -1004,7 +1004,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     // One camera for the whole clip, framing the parts assembled and exploded alike.
     assert!(round.iter().all(|(_, c)| *c == round[0].1));
     let mut framed = crate::render::Camera::default();
-    framed.fit(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) });
+    framed.fit(&solidcraft_render::view_bounds(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) }));
     assert!(round[0].1.target.dist(framed.target) < 1e-9 && (round[0].1.distance - framed.distance).abs() < 1e-9, "{:?}", round[0].1);
     // Without samples: 41 frames, or 81 with back (the middle one exploded).
     assert_eq!(frames(json!({"view": "Apart"})).len(), 41);

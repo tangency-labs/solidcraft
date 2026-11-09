@@ -1,7 +1,7 @@
-//! The renderer's own vector maths on [`Vec3`] and [`Vec2`]: the few products, lengths and
-//! blends the camera, the CPU rasterizer, the shading models, the section hatch and the GPU
-//! pipelines need. The renderer takes no geometry crate, so it keeps these here rather than
-//! reach for an app's.
+//! The renderer's own vector maths on [`Vec3`] and [`Vec2`], and its [`Bounds`]: the few
+//! products, lengths, blends and boxes the camera, the CPU rasterizer, the shading models, the
+//! section hatch and the GPU pipelines need. The renderer takes no geometry crate, so it keeps
+//! these here rather than reach for an app's.
 
 use solidcore_record::{Vec2, Vec3};
 
@@ -93,9 +93,51 @@ impl Vec2Ops for Vec2 {
     }
 }
 
+/// An axis-aligned box the renderer frames, clips and shades by: the camera's fit and depth range,
+/// the ground's ambient occlusion. Plain data the host fills from its own bounds. An empty box
+/// ([`Bounds::EMPTY`], or any with `min` past `max` or NaN) has no centre or size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl Default for Bounds {
+    fn default() -> Self {
+        Bounds::EMPTY
+    }
+}
+
+impl Bounds {
+    /// The box around nothing.
+    pub const EMPTY: Bounds = Bounds {
+        min: Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+        max: Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+    };
+    /// Whether the box holds no point.
+    pub fn is_empty(&self) -> bool {
+        !(self.min.x <= self.max.x && self.min.y <= self.max.y && self.min.z <= self.max.z)
+    }
+    /// Grow the box to hold `p`; a point that is not finite is left out.
+    pub fn add(&mut self, p: Vec3) {
+        if p.is_finite() {
+            self.min = self.min.min(p);
+            self.max = self.max.max(p);
+        }
+    }
+    /// The middle of the box; the origin for an empty box.
+    pub fn center(&self) -> Vec3 {
+        if self.is_empty() { Vec3::ZERO } else { (self.min + self.max) * 0.5 }
+    }
+    /// The length of the box's diagonal; zero for an empty box.
+    pub fn diagonal(&self) -> f64 {
+        if self.is_empty() { 0.0 } else { (self.max - self.min).len() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Vec2Ops, Vec3Ops};
+    use super::{Bounds, Vec2Ops, Vec3Ops};
     use solidcore_record::{Vec2, Vec3};
 
     #[test]
@@ -124,6 +166,27 @@ mod tests {
             assert!(p.dot(v).abs() < 1e-12 && (p.len() - 1.0).abs() < 1e-12, "{v:?} -> {p:?}");
         }
         assert_eq!(Vec3::ZERO.any_perp(), Vec3::Z);
+    }
+
+    #[test]
+    fn a_box_has_a_centre_and_a_diagonal_unless_it_is_empty() {
+        let b = Bounds { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(3.0, 4.0, 12.0) };
+        assert!(!b.is_empty());
+        assert_eq!(b.center(), Vec3::new(1.5, 2.0, 6.0));
+        assert_eq!(b.diagonal(), 13.0);
+        let mut grown = Bounds::EMPTY;
+        for p in [Vec3::new(1.0, -2.0, 5.0), Vec3::new(f64::NAN, 9.0, 9.0), Vec3::new(-3.0, 4.0, f64::INFINITY), Vec3::new(2.0, 0.0, -1.0)] {
+            grown.add(p);
+        }
+        assert_eq!(grown, Bounds { min: Vec3::new(1.0, -2.0, -1.0), max: Vec3::new(2.0, 0.0, 5.0) });
+        let point = Bounds { min: Vec3::X, max: Vec3::X };
+        assert!(!point.is_empty() && point.diagonal() == 0.0 && point.center() == Vec3::X);
+        for empty in
+            [Bounds::EMPTY, Bounds::default(), Bounds { min: Vec3::X, max: Vec3::ZERO }, Bounds { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::X }]
+        {
+            assert!(empty.is_empty(), "{empty:?}");
+            assert_eq!((empty.center(), empty.diagonal()), (Vec3::ZERO, 0.0));
+        }
     }
 
     #[test]

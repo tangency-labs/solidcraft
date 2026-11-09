@@ -1204,7 +1204,7 @@ pub fn home_camera(s: &Session) -> Result<Camera> {
     let mut c = Camera::default();
     let b = bounds(s)?;
     if !b.is_empty() {
-        c.fit(&b);
+        c.fit(&solidcraft_render::view_bounds(&b));
     } else {
         c.distance = 150.0;
     }

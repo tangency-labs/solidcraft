@@ -129,7 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     let mut studio = request(width, height, budget);
     if case == "bodies" {
-        studio.camera.fit(&source.bounds);
+        studio.camera.fit(&solidcraft_render::view_bounds(&source.bounds));
     }
     let admission = host.admit(&source, &studio, JobOptions::default())?;
     let id = JobId { session: 20261022, serial: 1, generation: 1 };

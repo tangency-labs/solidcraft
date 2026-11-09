@@ -11,7 +11,9 @@ fn ground_ao_shares_the_selected_ground_plane_in_both_up_axes() {
             app.preferences.ground_shadow_follows_model = follows_model;
             // A 3 x 4 x 12 box has diagonal 13: the original ground offset is .014 mm.
             let bounds = Aabb3 { min: Vec3::new(-1.5, -2.0, bottom), max: Vec3::new(1.5, 2.0, bottom + 12.0) };
-            let ground = solidcraft_gpu::view::GroundAo::new(bounds, ground_height(&app, bounds), cam.up, 2.0).unwrap();
+            let ground =
+                solidcraft_gpu::view::GroundAo::new(solidcraft_engine::render::view_bounds(&bounds), ground_height(&app, bounds), cam.up, 2.0)
+                    .unwrap();
             let bytes = ground.vertices(None);
             assert_eq!(bytes.len(), 6 * crate::gpu::TRI_SIZE);
             for vertex in bytes.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
@@ -25,7 +27,15 @@ fn ground_ao_shares_the_selected_ground_plane_in_both_up_axes() {
         }
     }
     for (bounds, radius) in [(Aabb3::EMPTY, 2.0), (Aabb3 { min: Vec3::ZERO, max: Vec3::X }, f32::NAN)] {
-        assert!(solidcraft_gpu::view::GroundAo::new(bounds, ground_height(&app, bounds), Camera::default().up, radius).is_none());
+        assert!(
+            solidcraft_gpu::view::GroundAo::new(
+                solidcraft_engine::render::view_bounds(&bounds),
+                ground_height(&app, bounds),
+                Camera::default().up,
+                radius
+            )
+            .is_none()
+        );
     }
 }
 
@@ -78,7 +88,7 @@ fn ground_ao_covers_a_live_preview_without_moving_the_existing_plane() {
     app.preview.bounds = Aabb3 { min: Vec3::new(100.0, 0.0, -40.0), max: Vec3::new(103.0, 4.0, -28.0) };
     assert_eq!(scene_key(&app), before, "a preview update must not re-upload unchanged model batches");
     let scene = build_scene(&app);
-    let bytes = scene.ground_ao.unwrap().vertices(Some(app.preview.bounds));
+    let bytes = scene.ground_ao.unwrap().vertices(Some(solidcraft_engine::render::view_bounds(&app.preview.bounds)));
     let points: Vec<Vec3> = bytes
         .as_chunks::<{ crate::gpu::TRI_SIZE }>()
         .0

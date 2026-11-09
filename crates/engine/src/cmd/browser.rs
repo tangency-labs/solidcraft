@@ -1147,7 +1147,7 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
             Some(sv) => {
                 let mut c = crate::view::home_camera(s)?;
                 c.set_view(sv);
-                c.fit(&crate::view::bounds(s)?);
+                c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
                 c
             }
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,

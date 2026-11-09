@@ -1027,7 +1027,7 @@ pub struct Frame {
     pub pv_hide: bool,
     /// World bounds of the active preview. Ground effects update their small receiver without
     /// changing the model scene's key or re-uploading model geometry/colours.
-    pub preview_bounds: Option<solidcraft_geom::Aabb3>,
+    pub preview_bounds: Option<solidcraft_render::vec::Bounds>,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
     /// Direction toward the eye (for lighting).

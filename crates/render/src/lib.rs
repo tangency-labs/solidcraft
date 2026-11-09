@@ -17,6 +17,7 @@ pub mod hatch;
 pub mod job;
 pub mod lighting;
 pub mod mapping;
+mod model_bounds;
 mod product;
 mod raster;
 #[cfg(feature = "raytrace-cpu")]
@@ -42,6 +43,7 @@ pub use backend::{
 pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
 pub use curve_display::{PixelCurveView, SampledPath, SamplingBudget, SamplingQuality, sample_segment, sample_segment_unclipped};
 pub use gif::gif;
+pub use model_bounds::view_bounds;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
 pub use raster::{Canvas, render, render_png, render_transparent};
 pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};

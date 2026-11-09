@@ -238,5 +238,6 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
 }
 
 fn receiver(sc: &mut GpuScene, b: Aabb3, cam: &Camera, radius: f64) {
-    sc.ground_ao = solidcraft_gpu::view::GroundAo::new(b, b.min.z - 0.001 * (1.0 + b.diagonal()), cam.up, radius as f32);
+    sc.ground_ao =
+        solidcraft_gpu::view::GroundAo::new(solidcraft_render::view_bounds(&b), b.min.z - 0.001 * (1.0 + b.diagonal()), cam.up, radius as f32);
 }
