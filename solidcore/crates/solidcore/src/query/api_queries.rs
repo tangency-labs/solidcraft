@@ -2096,6 +2096,48 @@ mod tests {
         points_at(&two, &[0.2, 0.5].map(|x| Point3::new(x, 0.0, 0.0)));
     }
 
+    /// The edge's own tolerance is the tube the solve finds a touch in. The three-span cubic
+    /// peaks at x* = 0.5 - 0.3 / sqrt(3), y* = 20 (0.3)^3 / (3 sqrt(3)), with |y''| = 60 (0.3) /
+    /// sqrt(3) there, so the plane y = y* + 5e-4 passes within 1e-3 of it only for
+    /// |x - x*| <= sqrt(1e-3 / |y''|), under 0.01. An edge of tolerance 1e-3 touches that plane
+    /// there; one of 1e-5 (the default zone tolerance) doesn't, nor does the 1e-3 edge a plane
+    /// 2e-3 above the peak. The edge runs over [0, 0.6], where the peak is the curve's highest
+    /// point: past x = 0.8 the curve rises to 0.8 and crosses every plane above the peak.
+    #[test]
+    fn edge_plane_crossings_follow_the_edge_s_own_tolerance() {
+        let h = 0.3_f64;
+        let (x_peak, y_peak) = (
+            0.5 - h / 3.0_f64.sqrt(),
+            20.0 * h.powi(3) / (3.0 * 3.0_f64.sqrt()),
+        );
+        let mut k = Kernel::default();
+        let crossings = |k: &mut Kernel, tolerance: f64, above: f64| {
+            let (mut b, e) = wire(k, three_span_cubic(), Extent1d::from_min_max(0.0, 0.6));
+            b.edge_mut(e).unwrap().tolerance = tolerance;
+            let plane = Point3::new(0.0, y_peak + above, 0.0);
+            let found = edge_plane_crossings(k, &b, e, plane, Vec3::Y).unwrap();
+            on_the_edge(k, &b, e, &found);
+            found
+        };
+        let touch = crossings(&mut k, 1e-3, 5e-4);
+        assert!(!touch.is_empty(), "within the edge's tolerance of the peak");
+        for c in &touch {
+            let ends = match c {
+                PlaneCrossing::Point(p) => vec![*p],
+                PlaneCrossing::Along { start, end } => vec![*start, *end],
+            };
+            assert!(
+                ends.iter().all(|end| (end.point.x - x_peak).abs() <= 0.01),
+                "{c:?}"
+            );
+        }
+        assert!(
+            crossings(&mut k, 1e-3, 2e-3).is_empty(),
+            "beyond its tolerance"
+        );
+        assert!(crossings(&mut k, 1e-5, 5e-4).is_empty(), "a tighter edge");
+    }
+
     #[test]
     fn edge_plane_crossings_of_a_rational_quarter_circle() {
         // the NURBS quarter circle of radius 5 from (5, 0) to (0, 5) in z = 0 (weights 1,

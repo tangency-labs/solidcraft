@@ -3,6 +3,7 @@
 //! application's picks compare, and each face's area, centroid and plane normal and each edge's
 //! length and middle. Every number is the kernel's; ops converts and compares.
 
+use solidcore::curve::from_parameters;
 use solidcore::error::EntityRef;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::Shape;
@@ -18,9 +19,10 @@ use solidcore::query::api_queries::{
 };
 use solidcore::query::brep::{BrepClassifier, BrepQuery, LiveBrepObjects};
 use solidcore::topology::brep::outward_solid_failure;
+use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2::{self as face_p2, face_side_regions};
 use solidcore::topology::{edge, face};
-use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId, RegionId};
+use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId};
 use solidcore::{Point3, Vec3};
 
 use crate::blend::middle;
@@ -425,37 +427,43 @@ impl Body {
         })
     }
 
-    /// Where record edges `edges` cut `outline`, a curve over `interval` (the record's parameter)
-    /// that lies in the plane through `point` with normal `normal`: the outline's parameters, in
-    /// order. A crossing of an edge with the plane (`edge_plane_crossings`; a stretch gives its two
-    /// ends) is a cut when the kernel's closest point of the outline to it is within the edge's
-    /// tolerance and inside `interval`; a crossing at a vertex already cut is not cut again. So an
-    /// outline that is one line of the plane keeps only the crossings on that line, and two edges
-    /// meeting at a vertex on it cut it once.
+    /// Where the rim of record faces `faces` cuts `outline`, a curve over `interval` (the record's
+    /// parameter) that lies in the plane through `point` with normal `normal`: the outline's
+    /// parameters, in order. The rim is [`rim_edges`]: the edges with a face of the set on one
+    /// side only, so not a seam or an edge between two faces of the set, smooth or not. A crossing
+    /// of a rim edge with the plane (`edge_plane_crossings`; a stretch gives its two ends) is a cut
+    /// when the kernel's closest point of the outline to it is within the edge's tolerance and
+    /// inside `interval`; a crossing at a vertex already cut is not cut again. So an outline that
+    /// is one line of the plane keeps only the crossings on that line, and two edges meeting at a
+    /// vertex on it cut it once.
     ///
     /// # Errors
-    /// [`Error::Argument`] for an index past the edges, a coordinate that is not finite or an
-    /// outline the kernel can't hold; the kernel's refusal of a normal of no direction or an
-    /// interval that doesn't increase; any other kernel error.
+    /// [`Error::Argument`] for an index past the faces, a face with no side that faces out, a
+    /// coordinate that is not finite or an outline the kernel can't hold; the kernel's refusal of
+    /// a normal of no direction or an interval that doesn't increase; any other kernel error.
     pub fn outline_cuts(
         &self,
         order: &Order,
-        edges: &[usize],
+        faces: &[usize],
         outline: &solidcore_record::brep::Curve,
         interval: [f64; 2],
         point_on: [f64; 3],
         normal: [f64; 3],
     ) -> Result<Vec<f64>> {
-        let ids = edges
+        let set = faces
             .iter()
-            .map(|&i| order::edge(order, i))
+            .map(|&i| order::face(order, i))
             .collect::<Result<Vec<_>>>()?;
         let (on, normal) = (point(point_on)?, point(normal)?);
         let record = solidcore_convert::curve(outline).map_err(|_| Error::Argument)?;
         with_body("outline_cuts", self, |k, b| {
-            let made = solidcore::curve::from_parameters::from_parameters(k, &record, interval)?;
+            let made = from_parameters::from_parameters(k, &record, interval)?;
+            let rims = match rim_edges(b, &set)? {
+                Ok(rims) => rims,
+                Err(e) => return Ok(Err(e)),
+            };
             let (mut cuts, mut cut_vertices) = (Vec::new(), Vec::new());
-            for e in ids {
+            for e in rims {
                 let tolerance = b.edge(e)?.tolerance;
                 for crossing in q::edge_plane_crossings(k, b, e, on, normal)? {
                     let ends = match crossing {
@@ -467,15 +475,18 @@ impl Body {
                             continue;
                         }
                         let near = q::curve_closest_point(k, &made.curve, end.point)?;
-                        let t = solidcore::curve::from_parameters::record_parameter(
+                        let t = from_parameters::record_parameter(
+                            k,
+                            &made,
                             &record,
                             interval,
                             near.parameter,
-                        );
-                        if near.closest.distance <= tolerance
-                            && interval[0] <= t
-                            && t <= interval[1]
-                        {
+                        )?;
+                        // within the edge's tolerance of the outline, and on its interval as the
+                        // kernel classifies it: a cut a solve rounds just past an end is on that end
+                        let on = from_parameters::on_interval(interval, t)
+                            .filter(|_| near.closest.distance <= tolerance);
+                        if let Some(t) = on {
                             cuts.push(t);
                             cut_vertices.extend(end.vertex);
                         }
@@ -483,8 +494,8 @@ impl Body {
                 }
             }
             cuts.sort_by(f64::total_cmp);
-            Ok(cuts)
-        })
+            Ok(Ok(cuts))
+        })?
     }
 
     /// The distance from record vertex `vertex`'s point to `p`, with its proved rounding bound.
@@ -671,6 +682,37 @@ impl Body {
 /// # Errors
 /// The kernel's `UnsureRegion` for a side it is unsure is material; `NotFound` for a dangling
 /// id.
+/// The rim of the faces `set` ([`Body::outline_cuts`]): each of their edges that lies once on the
+/// set's outward uses ([`outer_faceuse`]), so with a face of the set on one side only, in the
+/// faces' edge order. A seam lies twice on its face's use and an edge between two faces of the
+/// set once on each, so neither is a rim; whether the faces meet smoothly there does not matter.
+///
+/// # Errors
+/// [`Error::Argument`] or [`Error::Unsupported`] (inner) for a face with no side that faces out;
+/// the kernel's errors (outer).
+fn rim_edges(b: &Brep, set: &[FaceId]) -> solidcore::Result<Result<Vec<EdgeId>>> {
+    let mut outward = Vec::with_capacity(set.len());
+    for &f in set {
+        match outer_faceuse(b, f)? {
+            Ok(fu) => outward.push(fu),
+            Err(e) => return Ok(Err(e)),
+        }
+    }
+    let (mut seen, mut rims) = (Vec::new(), Vec::new());
+    for &f in set {
+        for e in face::edges(b, f, None, false, None)? {
+            if seen.contains(&e) {
+                continue;
+            }
+            seen.push(e);
+            // not built yet: the rim rule comes in the next commit; every edge of the faces
+            let _ = (&outward, eu1::is_loop_edgeuse);
+            rims.push(e);
+        }
+    }
+    Ok(Ok(rims))
+}
+
 pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<FaceuseId>> {
     let (Some(x), Some(y)) = face_p2::faceuses(b, f)? else {
         return Ok(Err(Error::Argument));
@@ -695,6 +737,7 @@ pub(crate) fn outer_faceuse(b: &Brep, f: FaceId) -> solidcore::Result<Result<Fac
 pub(crate) mod tests {
     use super::*;
     use crate::{make_box, session};
+    use solidcore::surface::surface::SurfaceKind;
 
     fn all_fixes() {
         session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
@@ -1168,9 +1211,19 @@ pub(crate) mod tests {
         }
     }
 
-    /// Every edge of a body in its kernel order `o`.
-    fn all_edges(o: &Order) -> Vec<usize> {
-        (0..o.edges.len()).collect()
+    /// The faces of `b` (in its kernel order `o`) whose surface `is` picks.
+    fn faces_on(b: &Body, o: &Order, is: fn(&SurfaceKind) -> bool) -> Vec<usize> {
+        let brep = b.lock();
+        (0..o.faces.len())
+            .filter(|&i| is(face::surface(&brep, o.faces[i]).unwrap().unwrap().kind()))
+            .collect()
+    }
+
+    /// The faces of `b` (in its kernel order `o`) whose area centroid `at` picks.
+    fn faces_at(b: &Body, o: &Order, at: impl Fn([f64; 3]) -> bool) -> Vec<usize> {
+        (0..o.faces.len())
+            .filter(|&i| at(b.face_centroid(o, i, 1e-8).unwrap().centroid))
+            .collect()
     }
 
     fn close(cuts: &[f64], want: &[f64]) -> bool {
@@ -1181,7 +1234,8 @@ pub(crate) mod tests {
     fn outline_cuts_of_a_sphere_with_a_hole_are_the_contour_s_closed_form_angles() {
         // a sphere of radius 5 less a cylinder of radius 1 about x = 3, y = 0: seen along y, its
         // contour is the circle x^2 + z^2 = 25 in y = 0, which the hole's rims cross where
-        // x = 2 (z = +-sqrt 21) and x = 4 (z = +-3)
+        // x = 2 (z = +-sqrt 21) and x = 4 (z = +-3). The face set is the sphere's: its rim is the
+        // hole's two rims; its seam, which lies on the contour, is on the sphere on both sides
         all_fixes();
         let sphere = crate::make_sphere([0.0, 0.0, 0.0], 5.0).unwrap();
         let hole = crate::make_cylinder([3.0, 0.0, -10.0], 1.0, 20.0).unwrap();
@@ -1201,14 +1255,15 @@ pub(crate) mod tests {
         let cuts = b
             .outline_cuts(
                 &o,
-                &all_edges(&o),
+                &faces_on(&b, &o, |s| matches!(s, SurfaceKind::Sphere(_))),
                 &contour,
                 [0.0, turn],
                 [0.0, 0.0, 0.0],
                 [0.0, 1.0, 0.0],
             )
             .unwrap();
-        let (near, far) = (3.0_f64.atan2(4.0), 21.0_f64.sqrt().atan2(2.0));
+        // atan2(3, 4) and atan2(sqrt 21, 2)
+        let (near, far) = (0.643_501_108_793_284_4, 1.159_279_480_727_408_5);
         assert!(
             close(&cuts, &[near, far, turn - far, turn - near]),
             "{cuts:?}"
@@ -1220,7 +1275,8 @@ pub(crate) mod tests {
         // a frustum of base radius 4 and top radius 1, 6 high: its apex would be at z = 8, and its
         // right silhouette seen along y runs from the apex to (4, 0, 0), x = 4 - z / 2. Less the
         // part past x = 2, its cut edge (a hyperbola) crosses that silhouette at (2, 0, 4), a
-        // half of the way; the top circle meets it at (1, 0, 6), a quarter of the way
+        // half of the way; the top circle meets it at (1, 0, 6), a quarter of the way. The face set
+        // is the cone's; its seam lies on that silhouette and is on the cone on both sides
         all_fixes();
         let silhouette = solidcore_record::brep::Curve::Line {
             start: [0.0, 0.0, 8.0],
@@ -1229,14 +1285,14 @@ pub(crate) mod tests {
         // less the box from x = from_x, 10 wide
         let cut = |from_x: f64| {
             let cone = crate::make_cone([0.0, 0.0, 0.0], 4.0, 1.0, 6.0).unwrap();
-            let past = crate::make_box([from_x, -10.0, -1.0], [10.0, 20.0, 10.0]).unwrap();
+            let past = make_box([from_x, -10.0, -1.0], [10.0, 20.0, 10.0]).unwrap();
             let b = crate::boolean::boolean(cone, past, crate::BooleanOp::Subtract)
                 .unwrap()
                 .unwrap();
             let o = kernel_order(&b);
             b.outline_cuts(
                 &o,
-                &all_edges(&o),
+                &faces_on(&b, &o, |s| matches!(s, SurfaceKind::Cone(_))),
                 &silhouette,
                 [0.0, 1.0],
                 [0.0, 0.0, 0.0],
@@ -1254,9 +1310,9 @@ pub(crate) mod tests {
 
     #[test]
     fn outline_cuts_at_a_vertex_cut_once() {
-        // the unit box's bottom, z = 0, and the line through (-1, 0, 0) and (2, 0, 0) on it: the
-        // bottom edges along that line lie on it from (0, 0, 0) to (1, 0, 0), and three edges
-        // meet at each of those corners; each corner is one cut, a third and two thirds along
+        // the unit box's front face, y = 0, and the line through (-1, 0, 0) and (2, 0, 0) in z = 0:
+        // the face's bottom edge lies on it from (0, 0, 0) to (1, 0, 0), and its two upright edges
+        // end at those corners; each corner is one cut, a third and two thirds along
         all_fixes();
         let b = make_box([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]).unwrap();
         let o = kernel_order(&b);
@@ -1267,7 +1323,7 @@ pub(crate) mod tests {
         let cuts = b
             .outline_cuts(
                 &o,
-                &all_edges(&o),
+                &faces_at(&b, &o, |c| c[1].abs() <= 1e-9),
                 &line,
                 [0.0, 1.0],
                 [0.0, 0.0, 0.0],
@@ -1275,6 +1331,56 @@ pub(crate) mod tests {
             )
             .unwrap();
         assert!(close(&cuts, &[1.0 / 3.0, 2.0 / 3.0]), "{cuts:?}");
+    }
+
+    #[test]
+    fn outline_cuts_keep_a_rim_where_the_faces_meet_smoothly() {
+        // a hemisphere of radius 5 below z = 0 and a cylinder of radius 5 from z = 0 to 5 above it,
+        // one revolved solid: they meet smoothly on the circle of radius 5 in z = 0. Seen along y,
+        // the hemisphere's contour is the circle of radius 5 in y = 0, at angle t from -z towards
+        // +x; that rim crosses it at (5, 0, 0) and (-5, 0, 0), t = pi / 2 and -pi / 2
+        all_fixes();
+        let arc = crate::sweep::Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 1.0, 0.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 5.0,
+            start: 0.0,
+            end: std::f64::consts::FRAC_PI_2,
+        };
+        let line = |start: [f64; 3], end: [f64; 3]| crate::sweep::Curve::Line { start, end };
+        let profile = [
+            arc,
+            line([0.0, 0.0, -5.0], [0.0, 0.0, 5.0]),
+            line([0.0, 0.0, 5.0], [5.0, 0.0, 5.0]),
+            line([5.0, 0.0, 5.0], [5.0, 0.0, 0.0]),
+        ];
+        let turn = std::f64::consts::TAU;
+        let b = crate::sweep::revolve(&profile, [0.0; 3], [0.0, 0.0, 1.0], turn, true).unwrap();
+        let o = kernel_order(&b);
+        let below = faces_at(&b, &o, |c| c[2] < 0.0);
+        assert_eq!(below.len(), 1, "{below:?}");
+        let contour = solidcore_record::brep::Curve::Circle {
+            frame: solidcore_record::brep::Frame {
+                origin: [0.0, 0.0, 0.0],
+                x_axis: [0.0, 0.0, -1.0],
+                y_axis: [1.0, 0.0, 0.0],
+            },
+            radius: 5.0,
+        };
+        let half = std::f64::consts::PI;
+        let cuts = b
+            .outline_cuts(
+                &o,
+                &below,
+                &contour,
+                [-half, half],
+                [0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            )
+            .unwrap();
+        let quarter = std::f64::consts::FRAC_PI_2;
+        assert!(close(&cuts, &[-quarter, quarter]), "{cuts:?}");
     }
 
     #[test]
@@ -1288,7 +1394,7 @@ pub(crate) mod tests {
         };
         let past = b.outline_cuts(
             &o,
-            &[o.edges.len()],
+            &[o.faces.len()],
             &line,
             [0.0, 1.0],
             [0.0; 3],

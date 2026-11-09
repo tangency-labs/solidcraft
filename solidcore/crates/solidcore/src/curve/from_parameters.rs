@@ -34,9 +34,10 @@ use crate::curve::line::Line;
 use crate::error::{Result, SolidError};
 use crate::eval::{Curve as Record, Curve2 as Record2, Frame};
 use crate::geom::axis2_placement::Axis2Placement;
-use crate::geom::extent1d::Extent1d;
+use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
@@ -140,19 +141,42 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
     }
 }
 
-/// The record's parameter of the kernel's parameter `t` on the curve [`from_parameters`] makes
-/// from `record` over `interval`: the inverse of its parameter map. A circle's or ellipse's
-/// kernel parameter is in degrees, over the interval turned and snapped as [`from_parameters`]
-/// does, so the record's is the interval's start plus the turn from there, in radians. Every
-/// other curve keeps the record's parameter.
-#[must_use]
-pub fn record_parameter(record: &Record, interval: [f64; 2], t: f64) -> f64 {
+/// The record's parameter of the kernel's parameter `t` on `made`, the curve
+/// [`from_parameters`] makes from `record` over `interval`: the inverse of its parameter map. A
+/// circle's or ellipse's kernel parameter is its rational NURBS's, which is the angle in degrees
+/// only on the quarter grid; the conic's own polar table turns it into the angle in degrees
+/// (`ConvertTFromNURBSToSTEP`), over the interval turned and snapped as [`from_parameters`] does,
+/// so the record's is the interval's start plus the turn from there, in radians. Every other
+/// curve keeps the record's parameter.
+///
+/// # Errors
+///
+/// Those of the polar table's conversion.
+pub fn record_parameter(
+    k: &Kernel,
+    made: &EdgeCurve,
+    record: &Record,
+    interval: [f64; 2],
+    t: f64,
+) -> Result<f64> {
     match record {
         Record::Circle { .. } | Record::Ellipse { .. } => {
-            interval[0] + (t - degrees(turned(interval)[0])).to_radians()
+            // not built yet: the polar table comes in the next commit
+            let _ = (k, made);
+            Ok(interval[0] + (t - degrees(turned(interval)[0])).to_radians())
         }
-        _ => t,
+        _ => Ok(t),
     }
+}
+
+/// The record parameter `t` on `interval`, as the kernel classifies a parameter against an
+/// interval (`SmExtent1d::ClassifyPoint` at its default tolerance, `EFF_ZERO`): inside as it is,
+/// on an end moved onto that end (a solve's rounding past it), outside `None`.
+#[must_use]
+pub fn on_interval(interval: [f64; 2], t: f64) -> Option<f64> {
+    // not built yet: the kernel's classification comes in the next commit
+    let _ = (ExtentPointType::Inside, EFF_ZERO);
+    (interval[0] <= t && t <= interval[1]).then_some(t)
 }
 
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the

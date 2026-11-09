@@ -99,6 +99,47 @@ fn an_arc_past_a_turn_moves_back_by_whole_turns() {
     near(at(&k, &e.curve, -90.0), [0.0, -1.0, 0.0], 1e-15 * 8.0);
 }
 
+/// The record's parameter of a kernel parameter is the conic's angle there, also off the
+/// quarter grid, where the rational NURBS parameter is not the angle in degrees: the circle
+/// `5 (cos t, sin t)` at (4, 3) is at t = atan2(3, 4); the ellipse `(6 cos t, 4 sin t)` over
+/// [2 pi, 3 pi] is at t = 2 pi + 0.5 where its point is.
+#[test]
+fn a_kernel_parameter_goes_back_to_the_conics_angle() {
+    let k = k();
+    let back = |record: Record, interval: [f64; 2], point: Point3| {
+        let e = from_parameters(&k, &record, interval).unwrap();
+        let t = crate::query::api_queries::curve_closest_point(&k, &e.curve, point)
+            .unwrap()
+            .parameter;
+        record_parameter(&k, &e, &record, interval, t).unwrap()
+    };
+    let circle = Record::Circle {
+        frame: frame([0.0; 3]),
+        radius: 5.0,
+    };
+    let t = back(circle, [0.0, TAU], Point3::new(4.0, 3.0, 0.0));
+    assert!((t - 3.0_f64.atan2(4.0)).abs() <= 1e-12, "{t}");
+    let ellipse = Record::Ellipse {
+        frame: frame([0.0; 3]),
+        radii: [6.0, 4.0],
+    };
+    let on = Point3::new(6.0 * 0.5_f64.cos(), 4.0 * 0.5_f64.sin(), 0.0);
+    let t = back(ellipse, [TAU, TAU + PI], on);
+    assert!((t - (TAU + 0.5)).abs() <= 1e-12, "{t}");
+}
+
+/// A parameter a solve rounds just past an end (one ulp past 1, as a cone's silhouette end
+/// came back) is on that end; one past it by more than `EFF_ZERO` is outside.
+#[test]
+fn a_parameter_rounded_past_an_end_is_on_it() {
+    let past = 1.0 + f64::EPSILON;
+    assert_eq!(on_interval([0.0, 1.0], past), Some(1.0));
+    assert_eq!(on_interval([0.0, 1.0], -1e-13), Some(0.0));
+    assert_eq!(on_interval([0.0, 1.0], 0.5), Some(0.5));
+    assert_eq!(on_interval([0.0, 1.0], 1.0 + 1e-9), None);
+    assert_eq!(on_interval([0.0, 1.0], f64::NAN), None);
+}
+
 /// A frame not orthonormal is refused (the kernel would silently rebuild it), as is a radius
 /// of no length.
 #[test]
