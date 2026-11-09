@@ -282,9 +282,22 @@ pub fn handles_region(proj: &Proj, t: &Triad) -> Option<egui::Rect> {
     Some(egui::Rect::from_min_max(min, max).expand(HIT_TOLERANCE))
 }
 
+/// The handle a press landed on this frame without starting a drag, if any: a click, or a press
+/// and release that arrived in one frame, which no drag ever begins from. Read it once per frame
+/// after [`show`], with the same `id`; it moves nothing.
+pub fn take_click(ui: &egui::Ui, id: egui::Id) -> Option<Handle> {
+    ui.data_mut(|d| {
+        let key = id.with("click");
+        let handle = d.get_temp::<Handle>(key);
+        d.remove::<Handle>(key);
+        handle
+    })
+}
+
 /// Draw the triad and run a drag on it. `step` is the distance snap step.
 pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64) -> Option<Drag> {
     let tk = Tokens::get();
+    ui.data_mut(|d| d.remove::<Handle>(id.with("click")));
     let l = mm_per_px(proj, t.center)? * LEN_PX;
     LAST.with(|x| *x.borrow_mut() = Some((t.center, l)));
     let sh = shapes(proj, t, l)?;
@@ -312,8 +325,29 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     }
     let bc = if hot(Handle::Ball) { tk.accent } else { Color32::from_gray(235) };
     painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
-    let p = pointer?;
-    active?;
+    // The handle under the press itself, owned as `hovered` is (this layer, inside the view): a
+    // press and release in one frame can end with the pointer somewhere else, even off the triad.
+    let pressed = || {
+        let at = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: true, pos, .. } => Some(*pos),
+                _ => None,
+            })
+        })?;
+        let owned = ui.clip_rect().intersect(proj.rect).contains(at) && ui.ctx().layer_id_at(at) == Some(ui.layer_id());
+        owned.then(|| hit(&sh, at)).flatten()
+    };
+    let click = |h: Option<Handle>| {
+        if let Some(h) = h {
+            ui.data_mut(|d| d.insert_temp(id.with("click"), h));
+        }
+    };
+    let (Some(p), Some(_)) = (pointer, active) else {
+        if state.is_none() {
+            click(pressed());
+        }
+        return None;
+    };
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     let r = ui.interact(Rect::from_center_size(p, vec2(24.0, 24.0)), id.with("hit"), Sense::drag());
     // Free drag is driven by the per-frame thread-local set from prefs::manipulator_free_held.
@@ -331,6 +365,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         Some(s) => s,
         None => {
             if !r.drag_started() {
+                click(pressed());
                 return None;
             }
             let h = hovered?;
