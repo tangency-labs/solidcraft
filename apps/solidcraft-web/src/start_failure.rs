@@ -4,7 +4,7 @@
 //! often because it has turned them off for an old graphics card or driver. The page then says
 //! what the person can change in the browser instead of showing only the technical error.
 
-use solidcraft_ui_egui::i18n;
+use solidcraft_ui_text as i18n;
 
 /// The words the loading overlay shows instead of the logo.
 #[derive(Debug, PartialEq, Eq)]
@@ -24,6 +24,8 @@ pub struct Notice {
 /// whether the browser has `navigator.gpu`. Graphics is the cause when neither is there, or when
 /// the error comes from setting up the graphics device (an adapter or a limit it refuses).
 pub fn notice(error: &str, webgl2: bool, webgpu: bool) -> Notice {
+    // The app's catalogs: SolidCraft may have failed before the app installed them.
+    solidcraft_ui_egui::i18n::install();
     let graphics = !(webgl2 || webgpu) || is_graphics_error(error);
     let (title, why, steps) = if graphics {
         (
@@ -57,8 +59,14 @@ fn is_graphics_error(error: &str) -> bool {
 mod tests {
     use super::*;
 
+    /// English whatever the PC's language.
+    fn english() {
+        i18n::pin_system_language();
+    }
+
     #[test]
     fn no_webgl2_or_webgpu_says_what_to_try() {
+        english();
         let error = r#"failed to create wgpu surface: Failed to create surface for any enabled backend: {Gl: InstanceError { message: "canvas.getContext() returned null; webgl2 not available or canvas already in use", source: None }}"#;
         let n = notice(error, false, true);
         assert_eq!(n.title, "SolidCraft can't draw in this browser");
@@ -71,6 +79,7 @@ mod tests {
 
     #[test]
     fn a_refused_graphics_device_is_graphics_too() {
+        english();
         // WebGL2 exists, but the adapter refused the device.
         assert_eq!(notice("WgpuError: RequestDeviceError", true, false).title, "SolidCraft can't draw in this browser");
         assert_eq!(notice("No suitable adapter found", true, true).steps.len(), 4);
@@ -78,6 +87,7 @@ mod tests {
 
     #[test]
     fn other_failures_keep_a_plain_message() {
+        english();
         let n = notice("SolidCraft browser API: JsValue(TypeError)", true, true);
         assert_eq!(n.title, "SolidCraft failed to start");
         assert!(n.steps.is_empty());
