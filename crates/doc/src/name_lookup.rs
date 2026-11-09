@@ -122,11 +122,9 @@ fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Opt
         return None;
     }
     let hit = locate_edge(b, &whole.join("|"), near).ok().filter(|hit| hit.verified && hit.on_point)?;
-    // Each face it separates is whole: no other piece of it is left to be the one picked.
-    let mesh = b.mesh();
-    let faces = mesh.edge_faces.get(hit.edge)?;
-    let names = face_names(b);
-    faces.iter().all(|f| names.get(*f as usize).is_some_and(|n| faces_with_stem(b, n).len() == 1)).then_some(hit)
+    // Each face it separates is whole: no other piece of it is left to be the one picked. The
+    // edge is verified by that name, so the faces it separates are the `whole` stems.
+    whole.iter().all(|face| faces_with_stem(b, face).len() == 1).then_some(hit)
 }
 
 /// Whether a face found at `level` is exactly the face a name named: the very name (or another
