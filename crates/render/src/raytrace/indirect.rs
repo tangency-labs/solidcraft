@@ -115,7 +115,8 @@ pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, 
         } else {
             surface.roughness()
         };
-        let half = crate::glass_model::visible_normal(v, n, roughness * roughness, [u[1], u[2]]).map_err(|_| invalid("CPU visible GGX normal"))?;
+        let half =
+            solidcraft_viewport::surface::visible_normal(v, n, roughness * roughness, [u[1], u[2]]).map_err(|_| invalid("CPU visible GGX normal"))?;
         if v.dot(half) <= 0.0 {
             return Ok(None);
         }

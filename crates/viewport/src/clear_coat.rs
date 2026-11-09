@@ -192,7 +192,7 @@ mod tests {
                                             Vec3::new(x.sqrt() * phi.cos(), x.sqrt() * phi.sin(), (1.0 - x).sqrt())
                                         } else {
                                             let r = if component == 1 { base_roughness } else { coat_roughness };
-                                            let h = crate::glass_model::visible_normal(v, Vec3::Z, r * r, [x, phi / (2.0 * PI)]).unwrap();
+                                            let h = crate::surface::visible_normal(v, Vec3::Z, r * r, [x, phi / (2.0 * PI)]).unwrap();
                                             h * (2.0 * v.dot(h)) - v
                                         };
                                         if l.z <= 0.0 {

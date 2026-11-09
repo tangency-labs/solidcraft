@@ -2233,7 +2233,7 @@ fn denoise_optical_fixture(boundary: Option<job::DielectricBoundary>, path: bool
     request.camera.target = Vec3::ZERO;
     request.camera.distance = 3.0;
     request.camera.fov = 0.5;
-    request.camera.set_view(crate::StandardView::Top);
+    request.camera.set_view(solidcraft_viewport::StandardView::Top);
     let mut options = RaytraceOptions {
         threads: 1,
         denoise: true,
@@ -2293,8 +2293,9 @@ fn cpu_denoise_optical_guides_follow_explicit_mirror_and_near_perfect_metal() {
 fn cpu_denoise_optical_guides_bypass_every_active_coat_on_metal() {
     for roughness in [0.045, 0.1, 0.5] {
         let (mut scene, request, options) = denoise_optical_fixture(None, true);
-        scene.meshes[0].surface =
-            scene.meshes[0].surface.map(|surface| surface.with_clear_coat(crate::clear_coat::ClearCoat::new(0.8, roughness, 1.5).unwrap()));
+        scene.meshes[0].surface = scene.meshes[0]
+            .surface
+            .map(|surface| surface.with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(0.8, roughness, 1.5).unwrap()));
         assert_eq!(optical_denoise_guide(scene, request, options).body, 0);
     }
 }

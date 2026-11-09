@@ -425,7 +425,13 @@ pub fn validate_cpu_options(options: &super::RaytraceOptions) -> Result<()> {
 /// Approximate a secondary ray's pixel cone by projecting two perpendicular
 /// spans onto the receiver plane. Exact primary ray differentials stay separate.
 #[cfg(feature = "raytrace-cpu")]
-pub(crate) fn secondary_footprint(camera: &crate::Camera, height: u32, distance: f64, direction: Vec3, normal: Vec3) -> Result<Option<[Vec3; 2]>> {
+pub(crate) fn secondary_footprint(
+    camera: &solidcraft_viewport::Camera,
+    height: u32,
+    distance: f64,
+    direction: Vec3,
+    normal: Vec3,
+) -> Result<Option<[Vec3; 2]>> {
     let pixel = 2.0 * camera.half_height() / f64::from(height);
     let diameter = if camera.fov > 0.0 { pixel * distance / camera.distance } else { pixel };
     if height == 0 || !diameter.is_finite() || diameter < 0.0 {
@@ -646,7 +652,7 @@ mod tests {
             assert!((rgb[0] - 0.5).abs() < 1e-10, "{rgb:?}");
             assert_eq!(rgb[1], 0.0, "minor-axis texel detail must survive");
         }
-        let camera = crate::Camera { fov: std::f64::consts::FRAC_PI_2, distance: 10.0, ..Default::default() };
+        let camera = solidcraft_viewport::Camera { fov: std::f64::consts::FRAC_PI_2, distance: 10.0, ..Default::default() };
         let front = secondary_footprint(&camera, 100, 20.0, -Vec3::Z, Vec3::Z).unwrap().unwrap();
         assert!(front.iter().all(|v| (v.len() - 0.4).abs() < 1e-12));
         assert_eq!(front, secondary_footprint(&camera, 100, 20.0, -Vec3::Z, -Vec3::Z).unwrap().unwrap());
@@ -851,7 +857,8 @@ mod tests {
     #[test]
     #[cfg(feature = "raytrace-cpu")]
     fn cpu_quality_normal_mips_broaden_only_unresolved_detail() {
-        use crate::{clear_coat::ClearCoat, surface::OpaqueSurface, surface_patterns::ShadingSurface};
+        use crate::surface_patterns::ShadingSurface;
+        use solidcraft_viewport::{clear_coat::ClearCoat, surface::OpaqueSurface};
         let roughness = 0.2_f64;
         let strength = 0.65_f64;
         let original =

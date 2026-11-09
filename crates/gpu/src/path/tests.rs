@@ -3970,9 +3970,9 @@ fn gpu_quality_texture_preserves_minor_axis_detail_and_linear_mip_precision() {
     use image::ImageEncoder;
     use solidcraft_render::{
         job::textures::{PlanarFrame, RuntimeTextures, TextureMap},
-        surface::srgb8_to_linear,
         texture_input::MapRole,
     };
+    use solidcraft_viewport::surface::srgb8_to_linear;
     let Some(executor) = executor() else { return };
     let context = &executor.context;
     let source = texture_fixture(PlanarFrame { origin: [0.0; 3], u: [2.0, 0.0, 0.0], v: [0.0, 2.0, 0.0] });

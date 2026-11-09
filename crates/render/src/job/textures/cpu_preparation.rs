@@ -3,7 +3,6 @@
 use super::{BaseColorMode, TextureBinding, TextureMap, normal_direction_variance, unit_normal_texel};
 use crate::{
     job::{CancelToken, ErrorCode, JobError, Result},
-    surface::{MIN_ROUGHNESS, srgb8_to_linear},
     surface_patterns::ShadingSurface,
     texture_input::{MapRole, png_metadata::PngMetadata},
     texture_sampling::{TextureView, mips},
