@@ -182,7 +182,7 @@ fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: 
         let Some(left) = work.checked_sub(2) else { return unknown };
         *work = left;
         let t = t0 + (t1 - t0) * (k as f64 + 0.5) / STATIONS as f64;
-        let (Some(ua), Some(ub)) = (solidcraft_geom::brep::pcurve::eval(pa, t), solidcraft_geom::brep::pcurve::eval(pb, t)) else { return unknown };
+        let (Some(ua), Some(ub)) = (solidcore_ops::pcurve::eval(pa, t), solidcore_ops::pcurve::eval(pb, t)) else { return unknown };
         let (Some(sa), Some(sb)) = (station(fa, ua), station(fb, ub)) else { return unknown };
         let (Some(sa), Some(sb)) = (sa, sb) else { continue };
         let angle = sa.normal.cross(sb.normal).len().atan2(sa.normal.dot(sb.normal));

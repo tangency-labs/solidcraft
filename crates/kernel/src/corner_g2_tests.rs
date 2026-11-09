@@ -137,7 +137,7 @@ fn past_the_box(rec: &b::Brep, face: usize) -> (f64, f64, [f64; 2]) {
         for oe in edges {
             let [t0, t1] = oe.pcurve.interval().unwrap();
             let mut seg: Vec<[f64; 2]> =
-                (0..=400).map(|k| solidcraft_geom::brep::pcurve::eval(&oe.pcurve, t0 + (t1 - t0) * f64::from(k) / 400.0).unwrap()).collect();
+                (0..=400).map(|k| solidcore_ops::pcurve::eval(&oe.pcurve, t0 + (t1 - t0) * f64::from(k) / 400.0).unwrap()).collect();
             if !oe.forward {
                 seg.reverse();
             }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::prelude::*;
+use solidcore_ops::{label, pcurve, record_check as check};
 use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 

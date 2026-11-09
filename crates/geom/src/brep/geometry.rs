@@ -90,7 +90,7 @@ fn unevaluable(record: Record, what: impl std::fmt::Display) -> Mismatch {
 /// the pcurve's end.
 fn on_pcurve(pc: &Curve2, t: f64) -> Option<[f64; 2]> {
     let [a, b] = pc.interval()?;
-    super::pcurve::eval(pc, t.clamp(a.min(b), a.max(b)))
+    solidcore_ops::pcurve::eval(pc, t.clamp(a.min(b), a.max(b)))
 }
 
 /// `gap` within `tolerance` (a non-finite gap never is).

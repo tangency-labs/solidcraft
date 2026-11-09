@@ -27,7 +27,7 @@ mod native_tests {
             let v = b.mass_properties(MEASURE_ACCURACY).unwrap().volume;
             assert!((v - exact).abs() < 1e-6 * exact, "{name}: SMLib volume {v}, closed form {exact}");
             let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
-            solidcraft_geom::brep::check::validate(&native).unwrap();
+            solidcore_ops::record_check::validate(&native).unwrap();
             solidcraft_geom::brep::geometry::check(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(report, Report { nurbs_edges: report.nurbs_edges, ..Report::default() }, "{name}: every face agrees");
             let [f, e, n] = b.counts().unwrap();
@@ -63,7 +63,7 @@ mod native_tests {
         let mids: Vec<[f64; 3]> = [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
         let f = Brep::make_box([0.0; 3], [a; 3]).unwrap().fillet(&mids, 0.1, r).unwrap();
         let record = f.to_native().unwrap();
-        solidcraft_geom::brep::check::validate(&record).unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
         let corners: Vec<([f64; 3], f64)> = record
             .faces
             .iter()
@@ -143,7 +143,7 @@ mod native_tests {
                 assert!((p - Vec3::new(q[0], q[1], q[2])).len() < 1e-9, "{:?} at {t}", e.curve);
             }
             if let b::Curve::Circle { radius, .. } = e.curve {
-                let [a, z] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
+                let [a, z] = solidcore_ops::label::edge_curve_interval(e).unwrap();
                 assert!((radius - 5.0).abs() < 1e-12 && (z - a - TAU).abs() < 1e-9);
             }
         }
@@ -160,7 +160,7 @@ mod native_tests {
         let near = Brep::make_cone([0.0; 3], 4.0, 4.0 - 1e-12, 10.0).unwrap().to_native().unwrap();
         assert!(near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cylinder { .. })));
         assert!(!near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cone { .. })));
-        solidcraft_geom::brep::check::validate(&near).unwrap();
+        solidcore_ops::record_check::validate(&near).unwrap();
     }
 
     /// A hole tangent to the block's outline from inside: the material touches itself along the
@@ -327,10 +327,10 @@ mod native_tests {
             a
         };
         let (record, _) = native(&shifted(7e-15)).unwrap();
-        solidcraft_geom::brep::check::validate(&record).unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
         assert!(record.edges.iter().any(|x| x.interval[0] == first && x.interval[1] <= last), "an interval on the NURBS's first knot");
         assert!(
-            native(&shifted(1e-3)).map(|(r, _)| solidcraft_geom::brep::check::validate(&r)).map_or(true, |v| v.is_err()),
+            native(&shifted(1e-3)).map(|(r, _)| solidcore_ops::record_check::validate(&r)).map_or(true, |v| v.is_err()),
             "a real overshoot is not moved"
         );
     }

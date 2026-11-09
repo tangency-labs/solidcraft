@@ -316,7 +316,7 @@ mod tests {
                 let oe = &loop_edges[u.position as usize];
                 let Ok((s, map)) = crate::tess::surface::eval_surface(face.parameters(), face.domain) else { panic!("evaluates") };
                 for (t, p) in n.params.iter().zip(&n.points) {
-                    let Some(q) = solidcraft_geom::brep::pcurve::eval(&oe.pcurve, *t) else { panic!("pcurve at {t}") };
+                    let Some(q) = solidcore_ops::pcurve::eval(&oe.pcurve, *t) else { panic!("pcurve at {t}") };
                     let q = map.to_eval(q);
                     let Some((at, _, _)) = s.derivs(q[0], q[1]) else { panic!("evaluates") };
                     assert!(at.dist(*p) < 1e-6 + e.tolerance, "{at:?} vs {p:?}");
