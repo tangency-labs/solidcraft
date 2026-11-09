@@ -12,7 +12,7 @@
 
 ## Goals
 
-**solidcore is vendored into `solidcore/`. This RFC lists which SolidCraft geometry code moves into `solidcore/`, where it lands per `solidcore/docs/layers.md`, and in what order. Nothing already in `solidcore/` moves out.** For this plan, that means:
+**solidcore was vendored into `solidcore/` on 2026-11-08. This RFC lists which SolidCraft geometry code moves into `solidcore/`, where it lands per `solidcore/docs/layers.md`, and in what order. Nothing already in `solidcore/` moves out.** For this plan, that means:
 - **ops is the complete public modelling API, not SolidCraft's API.** It covers every operation a CAD app needs: primitives, booleans, fillets and chamfers, shell and offset, sweeps and lofts, surface construction, sewing and healing, measuring, import and export. Nothing SolidCraft-specific goes in it (no defaults, command ids or UI; layers.md's "never in it" column).
 - **Stable and versioned:** semver on ops, tess and record, with `cargo-semver-checks` in CI and a changelog.
 - **Documented with examples:** rustdoc on every public item, and a small `examples/` set that runs in CI.
