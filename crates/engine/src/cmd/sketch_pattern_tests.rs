@@ -509,6 +509,34 @@ fn pattern_edits_can_add_and_remove_seed_entities_but_not_copy_their_own_copies(
     }
 }
 
+/// A line drawn from a copy's end point shares that point: a changed seed list removes the copy
+/// but leaves the line where it was.
+#[test]
+fn a_changed_seed_list_keeps_a_line_drawn_from_a_copys_end_point() {
+    for circular in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["a"]}));
+        run(&mut s, "sketch.line", json!({"points":[[10,5],[20,5]],"ids":["b"]}));
+        let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
+        let params = if circular { json!({"entities":["a"],"center":"origin","count":4}) } else { json!({"entities":["a"],"count":4,"spacing":10}) };
+        let original = run(&mut s, cmd, params);
+        let pattern = original["pattern"].as_str().unwrap();
+        let copy_end = format!("{}.end", ids(&original["curves"])[0]);
+        run(&mut s, "sketch.line", json!({"points":[copy_end, [50,50]],"ids":["tail"]}));
+        let sk = sketch(&s);
+        assert_eq!(sk.resolve_point("tail.start"), sk.resolve_point(&copy_end), "{cmd}: the line shares the copy's point");
+        let start = point(&sk, "tail.start");
+
+        run(&mut s, cmd, json!({"pattern":pattern,"entities":["a","b"]}));
+        let sk = sketch(&s);
+        assert!(sk.curve_index("tail").is_some(), "{cmd}: the line stays");
+        assert!(point(&sk, "tail.start").dist(start) < 1e-6, "{cmd}: the line's start stays");
+        assert!(point(&sk, "tail.end").dist(Vec2::new(50.0, 50.0)) < 1e-6, "{cmd}: the line's end stays");
+        assert_eq!(sk.curves.len(), 9, "{cmd}: two seeds, the line and six new copies");
+        check_relations(&s);
+    }
+}
+
 #[test]
 fn malformed_pattern_edits_roll_back_and_deleted_seed_does_not_panic() {
     let mut s = new_sketch();

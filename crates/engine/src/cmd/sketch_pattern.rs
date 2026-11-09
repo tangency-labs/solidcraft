@@ -101,7 +101,10 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                     sk.constraints.retain(|c| !instance.constraints.contains(&c.id));
                     let curves: Vec<_> = instance.curves.iter().filter_map(|id| sk.curve_index(id)).collect();
                     sk.remove_curves(&curves);
-                    let points: Vec<_> = instance.points.iter().filter_map(|(_, id)| sk.resolve_point(id)).collect();
+                    // A curve drawn from a copy's point keeps it: removing the point would take the curve.
+                    let kept: Vec<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+                    let points: Vec<_> =
+                        instance.points.iter().filter_map(|(_, id)| sk.resolve_point(id)).filter(|point| !kept.contains(point)).collect();
                     sk.remove_points(&points);
                 }
             }
