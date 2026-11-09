@@ -107,6 +107,10 @@
 //!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
 //!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
 //!   fork's thread-groove fixes, tangency-labs/smlib b43876f, a8caccd).
+//! - **Not upstream: one trim interval** (WR-767, tangency-labs/solidcore#3214).
+//!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
+//!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream
+//!   trims them in turn with one interval, and the edge can end past its 3D curve.
 //! - `UpdateEdges` trims a definition at the split point; its alternative of splitting
 //!   the proto edge (`SmProtoEdge::Split`) sits behind `static constexpr SmBoolean
 //!   cbiDoSplit = FALSE` and is not ported.
@@ -140,6 +144,7 @@ use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::proto_vertex_containment_radius;
+use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
 use crate::topology::VertexId;
 
@@ -2211,26 +2216,54 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let p3d_curve = cc1.curve();
         let _ = cc2.curve() == p3d_curve;
 
-        // Create a copy of the input curve and trim it to this CurveInterval.
+        // Create a copy of the input curve and of its uv curves (copy statuses ignored), and
+        // trim them to this CurveInterval.
         let mut copy = curve_of(brep, p3d_curve)?.copy(k)?;
-        let mut domain = ci1.interval;
-        copy.trim(k, &mut domain, TrimMode::Notify)?;
-
-        // See about uv curves (copy statuses ignored; the trims' passed on with
-        // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01).
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
         let mut uv1 = None;
         if let Some(c) = cc1.uv_curve1() {
             uv1 = ignore_soft(curve_of(brep, Some(c))?.copy(k))?;
-            if let Some(u) = uv1.as_mut() {
-                ignore_soft(passed_on(u.trim(k, &mut domain, TrimMode::Notify), pass)?)?;
-            }
         }
         let mut uv2 = None;
         if let Some(c) = cc2.uv_curve1() {
             uv2 = ignore_soft(curve_of(brep, Some(c))?.copy(k))?;
-            if let Some(u) = uv2.as_mut() {
-                ignore_soft(passed_on(u.trim(k, &mut domain, TrimMode::Notify), pass)?)?;
+        }
+
+        // The uv curves' trim statuses are ignored, and passed on with
+        // `ssi_proto_topology_statuses_pass_on` (fork bcc6f01). Not upstream (WR-767): the
+        // 3D curve and the uv curves whose trims accept the interval are trimmed to the one
+        // interval none of their trims snaps ([`common_trim_interval`]). Upstream trims them
+        // in turn with one interval, each trim snapping it onto a knot of its own curve, and
+        // the edge takes the interval the last trim left: a uv curve's knot a few ulps from
+        // the 3D curve's trim parameter leaves the edge's interval outside its 3D curve's
+        // (`SmEdge` test 2). A uv curve whose trim refuses the interval is trimmed alone, as
+        // upstream.
+        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let mut joins = [false; 2];
+        for (u, join) in [&uv1, &uv2].into_iter().zip(&mut joins) {
+            if let Some(u) = u {
+                let mut probe = ci1.interval;
+                let trimmed = u.copy(k)?.trim(k, &mut probe, TrimMode::IntervalOnly);
+                *join = ignore_soft(passed_on(trimmed, pass)?)?.is_some();
+            }
+        }
+        let joined: Vec<&Curve> = std::iter::once(&copy)
+            .chain(
+                [&uv1, &uv2]
+                    .into_iter()
+                    .zip(joins)
+                    .filter_map(|(u, join)| u.as_ref().filter(|_| join)),
+            )
+            .collect();
+        let domain = common_trim_interval(k, &joined, ci1.interval, OP_CREATE_PE)?;
+        trim_unsnapped(k, &mut copy, domain, OP_CREATE_PE)?;
+        for (u, join) in [&mut uv1, &mut uv2].into_iter().zip(joins) {
+            if let Some(u) = u.as_mut() {
+                let trimmed = if join {
+                    trim_unsnapped(k, u, domain, OP_CREATE_PE)
+                } else {
+                    u.trim(k, &mut domain.clone(), TrimMode::Notify)
+                };
+                ignore_soft(passed_on(trimmed, pass)?)?;
             }
         }
 

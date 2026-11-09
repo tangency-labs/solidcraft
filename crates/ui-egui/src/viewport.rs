@@ -9313,6 +9313,7 @@ mod tests {
             positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
             triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
             color: Some([0.8, 0.3, 0.1]),
+            corner_normals: Default::default(),
         }];
         let id = doc.add_feature(FeatureKind::MeshImport { file: "small.stl".into(), meshes }, Some("Mesh")).unwrap();
         doc.feature_mut(id).unwrap().component = component;
@@ -9357,7 +9358,7 @@ mod tests {
                 })
             })
             .collect();
-        let meshes = vec![MeshData { name: "Grid".into(), positions, triangles, color: None }];
+        let meshes = vec![MeshData { name: "Grid".into(), positions, triangles, color: None, corner_normals: Default::default() }];
         doc.add_feature(FeatureKind::MeshImport { file: "grid.stl".into(), meshes }, Some("Grid")).unwrap();
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
         app.ui.ground_shadow = false;
@@ -9416,6 +9417,7 @@ mod tests {
             positions: corners.iter().flat_map(|[x, y]| [f64::from(*x), f64::from(*y), 0.0]).collect(),
             triangles: (0..u32::try_from(corners.len()).unwrap()).collect(),
             color: None,
+            corner_normals: Default::default(),
         }];
         doc.add_feature(FeatureKind::MeshImport { file: "grid.stl".into(), meshes }, Some("Grid")).unwrap();
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
@@ -9451,6 +9453,7 @@ mod tests {
             positions: corners.iter().flatten().copied().collect(),
             triangles: (0..u32::try_from(corners.len()).unwrap()).collect(),
             color: None,
+            corner_normals: Default::default(),
         }];
         doc.add_feature(FeatureKind::MeshImport { file: "scan.stl".into(), meshes }, Some("Scan")).unwrap();
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
@@ -12062,7 +12065,7 @@ mod tests {
             frame(&mut app, Some(exposed), -120.0);
             assert_ne!(app.cam.half_height(), height);
             // Closing the popup returns its former area to the viewport.
-            app.prefs_window.open = false;
+            app.prefs_window.shell.open = false;
             for _ in 0..12 {
                 frame(&mut app, Some(list), 0.0);
             }
@@ -13770,6 +13773,7 @@ mod grid_plane_tests {
                 positions: vec![-0.25, y, -0.25, 0.25, y, -0.25, 0.0, y, 0.25].into(),
                 triangles: vec![0, 1, 2].into(),
                 color: None,
+                corner_normals: Default::default(),
             })
             .collect();
         doc.add_feature(FeatureKind::MeshImport { file: "synthetic.stl".into(), meshes }, Some("Panels")).unwrap();

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::{
     Session,
     doc::render_settings::{RenderJob, RenderSetup},
-    render::job::{CpuHost, JobId, Phase, ToneMap},
+    render::job::{CpuHost, JobId, NativeMemoryPolicy, Phase, ToneMap},
 };
 
 /// Only explicit runtime CLI flags are stored here. A typed setup owns these
@@ -74,6 +74,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut height = None;
     let mut exposure = None;
     let mut runtime = RuntimeOptions::default();
+    let mut memory_policy = NativeMemoryPolicy::AvailableRam;
     let mut overwrite = false;
     let mut timeout = 120u64;
     let mut i = 1;
@@ -82,6 +83,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             "--progressive" => runtime.progressive = true,
             "--transparent" => runtime.transparent = true,
             "--overwrite" => overwrite = true,
+            "--legacy-memory-admission" => memory_policy = NativeMemoryPolicy::SoftwarePoolOnly,
             "--out" | "--setup" | "--width" | "--height" | "--timeout" | "--samples" | "--max-depth" | "--seed" | "--exposure" | "--lighting"
             | "--tone-map" | "--environment" => {
                 i += 1;
@@ -134,9 +136,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
     // Resolve saved intent before opening a GPU or explicitly settling geometry.
     // Width/height/exposure only change this validated inline settings clone.
     let (mut params, needs_gpu) = runtime.request(&session, settings)?;
-    session.set_render_job_host(Some(CpuHost::for_platform().map_err(|e| e.to_string())?)).map_err(|e| e.to_string())?;
+    // The machine admission policy may accompany any saved setup; it does not
+    // replace the setup's image-quality options or alter the saved document.
+    let cpu_host = CpuHost::for_platform().map_err(|e| e.to_string())?;
+    cpu_host.set_native_memory_policy(memory_policy);
+    session.set_render_job_host(Some(cpu_host)).map_err(|e| e.to_string())?;
     if needs_gpu {
-        session.register_render_job_host(solidcraft_gpu::path::host().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let gpu_host = solidcraft_gpu::path::host().map_err(|e| e.to_string())?;
+        gpu_host.set_native_memory_policy(memory_policy);
+        session.register_render_job_host(gpu_host).map_err(|e| e.to_string())?;
     }
     session.execute("render.scene", &json!({})).map_err(|e| e.to_string())?;
     if setup.is_none() {
