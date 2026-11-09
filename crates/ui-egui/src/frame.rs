@@ -38,10 +38,42 @@ pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
 
 /// A title drag owns the pointer even when it outruns the dialog's previous position.
 pub(crate) fn dock_dragging(ctx: &egui::Context) -> bool {
+    // A card handed to a window of its own still holds the press until the button comes up.
+    #[cfg(not(target_arch = "wasm32"))]
+    if crate::tear_off::handoff_dragging(ctx) {
+        return true;
+    }
     let frame = ctx.cumulative_frame_nr();
     // The viewport can draw before the dialog, so retain the preceding frame's marker.
     ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_dock_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
         && ctx.input(|i| i.pointer.any_down())
+}
+
+fn title_drag_id(key: &str) -> egui::Id {
+    egui::Id::unique(("sc_title_drag_frame", key))
+}
+
+/// Whether the title band of the card with this dock key is being dragged, including the frame
+/// the button comes up on (a last move and the release can arrive together).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn title_dragging(ctx: &egui::Context, key: &str) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<u64>(title_drag_id(key))).is_some_and(|at| at >= frame.saturating_sub(1))
+        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
+}
+
+/// Place a docked panel with this key `offset` away from its docked corner.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn set_dock_offset(ctx: &egui::Context, key: &str, offset: egui::Vec2) {
+    if offset.is_finite() {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(("sc_dock_offset", key)), offset));
+    }
+}
+
+/// Forget a title drag, so a card that has just come back into the app does not leave it again.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn end_title_drag(ctx: &egui::Context, key: &str) {
+    ctx.data_mut(|d| d.remove::<u64>(title_drag_id(key)));
 }
 
 /// A docked dialog's anchor moved by `offset`, kept so its docked corner stays in `vp` with
@@ -72,6 +104,10 @@ pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_dock_drag_frame"), frame));
+    }
+    if response.dragged() || response.drag_stopped() {
+        let frame = ui.ctx().cumulative_frame_nr();
+        ui.ctx().data_mut(|d| d.insert_temp(title_drag_id(key), frame));
     }
     // The drag runs from where the press started, so no movement is lost while egui decides
     // it is a drag, nor on the frame it ends.

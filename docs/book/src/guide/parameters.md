@@ -19,6 +19,12 @@ Add and edit user parameters through the existing **Change Parameters** command.
 **3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
 **5** The value it works out to
 
+On the desktop, **Open in separate window** (beside Import and Export) moves the Parameters
+window out of the app into a window of its own, which you can put on another screen. Dragging
+the window's title past the edge of the app does the same. To put it back, click **Dock in main
+window**, or drag that window's title over the app and hold it there for a moment. The values you
+are typing, the column widths and the sort order stay as they are.
+
 ## Naming a value as you type it
 
 Any value input can name its value: type `width = 40` (or `#width = 40`) for a dimension, a

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "manage.parameters_pop_out": "Open in separate window",
+    "manage.parameters_dock": "Dock in main window"
+  },
+  "ar": {
+    "manage.parameters_pop_out": "فتح في نافذة منفصلة",
+    "manage.parameters_dock": "إرساء في النافذة الرئيسية"
+  },
+  "de": {
+    "manage.parameters_pop_out": "In eigenem Fenster öffnen",
+    "manage.parameters_dock": "Im Hauptfenster andocken"
+  },
+  "he": {
+    "manage.parameters_pop_out": "פתיחה בחלון נפרד",
+    "manage.parameters_dock": "עיגון בחלון הראשי"
+  },
+  "ja": {
+    "manage.parameters_pop_out": "別ウィンドウで開く",
+    "manage.parameters_dock": "メインウィンドウに戻す"
+  },
+  "ko": {
+    "manage.parameters_pop_out": "별도 창에서 열기",
+    "manage.parameters_dock": "메인 창에 도킹"
+  },
+  "vi": {
+    "manage.parameters_pop_out": "Mở trong cửa sổ riêng",
+    "manage.parameters_dock": "Gắn vào cửa sổ chính"
+  },
+  "zh": {
+    "manage.parameters_pop_out": "在独立窗口中打开",
+    "manage.parameters_dock": "停靠到主窗口"
+  }
+}

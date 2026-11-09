@@ -9,6 +9,9 @@
 //! wait instead, without a preview, until Apply or OK sets them in one `parameters.change`.
 //! Escape closes the window and discards pending edits and their preview.
 //! Import and export go through `parameters.import` / `parameters.export`.
+//! On the desktop the window can move out of the app into a window of its own, by its Pop out
+//! button or by dragging its title past the app's border, and back by Dock or by dragging that
+//! window's title over the app (#5097, `crate::tear_off`).
 //!
 //! [`complete`] adds suggestions (parameters, functions, units) under any expression box: the
 //! names come from `parameters.complete`, cached per document revision by [`publish`].
@@ -27,10 +30,40 @@ pub(crate) const IMPORT_TYPES: &[&str] = &["csv", "json"];
 
 const UNITS: [&str; 10] = ["mm", "cm", "m", "in", "ft", "deg", "rad", "", "um", "text"];
 
+/// Whether the window is in a window of its own, and that window's last place on the screen
+/// (`[x, y, width, height]`); remembered in egui's persisted memory (#5097).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+struct OwnWindow {
+    open: bool,
+    place: Option<[f32; 4]>,
+}
+
 /// Dialog state (what is being typed; the parameters themselves live in the document).
 #[derive(Default)]
 pub struct ParamsDialog {
     pub filter: String,
+    /// The window's own system window, when it has one (#5097).
+    #[cfg(not(target_arch = "wasm32"))]
+    own: OwnWindow,
+    #[cfg(not(target_arch = "wasm32"))]
+    own_loaded: bool,
+    /// The own window has been given its saved place; the system owns its place from then on.
+    #[cfg(not(target_arch = "wasm32"))]
+    own_placed: bool,
+    /// Where the title was grabbed, from the card's corner, while the card is in the app.
+    #[cfg(not(target_arch = "wasm32"))]
+    grab: Option<egui::Vec2>,
+    /// The own window following the pointer just after the card left the app.
+    #[cfg(not(target_arch = "wasm32"))]
+    tear_off: Option<crate::tear_off::TearOff>,
+    /// Watches the own window for a title drag back over the app.
+    #[cfg(not(target_arch = "wasm32"))]
+    dock_drag: crate::tear_off::NativeDockDrag,
+    /// Where the card goes back in the app (main-window points), after the own window was dropped there.
+    #[cfg(not(target_arch = "wasm32"))]
+    dock_at: Option<egui::Pos2>,
     /// The order by name inside each section (#8563); remembered across openings like the
     /// sections' open state.
     pub(crate) sort: ui_kit::Sort,
@@ -197,7 +230,13 @@ pub fn open(app: &mut SolveApp) {
 /// Cancel before drawing the editors: egui has already blurred the focused TextEdit on Esc,
 /// and drawing it would apply its pending value through `lost_focus`.
 pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    if app.home.open || app.params.is_none() || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    // In a window of its own, the window takes its own Escape; the main window's is for the rest
+    // of the app.
+    #[cfg(not(target_arch = "wasm32"))]
+    let own_window = app.params.as_ref().is_some_and(|d| d.own.open);
+    #[cfg(target_arch = "wasm32")]
+    let own_window = false;
+    if app.home.open || app.params.is_none() || own_window || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         return false;
     }
     ctx.input_mut(|i| {
@@ -221,17 +260,82 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     forget_refused_add(app, &mut d);
     d.sort = ctx.data_mut(|m| m.get_persisted(sort_id())).unwrap_or_default();
     let sort = d.sort;
+    let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
+        rows.clone()
+    } else {
+        let rows = Arc::new(rows(app));
+        d.listed = Some((app.session.revision, rows.clone()));
+        d.lists += 1;
+        rows
+    };
+    let live = app.preferences.parameters_apply_live;
+    let held_status = if live { None } else { held_status(held(&d, &all).len()) };
+    #[cfg(not(target_arch = "wasm32"))]
+    let outcome = {
+        if !d.own_loaded {
+            d.own = ctx.data_mut(|m| m.get_persisted(own_window_id())).unwrap_or_default();
+            d.own_loaded = true;
+        }
+        let before = d.own.clone();
+        let outcome = if d.own.open { Some(own_window(app, ctx, &mut d, &all, held_status)) } else { in_app(app, ctx, &mut d, &all, held_status) };
+        if d.own != before {
+            let own = d.own.clone();
+            ctx.data_mut(|m| m.insert_persisted(own_window_id(), own));
+        }
+        outcome
+    };
+    #[cfg(target_arch = "wasm32")]
+    let outcome = in_app(app, ctx, &mut d, &all, held_status);
+    let Some((closed, action)) = outcome else {
+        app.params = Some(d);
+        return;
+    };
+    // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
+    let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
+    let close = closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && applied);
+    // Each cell owns fresh Enter from raw events. The panel itself must not submit on
+    // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
+    // the filter, rename and comment fields still see Enter first to give up focus.
+    if let Some(at) = crate::scenario::handle_at("dialog:close") {
+        crate::scenario::publish_handle("params:close", at);
+    }
+    if let Some(rect) = crate::scenario::rect_of("dialog:header") {
+        crate::scenario::publish_handle("params:title", rect.center());
+    }
+    if d.sort != sort {
+        let chosen = d.sort;
+        ctx.data_mut(|m| m.insert_persisted(sort_id(), chosen));
+    }
+    if !close {
+        app.params = Some(d);
+    }
+}
+
+/// The window as a card in the app, docked beside the viewport or where its title was dragged.
+/// Returns whether it closed and the action taken; `None` while the viewport has no room.
+fn in_app(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[Row], held_status: Option<String>) -> Option<(bool, ui_kit::Action)> {
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let viewport = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     if !viewport.is_finite() || !viewport.is_positive() {
-        app.params = Some(d);
-        return;
+        return None;
     }
     let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
     let side =
         if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
+    // A width or body height the user dragged the card to replaces that default; each axis stays
+    // automatic until the user drags it (review of #13422).
+    let chosen_width: Option<f32> = ctx.data_mut(|m| m.get_persisted(width_id())).filter(|w: &f32| w.is_finite());
+    let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
+    let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
+    let width = if side == crate::frame::Side::Left { width.min(crate::sketch_palette::room_left_of(app, ctx, viewport)) } else { width };
+    // Back from its own window: the card's corner goes where that window's contents were.
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(at) = d.dock_at.take() {
+        let anchor = if side == crate::frame::Side::Right { at + egui::vec2(width, 0.0) } else { at };
+        crate::frame::set_dock_offset(ctx, "PARAMETERS", anchor - docked);
+    }
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -246,30 +350,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .wide()
     .body_rows(16.0)
-    .reset_scroll(d.reset_scroll);
-    // A width or body height the user dragged the card to replaces that default; each axis stays
-    // automatic until the user drags it (review of #13422).
-    let chosen_width: Option<f32> = ctx.data_mut(|m| m.get_persisted(width_id())).filter(|w: &f32| w.is_finite());
-    let chosen_height: Option<f32> = ctx.data_mut(|m| m.get_persisted(height_id())).filter(|h: &f32| h.is_finite());
-    let width = chosen_width.map_or(solidcraft_theme::Tokens::get().form_card_width * 3.0, |w| w.max(crate::frame::DIALOG_MIN_W));
-    let panel = panel.body_height(chosen_height);
-    let panel = if side == crate::frame::Side::Left {
-        let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
-        panel.width(width.min(available))
-    } else {
-        panel.width(width)
-    };
-    let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
-        rows.clone()
-    } else {
-        let rows = Arc::new(rows(app));
-        d.listed = Some((app.session.revision, rows.clone()));
-        d.lists += 1;
-        rows
-    };
+    .reset_scroll(d.reset_scroll)
+    .body_height(chosen_height)
+    .width(width);
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
-    let held_status = if live { None } else { held_status(held(&d, &all).len()) };
     let mut resize = Resize::None;
     let shown = panel.window(ctx).show(ctx, |ui| {
         outcome = panel.feature(
@@ -284,77 +369,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             },
             false,
             true,
-            |ui| {
-                ui_kit::text(ui, hint(live), ui_kit::Text::Hint("manage"));
-                apply_live_checkbox(app, ui, &mut d, &all);
-                ui_kit::row(ui, "Filter", |ui| {
-                    let id = ui.make_persistent_id("parameter_filter");
-                    ui_kit::search_field(ui, id, &mut d.filter, "Filter");
-                });
-                ui.horizontal_wrapped(|ui| {
-                    if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .backing_on_hover_text(solidcraft_ui_text::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
-                        .clicked()
-                    {
-                        app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
-                    }
-                    for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
-                        if ui_kit::icon_label_button(ui, label, "export_tray", true, false).clicked() {
-                            app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format": ext}));
-                        }
-                    }
-                });
-                if let Some(error) = d.banner() {
-                    ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
-                }
-                let filter = d.filter.to_ascii_lowercase();
-                let visible: Vec<_> = all.iter().filter(|r| r.matches(&filter)).collect();
-                // One Name-column floor for every table in this dialog so Favorites, User and
-                // Model sections stay lined up when only some lists hold a long name (#8551 review).
-                let name_floor = visible
-                    .iter()
-                    .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
-                    .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
-                    .min(solidcraft_theme::Tokens::get().form_card_width);
-                let Sections { favorites, users, groups } = sections(&visible, d.sort);
-                if !favorites.is_empty() {
-                    ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
-                        table(app, ui, &mut d, &favorites, "fav", name_floor)
-                    });
-                }
-                ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
-                    table(app, ui, &mut d, &users, "user", name_floor);
-                });
-                ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
-                    ui.scope(|ui| {
-                        ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
-                        ui.indent("model_groups", |ui| {
-                            let layout = GroupLayout {
-                                revision: app.session.revision,
-                                filter: filter.clone(),
-                                width: ui.available_width(),
-                                pixels_per_point: ui.ctx().pixels_per_point(),
-                                style: ui.style().clone(),
-                                font: app.applied_ui_font.clone(),
-                                system_fonts: app.applied_system_fonts,
-                                language: solidcraft_ui_text::language(),
-                            };
-                            if d.group_layout.as_ref() != Some(&layout) {
-                                d.group_sizes.clear();
-                                d.group_layout = Some(layout);
-                            }
-                            #[cfg(test)]
-                            {
-                                d.groups_drawn = 0;
-                            }
-                            for (group, members) in groups {
-                                model_group(app, ui, &mut d, group, &members, name_floor);
-                            }
-                        });
-                    });
-                });
-                ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
-            },
+            |ui| contents(app, ui, d, all, live, held_status),
         );
         resize = resize_edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
         d.reset_scroll = false;
@@ -389,26 +404,278 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
     }
-    // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
-    let (closed, action) = outcome;
-    let applied = live || !matches!(action, ui_kit::Action::Ok | ui_kit::Action::Apply) || apply_held(app, &mut d, &all);
-    let close = closed || action == ui_kit::Action::Cancel || (action == ui_kit::Action::Ok && applied);
-    // Each cell owns fresh Enter from raw events. The panel itself must not submit on
-    // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
-    // the filter, rename and comment fields still see Enter first to give up focus.
-    if let Some(at) = crate::scenario::handle_at("dialog:close") {
-        crate::scenario::publish_handle("params:close", at);
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(card) = shown.as_ref().map(|r| r.response.rect) {
+        leave_when_dragged_out(ctx, d, card);
     }
-    if let Some(rect) = crate::scenario::rect_of("dialog:header") {
-        crate::scenario::publish_handle("params:title", rect.center());
+    Some(outcome)
+}
+
+/// Where the own window's state is kept: egui's persisted memory, like the sort order.
+#[cfg(not(target_arch = "wasm32"))]
+fn own_window_id() -> egui::Id {
+    egui::Id::unique("sc_params_own_window")
+}
+
+/// Pop out moves the window into a window of its own, which can go to another screen; Dock puts
+/// it back in the app. Drafts, the sort order and column widths stay as they are.
+#[cfg(not(target_arch = "wasm32"))]
+fn own_window_button(ui: &mut egui::Ui, d: &mut ParamsDialog) {
+    let label = solidcraft_ui_text::tr(if d.own.open { "manage.parameters_dock" } else { "manage.parameters_pop_out" });
+    let response = ui_kit::button(ui, label, ui_kit::Button::Normal);
+    crate::scenario::publish_target("params:window_mode", response.rect);
+    if response.clicked() {
+        d.own.open = !d.own.open;
+        d.own_placed = false;
+        d.tear_off = None;
+        d.dock_drag = crate::tear_off::NativeDockDrag::default();
+        ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
     }
-    if d.sort != sort {
-        let chosen = d.sort;
-        ctx.data_mut(|m| m.insert_persisted(sort_id(), chosen));
+}
+
+/// Move the card into a window of its own when its title is dragged past the app's border (#5097).
+/// The hand-off happens while the main window still holds the press, before the system stops the
+/// pointer at the app's edge; `card` is where the card is drawn.
+#[cfg(not(target_arch = "wasm32"))]
+fn leave_when_dragged_out(ctx: &egui::Context, d: &mut ParamsDialog, card: egui::Rect) {
+    if ctx.input(|i| i.pointer.primary_pressed()) {
+        d.grab = ctx.input(|i| i.pointer.press_origin()).filter(|p| card.contains(*p)).map(|p| p - card.min);
     }
-    if !close {
-        app.params = Some(d);
+    if !crate::frame::title_dragging(ctx, "PARAMETERS") {
+        if !ctx.input(|i| i.pointer.primary_down()) {
+            d.grab = None;
+        }
+        return;
     }
+    let Some(pointer) = ctx.input(|i| i.pointer.latest_pos()) else { return };
+    let grab = *d.grab.get_or_insert_with(|| ctx.input(|i| i.pointer.press_origin()).unwrap_or(pointer) - card.min);
+    // Where the pointer would put the card, not where it is kept on screen.
+    let desired = egui::Rect::from_min_size(pointer - grab, card.size());
+    if !crate::tear_off::crosses_border(ctx.content_rect(), desired, pointer, grab) {
+        return;
+    }
+    let origin = ctx.input(|i| i.viewport().inner_rect.map(|r| r.min)).unwrap_or_default();
+    let at = origin + pointer.to_vec2() - grab;
+    d.own.place = Some([at.x, at.y, card.width(), card.height()]);
+    d.own.open = true;
+    d.own_placed = false;
+    d.tear_off = Some(crate::tear_off::TearOff::new(at, grab, ctx.input(|i| i.pointer.primary_down())));
+    d.dock_drag = crate::tear_off::NativeDockDrag::default();
+    crate::tear_off::mark_handoff(ctx);
+    ctx.request_repaint();
+}
+
+/// Put the card back in the app when the own window's title was dragged over the app and the
+/// window stopped there. `outer` and `inner` are the own window's frame and contents, `parent` the
+/// main window's contents, all on the screen.
+#[cfg(not(target_arch = "wasm32"))]
+fn dock_when_dragged_back(ctx: &egui::Context, d: &mut ParamsDialog, outer: egui::Rect, inner: egui::Rect, parent: egui::Rect, now: f64) {
+    if d.dock_drag.update(outer, inner, parent, now) {
+        d.own.open = false;
+        d.own_placed = false;
+        d.tear_off = None;
+        d.grab = None;
+        d.dock_at = Some((inner.min - parent.min).to_pos2());
+        d.dock_drag = crate::tear_off::NativeDockDrag::default();
+        crate::tear_off::end_handoff(ctx);
+        crate::frame::end_title_drag(ctx, "PARAMETERS");
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    } else if d.dock_drag.moving {
+        // A system title drag can end without a pointer event: look again until it settles.
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+}
+
+/// A saved own-window place that can be used: finite, a usable size, and not absurdly far away.
+/// `x` and `y` may be negative: a screen left of or above the main one.
+#[cfg(not(target_arch = "wasm32"))]
+fn own_window_place(place: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
+    let [x, y, w, h] = place?;
+    let usable = [x, y, w, h].iter().all(|v| v.is_finite())
+        && (solidcraft_theme::Tokens::get().form_card_width..=10_000.0).contains(&w)
+        && (200.0..=10_000.0).contains(&h)
+        && x.abs() <= 100_000.0
+        && y.abs() <= 100_000.0;
+    usable.then_some(([x, y], [w, h]))
+}
+
+/// The own window's settings, named after the design like the Assistant's window. The saved
+/// place goes only to a window that is opening: the system owns its place from then on.
+#[cfg(not(target_arch = "wasm32"))]
+fn own_window_builder(document: &str, placed: bool, place: Option<[f32; 4]>) -> egui::ViewportBuilder {
+    let t = solidcraft_theme::Tokens::get();
+    let title = format!("{document} — {}", solidcraft_ui_text::tr_label("Parameters"));
+    let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([t.form_card_width, 200.0]);
+    if placed {
+        return builder;
+    }
+    match own_window_place(place) {
+        Some((pos, size)) => builder.with_position(pos).with_inner_size(size),
+        None => builder.with_inner_size([t.form_card_width * 3.0, 640.0]),
+    }
+}
+
+/// The window in a window of its own, which can go to another screen (#5097). It holds the same
+/// contents as the card in the app. Escape and the system's close button close it as Cancel does;
+/// dragging its title back over the app and pausing puts the card back. Where the system can't
+/// open a window, egui shows it as a window inside the app.
+#[cfg(not(target_arch = "wasm32"))]
+fn own_window(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[Row], held_status: Option<String>) -> (bool, ui_kit::Action) {
+    let parent = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport().inner_rect);
+    let builder = own_window_builder(&app.session.doc.name, d.own_placed, d.own.place);
+    let builder = match &d.tear_off {
+        Some(tear_off) => tear_off.prepare(builder),
+        None => builder,
+    };
+    let opening = !d.own_placed;
+    d.own_placed = true;
+    let live = app.preferences.parameters_apply_live;
+    let mut outcome = (false, ui_kit::Action::None);
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_params_own_window"), builder, |ui, class| {
+        let ctx = ui.ctx().clone();
+        // Before the editors draw, so a focused field does not apply its value as it loses the
+        // focus (as `cancel_on_escape` does in the app).
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            outcome = (true, ui_kit::Action::None);
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+            return;
+        }
+        ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let frame = ui_kit::Container::new(&ctx, ui_kit::Surface::Panel).edge_frame(solidcraft_theme::Tokens::get().dialog_body);
+        let central = ui_kit::Container::new(&ctx, ui_kit::Surface::Viewport).central();
+        let shown = ui_kit::Container::show_central(ui, central, frame, |ui| {
+            let rect = ui.max_rect();
+            let title = solidcraft_ui_text::tr_label("Parameters");
+            let panel =
+                ui_kit::Panel::new(title, egui::Id::unique("sc_params_own_window_card"), rect.left_top(), rect, crate::frame::Side::Left, frame)
+                    .os_window()
+                    .reset_scroll(d.reset_scroll);
+            panel.feature(
+                ui,
+                ui_kit::FeatureOptions {
+                    icon: solidcraft_engine::find_command("parameters.change").map_or("", |c| c.icon),
+                    title,
+                    drag_key: "",
+                    moved: egui::Vec2::ZERO,
+                    docked: rect.left_top(),
+                    apply_label: (!live).then_some("Apply"),
+                },
+                false,
+                true,
+                |ui| contents(app, ui, d, all, live, held_status.clone()),
+            )
+        });
+        outcome = shown.inner;
+        d.reset_scroll = false;
+        crate::scenario::publish_rect("params:own_window", shown.response.rect);
+        if class == egui::ViewportClass::EmbeddedWindow {
+            // Inside the app: there is no system window to follow the pointer or to drag back.
+            d.tear_off = None;
+            return;
+        }
+        let (outer, inner, closing) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
+        let following = crate::tear_off::follow_pointer(&ctx, &mut d.tear_off, outer, inner);
+        if opening && following.is_none() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
+        if let (Some(outer), Some(inner)) = (outer, inner) {
+            let at = following.unwrap_or(outer.min);
+            d.own.place = Some([at.x, at.y, inner.width(), inner.height()]);
+            if !closing
+                && following.is_none()
+                && let Some(parent) = parent
+            {
+                let now = ctx.input(|i| i.time);
+                dock_when_dragged_back(&ctx, d, outer, inner, parent, now);
+            }
+        }
+        if closing {
+            outcome = (true, ui_kit::Action::None);
+        }
+    });
+    outcome
+}
+
+/// The window's body, the same in the app and in a window of its own: the hint, the live-apply
+/// option, the filter, import, export and Pop out or Dock, then the sections' tables.
+fn contents(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    d: &mut ParamsDialog,
+    all: &[Row],
+    live: bool,
+    held_status: Option<String>,
+) -> ui_kit::ComputeStatus {
+    ui_kit::text(ui, hint(live), ui_kit::Text::Hint("manage"));
+    apply_live_checkbox(app, ui, d, all);
+    ui_kit::row(ui, "Filter", |ui| {
+        let id = ui.make_persistent_id("parameter_filter");
+        ui_kit::search_field(ui, id, &mut d.filter, "Filter");
+    });
+    ui.horizontal_wrapped(|ui| {
+        if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+            .clicked()
+        {
+            app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
+        }
+        for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
+            if ui_kit::icon_label_button(ui, label, "export_tray", true, false).clicked() {
+                app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format": ext}));
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        own_window_button(ui, d);
+    });
+    if let Some(error) = d.banner() {
+        ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
+    }
+    let filter = d.filter.to_ascii_lowercase();
+    let visible: Vec<_> = all.iter().filter(|r| r.matches(&filter)).collect();
+    // One Name-column floor for every table in this dialog so Favorites, User and
+    // Model sections stay lined up when only some lists hold a long name (#8551 review).
+    let name_floor = visible
+        .iter()
+        .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
+        .fold(solidcraft_theme::Tokens::get().form_label_width, f32::max)
+        .min(solidcraft_theme::Tokens::get().form_card_width);
+    let Sections { favorites, users, groups } = sections(&visible, d.sort);
+    if !favorites.is_empty() {
+        ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| table(app, ui, d, &favorites, "fav", name_floor));
+    }
+    ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
+        table(app, ui, d, &users, "user", name_floor);
+    });
+    ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
+        ui.scope(|ui| {
+            ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
+            ui.indent("model_groups", |ui| {
+                let layout = GroupLayout {
+                    revision: app.session.revision,
+                    filter: filter.clone(),
+                    width: ui.available_width(),
+                    pixels_per_point: ui.ctx().pixels_per_point(),
+                    style: ui.style().clone(),
+                    font: app.applied_ui_font.clone(),
+                    system_fonts: app.applied_system_fonts,
+                    language: solidcraft_ui_text::language(),
+                };
+                if d.group_layout.as_ref() != Some(&layout) {
+                    d.group_sizes.clear();
+                    d.group_layout = Some(layout);
+                }
+                #[cfg(test)]
+                {
+                    d.groups_drawn = 0;
+                }
+                for (group, members) in groups {
+                    model_group(app, ui, d, group, &members, name_floor);
+                }
+            });
+        });
+    });
+    ui_kit::ComputeStatus { text: held_status, busy: false, applying: false }
 }
 
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
@@ -1257,6 +1524,138 @@ mod tests {
         h.step(&json!({"start":"parameters.change"})).unwrap();
         h.frames(3);
         h
+    }
+
+    /// Widen the user table's Name column with its header divider (#13422); returns its width.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn widen_the_name_column(h: &mut crate::scenario::Harness) -> f32 {
+        h.call("ui.resize", json!({"width": 1900, "height": 1200}));
+        h.frames(6);
+        let before = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        let at = crate::scenario::handle_at("dialog:column_divider:user:1").unwrap();
+        h.step(&json!({"drag": [[at.x, at.y], [at.x + 50.0, at.y]]})).unwrap();
+        h.frames(6);
+        let width = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        assert!(width > before + 30.0, "the divider widens the column: {before} -> {width}");
+        width
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn name_width() -> f32 {
+        crate::scenario::rect_of("dialog:column:user:Name").unwrap().width()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pop_out_and_dock_keep_the_drafts_and_column_widths() {
+        let mut h = escape_dialog();
+        let width = widen_the_name_column(&mut h);
+        let d = h.app.params.as_mut().unwrap();
+        d.adding = true;
+        d.new_name = "unsubmitted".into();
+        d.new_expr = "missing + 1 mm".into();
+        h.frames(3);
+        let document = h.app.session.doc.to_json();
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        assert!(h.app.params.as_ref().unwrap().own.open);
+        assert!(crate::scenario::rect_of("params:own_window").is_some());
+        assert!((name_width() - width).abs() < 1.0, "the column keeps its width in the window of its own");
+        assert_eq!(h.app.params.as_ref().unwrap().new_expr, "missing + 1 mm");
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        let d = h.app.params.as_ref().unwrap();
+        assert!(!d.own.open);
+        assert_eq!((d.new_name.as_str(), d.new_expr.as_str()), ("unsubmitted", "missing + 1 mm"));
+        assert!(crate::scenario::rect_of("params:own_window").is_none());
+        assert!((name_width() - width).abs() < 1.0, "and back in the app");
+        assert_eq!(h.app.session.doc.to_json(), document, "moving the window changes nothing in the design");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dragging_the_title_past_any_app_border_moves_the_window_into_its_own() {
+        for edge in ["left", "right", "top", "bottom", "beyond"] {
+            let mut h = escape_dialog();
+            h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+            h.frames(6);
+            let title = crate::scenario::handle_at("params:title").unwrap();
+            // The pointer stays inside the app: the hand-off must happen before the system stops it
+            // at the app's edge.
+            let to = match edge {
+                "left" => egui::pos2(8.0, title.y),
+                "right" => egui::pos2(1592.0, title.y),
+                "top" => egui::pos2(title.x, 4.0),
+                "bottom" => egui::pos2(title.x, 1192.0),
+                _ => egui::pos2(-30.0, title.y),
+            };
+            h.step(&json!({"drag": [[title.x, title.y], [to.x, to.y]]})).unwrap();
+            h.frames(6);
+            let d = h.app.params.as_ref().unwrap();
+            assert!(d.own.open && d.own.place.is_some(), "{edge}");
+            assert!(crate::scenario::rect_of("params:own_window").is_some(), "{edge}");
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dropping_the_own_window_over_the_app_puts_the_card_back_there_with_its_drafts() {
+        let mut h = escape_dialog();
+        let width = widen_the_name_column(&mut h);
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        let document = h.app.session.doc.to_json();
+        // Screen places: the main window's contents, and the own window under a 24-point title bar.
+        let parent = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(1900.0, 1200.0));
+        let inner = |outer: egui::Rect| egui::Rect::from_min_max(outer.min + egui::vec2(0.0, 24.0), outer.max);
+        let outside = egui::Rect::from_min_size(egui::pos2(2100.0, 250.0), egui::vec2(700.0, 524.0));
+        let inside = outside.translate(egui::vec2(-1600.0, 0.0));
+        let ctx = h.ctx.clone();
+        let d = h.app.params.as_mut().unwrap();
+        d.adding = true;
+        d.new_name = "unsubmitted".into();
+        d.new_expr = "missing + 1 mm".into();
+        dock_when_dragged_back(&ctx, d, outside, inner(outside), parent, 0.0);
+        dock_when_dragged_back(&ctx, d, inside, inner(inside), parent, 1.0);
+        assert!(d.own.open, "it docks only once the window stops over the app");
+        dock_when_dragged_back(&ctx, d, inside, inner(inside), parent, 1.2);
+        assert!(!d.own.open);
+        assert_eq!(d.dock_at, Some(egui::pos2(400.0, 224.0)));
+        h.frames(6);
+        let d = h.app.params.as_ref().unwrap();
+        assert_eq!((d.new_name.as_str(), d.new_expr.as_str()), ("unsubmitted", "missing + 1 mm"));
+        assert!(crate::scenario::rect_of("params:own_window").is_none());
+        assert!((name_width() - width).abs() < 1.0);
+        let header = crate::scenario::rect_of("dialog:header").unwrap();
+        assert!((header.left() - 400.0).abs() < 24.0, "the card comes back where the window was dropped: {header:?}");
+        assert_eq!(h.app.session.doc.to_json(), document);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_own_window_opens_at_its_saved_place_once_even_on_another_screen() {
+        let place = Some([-1600.0, 100.0, 900.0, 700.0]);
+        let first = own_window_builder("Plate", false, place);
+        assert_eq!(first.position, Some(egui::pos2(-1600.0, 100.0)));
+        assert_eq!(first.inner_size, Some(egui::vec2(900.0, 700.0)));
+        assert!(own_window_builder("Plate", true, place).position.is_none(), "the system owns its place once it is open");
+        for broken in [[f32::NAN, 0.0, 900.0, 700.0], [0.0, 0.0, 5.0, 700.0], [1e9, 0.0, 900.0, 700.0]] {
+            assert!(own_window_builder("Plate", false, Some(broken)).position.is_none(), "{broken:?} is not a usable place");
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn escape_closes_the_own_window_and_drops_its_drafts() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(3);
+        let document = h.app.session.doc.to_json();
+        h.app.params.as_mut().unwrap().new_expr = "missing + 1 mm".into();
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(h.app.params.is_none());
+        assert_eq!(h.app.session.doc.to_json(), document);
     }
 
     fn escape_state(h: &crate::scenario::Harness) -> Value {

@@ -51,7 +51,7 @@ windows use the shared composition, including its header and fixed outer frame.
 | Navigation bar | `navigation_bar_view` | Measured single-row Navigation surface; upward Popup menus use kit list rows; shell supplies the free canvas bounds |
 | Persistent viewport status items | `ui_kit::viewport_status` | Content-hugging ViewportStatus pill surface; anchored row and Popup key cards, independent of workspace docking |
 | OK and Cancel in the view's corner | `view_confirm` | Navigation surface in its own area; the viewport layout reserves its corner and the shell counts it as covered |
-| Home, model viewport, Render canvas and native Assistant window content | `home`, `lib`, `agent_chat/panel` | Central content hosts, not floating workspace panels |
+| Home, model viewport, Render canvas and native Assistant and Parameters window content | `home`, `lib`, `agent_chat/panel`, `params_dialog` | Central content hosts, not floating workspace panels |
 | Loading input shield | `file_load` | Explicit input shield; must remain interactive while CAD input is blocked |
 
 The compass, geometry previews, drag handles, selection outlines, dimension lines,

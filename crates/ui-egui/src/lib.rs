@@ -306,6 +306,8 @@ pub mod start_page;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
+#[cfg(not(target_arch = "wasm32"))]
+mod tear_off;
 pub(crate) mod test_boat;
 pub mod theme;
 pub mod theme_files;

@@ -725,6 +725,15 @@ fn parameters_header_drag_retains_offset_and_bounds_the_card() {
             let title = scenario::handle_at("params:title").unwrap();
             h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x+delta.x,"y1":title.y+delta.y,"steps":8}));
             h.frames(6);
+            // On the desktop, a title dragged past the app's border moves the window into one of its
+            // own (#5097); Dock brings the card back, still kept on screen.
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                assert!(scenario::rect_of("params:own_window").is_some(), "{layout:?}: dragged past the border, the window has its own");
+                h.step(&json!({"click":{"handle":"params:window_mode"}})).unwrap();
+                h.frames(6);
+                assert!(scenario::rect_of("params:own_window").is_none());
+            }
             let card = scenario::rect_of("dialog:header").unwrap().union(scenario::rect_of("dialog:footer").unwrap());
             let viewport = crate::shell::tool_drag_rect(&h.app, crate::shell::content_rect(&h.app, h.app.viewport.rect.unwrap()));
             assert!(viewport.expand(2.0).contains_rect(card), "{layout:?}: {card:?} outside {viewport:?}");

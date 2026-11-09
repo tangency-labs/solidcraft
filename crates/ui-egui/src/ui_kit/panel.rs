@@ -318,6 +318,7 @@ pub(crate) struct Panel<'a> {
     reset_scroll: bool,
     joined: Option<super::DockEdges>,
     grow_key: Option<egui::Id>,
+    os_window: bool,
 }
 
 pub(crate) struct WorkspaceOptions<'a> {
@@ -650,7 +651,16 @@ impl<'a> Panel<'a> {
             reset_scroll: false,
             joined: None,
             grow_key: None,
+            os_window: false,
         }
+    }
+
+    /// The card fills a window of its own (the Parameters window moved out of the app): its title
+    /// band moves that window, and its body takes the window's height above the actions.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn os_window(mut self) -> Self {
+        self.os_window = true;
+        self
     }
 
     /// The edges the card meets the window or a docked surface at (a dialog in the left column):
@@ -842,7 +852,13 @@ impl<'a> Panel<'a> {
             let t = Tokens::get();
             let min = ui.cursor().min;
             let band = egui::Rect::from_min_size(min, vec2(ui.available_width(), super::header_height()));
-            if heading.drag_key.is_empty() {
+            if self.os_window {
+                // The system moves the window; it can be dragged back over the app from here too.
+                solidcraft_ui_registry::publish_handle("dialog:title", band.center());
+                if ui.interact(band, ui.scope_id().with("sc_os_window_drag"), egui::Sense::drag()).drag_started() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                }
+            } else if heading.drag_key.is_empty() {
                 solidcraft_ui_registry::publish_handle("dialog:title", band.center());
             } else {
                 crate::frame::drag_dock(ui, band, heading.drag_key, heading.moved, self.bounded_anchor(ui.ctx()) - heading.docked);
@@ -865,6 +881,7 @@ impl<'a> Panel<'a> {
             let footer_height = if top.is_some() { 0.0 } else { t.form_footer_height };
             let fields_height = (bottom - ui.cursor().top() - footer_height - ui.spacing().item_spacing.y).max(0.0);
             let fields_height = match self.body_height {
+                _ if self.os_window => (ui.available_height() - footer_height - ui.spacing().item_spacing.y).max(0.0),
                 Some(height) => fields_height.min(height),
                 None => self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0)),
             };
@@ -882,7 +899,7 @@ impl<'a> Panel<'a> {
                         .id_salt("feature_fields")
                         .min_scrolled_height(0.0)
                         .max_height(fields_height)
-                        .auto_shrink([true, self.body_height.is_none()])
+                        .auto_shrink([true, self.body_height.is_none() && !self.os_window])
                         .show(ui, |ui| {
                             if disabled {
                                 ui.disable();
