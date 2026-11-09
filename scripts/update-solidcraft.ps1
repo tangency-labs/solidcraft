@@ -216,7 +216,16 @@ try {
         Clear-ProfileBuildArtifactsPreservingBackups -TargetDirectory $TargetDir -BackupDirectory $BackupDir
         if ($BuildWeb) {
             $WasmTargetDir = Join-Path $RepoRoot (Join-Path 'target' (Join-Path 'wasm32-unknown-unknown' $Profile))
-            if (Test-Path -LiteralPath $WasmTargetDir) { Remove-Item -LiteralPath $WasmTargetDir -Recurse -Force }
+            if (Test-Path -LiteralPath $WasmTargetDir) {
+                $WebInstallDir = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
+                $WasmFull = [System.IO.Path]::GetFullPath($WasmTargetDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+                $WebFull = [System.IO.Path]::GetFullPath($WebInstallDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+                if ($WebFull -eq $WasmFull -or $WebFull.StartsWith($WasmFull + [System.IO.Path]::DirectorySeparatorChar) -or $WasmFull.StartsWith($WebFull + [System.IO.Path]::DirectorySeparatorChar)) {
+                    throw "WEB_INSTALL_DIR ($WebInstallDir) overlaps with WebAssembly target directory ($WasmTargetDir)."
+                }
+                Get-ChildItem -LiteralPath $WasmTargetDir -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+                Write-Host "Cleaned generated contents of WebAssembly target directory: $WasmTargetDir"
+            }
         }
     }
 
@@ -232,7 +241,7 @@ try {
         Write-Host "[STEP 3] Running workspace tests ($Profile mode)..."
         try {
             Invoke-Native -Command 'cargo' -Arguments (@('test', '--workspace') + $CargoProfileFlag + $JobsArg)
-            
+
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "ERROR: Workspace tests failed with exit code $LASTEXITCODE! Recording error and continuing." -ForegroundColor Red
                 $targetFailed = $true
