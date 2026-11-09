@@ -96,6 +96,46 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
+/// [`locate_edge`], and for an edge of a design saved by 0.30.1, whose kernel split a round face
+/// into numbered pieces (`F2:side:c1#2|F2:top`), the edge between the faces that are whole now
+/// (`F2:side:c1|F2:top`) (#13499). That is taken only where the saved pick still lies on the
+/// edge, its name is exact, and no other piece of either face is left to be the one picked.
+pub(crate) fn locate_edge_numbered(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
+    locate_edge(b, name, near).or_else(|miss| recover_numbered_edge(b, name, near).ok_or(miss))
+}
+
+fn recover_numbered_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // Each face of the name without its piece number (`F2:side:c1#2` is `F2:side:c1`).
+    let mut numbered = false;
+    let whole: Vec<&str> = name
+        .split('|')
+        .map(|part| match part.rsplit_once('#') {
+            Some((stem, number))
+                if !stem.is_empty()
+                    && strip_piece(stem) == stem
+                    && !number.is_empty()
+                    && !number.starts_with('0')
+                    && number.bytes().all(|digit| digit.is_ascii_digit()) =>
+            {
+                numbered = true;
+                stem
+            }
+            _ => part,
+        })
+        .collect();
+    if !numbered {
+        return None;
+    }
+    let hit = locate_edge(b, &whole.join("|"), near).ok().filter(|hit| hit.verified && hit.on_point)?;
+    // Each face it separates is whole: no other piece of it is left to be the one picked.
+    let faces = b.mesh().edge_faces.get(hit.edge)?.clone();
+    let names = face_names(b);
+    faces.iter().all(|f| names.get(*f as usize).is_some_and(|n| faces_with_stem(b, n).len() == 1)).then_some(hit)
+}
+
 /// Whether a face found at `level` is exactly the face a name named: the very name (or another
 /// name of that very face: a face its feature made from several roles has each), or the named
 /// piece told apart by the faces around it. A face the named one was merged into, or a face of
