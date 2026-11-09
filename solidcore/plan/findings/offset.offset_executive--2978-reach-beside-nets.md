@@ -27,9 +27,9 @@ net whose rows end in one weight ratio and for one whose rows do not.
 
 *The meeting past the net's side, `τ` along the moved plane's trace from the foot `x0`.*
 
-**Cases.** Seven cases of `topology.brep_local_operation` are built now, and each was refused
-before: `gen0000`, `gen0021`, `gen0031`, `gen0041`, `gen0048` and `gen0059` (extrusion), and
-`gen0076` (pyramid). Below, each is shown before (the input kept, the moved faces in blue) and
+**Cases.** Eight cases of `topology.brep_local_operation` are built now, and each was refused
+before: `gen0000`, `gen0021`, `gen0031`, `gen0041`, `gen0048`, `gen0059` and `gen0070`
+(extrusion), and `gen0076` (pyramid). `gen0070` moves the bottom cap and a side wall. Below, each is shown before (the input kept, the moved faces in blue) and
 after, from the same view.
 
 ![gen0000](offset.offset_executive--2978-reach-beside-nets/gen0000.png)
@@ -38,6 +38,7 @@ after, from the same view.
 ![gen0041](offset.offset_executive--2978-reach-beside-nets/gen0041.png)
 ![gen0048](offset.offset_executive--2978-reach-beside-nets/gen0048.png)
 ![gen0059](offset.offset_executive--2978-reach-beside-nets/gen0059.png)
+![gen0070](offset.offset_executive--2978-reach-beside-nets/gen0070.png)
 ![gen0076](offset.offset_executive--2978-reach-beside-nets/gen0076.png)
 
 **Still refused.** On the pyramid, eight cases move a side whose net ends in the apex pole.
