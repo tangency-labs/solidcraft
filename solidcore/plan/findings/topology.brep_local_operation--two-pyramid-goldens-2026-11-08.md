@@ -1,9 +1,9 @@
 # Two generated pyramid results meet their five-plane solids (2026-11-08)
 
-Continues #3056 / #2981. Only `gen0040` and `gen0068` in
-`topology.brep_local_operation` are justified here. No production code, tolerance,
-failure registry, case input, gate or excluded pole-patch construction changes.
-The other eleven local-operation golden differences remain unresolved.
+Historical evidence at `134a7186f1a14abf84ee4d0115c8cc6c302b6001` for
+`gen0040` and `gen0068` only; it does not justify other rows. At that revision
+the other eleven local-operation golden differences remained unresolved. The
+later parallel-sheet repair and its separate evidence are linked below.
 
 ## Exact cases and independent construction
 
@@ -52,6 +52,27 @@ and reordered planes; the actual pyramid; wrong volume and vertex rejection;
 nonplanar kept-patch/invalid-body rejection; and the distinction between an
 explicitly replaced rounded patch and a kept patch.
 
+The following independent intersection coordinates are rounded from the retained
+160-digit calculation, for inspection; the distance checks above used the
+unrounded values. Each row is `(x, y, z)`.
+
+```text
+gen0040:
+ ( 83.55555725097657,  88.12943221867270, 0)
+ (-83.55555725097657,  88.12943221867270, 0)
+ ( 83.55555725097657, -87.11111259460449, 0)
+ (-83.55555725097657, -87.11111259460449, 0)
+ (0, 1.0183186703939122,    101.33333587646483)
+ (0, 0.0000009536743028046, 101.33333587646483)
+gen0068:
+ (  67.54365432941965,   69.79129302528030,  19.41869087052869)
+ ( -75.72819854442072,  128.78202504898039,   9.49275422165562)
+ (  85.38476990096218,  -89.01816409541872,  -2.21840684149472)
+ (-109.68393353872636, -114.35133489122169, -31.68760543742605)
+ (  11.78234451679937,  -12.28372001996392,  87.04410947891005)
+ (  -9.45207816493448,   -9.85429337913251,  89.87017719581693)
+```
+
 ## Native pictures
 
 The existing `case_smb` example rebuilt the exact generated cases; the native
@@ -60,15 +81,15 @@ three views use `--wireframe --view -35,30 --size 1200x900 --edges-above 0.001`.
 The small `gen0040` split is barely resolved in the whole-part view; its numeric
 vertex and edge checks above, not visual similarity, establish the split.
 
-![Original pyramid, whose four sides meet at one apex.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-pyramid-input.png)
+![Original pyramid, whose four sides meet at one apex.](https://github.com/user-attachments/assets/b9e10ab5-9d4d-47db-8cd2-5d262f07132b)
 
 Original input: four sides meet at one apex.
 
-![gen0040 after the face edit, with the short split at its apex.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-pyramid-gen0040.png)
+![gen0040 after the face edit, with the short split at its apex.](https://github.com/user-attachments/assets/18cb8402-740c-4c98-8e97-9691f73aad61)
 
 `gen0040`: the short split is measured as six vertices and nine edges.
 
-![gen0068 after the tilted plane edits, with two separated top vertices.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-pyramid-gen0068.png)
+![gen0068 after the tilted plane edits, with two separated top vertices.](https://github.com/user-attachments/assets/6e836c9c-3882-4807-b08c-88a1952675de)
 
 `gen0068`: the two top intersections and the edge between them are visible.
 
@@ -101,20 +122,20 @@ byte-unchanged.
 
 ## Preserved evidence and remaining holds
 
-The 41-member archive was read back and hash-verified, SHA-256
+The 41-member historical archive was read back and hash-verified as SHA-256
 `a7a2c79290b672472bf6661707c68c3399bb1e91f75db426d44e28f12b47c049`.
-It retains the exact input/result data, original nets, executable convex model,
-controls, native `.smb` captures/images and all probe versions. Local path:
-`~/.local/share/opencode/solidcore-cleanup-evidence/pr3056-pyramid-input-planes-20261108-134a7186f/`.
+The numerical results and old/new encodings needed to interpret this finding are
+recorded above; the full raw archive is not publicly attached. The linked PNGs
+are approved GitHub-hosted review attachments, byte-checked against the historical
+originals by SHA-256. Generated PNGs are not committed here.
 
 The first probe did not reconcile the runner's notification identities with
-direct checks; its raw results remain retained, without attributing new failures.
-The later diagnostic gives its private bodies arena identities before direct checks. The eleven disk
-cases remain unapproved: their changed boundary geometry and discrepancies
-between the earlier custom-key soundness probe and direct checks require
-separate reconciliation. No result is blessed just because that earlier probe
-called it sound.
+direct checks; its raw results remain retained without attributing new failures.
+The later diagnostic gives its private bodies arena identities before direct checks.
+The historical eleven-disk hold is not a verdict on the subsequent parallel-sheet
+repair. The [current PR evidence](https://github.com/tangency-labs/solidcraft/pull/13912)
+separately records the 13 parallel disk/circle row changes, repaired `gen0001`
+measurements and remaining tilted-disk known failures.
 
-The PR remains draft: six local-operation test failures, other invalid/ungraded
-results, unresolved golden differences and canonical approval holds remain.
+Historical test failures and golden differences are not current gate results.
 No #3073, #3084 or #3124 implementation is taken here.

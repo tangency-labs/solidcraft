@@ -1,9 +1,9 @@
 # Disk results: repeated validation and a boundary-preservation hold (2026-11-08)
 
-Evidence-only continuation of #3056. This reconciles the earlier soundness-only
-probe with the direct checks recorded beside the two justified pyramid results.
-It does not bless a disk, change a failure entry, implement a gate, or take
-#3084's per-entity matching work. The eleven disk rows remain unapproved.
+Historical evidence at `ec0f6558107e36c48e7f9063b9ebfc05a2c3fe5f`, not a
+description of the later repaired result. At that revision this evidence held all
+eleven disk rows unapproved; it did not change a failure entry or implement a gate.
+The current continuation and its remaining holds are distinguished below.
 
 ## Four fresh sequences per exact retained case
 
@@ -94,7 +94,26 @@ tilted-case rejection. This is a negative preservation witness, not a complete
 boundary certificate for either result or the two tilted disk cases whose
 repeated checks stay clean. Those two are not blessed either.
 
-## Native views
+## Current continuation versus the historical witness
+
+At `954fe0d45690a6b456793d27371f661c9a229bde`, the parallel bare B-spline
+lamina repair preserves the source UV frame and translates homogeneous control
+points by weight times displacement. For the same `gen0001` input, the measured
+result has 1 face / 2 edges / 2 vertices, endpoint x coordinates
+`-5.0000000000003517, 5`, endpoint y coordinates
+`0.0000000000000006, 0`, and plane and boundary-control z
+`0.9196834024495337`. Unlike the four-edge historical result above, it has no
+bridge segments. The test checks equivalent plane frames; a separate circle
+regression checks the seam and area at the unchanged tolerance. These measurements
+do not retroactively change the old check-order results or establish a repair for
+tilted disks.
+
+The [PR evidence](https://github.com/tangency-labs/solidcraft/pull/13912)
+records the old and new values for all 13 parallel disk/circle rows, the
+before/after `gen0001` views and the four tilted cases retained as known failures.
+The old `ec0f6558` boundary violation is not a finding about the repaired head.
+
+## Historical native views
 
 These are native `solidcore-diag` edge renders at the same `--view 0,90`, size
 `1200x900`; each image is independently framed by the renderer. The first is the
@@ -102,23 +121,21 @@ original input, the second the exact generated result, not a hand-authored
 schematic or an invented before-result. Looking down z, the expected z-only
 translation keeps the input outline.
 
-![Original semicircle and diameter.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-disk-input.png)
+![Original semicircle and diameter.](https://github.com/user-attachments/assets/0469eeec-f1ce-427a-a2f5-7029c1bb7867)
 
-![gen0001 result: the boundary is no longer the original semicircle and diameter.](https://raw.githubusercontent.com/altvnk/solidcraft/954fe0d45690a6b456793d27371f661c9a229bde/solidcore/plan/findings/figures/pr3056-disk-gen0001.png)
+![gen0001 result: the boundary is no longer the original semicircle and diameter.](https://github.com/user-attachments/assets/99cfd2d4-9e06-43c1-b05d-075b97398682)
 
 ## Evidence and scope
 
-The 27-member executable/raw/native-picture archive was read back and
-hash-verified, SHA-256
-`170977910ee4732b3421637ccfbdcff33f8c8923506f2424774d4eedc3cdd7d8`.
-It retains every sequence's before/after states and verdicts, the original
-inputs, exact output bits, artifact identities, the input-hull model and controls,
-the original input and native result `.smb`, and both pictures. Local path:
-`~/.local/share/opencode/solidcore-cleanup-evidence/pr3056-disk-check-order-20261108-ec0f65581/`.
+The recorded inputs, witness bits, checks and current measurements above make
+the numerical comparison readable without a home-directory archive. The
+historical archive was read back and hash-verified as SHA-256
+`170977910ee4732b3421637ccfbdcff33f8c8923506f2424774d4eedc3cdd7d8`;
+its full raw captures are not publicly attached. The linked PNGs are approved
+GitHub-hosted review attachments, byte-checked against the historical originals
+by SHA-256. Generated PNGs are not committed here.
 
-No production, case input, assertion, golden, known-failure registry, tolerance,
-floor or gate changes accompany this record. All 54 ordinary differences and
-the six failing local-operation tests remain open. This evidence does not
-implement #3073's tangent-round construction, #3084's gate, #3124's kept-edge
-restoration, #3174's manifold-result refusal, #3015's shell work, or the excluded
-pole-patch construction. The draft hold remains in force.
+The earlier counts of 54 ordinary differences and six failing local-operation
+tests describe the historical probe only, not a current gate result. This record
+does not implement the separately owned tangent-round, soundness-gate, kept-edge,
+or pole-patch constructions.

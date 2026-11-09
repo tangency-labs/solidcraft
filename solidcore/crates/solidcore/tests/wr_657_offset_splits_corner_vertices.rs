@@ -361,14 +361,23 @@ fn off_the_translated_circle(p: Point3, height: f64) -> f64 {
 /// The `topology.brep_local_operation` fixture `disk.smb` (case `gen0001`'s input): one
 /// lamina face bounded by the rational quadratic upper semicircle r 5 about the origin
 /// and its diameter, in the plane z = 0.
-fn disk_sheet(k: &mut Kernel) -> Brep {
+fn disk_sheet(k: &mut Kernel) -> Option<Brep> {
     sheet(k, "disk.smb")
 }
 
 /// The named upstream sheet fixture (`upstream/TestFiles/pt_TestFiles`).
-fn sheet(k: &mut Kernel, file: &str) -> Brep {
+fn sheet(k: &mut Kernel, file: &str) -> Option<Brep> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let bytes = std::fs::read(root.join("upstream/TestFiles/pt_TestFiles").join(file)).unwrap();
+    let path = root.join("upstream/TestFiles/pt_TestFiles").join(file);
+    let Ok(bytes) = std::fs::read(&path) else {
+        assert!(
+            std::env::var_os("SOLIDCORE_REQUIRE_UPSTREAM").is_none(),
+            "SOLIDCORE_REQUIRE_UPSTREAM is set and the upstream test file is missing: {}",
+            path.display()
+        );
+        eprintln!("unavailable upstream test file: {}", path.display());
+        return None;
+    };
     let mut attributes = AttributeStore::new();
     let mut records = NotifyRecords::new();
     let fresh = Brep::new();
@@ -382,7 +391,7 @@ fn sheet(k: &mut Kernel, file: &str) -> Brep {
     };
     let mut b = read_brep_from_file(k, Some(bytes), true, false, &mut env).unwrap();
     b.refresh_cached_topology();
-    b
+    Some(b)
 }
 
 /// The plane `distance` along the face's own normal, on one of three placements of the
@@ -481,7 +490,9 @@ fn disk_sheet_parallel_plane_move_keeps_its_boundary() {
     let mut runs: Vec<Vec<Point3>> = Vec::new();
     for frame in 0..3 {
         let mut k = Kernel::default();
-        let mut b = disk_sheet(&mut k);
+        let Some(mut b) = disk_sheet(&mut k) else {
+            return;
+        };
         assert_eq!(b.face_list().len(), 1, "frame {frame}: one lamina face");
         let face = b.face_list()[0];
         let plane = moved_plane(&k, &b, face, HEIGHT, frame);
@@ -556,7 +567,9 @@ fn disk_sheet_parallel_plane_move_keeps_its_boundary() {
 fn circle_sheet_parallel_plane_move_keeps_its_seam() {
     const OFFSET: f64 = 0.3239936032947275; // the difftest case gen0027
     let mut k = Kernel::default();
-    let mut b = sheet(&mut k, "plane_circ.smb");
+    let Some(mut b) = sheet(&mut k, "plane_circ.smb") else {
+        return;
+    };
     assert_eq!(b.face_list().len(), 1, "one lamina face");
     let face = b.face_list()[0];
     let plane = moved_plane(&k, &b, face, OFFSET, 0);
