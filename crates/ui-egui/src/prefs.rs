@@ -947,6 +947,9 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
+    /// Off: it does nothing there, as before (#6159).
+    right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
