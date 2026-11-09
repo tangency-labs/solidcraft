@@ -2022,7 +2022,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     for (key, text) in ["effort", "velocity", "damping", "friction"].into_iter().zip(row) {
                         if !text.trim().is_empty() {
                             let x = text.trim().parse::<f64>().ok().filter(|x| x.is_finite());
-                            let x = x.ok_or_else(|| format!("{}: {text}", crate::i18n::tr_label("Not a number")))?;
+                            let x = x.ok_or_else(|| format!("{}: {text}", solidcraft_ui_text::tr_label("Not a number")))?;
                             p[key] = json!(x);
                         }
                     }
