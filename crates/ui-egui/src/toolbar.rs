@@ -2009,38 +2009,6 @@ fn grid_cell_extras(
     }
 }
 
-/// The Report a bug button for this header layout ([`app_bar::report_rect`]).
-#[cfg(test)]
-fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32, layout: HeaderLayout) -> (Rect, bool) {
-    let version = (layout.version == VersionPlace::Header).then_some(version_width);
-    app_bar::report_rect(bar, captions, tabs_start, label_width, version, layout.report == ReportButton::Icon)
-}
-
-#[cfg(test)]
-use app_bar::{CLUSTER_BUTTONS, REPORT_TEXT_X, RIGHT_GROUP, SEARCH_GAP as HEADER_SEARCH_GAP, help_x, version_room};
-
-/// A grid drop-down's commands as the grid lays them out: their ids under their headings.
-#[cfg(test)]
-fn grid_ids(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)]) -> Vec<(Option<&'static str>, &'static str)> {
-    grouped.iter().map(|(heading, c)| (*heading, c.id)).collect()
-}
-
-/// One icon of a grid drop-down at `rect` ([`ribbon::grid_cell`]).
-#[cfg(test)]
-fn dropdown_cell(
-    app: &SolveApp,
-    ui: &mut egui::Ui,
-    c: &'static solidcraft_engine::CommandSpec,
-    rect: Rect,
-    pinned: bool,
-    paints: &mut Vec<PersistentRibbonPaint>,
-) -> Option<ribbon::MenuAction> {
-    let label = app.tr_label(c.label).to_string();
-    let (action, cell) = ribbon::grid_cell(ui, &grid_entry(app, c, &label, pinned), rect, &menu_style(app));
-    grid_cell_extras(app, ui, c, cell, paints);
-    action
-}
-
 use ribbon::ROW_H;
 
 /// Registry parameter syntax is not a user-facing description. Reuse existing catalog prose
@@ -2560,6 +2528,38 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
         }
     }
+}
+
+/// The Report a bug button for this header layout ([`app_bar::report_rect`]).
+#[cfg(test)]
+fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32, layout: HeaderLayout) -> (Rect, bool) {
+    let version = (layout.version == VersionPlace::Header).then_some(version_width);
+    app_bar::report_rect(bar, captions, tabs_start, label_width, version, layout.report == ReportButton::Icon)
+}
+
+#[cfg(test)]
+use app_bar::{CLUSTER_BUTTONS, REPORT_TEXT_X, RIGHT_GROUP, SEARCH_GAP as HEADER_SEARCH_GAP, help_x, version_room};
+
+/// A grid drop-down's commands as the grid lays them out: their ids under their headings.
+#[cfg(test)]
+fn grid_ids(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)]) -> Vec<(Option<&'static str>, &'static str)> {
+    grouped.iter().map(|(heading, c)| (*heading, c.id)).collect()
+}
+
+/// One icon of a grid drop-down at `rect` ([`ribbon::grid_cell`]).
+#[cfg(test)]
+fn dropdown_cell(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    c: &'static solidcraft_engine::CommandSpec,
+    rect: Rect,
+    pinned: bool,
+    paints: &mut Vec<PersistentRibbonPaint>,
+) -> Option<ribbon::MenuAction> {
+    let label = app.tr_label(c.label).to_string();
+    let (action, cell) = ribbon::grid_cell(ui, &grid_entry(app, c, &label, pinned), rect, &menu_style(app));
+    grid_cell_extras(app, ui, c, cell, paints);
+    action
 }
 
 #[cfg(test)]

@@ -195,7 +195,8 @@ pub fn label_width(painter: &egui::Painter, text: &str) -> f32 {
     let mut job = egui::text::LayoutJob::simple(
         text.to_owned(),
         FontId::proportional(solidcraft_theme::Tokens::get().font_body),
-        Color32::WHITE,
+        // Measured only: the colour plays no part in the width.
+        solidcraft_theme::Tokens::get().text,
         f32::INFINITY,
     );
     job.halign = egui::Align::Center;
