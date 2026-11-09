@@ -300,10 +300,7 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
 /// column of `available` width with `gap` between columns (#11089).
 fn fitting_columns(label_widths: &[f32], lead: f32, available: f32, gap: f32, wanted: usize) -> usize {
     let widest = label_widths.iter().copied().fold(0.0_f32, f32::max);
-    (2..=wanted.max(1))
-        .rev()
-        .find(|&columns| (available - gap * (columns - 1) as f32) / columns as f32 + 1e-3 >= lead + widest)
-        .unwrap_or(1)
+    (2..=wanted.max(1)).rev().find(|&columns| (available - gap * (columns - 1) as f32) / columns as f32 + 1e-3 >= lead + widest).unwrap_or(1)
 }
 
 /// Compact checkbox options in bounded columns. Tokens: `form_checkbox_height, control_fill/border, radius_sm, accent, on_accent, font_body, text, space_2/3/6/8/14`.
