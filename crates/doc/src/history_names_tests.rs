@@ -226,3 +226,33 @@ fn a_piece_of_a_blend_face_finds_it_once_it_is_one_face_again() {
     assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.1"), Some(Match::Piece));
     assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.2"), None, "another copy");
 }
+
+/// Two pieces of one face that a blend tells apart from the same face both answer to the stored
+/// name: one through the face itself, one through the blend that replaced its edge. The lookup
+/// chooses neither (#4325).
+#[test]
+fn two_pieces_told_apart_by_one_blend_both_answer_to_a_stored_name() {
+    let doc = crate::Document {
+        features: serde_json::from_value(serde_json::json!([
+            {"id": 1, "name": "Box1", "type": "box", "corner": [0, 0, 0], "length": "40", "width": "30", "height": "10"},
+            {"id": 2, "name": "Round", "type": "fillet", "edges": [[20, 0, 10]], "radius": "2"},
+            // A slot through the front wall, top to bottom: the wall is two pieces, and each keeps
+            // the round along its own top edge.
+            {"id": 3, "name": "Slot", "type": "box", "corner": [15, -1, 0], "length": "10", "width": "12", "height": "12"},
+            {"id": 4, "name": "SlotCut", "type": "combine", "target": "Body1", "tools": ["Body2"], "operation": "cut"}
+        ]))
+        .unwrap(),
+        ..crate::Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let names = crate::naming::names(body);
+    let stored = "F1:-y#[F1:+z]";
+    let answering: Vec<usize> =
+        (0..names.faces.len()).filter(|face| matches(&names, *face, stored).is_some_and(|level| level >= Match::Piece)).collect();
+    assert_eq!(answering.len(), 2, "{:?}", names.faces);
+    assert!(crate::name_lookup::locate_face_on_body(&state, Some("Body1"), stored, Vec3::new(5., 0., 4.)).is_none(), "two faces answer");
+}
