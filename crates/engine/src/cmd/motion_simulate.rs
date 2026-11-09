@@ -35,6 +35,7 @@ const MAX_DURATION: f64 = 3600.0;
 const MAX_OUTPUT: usize = 2_000_000;
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Simulate Motion", crate::checked!("motion.simulate", run))
+    .icon("play")
     .noundo()
     .enabled(enabled)
     .contract(&CONTRACT)
