@@ -1,8 +1,8 @@
 # blend.blend_setback: the scale search's attempts fill degree 9 first, as the corner's fill does (2026-11-07)
 
 - **Unit:** the setback fill (`blend::blend_setback`, no plan unit); its scale search `certified_scale` (`blend_setback/scale.rs`) and the degree loop of `graph_gk` (`blend_setback/graph.rs`).
-- **Problem (#2929):** `thousandth_scales_and_attempt_budget` took 129,085 QP steps on aarch64 for its first corner (rounds 2, 3, 4; setbacks 4.5, 4.75, 6), against a budget of 25,000 and 9,347 on x86-64; scale, attempts and QP count were right.
-- **Cause:** each attempt of the search fills its model with `Probe { fill: true }`, and `graph_gk` tried that probe's degrees from 3 up to 9, while the corner's own fill tries 9 first and stops where 9 proves the sector conditions unmet (#2344(b) as ruled; the streamed rows of #2783 kept the probe's order). A failing attempt so solved five programmes where one decides. On aarch64 one of them, of degree 7, took 120,513 of the 129,085 steps and ended unproven before degree 9 proved the conditions unmet (#2344's brief, the fork's 20b1c01, which counts there as main does).
+- **Problem (tangency-labs/solidcraft#13739):** `thousandth_scales_and_attempt_budget` took 129,085 QP steps on aarch64 for its first corner (rounds 2, 3, 4; setbacks 4.5, 4.75, 6), against a budget of 25,000 and 9,347 on x86-64; scale, attempts and QP count were right.
+- **Cause:** each attempt of the search fills its model with `Probe { fill: true }`, and `graph_gk` tried that probe's degrees from 3 up to 9, while the corner's own fill tries 9 first and stops where 9 proves the sector conditions unmet (tangency-labs/solidcraft#13831(b) as ruled; the streamed rows of tangency-labs/solidcore#2783 kept the probe's order). A failing attempt so solved five programmes where one decides. On aarch64 one of them, of degree 7, took 120,513 of the 129,085 steps and ended unproven before degree 9 proved the conditions unmet (tangency-labs/solidcraft#13831's brief, the fork's 20b1c01, which counts there as main does).
 
 ![Four rows of degree boxes: a failing attempt tries 3 to 9 on main and only 9 now; a certifying attempt tries 3 up to the least certifying degree d on main and 9, then 3 up to d, now.](blend.blend_setback--scale-search-degree-order.svg)
 
@@ -23,5 +23,5 @@
 - **Open:**
   - Step counts stay platform-dependent: only libm differs by target on this path, as far as read (the fan's `cos`/`sin`, the kernel direction's `atan2`, the Givens rotations' `hypot`); the fork's 3843ddb counts 6,425 steps for the first corner on aarch64 against 6,537 here.
   - An attempt whose degree 9 ends unproven still tries 3 to 8, so a long unproven dual run like the degree-7 one stays reachable.
-  - The feasibility and margin probe modes are unused (#2344(b): "probes deleted").
+  - The feasibility and margin probe modes are unused (tangency-labs/solidcraft#13831(b): "probes deleted").
 - **State:** fixed in the search's order; the aarch64 counts after the change are unmeasured here.
