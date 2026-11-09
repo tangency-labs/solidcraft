@@ -5787,3 +5787,16 @@ fn clearance_sizes_are_the_iso_273_table() {
     assert_eq!(cmd::clearance_diameter("M7", "normal"), None, "no M7 in ISO 273");
     assert_eq!(cmd::clearance_diameter("M4", "snug"), None, "no such fit");
 }
+
+/// The counterbore `head` makes, as the Hole dialog shows it before running the command: the
+/// head's diameter and height from the standard's table plus the default 0.5 mm gap each side
+/// and below. A size with its pitch finds the same head; a size or standard the tables do not
+/// have gives none.
+#[test]
+fn head_counterbore_is_the_head_plus_the_default_gap() {
+    assert_eq!(cmd::head_counterbore("ISO 4762", "M4"), Some((8.0, 4.5)), "socket head dk 7, k 4");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M4x0.7"), Some((8.6, 2.7)), "button head dk 7.6, k 2.2");
+    assert_eq!(cmd::head_counterbore("socket_head_cap_screw", "M4"), Some((8.0, 4.5)), "the family name parts.insert takes");
+    assert_eq!(cmd::head_counterbore("ISO 7380-1", "M2"), None, "ISO 7380-1 has no M2");
+    assert_eq!(cmd::head_counterbore("DIN 912", "M4"), None);
+}

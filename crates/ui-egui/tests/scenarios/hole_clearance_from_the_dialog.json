@@ -10,7 +10,7 @@
   {"click": {"handle": "dialog:Size:M4"}},
   {"expect": {"dialog": "error: None"}},
   {"click": {"handle": "dialog:OK"}},
-  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [29833.79, 1e-2]}},
+  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [29833.79, 1e-6]}},
   {"start": "solid.hole"},
   {"click": {"world": [10, 15, 20]}},
   {"click": {"handle": "dialog:Hole Tap Type"}},
@@ -18,5 +18,5 @@
   {"click": {"handle": "dialog:ui.clearance_fit"}},
   {"click": {"handle": "dialog:ui.clearance_fit:ui.fit_loose"}},
   {"click": {"handle": "dialog:OK"}},
-  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [29644.14, 1e-2]}}
+  {"expect": {"bodies": 1, "errors": 0, "dialog": null, "volume": [29644.14, 1e-6]}}
 ]

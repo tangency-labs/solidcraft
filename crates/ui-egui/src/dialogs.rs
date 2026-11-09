@@ -482,6 +482,12 @@ pub struct HoleOpts {
     /// A clearance hole's diameter when it is not the table's for the size and fit (the
     /// command's `diameter`); none: the table's.
     pub clearance_diameter: Option<String>,
+    /// A clearance counterbore's cap screw head, an index into
+    /// [`crate::dialogs_hole::SCREW_HEADS`] (the command's `head`); 0: none, typed by hand.
+    pub head: usize,
+    /// The head and bolt size the counterbore's diameter and depth were last filled for, so a
+    /// new head or size fills them again and typed values stay otherwise.
+    pub head_filled: Option<(usize, String)>,
     /// Custom nominal diameter and pitch being edited, separate from the saved designation.
     pub custom_thread: Option<crate::dialogs_thread::HoleThreadDraft>,
     /// The Single hole's reference edge distances (`hole_refs`, #37).
@@ -515,6 +521,8 @@ impl Default for HoleOpts {
             clearance_size: "M4".into(),
             clearance_fit: crate::dialogs_hole::NORMAL_FIT,
             clearance_diameter: None,
+            head: 0,
+            head_filled: None,
             custom_thread: None,
             refs: Default::default(),
             thread_full_depth: true,
@@ -6272,8 +6280,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 match *kind {
                     1 => {
-                        params["cb_diameter"] = json!(cb_diameter);
-                        params["cb_depth"] = json!(cb_depth);
+                        // A clearance counterbore sized to a cap screw's head sends the head,
+                        // and the diameter or depth only when they are not the head's.
+                        let head = if opts.clearance { crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1) } else { None };
+                        if let Some(standard) = head {
+                            if let Some(problem) = crate::dialogs_hole::head_problem(opts) {
+                                return Err(problem);
+                            }
+                            let (d, h) = crate::dialogs_hole::head_counterbore_texts(opts).unwrap_or_default();
+                            params["head"] = json!(standard);
+                            if cb_diameter.trim() != d {
+                                params["cb_diameter"] = json!(cb_diameter);
+                            }
+                            if cb_depth.trim() != h {
+                                params["cb_depth"] = json!(cb_depth);
+                            }
+                        } else {
+                            params["cb_diameter"] = json!(cb_diameter);
+                            params["cb_depth"] = json!(cb_depth);
+                        }
                         let bridge = opts.bridge.trim();
                         if !bridge.is_empty() {
                             if !app.session.doc.eval(bridge, ValueKind::Length).is_ok_and(|t| t > 0.0) {

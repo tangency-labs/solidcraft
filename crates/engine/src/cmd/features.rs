@@ -3109,6 +3109,18 @@ pub fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
     }
 }
 
+/// `head_gap`'s default: the room left each side of a cap screw's head and below it, in mm.
+const HEAD_GAP_MM: f64 = 0.5;
+
+/// The counterbore `head` makes for a cap screw of `size` (`M4`) with the default `head_gap`:
+/// its diameter and depth in mm, as the Hole dialog shows them before the command runs. `None`
+/// for a standard or a size the head tables do not have.
+pub fn head_counterbore(standard: &str, size: &str) -> Option<(f64, f64)> {
+    let (dk, k) = super::parts::cap_screw_head(standard, size).ok()?;
+    let round = |x: f64| (x * 1e6).round() / 1e6;
+    Some((round(dk + 2.0 * HEAD_GAP_MM), round(k + HEAD_GAP_MM)))
+}
+
 /// The counterbore a cap screw's head sits in (`head` with `clearance`): its diameter and depth.
 /// The head's dk and k come from the standard's table (ISO 4762 socket heads, ISO 7380-1 button
 /// heads, in `parts`), with `head_gap` (default 0.5 mm) added each side and below. A gap that
@@ -3123,7 +3135,7 @@ fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<(Expr, Expr)>
     let (dk, k) = super::parts::cap_screw_head(head, size).map_err(|e| bad(cmd, e))?;
     let gap = match (expr(p, "head_gap"), p.get("head_gap")) {
         (Some(g), _) => g,
-        (None, None | Some(Value::Null)) => Expr::new("0.5 mm"),
+        (None, None | Some(Value::Null)) => Expr::new(format!("{HEAD_GAP_MM} mm")),
         (None, v) => return Err(bad(cmd, format!("`head_gap` {}", expr_problem(v)))),
     };
     let g = s.doc.eval(gap.as_str(), Kind::Length).map_err(|e| bad(cmd, format!("head_gap: {e}")))?;

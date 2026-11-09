@@ -52,6 +52,59 @@ pub(crate) fn clearance_table_diameter(opts: &HoleOpts) -> Option<f64> {
     solidcraft_engine::cmd::clearance_diameter(&opts.clearance_size, fit)
 }
 
+/// The cap screw heads a clearance counterbore can be sized to: (label id, the command's `head`;
+/// none for a counterbore typed by hand).
+pub(crate) const SCREW_HEADS: [(&str, Option<&str>); 3] =
+    [("None", None), ("ui.head_socket", Some("ISO 4762")), ("ui.head_button", Some("ISO 7380-1"))];
+
+/// The counterbore the options' screw head makes for their bolt size, with the command's
+/// default gap: (diameter, depth) as the counterbore fields take them. None without a head, or
+/// for a size the head's standard does not have.
+pub(crate) fn head_counterbore_texts(opts: &HoleOpts) -> Option<(String, String)> {
+    let standard = SCREW_HEADS.get(opts.head)?.1?;
+    let (d, h) = solidcraft_engine::cmd::head_counterbore(standard, &opts.clearance_size)?;
+    Some((format!("{d} mm"), format!("{h} mm")))
+}
+
+/// Why a clearance counterbore's head gives no counterbore: the head's standard has no head for
+/// the bolt size. None when it does, or without a head.
+pub(crate) fn head_problem(opts: &HoleOpts) -> Option<String> {
+    let standard = SCREW_HEADS.get(opts.head)?.1?;
+    head_counterbore_texts(opts)
+        .is_none()
+        .then(|| solidcraft_ui_text::format("hole.no_head", &[("standard", standard), ("size", opts.clearance_size.trim())]))
+}
+
+/// A clearance counterbore's Head row: the cap screw head it seats (ISO 4762 socket head or
+/// ISO 7380-1 button head). A new head or bolt size fills the counterbore's diameter and depth
+/// with the head's and its gap, which stay editable; OK then sends `head`, and the diameter or
+/// depth only when they were changed.
+pub(crate) fn head_row(ui: &mut egui::Ui, opts: &mut HoleOpts, cb_diameter: &mut String, cb_depth: &mut String) {
+    crate::dialogs::form_row(ui, "ui.screw_head", |ui| {
+        let labels: Vec<&str> = SCREW_HEADS.iter().map(|h| h.0).collect();
+        let mut selected = opts.head.min(SCREW_HEADS.len() - 1);
+        crate::dialogs::combo(ui, "hole_screw_head", &labels, &mut selected);
+        opts.head = selected;
+    });
+    if opts.head == 0 {
+        opts.head_filled = None;
+        return;
+    }
+    let key = (opts.head, opts.clearance_size.trim().to_string());
+    if opts.head_filled.as_ref() != Some(&key) {
+        if let Some((d, h)) = head_counterbore_texts(opts) {
+            *cb_diameter = d;
+            *cb_depth = h;
+        }
+        opts.head_filled = Some(key);
+    }
+    if let Some(problem) = head_problem(opts) {
+        crate::dialogs::form_row(ui, "", |ui| {
+            ui.label(egui::RichText::new(problem).color(Tokens::get().warning));
+        });
+    }
+}
+
 /// The Clearance tap type's rows: the bolt size, the fit, and the hole's diameter, the table's
 /// as an editable default (as the tap drill is for a tapped hole). A new size or fit goes back
 /// to its own diameter. Returns whether Enter was accepted in the diameter field.
@@ -585,6 +638,22 @@ mod tests {
         assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), None);
         opts.tapped = false;
         assert_eq!(bore_diameter("4 mm", &opts, &stale_diameter), Some(4.0));
+    }
+
+    /// A clearance counterbore's head fills the counterbore with the command's own numbers, and
+    /// a bolt size the head's standard lacks is said in words instead of filling anything.
+    #[test]
+    fn screw_head_fills_the_counterbore_or_says_the_size_is_missing() {
+        let mut opts = HoleOpts { clearance: true, clearance_size: "M4".into(), ..HoleOpts::default() };
+        assert_eq!((head_counterbore_texts(&opts), head_problem(&opts)), (None, None), "no head, nothing to fill");
+        opts.head = 1;
+        assert_eq!(head_counterbore_texts(&opts), Some(("8 mm".to_string(), "4.5 mm".to_string())));
+        assert_eq!(head_problem(&opts), None);
+        opts.head = 2;
+        opts.clearance_size = "M2".into();
+        assert_eq!(head_counterbore_texts(&opts), None);
+        let problem = head_problem(&opts).unwrap_or_default();
+        assert!(problem.contains("ISO 7380-1") && problem.contains("M2"), "{problem}");
     }
 
     #[test]

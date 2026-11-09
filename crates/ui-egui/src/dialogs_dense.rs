@@ -708,7 +708,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
             }
         }
-        Kind::Hole { kind, opts, .. } => {
+        Kind::Hole { kind, opts, cb_diameter, cb_depth, .. } => {
             let doc = &app.session.doc;
             let eval = |e: &str, k| doc.eval(e, k).ok();
             // Each option shows the hole it makes while hovered (dialogs_hole::preview).
@@ -749,6 +749,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             // A clearance hole for a bolt: its size and fit set the diameter (ISO 273).
             if opts.clearance {
                 enter |= crate::dialogs_hole::clearance_rows(ui, opts);
+                // A counterbore for a cap screw: its head sets the counterbore (#12321).
+                if *kind == 1 {
+                    crate::dialogs_hole::head_row(ui, opts, cb_diameter, cb_depth);
+                }
             }
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread, &mut opts.drill);

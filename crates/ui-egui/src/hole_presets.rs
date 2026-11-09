@@ -65,13 +65,16 @@ fn named_runout(text: &str) -> bool {
 }
 
 /// A clearance hole for a bolt (the Clearance tap type): the size and fit the command takes,
-/// and the diameter only when it is not the table's for them.
+/// the diameter only when it is not the table's for them, and a counterbore's cap screw head
+/// (the command's `head`) when it is sized to one.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Clearance {
     size: String,
     fit: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     diameter: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    head: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -123,7 +126,8 @@ impl Preset {
             && (self.tapped
                 || !crate::dialogs_hole::CLEARANCE_FITS.iter().any(|f| f.1 == clearance.fit)
                 || solidcraft_engine::cmd::clearance_diameter(&clearance.size, &clearance.fit).is_none()
-                || clearance.diameter.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION)))
+                || clearance.diameter.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
+                || clearance.head.as_deref().is_some_and(|head| !crate::dialogs_hole::SCREW_HEADS.iter().any(|h| h.1 == Some(head))))
         {
             return Err("hole_presets.invalid_parameters");
         }
@@ -252,6 +256,7 @@ impl Preset {
                     size: opts.clearance_size.trim().into(),
                     fit: crate::dialogs_hole::CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| f.1).into(),
                     diameter: opts.clearance_diameter.as_deref().filter(|d| !d.trim().is_empty()).map(|d| portable_length(d, true)).transpose()?,
+                    head: crate::dialogs_hole::SCREW_HEADS.get(opts.head).and_then(|h| h.1).map(Into::into),
                 })
             } else {
                 None
@@ -340,11 +345,16 @@ impl Preset {
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
         opts.clearance = self.clearance.is_some();
+        opts.head = 0;
+        opts.head_filled = None;
         if let Some(clearance) = &self.clearance {
             opts.clearance_size.clone_from(&clearance.size);
             opts.clearance_fit =
                 crate::dialogs_hole::CLEARANCE_FITS.iter().position(|f| f.1 == clearance.fit).unwrap_or(crate::dialogs_hole::NORMAL_FIT);
             opts.clearance_diameter.clone_from(&clearance.diameter);
+            opts.head = crate::dialogs_hole::SCREW_HEADS.iter().position(|h| h.1.is_some() && h.1 == clearance.head.as_deref()).unwrap_or(0);
+            // The preset's own counterbore sizes stay: they count as filled for this head and size.
+            opts.head_filled = (opts.head != 0).then(|| (opts.head, opts.clearance_size.trim().to_string()));
         }
         opts.thread_full_depth = self.thread_options.full_length;
         opts.hand = if self.thread_options.handedness == "left" {
@@ -688,6 +698,43 @@ mod tests {
         older["clearance"] = serde_json::json!({"size": "M7", "fit": "normal"});
         let bad: Preset = serde_json::from_value(older).unwrap();
         assert_eq!(bad.recall(&mut Dialog::for_command(&harness.app, "solid.hole").unwrap()), Err("hole_presets.invalid_parameters"));
+    }
+
+    /// A clearance counterbore sized to a cap screw's head keeps the head (the command's
+    /// `head`) and its counterbore sizes: recalled, the head comes back and the sizes are not
+    /// filled again over the preset's. A head that is not in the list is refused, and a preset
+    /// without a clearance recalls no head.
+    #[test]
+    fn hole_presets_round_trip_a_clearance_counterbore_head() {
+        let harness = crate::scenario::Harness::new();
+        let doc = Document::default();
+        let mut dialog = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { kind, cb_diameter, cb_depth, opts, .. } = &mut dialog.kind else { panic!("expected Hole") };
+        *kind = 1;
+        *cb_diameter = "8 mm".into();
+        *cb_depth = "6 mm".into();
+        opts.clearance = true;
+        opts.clearance_size = "M4".into();
+        opts.head = 2;
+        let saved = serde_json::to_value(Preset::capture(&dialog, "Button", &doc).unwrap()).unwrap();
+        assert_eq!(saved["clearance"]["head"], "ISO 7380-1", "{saved}");
+        let read: Preset = serde_json::from_value(saved.clone()).unwrap();
+        let mut fresh = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        read.recall(&mut fresh).unwrap();
+        let Kind::Hole { cb_depth, opts, .. } = &fresh.kind else { panic!("expected Hole") };
+        assert_eq!((opts.head, cb_depth.as_str()), (2, "6 mm"));
+        assert_eq!(opts.head_filled, Some((2, "M4".to_string())), "the preset's sizes count as filled");
+        let mut odd = saved;
+        odd["clearance"]["head"] = serde_json::json!("DIN 912");
+        let bad: Preset = serde_json::from_value(odd).unwrap();
+        assert_eq!(bad.recall(&mut Dialog::for_command(&harness.app, "solid.hole").unwrap()), Err("hole_presets.invalid_parameters"));
+        let plain = Preset::capture(&Dialog::for_command(&harness.app, "solid.hole").unwrap(), "Plain", &doc).unwrap();
+        let mut headed = Dialog::for_command(&harness.app, "solid.hole").unwrap();
+        let Kind::Hole { opts, .. } = &mut headed.kind else { panic!("expected Hole") };
+        opts.head = 1;
+        plain.recall(&mut headed).unwrap();
+        let Kind::Hole { opts, .. } = &headed.kind else { panic!("expected Hole") };
+        assert_eq!((opts.head, opts.head_filled.as_ref()), (0, None));
     }
 
     /// A tapped preset keeps the thread's form and options: an Rc and an NPT size, modelled,
