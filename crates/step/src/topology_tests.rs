@@ -1274,3 +1274,22 @@ fn parabola_and_hyperbola_edges_bound_faces() {
         }
     }
 }
+
+/// A sliver face's parameter box is `OPEN_DOMAIN_SPAN` across even against a bound of its
+/// surface's natural range, and pcurves wholly outside that range stay an empty box (#12757).
+#[test]
+fn face_domain_sliver_at_a_natural_bound() {
+    use std::f64::consts::FRAC_PI_2;
+    let ball = BSurface::Sphere { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 5.0 };
+    let loop_at = |v0: f64, v1: f64| vec![vec![Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.1, v0], [0.3, v1]] }]];
+    for (v0, v1, want) in [
+        (-FRAC_PI_2, -FRAC_PI_2 + 1e-6, [-FRAC_PI_2, -FRAC_PI_2 + OPEN_DOMAIN_SPAN]),
+        (FRAC_PI_2 - 1e-6, FRAC_PI_2, [FRAC_PI_2 - OPEN_DOMAIN_SPAN, FRAC_PI_2]),
+    ] {
+        let d = face_domain(&ball, &loop_at(v0, v1)).unwrap();
+        assert!((d[1][0] - want[0]).abs() < 1e-12 && (d[1][1] - want[1]).abs() < 1e-12, "{v0} {v1}: {d:?}");
+    }
+    let mid = face_domain(&ball, &loop_at(0.0, 1e-6)).unwrap();
+    assert!((mid[1][1] - mid[1][0] - OPEN_DOMAIN_SPAN).abs() < 1e-12 && mid[1][0] < 0.0 && mid[1][1] > 1e-6, "{mid:?}");
+    assert!(face_domain(&ball, &loop_at(FRAC_PI_2 + 1e-4, FRAC_PI_2 + 2e-4)).is_err());
+}
