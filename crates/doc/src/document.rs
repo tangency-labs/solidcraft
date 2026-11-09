@@ -3962,12 +3962,35 @@ impl Document {
     }
 
     /// A component by id or name (0 / "root" is the design itself). A component that carries the
-    /// design's own name is found by that name: the design is still named by 0 / "root".
+    /// design's own name is found by that name: the design is still named by 0 / "root". An
+    /// ambiguous name finds nothing; commands use [`Self::resolve_component`] to report why.
     pub fn find_component(&self, key: &str) -> Option<u64> {
+        self.resolve_component(key).ok().flatten()
+    }
+
+    /// Resolve a component reference without choosing between components with the same name.
+    /// Canonical numeric ids (including ids sent as strings by the UI) and the root aliases
+    /// take priority over names. Other numeric spellings, such as `01`, remain names.
+    pub fn resolve_component(&self, key: &str) -> Result<Option<u64>> {
         if key == "0" || key.eq_ignore_ascii_case("root") {
-            return Some(0);
+            return Ok(Some(0));
         }
-        self.components.iter().find(|c| c.id.to_string() == key || c.name == key).map(|c| c.id).or_else(|| (key == self.name).then_some(0))
+        if let Ok(id) = key.parse::<u64>()
+            && id.to_string() == key
+            && self.components.iter().any(|component| component.id == id)
+        {
+            return Ok(Some(id));
+        }
+        let mut matches = self.components.iter().filter(|component| component.name == key);
+        let Some(first) = matches.next() else { return Ok((key == self.name).then_some(0)) };
+        if let Some(second) = matches.next() {
+            let mut ids = vec![first.id, second.id];
+            ids.extend(matches.map(|component| component.id));
+            ids.sort_unstable();
+            let ids = ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+            return Err(DocError::Invalid(format!("ambiguous component `{key}`; matching IDs: {ids}; use a numeric component ID")));
+        }
+        Ok(Some(first.id))
     }
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
