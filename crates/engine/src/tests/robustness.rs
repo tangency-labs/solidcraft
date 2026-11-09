@@ -1,6 +1,7 @@
 //! Cases found by the robustness runs (`solidcraft-cli fuzz`, docs/robustness.md), cut down to
 //! the steps that matter, and a fixed set of seeds that must keep running clean.
 
+use solidcraft_geom::tess::EvaluateMesh as _;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
@@ -385,7 +386,12 @@ fn knife_edge_part() -> Session {
 
 /// The volume of the session's bodies through the display plan.
 fn planned_volume(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate_mesh().measure().volume)
+        .sum()
 }
 
 /// #851: the arc's top edge runs out tangent to the back face at the knife edge's top. The blend

@@ -19,25 +19,29 @@
 //! Library code never panics, unwraps or indexes on input-derived data: a face the planner
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
+#[cfg(test)]
+mod fixtures;
 mod mesh;
+// SolidCraft's mesher, moved here (RFC 0003, item 1.1) and kept in SolidCraft's formatting so it
+// reads the same as its history.
+#[rustfmt::skip]
+mod mesher;
 mod par;
 mod plan;
-mod planner;
 mod pole;
 pub mod preview;
 mod ring;
 pub mod simplify;
+mod stats;
 mod tolerance;
 mod vec;
 
 pub use mesh::Mesh;
+pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
-pub use planner::{
-    Cap, CappedEdge, EdgeCap, MAX_ANGLE_BOUNDARY, OverTolerance, PlanStats, RefusedEdge,
-    RefusedFace, plan,
-};
 pub use pole::{AveragedPole, PoleNode, PoleRule};
+pub use stats::{Cap, CappedEdge, EdgeCap, OverTolerance, PlanStats, RefusedEdge, RefusedFace};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
 /// Why a body could not be planned. The messages are the ones the mesher has always reported.

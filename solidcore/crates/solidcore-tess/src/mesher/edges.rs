@@ -1,13 +1,14 @@
 //! Edge nodes: every edge of a body sampled once, so the faces on either side share the very
 //! same boundary points (watertight by construction).
 
-use solidcore_record::Vec3;
+use solidcore::Vec3;
 use solidcore_record::brep::{self, Curve};
-use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::prelude::*;
+use solidcore::eval::CurveEval;
+use solidcore_convert as kernel;
+use crate::vec::VecExt as _;
 
 use super::size::Rules;
-use crate::{KernelError, Result};
+use crate::{Result, TessError};
 
 /// Most nodes on one edge.
 pub(crate) const MAX_EDGE_NODES: usize = 20_000;
@@ -37,11 +38,11 @@ pub(crate) struct Nodes {
 /// exactly. A curve that does not evaluate somewhere on its interval is an error naming the
 /// edge.
 pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Result<Nodes> {
-    let fail = |why: String| KernelError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let vertex = |k: usize| {
         let v = edge.vertices.get(k).and_then(|&v| b.vertices.get(v as usize)).ok_or_else(|| fail("no such vertex".into()))?;
-        Ok::<Vec3, KernelError>(Vec3::new(v.point[0], v.point[1], v.point[2]))
+        Ok::<Vec3, TessError>(Vec3::new(v.point[0], v.point[1], v.point[2]))
     };
     let (front, back) = (vertex(0)?, vertex(1)?);
     let tol = rules.tol;
@@ -63,7 +64,8 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
         }
         return Ok(Nodes { points: pts, params, snapped: Vec::new() });
     }
-    let curve = CurveEval::new(edge.parameters()).map_err(|e| fail(e.to_string()))?;
+    let curve_value = kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?;
+    let curve = CurveEval::new(&curve_value).map_err(|e| fail(crate::eval_message(e)))?;
     let at =
         |t: f64| -> Result<Vec3> { curve.point(t).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {t}"))) };
     // A closed curve's chord between its ends is empty: start it from a few segments. An open
@@ -129,7 +131,7 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
 /// its two nodes. More than [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, is
 /// an error naming the edge.
 pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs: &[u32]) -> Result<()> {
-    let fail = |why: String| KernelError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let fail = |why: String| TessError::Failed(format!("tessellation: edge {ei}: {why}"));
     let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
     let mut segs = segs.to_vec();
     segs.sort_unstable();
@@ -140,7 +142,7 @@ pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs:
     }
     let curve = match edge.curve {
         Curve::Line { .. } => None,
-        _ => Some(CurveEval::new(edge.parameters()).map_err(|e| fail(e.to_string()))?),
+        _ => Some(CurveEval::new(&kernel::curve(edge.parameters()).map_err(|e| fail(e.to_string()))?).map_err(|e| fail(crate::eval_message(e)))?),
     };
     let (mut points, mut params) = (Vec::with_capacity(n + segs.len()), Vec::with_capacity(n + segs.len()));
     let mut next = segs.iter().copied().peekable();
@@ -178,7 +180,7 @@ pub(crate) fn snap(ei: usize, nodes: &mut Nodes, add: &[(f64, Vec3)]) -> Result<
     add.sort_by(|a, b| a.0.total_cmp(&b.0));
     add.dedup_by(|a, b| a.0 == b.0);
     if nodes.points.len() + add.len() > MAX_EDGE_NODES {
-        return Err(KernelError::Failed(format!("tessellation: edge {ei}: more than {MAX_EDGE_NODES} nodes")));
+        return Err(TessError::Failed(format!("tessellation: edge {ei}: more than {MAX_EDGE_NODES} nodes")));
     }
     let n = nodes.points.len().min(nodes.params.len());
     let (mut points, mut params) = (Vec::with_capacity(n + add.len()), Vec::with_capacity(n + add.len()));
@@ -218,13 +220,6 @@ pub(crate) fn turn(a: Vec3, b: Vec3) -> f64 {
 mod tests {
     use super::*;
 
-    fn record(b: crate::Result<crate::Body>) -> brep::Brep {
-        match b.and_then(|b| crate::brep_record(&b)) {
-            Ok(r) => r,
-            Err(e) => panic!("{e}"),
-        }
-    }
-
     fn sample(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> Nodes {
         match sample_edge(b, ei, rules, h) {
             Ok(n) => n,
@@ -241,7 +236,7 @@ mod tests {
 
     #[test]
     fn circle_edges_are_within_tolerance_and_end_on_vertices() {
-        let cyl = record(crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0));
+        let cyl = crate::fixtures::fixture("cylinder_r10_h5");
         for tol in [0.1, 0.01, 0.001] {
             for (ei, e) in cyl.edges.iter().enumerate() {
                 let pts = sample(&cyl, ei, &Rules { tol, max_len: f64::INFINITY, turn: None }, f64::INFINITY).points;
@@ -265,7 +260,7 @@ mod tests {
 
     #[test]
     fn edges_are_split_to_the_side_length_and_turn() {
-        let cyl = record(crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0));
+        let cyl = crate::fixtures::fixture("cylinder_r10_h5");
         for (ei, e) in cyl.edges.iter().enumerate() {
             let pts = sample(&cyl, ei, &Rules { tol: 1.0, max_len: f64::INFINITY, turn: None }, 1.2).points;
             for w in pts.windows(2) {
@@ -283,7 +278,7 @@ mod tests {
         // A coarse tolerance alone would leave a few long chords; a 30° facet angle keeps every
         // side within 30° of arc: at least 12 around each of the two circles.
         let thirty =
-            Rules { tol: 5.0, max_len: f64::INFINITY, turn: Some(crate::tess::size::Turn { angle: std::f64::consts::PI / 6.0, floor: 0.0 }) };
+            Rules { tol: 5.0, max_len: f64::INFINITY, turn: Some(crate::mesher::size::Turn { angle: std::f64::consts::PI / 6.0, floor: 0.0 }) };
         let sides: usize = (0..cyl.edges.len())
             .filter(|&ei| !matches!(cyl.edges[ei].curve, Curve::Line { .. }))
             .map(|ei| sample(&cyl, ei, &thirty, f64::INFINITY).points.len() - 1)
@@ -295,12 +290,8 @@ mod tests {
     /// face's pcurve of the edge puts each node on that face's surface, at the node.
     #[test]
     fn edge_nodes_carry_their_parameters_on_both_faces() {
-        let pin = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0);
-        let cross = crate::cylinder(Vec3::new(5.0, -1.0, 2.0), Vec3::Y, 1.0, 12.0);
-        let body = record(pin.and_then(|pin| {
-            let cross = cross?;
-            crate::boolean(&pin, &cross, crate::BoolOp::Cut)?.ok_or_else(|| crate::KernelError::Failed("cut: nothing left".into()))
-        }));
+        // A pin with a cross hole cut through it.
+        let body = crate::fixtures::fixture("cylinder_with_cross_hole");
         let rules = Rules { tol: 0.01, max_len: f64::INFINITY, turn: None };
         let curved = |f: u32| !matches!(body.faces[f as usize].surface, brep::Surface::Plane { .. } | brep::Surface::PlaneThrough { .. });
         let (mut edges, mut checked) = (0, 0);
@@ -314,9 +305,9 @@ mod tests {
                 let face = &body.faces[u.face as usize];
                 let brep::Loop::Edges { edges: loop_edges } = &face.loops[u.r#loop as usize] else { panic!("an edge loop") };
                 let oe = &loop_edges[u.position as usize];
-                let Ok((s, map)) = crate::tess::surface::eval_surface(face.parameters(), face.domain) else { panic!("evaluates") };
+                let Ok((s, map)) = crate::mesher::surface::eval_surface(face.parameters(), face.domain) else { panic!("evaluates") };
                 for (t, p) in n.params.iter().zip(&n.points) {
-                    let Some(q) = solidcraft_geom::brep::pcurve::eval(&oe.pcurve, *t) else { panic!("pcurve at {t}") };
+                    let Some(q) = solidcore_convert::curve2(&oe.pcurve).eval(*t) else { panic!("pcurve at {t}") };
                     let q = map.to_eval(q);
                     let Some((at, _, _)) = s.derivs(q[0], q[1]) else { panic!("evaluates") };
                     assert!(at.dist(*p) < 1e-6 + e.tolerance, "{at:?} vs {p:?}");

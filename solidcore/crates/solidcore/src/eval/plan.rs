@@ -12,11 +12,31 @@
 //! functions and derivatives), §4.5 (derivatives of a rational surface). [`uv`] finds the
 //! parameters of a point on an evaluator surface.
 
-use crate::Mesh;
-use crate::bspline::MAX_SPLINE_DEGREE;
-use crate::prelude::*;
-use solidcore_record::Vec3;
+// SolidCraft's plan evaluator, moved here from its geom crate as it is (RFC 0003, item 1.1), so
+// it stays the same text as its history; where it overlaps the rest of `solidcore::eval`, the two
+// are unified in a later step. Its slice indexing is within bounds the code checks before it;
+// checked access and the rest of the kernel's lints come with that step.
+#![allow(
+    missing_docs,
+    clippy::indexing_slicing,
+    clippy::neg_cmp_op_on_partial_ord,
+    clippy::assigning_clones,
+    clippy::doc_markdown,
+    clippy::return_self_not_must_use,
+    clippy::if_not_else,
+    clippy::map_unwrap_or,
+    clippy::cast_lossless,
+    clippy::must_use_candidate,
+    clippy::unreadable_literal,
+    clippy::many_single_char_names
+)]
 
+use super::vec::VecExt as _;
+use crate::math::Vec3;
+
+pub use super::spline::MAX_SPLINE_DEGREE;
+
+pub mod basis;
 pub mod partials;
 pub mod uv;
 
@@ -25,7 +45,7 @@ pub const MAX_EVAL_KNOTS: usize = 1 << 12;
 /// Most control points in one evaluable surface.
 pub const MAX_EVAL_POINTS: usize = 1 << 18;
 /// Basis slots for the highest evaluable degree.
-pub(crate) const W: usize = MAX_SPLINE_DEGREE + 1;
+pub const W: usize = MAX_SPLINE_DEGREE + 1;
 
 /// A rational B-spline curve: homogeneous control points `[x·w, y·w, z·w, w]`. Outside its
 /// domain it continues as the polynomial of the end span (a line extends for ever).
@@ -50,160 +70,6 @@ pub enum EvalSurface {
     /// along the unit `axis`, then mapped by the affine `transform` (row-major 3×4); with
     /// `swap` the parameters are exchanged first (the surface is evaluated at `(v, u)`).
     Revolved { profile: EvalCurve, origin: Vec3, axis: Vec3, transform: [[f64; 4]; 3], swap: bool },
-}
-
-/// One face's share of a [`TessPlan`].
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct FacePlan {
-    /// The B-rep face (index in the body's face order).
-    pub face: u32,
-    /// Index into [`TessPlan::surfaces`]; `None` when every position and normal is given.
-    pub surface: Option<u32>,
-    /// Parameters of every vertex.
-    pub uv: Vec<[f64; 2]>,
-    /// Positions of the first `fixed.len()` vertices: the shared edge nodes, used exactly as
-    /// they are so the neighbouring face gets bit-identical boundary points.
-    pub fixed: Vec<Vec3>,
-    /// Normals of every vertex, only for faces without an evaluable surface.
-    pub normals: Vec<Vec3>,
-    /// The face is reversed against its surface: normals point the other way.
-    pub flip: bool,
-    /// Counter-clockwise seen from outside (orientation already applied).
-    pub triangles: Vec<[u32; 3]>,
-}
-
-impl FacePlan {
-    /// Triangle `t` is on this face's own nodes (the evaluated mesh keeps only those).
-    fn has_nodes(&self, t: &[u32; 3]) -> bool {
-        t.iter().all(|&i| (i as usize) < self.uv.len())
-    }
-}
-
-/// A body's display tessellation, ready to evaluate.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TessPlan {
-    pub surfaces: Vec<EvalSurface>,
-    pub faces: Vec<FacePlan>,
-    /// B-rep edges as polylines (the shared edge nodes), in the body's edge order.
-    pub edges: Vec<Vec<Vec3>>,
-    /// Per edge: the faces it bounds.
-    pub edge_faces: Vec<Vec<u32>>,
-}
-
-impl TessPlan {
-    /// Evaluate on the CPU into an indexed mesh (vertices are shared within a face, not
-    /// across faces, so creases keep their own normals).
-    pub fn evaluate(&self) -> Mesh {
-        let mut out = Mesh::default();
-        for f in &self.faces {
-            let base = out.positions.len();
-            let surface = f.surface.and_then(|i| self.surfaces.get(i as usize));
-            for (k, uv) in f.uv.iter().enumerate() {
-                let (p, n) = match surface {
-                    Some(s) => s.eval(uv[0], uv[1]),
-                    None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
-                };
-                let p = f.fixed.get(k).copied().unwrap_or(p);
-                out.positions.push(p);
-                out.normals.push(if f.flip { -n } else { n });
-            }
-            for t in &f.triangles {
-                if f.has_nodes(t) {
-                    let at = |i: u32| u32::try_from(base + i as usize).unwrap_or(u32::MAX);
-                    out.triangles.push([at(t[0]), at(t[1]), at(t[2])]);
-                    out.tri_face.push(f.face);
-                }
-            }
-        }
-        out.edges = self.edges.clone();
-        out.edge_faces = self.edge_faces.clone();
-        out
-    }
-
-    /// Which of the body's `faces` faces have triangles in [`TessPlan::evaluate`]'s mesh,
-    /// without evaluating it.
-    pub fn faces_with_triangles(&self, faces: usize) -> Vec<bool> {
-        let mut has = vec![false; faces];
-        for f in &self.faces {
-            if f.triangles.iter().any(|t| f.has_nodes(t))
-                && let Some(h) = has.get_mut(f.face as usize)
-            {
-                *h = true;
-            }
-        }
-        has
-    }
-
-    /// Vertices across all faces.
-    pub fn vertex_count(&self) -> usize {
-        self.faces.iter().map(|f| f.uv.len()).sum()
-    }
-
-    /// This plan for the body moved by the rotation and translation `m` (by columns, the
-    /// translation in `m[3]`): the same parameters and triangles on the moved surfaces, so a
-    /// part placed many times is planned once. Only for proper rigid motions (a reflection
-    /// would turn the triangles inside out; the caller checks).
-    pub fn transformed(&self, m: &[[f64; 4]; 4]) -> TessPlan {
-        let vector = |v: Vec3| {
-            Vec3::new(
-                m[0][0] * v.x + m[1][0] * v.y + m[2][0] * v.z,
-                m[0][1] * v.x + m[1][1] * v.y + m[2][1] * v.z,
-                m[0][2] * v.x + m[1][2] * v.y + m[2][2] * v.z,
-            )
-        };
-        let point = |p: Vec3| vector(p) + Vec3::new(m[3][0], m[3][1], m[3][2]);
-        let surfaces = self
-            .surfaces
-            .iter()
-            .map(|s| match s {
-                EvalSurface::Plane { origin, du, dv } => EvalSurface::Plane { origin: point(*origin), du: vector(*du), dv: vector(*dv) },
-                EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => EvalSurface::Nurbs {
-                    degree: *degree,
-                    // An affine map keeps a surface closed or open.
-                    closed: *closed,
-                    knots: knots.clone(),
-                    count: *count,
-                    // Homogeneous: the translation scales with the weight.
-                    ctrl: ctrl
-                        .iter()
-                        .map(|c| {
-                            let q = vector(Vec3::new(c[0], c[1], c[2])) + Vec3::new(m[3][0], m[3][1], m[3][2]) * c[3];
-                            [q.x, q.y, q.z, c[3]]
-                        })
-                        .collect(),
-                },
-                EvalSurface::Revolved { profile, origin, axis, transform, swap } => {
-                    // `m` (as rows) after the surface's own affine map.
-                    let r = |i: usize| [m[0][i], m[1][i], m[2][i], m[3][i]];
-                    let rows = [r(0), r(1), r(2)];
-                    let t = transform;
-                    let composed = rows.map(|row| {
-                        let mut out = [0.0; 4];
-                        for (j, slot) in out.iter_mut().enumerate() {
-                            *slot = (0..3).map(|k| row[k] * t[k][j]).sum::<f64>() + if j == 3 { row[3] } else { 0.0 };
-                        }
-                        out
-                    });
-                    EvalSurface::Revolved { profile: profile.clone(), origin: *origin, axis: *axis, transform: composed, swap: *swap }
-                }
-            })
-            .collect();
-        let faces = self
-            .faces
-            .iter()
-            .map(|f| FacePlan {
-                fixed: f.fixed.iter().map(|p| point(*p)).collect(),
-                normals: f.normals.iter().map(|n| vector(*n)).collect(),
-                ..f.clone()
-            })
-            .collect();
-        TessPlan {
-            surfaces,
-            faces,
-            edges: self.edges.iter().map(|e| e.iter().map(|p| point(*p)).collect()).collect(),
-            edge_faces: self.edge_faces.clone(),
-        }
-    }
 }
 
 impl EvalCurve {
@@ -275,12 +141,10 @@ impl EvalSurface {
         let h = 1e-6 * (1.0 + u.abs().max(v.abs()));
         let inside = |d: usize, t: f64, s: f64| self.interval(d).is_none_or(|(lo, hi)| (lo..=hi).contains(&(t + s * h)));
         for (su, sv) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-            if inside(0, u, su)
-                && inside(1, v, sv)
-                && let Some((_, a, b)) = self.derivs(u + su * h, v + sv * h)
-                && let Some(n) = self.oriented(a.cross(b)).normalized()
-            {
-                return (p, n);
+            if inside(0, u, su) && inside(1, v, sv) {
+                if let Some(n) = self.derivs(u + su * h, v + sv * h).and_then(|(_, a, b)| self.oriented(a.cross(b)).normalized()) {
+                    return (p, n);
+                }
             }
         }
         (p, Vec3::Z)
@@ -315,21 +179,20 @@ impl EvalSurface {
             let d = usize::from(*swap);
             let range = self.interval(d);
             let mut out = uv;
-            if let (Some(r), Some(x)) = (range, out.get_mut(d))
-                && !(r.0..=r.1).contains(x)
-                && uv::closed_curve(profile)
-            {
-                *x = uv::wrap_into(*x, r);
+            if let (Some(r), Some(x)) = (range, out.get_mut(d)) {
+                if !(r.0..=r.1).contains(x) && uv::closed_curve(profile) {
+                    *x = uv::wrap_into(*x, r);
+                }
             }
             return out;
         }
         let EvalSurface::Nurbs { closed, .. } = self else { return uv };
         let mut out = uv;
         for d in 0..2 {
-            if let (true, Some(r)) = (closed[d], self.interval(d))
-                && !(r.0..=r.1).contains(&uv[d])
-            {
-                out[d] = uv::wrap_into(uv[d], r);
+            if let (true, Some(r)) = (closed[d], self.interval(d)) {
+                if !(r.0..=r.1).contains(&uv[d]) {
+                    out[d] = uv::wrap_into(uv[d], r);
+                }
             }
         }
         out
@@ -385,18 +248,18 @@ impl EvalSurface {
 }
 
 /// The values and first two derivatives of the `p + 1` basis functions of degree `p` alive at
-/// `t` ([`crate::bspline::basis_derivatives`]), and the span they live on. A `t` past an end of
+/// `t` ([`basis::basis_derivatives`]), and the span they live on. A `t` past an end of
 /// the knot range by no more than rounding (a boundary point carried off by a pcurve's
 /// evaluation, which [`nurbs_derivs`] takes as it is) is that end: the basis functions are zero
 /// outside their supports, so the derivatives there would not exist.
 fn basis_second(knots: &[f64], p: usize, n: usize, t: f64) -> Option<(usize, Vec<[f64; 3]>)> {
-    let (first, ders) = crate::bspline::basis_derivatives(knots, p, n, onto_knots(knots, p, n, t)?, 2)?;
+    let (first, ders) = basis::basis_derivatives(knots, p, n, onto_knots(knots, p, n, t)?, 2)?;
     Some((first + p, ders.iter().map(|d| Some([*d.first()?, *d.get(1)?, *d.get(2)?])).collect::<Option<_>>()?))
 }
 
 /// `t`, or the end of the knot range of a spline of degree `p` over `n` points when `t` is past
 /// it by no more than rounding ([`basis_second`]).
-pub(crate) fn onto_knots(knots: &[f64], p: usize, n: usize, t: f64) -> Option<f64> {
+pub fn onto_knots(knots: &[f64], p: usize, n: usize, t: f64) -> Option<f64> {
     let (&lo, &hi) = (knots.get(p)?, knots.get(n)?);
     let slack = BOUNDARY_ROUNDING * (hi - lo).abs().max(lo.abs()).max(hi.abs()).max(1.0);
     Some(if t < lo && t >= lo - slack {
@@ -502,12 +365,11 @@ fn nurbs_derivs(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ct
 
 /// The knot span used at `t`: the last non-empty span starting at or before `t`, clamped to
 /// the valid spans `p ≤ k < n` so parameters just outside the domain extend the end spans.
-pub(crate) fn span_of(knots: &[f64], p: usize, n: usize, t: f64) -> usize {
+pub fn span_of(knots: &[f64], p: usize, n: usize, t: f64) -> usize {
     let mut k = p;
     for i in p..n {
-        if let (Some(&a), Some(&b)) = (knots.get(i), knots.get(i + 1))
-            && a < b
-        {
+        let (Some(&a), Some(&b)) = (knots.get(i), knots.get(i + 1)) else { continue };
+        if a < b {
             if a <= t {
                 k = i;
             } else {
@@ -547,7 +409,7 @@ fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64, n: &mut [f64; W]) ->
 /// (NURBS Book eq. 2.7, from the degree p − 1 functions on the same span). `ders[0][j]` is
 /// `N_{span−p+j}`, `ders[1][j]` its derivative. One-dimensional tables, as the GPU twin keeps
 /// them, so a high degree costs its own work only.
-pub(crate) fn basis_ders(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[[f64; W]; 2]> {
+pub fn basis_ders(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[[f64; W]; 2]> {
     let mut ders = [[0.0f64; W]; 2];
     basis_ders_into(knots, span, p, t, &mut ders)?;
     Some(ders)
@@ -591,53 +453,6 @@ mod tests {
 
     fn close(a: Vec3, b: Vec3, tol: f64) -> bool {
         a.dist(b) <= tol
-    }
-
-    /// A moved plan evaluates to the plan's points moved, on a rational spline surface (the
-    /// translation scales with each weight) and a revolved one (composed with its own map).
-    #[test]
-    fn a_transformed_plan_evaluates_to_the_moved_points() {
-        let (c, s) = (0.6f64.cos(), 0.6f64.sin());
-        // Turned about z by 0.6 rad, then moved: by columns.
-        let m = [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, -2.0, 7.0, 1.0]];
-        let apply = |p: Vec3| Vec3::new(c * p.x - s * p.y + 5.0, s * p.x + c * p.y - 2.0, p.z + 7.0);
-        let w = std::f64::consts::FRAC_1_SQRT_2;
-        let nurbs = EvalSurface::nurbs(
-            [2, 1],
-            [vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 1.0, 1.0]],
-            [3, 2],
-            vec![[1.0, 0.0, 0.0, 1.0], [w, w, 0.0, w], [0.0, 1.0, 0.0, 1.0], [1.0, 0.0, 2.0, 1.0], [w, w, 2.0 * w, w], [0.0, 1.0, 2.0, 1.0]],
-        );
-        let revolved = EvalSurface::Revolved {
-            profile: line(Vec3::new(2.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0)),
-            origin: Vec3::ZERO,
-            axis: Vec3::Z,
-            transform: [[1.0, 0.0, 0.0, 1.0], [0.0, 0.0, -1.0, 2.0], [0.0, 1.0, 0.0, 3.0]],
-            swap: false,
-        };
-        let face = |i: u32| FacePlan {
-            face: i,
-            surface: Some(i),
-            uv: vec![[0.1, 0.2], [0.7, 0.4], [0.3, 0.9]],
-            fixed: vec![Vec3::new(1.0, 2.0, 3.0)],
-            triangles: vec![[0, 1, 2]],
-            ..Default::default()
-        };
-        let plan = TessPlan {
-            surfaces: vec![nurbs, revolved],
-            faces: vec![face(0), face(1)],
-            edges: vec![vec![Vec3::new(1.0, 1.0, 1.0)]],
-            edge_faces: vec![vec![0, 1]],
-        };
-        let (a, b) = (plan.evaluate(), plan.transformed(&m).evaluate());
-        assert_eq!(a.triangles, b.triangles);
-        for (p, q) in a.positions.iter().zip(&b.positions) {
-            assert!(close(apply(*p), *q, 1e-12), "{p:?} -> {q:?}");
-        }
-        for (n, k) in a.normals.iter().zip(&b.normals) {
-            assert!(close(apply(*n) - apply(Vec3::ZERO), *k, 1e-12));
-        }
-        assert!(close(apply(a.edges[0][0]), b.edges[0][0], 1e-12));
     }
 
     fn line(a: Vec3, b: Vec3) -> EvalCurve {
@@ -738,42 +553,6 @@ mod tests {
     }
 
     #[test]
-    fn cubic_nurbs_matches_the_geom_surface() {
-        // Cross-check the evaluator against `bspline::NurbsSurface::eval` on a weighted patch.
-        let knots = [vec![0.0, 0.0, 0.0, 0.0, 0.4, 1.0, 1.0, 1.0, 1.0], vec![0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 2.0]];
-        let (nu, nv) = (5, 4);
-        let mut pts = Vec::new();
-        let mut wts = Vec::new();
-        for j in 0..nv {
-            for i in 0..nu {
-                pts.push(Vec3::new(i as f64, j as f64, ((i * 7 + j * 3) % 5) as f64 * 0.3));
-                wts.push(1.0 + ((i + 2 * j) % 3) as f64 * 0.25);
-            }
-        }
-        let Ok(reference) = crate::bspline::NurbsSurface::new([3, 2], knots.clone(), &pts, &wts) else { panic!("valid surface") };
-        let ctrl = reference.homogeneous().iter().map(|h| [h.x, h.y, h.z, h.w]).collect();
-        let s = EvalSurface::nurbs([3, 2], knots, [nu, nv], ctrl);
-        for i in 0..=8 {
-            for j in 0..=8 {
-                let (u, v) = (i as f64 / 8.0, j as f64 / 4.0);
-                let Ok(want) = reference.eval(u, v) else { panic!("in domain") };
-                let Some((p, du, dv)) = s.derivs(u, v) else { panic!("evaluates") };
-                assert!(close(p, want, 1e-12), "({u}, {v}): {p:?} vs {want:?}");
-                // Derivatives against central differences (one-sided at the domain ends).
-                let h = 1e-6;
-                let fd = |a: (f64, f64), b: (f64, f64)| {
-                    let (Some(pa), Some(pb)) = (s.derivs(a.0, a.1), s.derivs(b.0, b.1)) else { panic!("evaluates") };
-                    (pb.0 - pa.0) * (1.0 / (b.0 - a.0 + b.1 - a.1))
-                };
-                let fu = fd((u.max(h) - h, v), ((u + h).min(1.0), v));
-                let fv = fd((u, v.max(h) - h), (u, (v + h).min(2.0)));
-                assert!(close(du, fu, 1e-4 * (1.0 + du.len())), "du at ({u}, {v}): {du:?} vs {fu:?}");
-                assert!(close(dv, fv, 1e-4 * (1.0 + dv.len())), "dv at ({u}, {v}): {dv:?} vs {fv:?}");
-            }
-        }
-    }
-
-    #[test]
     fn hostile_surfaces_do_not_panic() {
         let bad = [
             EvalSurface::nurbs([9, 1], [vec![0.0; 3], vec![0.0; 3]], [1, 1], vec![]),
@@ -794,41 +573,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn evaluate_uses_fixed_points_and_drops_bad_indices() {
-        let plan = TessPlan {
-            surfaces: vec![EvalSurface::Plane { origin: Vec3::ZERO, du: Vec3::X, dv: Vec3::Y }],
-            faces: vec![FacePlan {
-                face: 3,
-                surface: Some(0),
-                uv: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
-                fixed: vec![Vec3::new(0.0, 0.0, 1e-9)],
-                normals: vec![],
-                flip: true,
-                triangles: vec![[0, 1, 2], [0, 1, 7]],
-            }],
-            edges: vec![],
-            edge_faces: vec![],
-        };
-        let m = plan.evaluate();
-        assert_eq!(m.positions.len(), 3);
-        assert_eq!(m.positions.first().copied(), Some(Vec3::new(0.0, 0.0, 1e-9)));
-        assert_eq!(m.triangles, vec![[0, 1, 2]]);
-        assert_eq!(m.tri_face, vec![3]);
-        assert!(m.normals.iter().all(|n| close(*n, -Vec3::Z, 1e-12)));
-        // Faces with triangles, counted without evaluating, are the faces the mesh has: not a
-        // face whose only triangle is off its nodes, nor one with none, nor one out of range.
-        let mut plan = plan;
-        let only = |face: u32, triangles: Vec<[u32; 3]>| FacePlan { face, uv: vec![[0.0, 0.0]; 3], triangles, ..Default::default() };
-        plan.faces.extend([only(0, vec![[0, 1, 9]]), only(1, vec![]), only(2, vec![[2, 1, 0]]), only(7, vec![[0, 1, 2]])]);
-        let has = plan.faces_with_triangles(5);
-        let mut evaluated = vec![false; 5];
-        for f in plan.evaluate().tri_face {
-            if let Some(h) = evaluated.get_mut(f as usize) {
-                *h = true;
-            }
-        }
-        assert_eq!(has, evaluated);
-        assert_eq!(has, vec![false, false, true, true, false]);
-    }
 }

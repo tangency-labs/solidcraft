@@ -5,7 +5,7 @@
 //! added. The boundary stays exactly the shared edge nodes, so the face meets its neighbours
 //! exactly, and only the band next to the boundary is irregular (cut-cell meshing).
 
-use solidcraft_geom::Ring;
+use crate::ring::Ring;
 
 use super::cdt;
 use super::motorcycle::Trace;

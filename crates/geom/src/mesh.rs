@@ -131,6 +131,15 @@ pub struct Mesh {
     pub edge_faces: Vec<Vec<u32>>,
 }
 
+/// A mesh solidcore-tess evaluated, field for field.
+impl From<solidcore_tess::Mesh> for Mesh {
+    fn from(m: solidcore_tess::Mesh) -> Mesh {
+        let solidcore_tess::Mesh { positions, normals, triangles, tri_face, edges, display_only_edges, seams, smooth_edges, sharp_edges, edge_faces } =
+            m;
+        Mesh { positions, normals, triangles, tri_face, edges, display_only_edges, seams, smooth_edges, sharp_edges, edge_faces }
+    }
+}
+
 /// A triangle with its bounding box, as [`find_close_pair`] takes them.
 pub type BoxedTriangle = ([Vec3; 3], Aabb3);
 

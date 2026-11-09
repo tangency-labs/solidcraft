@@ -535,9 +535,9 @@ fn pack(plans: &[&TessPlan]) -> Result<Packed> {
             EvalSurface::Plane { origin, du, dv } => {
                 head[0] = 0;
                 head[8] = word(data.len())?;
-                push3(&mut data, *origin);
-                push3(&mut data, *du);
-                push3(&mut data, *dv);
+                push3(&mut data, solidcraft_geom::tess::from_kernel(*origin));
+                push3(&mut data, solidcraft_geom::tess::from_kernel(*du));
+                push3(&mut data, solidcraft_geom::tess::from_kernel(*dv));
             }
             EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => {
                 head[0] = 1;
@@ -561,8 +561,8 @@ fn pack(plans: &[&TessPlan]) -> Result<Packed> {
                 head[5] = k;
                 head[7] = c;
                 head[8] = word(data.len())?;
-                push3(&mut data, *origin);
-                push3(&mut data, *axis);
+                push3(&mut data, solidcraft_geom::tess::from_kernel(*origin));
+                push3(&mut data, solidcraft_geom::tess::from_kernel(*axis));
                 data.extend(transform.iter().flatten().map(|x| *x as f32));
                 head[9] = u32::from(*swap);
                 let m = transform;

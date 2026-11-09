@@ -99,6 +99,8 @@ mod outline_tests;
 mod par;
 pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
+mod display_plan_tests;
+#[cfg(test)]
 mod pinch_tests;
 #[cfg(test)]
 mod planar_faces_tests;
@@ -140,7 +142,6 @@ mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
 mod tangent_edge;
-mod tess;
 #[cfg(test)]
 mod thin_face_tests;
 #[cfg(test)]
@@ -258,6 +259,17 @@ pub enum KernelError {
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;
+
+/// The mesher's error as the kernel's: the same words.
+impl From<solidcore_tess::TessError> for KernelError {
+    fn from(e: solidcore_tess::TessError) -> KernelError {
+        match e {
+            solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
+            solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
+            solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+        }
+    }
+}
 
 /// Why a kernel step failed: a message, or an error of the solidcore wrapper, which may be a
 /// panic the wrapper caught ([`solidcraft_smlib::Error::Internal`]).

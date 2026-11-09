@@ -2,7 +2,7 @@
 //! parameters, that cross another chord of the face although the curves they stand for do not
 //! (two curves running closer together than their chords sag).
 
-use solidcraft_geom::tess::EvalSurface;
+use solidcore::eval::plan::EvalSurface;
 
 use super::seam;
 use super::uv;

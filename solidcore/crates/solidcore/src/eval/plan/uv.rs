@@ -10,8 +10,8 @@
 //! whole circle).
 
 use super::EvalSurface;
-use crate::prelude::*;
-use solidcore_record::Vec3;
+use crate::eval::vec::VecExt as _;
+use crate::math::Vec3;
 
 /// The parameter box of a surface and its periods.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -249,9 +249,7 @@ pub fn project_with(s: &EvalSurface, dom: &Domain, starts: &Starts, p: Vec3, hin
         return (uv[0].is_finite() && uv[1].is_finite()).then_some(uv);
     }
     let mut best: Option<([f64; 2], f64)> = None;
-    if let Some(h) = hint
-        && let Some((uv, d)) = newton(s, dom, p, h)
-    {
+    if let Some((uv, d)) = hint.and_then(|h| newton(s, dom, p, h)) {
         if d <= accept {
             return Some(uv);
         }
@@ -272,10 +270,10 @@ pub fn project_with(s: &EvalSurface, dom: &Domain, starts: &Starts, p: Vec3, hin
     }
     near.sort_by(by_distance);
     for start in near.iter().filter_map(|(_, i)| grid.get(*i).map(|(_, uv)| uv)) {
-        if let Some((uv, d)) = newton(s, dom, p, *start)
-            && best.is_none_or(|(_, bd)| d < bd)
-        {
-            best = Some((uv, d));
+        if let Some((uv, d)) = newton(s, dom, p, *start) {
+            if best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((uv, d));
+            }
         }
         if accept.is_finite() && best.is_some_and(|(_, d)| d <= accept) {
             break;
@@ -367,7 +365,7 @@ pub fn collapsed(speed: [f64; 2], dom: &Domain, reach: f64) -> [bool; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tess::EvalCurve;
+    use crate::eval::plan::EvalCurve;
 
     fn cylinder() -> EvalSurface {
         EvalSurface::Revolved {

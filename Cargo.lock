@@ -4190,11 +4190,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-convert"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-record"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "solidcore-tess"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "serde",
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-record",
+ "spade",
  "thiserror 2.0.21",
 ]
 
@@ -4350,7 +4371,9 @@ version = "0.40.0-rc.3"
 dependencies = [
  "serde",
  "serde_json",
+ "solidcore",
  "solidcore-record",
+ "solidcore-tess",
  "thiserror 2.0.21",
 ]
 
@@ -4414,6 +4437,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore-record",
+ "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",

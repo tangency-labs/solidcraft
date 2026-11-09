@@ -47,6 +47,8 @@ solidcore = { path = "solidcore/crates/solidcore" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Vendored with solidcore, in the same subtree.
 solidcore-record = { path = "solidcore/crates/solidcore-record" }
+# The one mesher (solidcore's layers §2), SolidCraft's, moved into the subtree (RFC 0003, item 1.1).
+solidcore-tess = { path = "solidcore/crates/solidcore-tess" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 

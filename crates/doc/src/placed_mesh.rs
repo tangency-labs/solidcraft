@@ -293,6 +293,7 @@ fn proper_rigid(m: &crate::Mat) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_geom::tess::EvaluateMesh as _;
 
     #[test]
     fn mesh_outlines_keep_boundaries_and_creases_without_smooth_facet_lines() {
@@ -433,10 +434,10 @@ mod tests {
             let plans: Vec<_> = placed.iter().map(|p| p.display_plan_at(q).unwrap()).collect();
             assert!(source.plan.get(q.index()).unwrap().get().is_some(), "placing plans the definition, in its own cell");
             let own = source.display_plan_at(q).unwrap();
-            let local = own.evaluate();
+            let local = own.evaluate_mesh();
             for (m, plan) in [a, b].iter().zip(&plans) {
                 assert!(!Arc::ptr_eq(plan, &own));
-                let moved = plan.evaluate();
+                let moved = plan.evaluate_mesh();
                 assert_eq!(moved.triangles, local.triangles);
                 for (p, q) in local.positions.iter().zip(&moved.positions) {
                     assert!(crate::apply_point(m, *p).dist(*q) < 1e-9, "{p:?} -> {q:?}");
