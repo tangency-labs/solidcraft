@@ -95,15 +95,16 @@ pub(crate) fn flange_corner_sources(before: &ModelState, after: &ModelState, edi
     let mut corners = Vec::new();
     for sheet in &after.surface_sheets {
         let Some(previous) = before.surface_sheets.iter().find(|previous| previous.body == sheet.body) else { continue };
+        let Some(body) = after.body(&sheet.body) else { continue };
         let belongs = |source: &SheetEdgeName| {
-            let Ok(index) = sheet.bend_joint_for_edge_name(source) else { return false };
-            let Some(joint) = sheet.sheet.joints.get(index) else { return false };
+            let Ok(index) = sheet.bend_joint_for_edge_name(source, body) else { return false };
+            let Some(maker) = sheet.bend_feature(index) else { return false };
             match editing {
-                Some(feature) => sheet.sheet.panels.get(joint.b.panel).is_some_and(|panel| panel.name.starts_with(&format!("F{feature}."))),
-                None => index >= previous.sheet.joints.len() && joint.a.panel < previous.sheet.panels.len(),
+                Some(feature) => maker == feature,
+                None => !(0..previous.sheet.joints.len()).any(|joint| previous.bend_feature(joint) == Some(maker)),
             }
         };
-        corners.extend(sheet.corner_join_sources().into_iter().filter(|sources| sources.iter().any(belongs)));
+        corners.extend(sheet.corner_join_sources(body).into_iter().filter(|sources| sources.iter().any(belongs)));
     }
     corners
 }
@@ -1271,9 +1272,10 @@ fn corner_sources(app: &SolveApp, inputs: &[SelInput]) -> Result<(String, SheetE
     let source = body.source_name.as_deref().unwrap_or(&body.name);
     let state = app.session.model.state();
     let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == source).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
+    let built = state.body(source).ok_or_else(|| app.tr("ui.surface_corner_same_body"))?;
     let [covering_joint, covered_joint] = sheet.corner_joints_at(&body.body, [*covering, *covered], 1e-6).map_err(|error| error.to_string())?;
-    let covering = sheet.bend_source_edge(covering_joint).map_err(|error| error.to_string())?;
-    let covered = sheet.bend_source_edge(covered_joint).map_err(|error| error.to_string())?;
+    let covering = sheet.bend_source_edge(covering_joint, built).map_err(|error| error.to_string())?;
+    let covered = sheet.bend_source_edge(covered_joint, built).map_err(|error| error.to_string())?;
     Ok((source.to_string(), covering, covered))
 }
 

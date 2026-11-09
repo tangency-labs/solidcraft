@@ -19,6 +19,7 @@ use solidcraft_kernel::BoolOp;
 
 use crate::sheet::{HeightFrom, WHOLE_EDGE};
 use crate::sheet_surface::entry;
+use crate::sheet_surface_convert::SheetPart;
 use crate::{DocError, FoldSide, Result, SurfaceSheet};
 
 fn err<T>(msg: impl Into<String>) -> Result<T> {
@@ -31,57 +32,54 @@ enum SheetPanelPart {
     Name(String),
 }
 
-/// A sheet rim identity, `<panel>:rim.<rim>:<top|bottom>`. The panel's maker IDs
-/// follow feature copies; the rim and side keep their meanings. This is not a kernel edge name.
+/// A central edge name, `<face>|<face>`, retained exactly as the naming engine gave it.
+/// Feature-id tokens follow feature copies; this type never assigns names to sheet parts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SheetEdgeName {
-    panel: Vec<SheetPanelPart>,
-    rim: String,
-    far_face: bool,
+    parts: Vec<SheetPanelPart>,
 }
 
 impl SheetEdgeName {
-    /// Reads the same rim identity saved by sheet flange and hem picks.
+    /// Reads a central edge name. Old sheet-only rim names must be reselected.
     pub fn parse(text: &str) -> Result<Self> {
-        let Some((rest, side)) = text.rsplit_once(':') else { return err("a sheet edge needs a panel, rim and side") };
-        let Some((panel, rim)) = rest.rsplit_once(':') else { return err("a sheet edge needs a panel, rim and side") };
-        let Some(rim) = rim.strip_prefix("rim.").filter(|rim| !rim.is_empty()) else { return err("a sheet edge needs a named rim") };
-        let far_face = match side {
-            "top" => false,
-            "bottom" => true,
-            _ => return err("a sheet edge side must be top or bottom"),
-        };
-        let mut parts = Vec::new();
-        for part in panel.split('.') {
-            if part.is_empty() || part.contains(':') || part.contains('|') {
-                return err("a sheet edge needs a named panel");
-            }
-            let part = match part.strip_prefix('F').filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())) {
-                Some(id) => {
-                    SheetPanelPart::Feature(crate::FeatureId(id.parse().map_err(|_| DocError::Invalid("sheet maker ID is too large".into()))?))
-                }
-                None => SheetPanelPart::Name(part.to_owned()),
-            };
-            parts.push(part);
+        if !text.contains('|') || text.split('|').any(|face| face.trim().is_empty()) {
+            return err("reselect the corner: its source must be a central edge name, <face>|<face>");
         }
-        Ok(Self { panel: parts, rim: rim.to_owned(), far_face })
-    }
-
-    fn panel_name(&self) -> String {
-        self.panel
-            .iter()
-            .map(|part| match part {
-                SheetPanelPart::Feature(id) => format!("F{}", id.0),
-                SheetPanelPart::Name(name) => name.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join(".")
+        let mut parts = Vec::new();
+        let mut start = 0;
+        for (index, _) in text.match_indices('F') {
+            if text.get(..index).and_then(|prefix| prefix.chars().next_back()).is_some_and(|ch| ch.is_alphanumeric() || ch == '_') {
+                continue;
+            }
+            let Some(tail) = text.get(index + 1..) else { continue };
+            let digits = tail.bytes().take_while(u8::is_ascii_digit).count();
+            if digits == 0 || !matches!(tail.as_bytes().get(digits), Some(b':' | b'.')) {
+                continue;
+            }
+            let Some(number) = tail.get(..digits) else { continue };
+            let id = crate::FeatureId(number.parse().map_err(|_| DocError::Invalid("feature ID is too large".into()))?);
+            if let Some(literal) = text.get(start..index).filter(|literal| !literal.is_empty()) {
+                parts.push(SheetPanelPart::Name(literal.to_owned()));
+            }
+            parts.push(SheetPanelPart::Feature(id));
+            start = index + 1 + digits;
+        }
+        if let Some(literal) = text.get(start..).filter(|literal| !literal.is_empty()) {
+            parts.push(SheetPanelPart::Name(literal.to_owned()));
+        }
+        Ok(Self { parts })
     }
 }
 
 impl std::fmt::Display for SheetEdgeName {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}:rim.{}:{}", self.panel_name(), self.rim, if self.far_face { "bottom" } else { "top" })
+        for part in &self.parts {
+            match part {
+                SheetPanelPart::Feature(id) => write!(formatter, "F{}", id.0)?,
+                SheetPanelPart::Name(literal) => formatter.write_str(literal)?,
+            }
+        }
+        Ok(())
     }
 }
 
@@ -100,7 +98,7 @@ impl<'de> serde::Deserialize<'de> for SheetEdgeName {
 
 impl crate::walk::Walk for SheetEdgeName {
     fn walk_refs<'a>(&'a self, visit: &mut dyn FnMut(crate::walk::RefItem<'a>)) {
-        for part in &self.panel {
+        for part in &self.parts {
             if let SheetPanelPart::Feature(id) = part {
                 visit(crate::walk::Ref::Feature(id));
             }
@@ -108,7 +106,7 @@ impl crate::walk::Walk for SheetEdgeName {
     }
 
     fn walk_refs_mut<'a>(&'a mut self, visit: &mut dyn FnMut(crate::walk::RefItemMut<'a>)) {
-        for part in &mut self.panel {
+        for part in &mut self.parts {
             if let SheetPanelPart::Feature(id) = part {
                 visit(crate::walk::Ref::Feature(id));
             }
@@ -185,7 +183,7 @@ fn corner_kind_or_default<'de, D: serde::Deserializer<'de>>(deserializer: D) -> 
 
 impl CornerJoinParams {
     /// Resolves the two source edges through the current build's edge-to-bend mapping.
-    /// The named sheet rims, not kernel edges or saved points, identify the bends.
+    /// Central edge names, not kernel indices or saved points, identify the bends.
     /// The first joint is the covering bend.
     pub fn joint_pair(&self, mut resolve: impl FnMut(&SheetEdgeName) -> Result<usize>) -> Result<[usize; 2]> {
         let joints = [resolve(&self.covering)?, resolve(&self.covered)?];
@@ -351,42 +349,58 @@ fn notches_across(outline: &Loop2, n: Vec2, s0: f64, ba: f64) -> Option<(Loop2, 
 }
 
 impl SurfaceSheet {
-    fn bend_source_rim(&self, joint: &Joint) -> Option<SheetEdgeName> {
+    /// Resolves a central edge name against this body's build provenance.
+    pub fn bend_joint_for_edge_name(&self, source: &SheetEdgeName, body: &crate::ModelBody) -> Result<usize> {
+        if self.unfolded || self.altered_by.is_some() || self.parts.len() != body.body.face_count() {
+            return Err(DocError::reselect(source.to_string()));
+        }
+        let hit = crate::name_lookup::locate_edge(body, &source.to_string(), Vec3::ZERO).map_err(|_| DocError::reselect(source.to_string()))?;
+        if !hit.verified {
+            return Err(DocError::reselect(source.to_string()));
+        }
+        self.bend_for_edge(body, hit.edge).ok_or_else(|| DocError::reselect(source.to_string()))
+    }
+
+    fn bend_for_edge(&self, body: &crate::ModelBody, edge: usize) -> Option<usize> {
+        let [first, second] = body.body.record().edges.get(edge)?.uses.as_slice() else { return None };
+        let first = &self.parts.get(first.face as usize)?.as_ref()?.part;
+        let second = &self.parts.get(second.face as usize)?.as_ref()?.part;
+        let part = match (first, second) {
+            (SheetPart::Cap { panel, .. }, SheetPart::Bend { panel: bent, outer: false }) if panel == bent => second,
+            (SheetPart::Bend { panel: bent, outer: false }, SheetPart::Cap { panel, .. }) if panel == bent => first,
+            _ => return None,
+        };
+        self.bend_joint_for_part(part)
+    }
+
+    /// The feature whose build created an edge-flange bend, from its structured recipe.
+    pub fn bend_feature(&self, joint: usize) -> Option<u64> {
+        let joint = self.sheet.joints.get(joint)?;
         if !matches!(joint.kind, JointKind::Bend(_)) {
             return None;
         }
-        let parent = self.sheet.panels.get(joint.a.panel)?;
-        let flange = self.sheet.panels.get(joint.b.panel)?;
-        let (maker, rest) = flange.name.split_once('.')?;
-        maker.strip_prefix('F')?.parse::<u64>().ok()?;
-        let rim = rest.strip_prefix(&format!("{}.", parent.name))?;
-        SheetEdgeName::parse(&format!("{}:rim.{rim}:top", parent.name)).ok()
-    }
-
-    /// Resolves a named source rim to its unique flange bend. Both slab sides name the same
-    /// bend; no picked point, panel ordinal or nearest-edge fallback is used.
-    pub fn bend_joint_for_edge_name(&self, source: &SheetEdgeName) -> Result<usize> {
-        let mut matches = self.sheet.joints.iter().enumerate().filter_map(|(index, joint)| {
-            self.bend_source_rim(joint).filter(|named| named.panel == source.panel && named.rim == source.rim).map(|_| index)
-        });
-        let Some(joint) = matches.next() else { return Err(DocError::reselect(source.to_string())) };
-        if matches.next().is_some() {
-            return err("the named sheet rim belongs to more than one bend joint");
+        let panel = self.sheet.panels.get(joint.b.panel)?;
+        match self.recipes.iter().find(|(key, _)| key == &panel.name).map(|(_, made)| made) {
+            Some(crate::sheet_surface_convert::PanelMade::Bend { feature, .. }) => Some(*feature),
+            _ => None,
         }
-        Ok(joint)
     }
 
-    /// The canonical source rim of a picked flange bend, for a saved corner parameter.
-    /// A bend without a named rim (such as a fold across a panel) is refused.
-    pub fn bend_source_edge(&self, joint: usize) -> Result<SheetEdgeName> {
-        let source = self
-            .sheet
-            .joints
-            .get(joint)
-            .and_then(|joint| self.bend_source_rim(joint))
-            .ok_or_else(|| DocError::Invalid("select an edge flange with a named source rim".into()))?;
-        if self.bend_joint_for_edge_name(&source)? != joint {
-            return err("the named sheet rim does not identify the picked bend");
+    /// The centrally named cap/bend boundary of a flange in the current body.
+    pub fn bend_source_edge(&self, joint: usize, body: &crate::ModelBody) -> Result<SheetEdgeName> {
+        if self.unfolded || self.altered_by.is_some() || self.parts.len() != body.body.face_count() || self.bend_feature(joint).is_none() {
+            return Err(DocError::reselect("flange source"));
+        }
+        let names = crate::naming::edge_names(body);
+        let mut sources =
+            names.iter().enumerate().filter_map(|(edge, name)| (self.bend_for_edge(body, edge) == Some(joint)).then_some(name.as_str()));
+        let Some(name) = sources.next() else { return Err(DocError::reselect("flange source")) };
+        if sources.next().is_some() {
+            return Err(DocError::reselect("ambiguous flange source"));
+        }
+        let source = SheetEdgeName::parse(name)?;
+        if self.bend_joint_for_edge_name(&source, body)? != joint {
+            return Err(DocError::reselect(name));
         }
         Ok(source)
     }
@@ -495,8 +509,10 @@ impl SurfaceSheet {
             return err("the corner joint is no longer present");
         };
         rip.lap = lap;
-        develop(&next, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
-        self.sheet = next;
+        let mut candidate = self.clone();
+        candidate.sheet = next;
+        candidate.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
+        *self = candidate;
         Ok(())
     }
 
@@ -2500,12 +2516,27 @@ impl SurfaceSheet {
     /// The bend that made the panel of a current body-face name. This is a build-local pick
     /// conversion, not a persistent corner reference. Missing or ambiguous panels/bends return
     /// `None`, and a support panel with no bend on its `b` anchor is not a flange.
-    pub fn bend_joint_for_face(&self, name: &str) -> Option<usize> {
-        let (panel_name, side) = name.rsplit_once(':')?;
-        if !matches!(side, "top" | "bottom" | "bend.end1" | "bend.end2") && !side.starts_with("rim.") {
-            return None;
-        }
-        let mut panels = self.sheet.panels.iter().enumerate().filter(|(_, panel)| panel.name == panel_name);
+    pub fn bend_joint_for_face(&self, name: &str, body: &crate::ModelBody) -> Option<usize> {
+        let mut joints = self.parts.iter().enumerate().filter_map(|(face, part)| {
+            crate::name_lookup::face_has_name(body, face, name)
+                .then_some(part.as_ref())
+                .flatten()
+                .and_then(|part| self.bend_joint_for_part(&part.part))
+        });
+        let joint = joints.next()?;
+        joints.all(|other| other == joint).then_some(joint)
+    }
+
+    fn bend_joint_for_part(&self, part: &SheetPart) -> Option<usize> {
+        let panel = match part {
+            SheetPart::Cap { panel, .. }
+            | SheetPart::Rim { panel, .. }
+            | SheetPart::Bend { panel, .. }
+            | SheetPart::BendEnd { panel, .. }
+            | SheetPart::Tab { panel, .. } => panel,
+            _ => return None,
+        };
+        let mut panels = self.sheet.panels.iter().enumerate().filter(|(_, candidate)| &candidate.name == panel);
         let (panel, _) = panels.next()?;
         if panels.next().is_some() {
             return None;
@@ -2517,21 +2548,21 @@ impl SurfaceSheet {
 
     /// Current body-face indices belonging to the flange made from a named source rim.
     /// Returns no faces for flat, altered, mismatched or unresolved sheets.
-    pub fn bend_face_indices(&self, body: &solidcraft_kernel::Body, source: &SheetEdgeName) -> Vec<usize> {
-        if self.unfolded || self.altered_by.is_some() || self.face_names.len() != body.face_count() {
+    pub fn bend_face_indices(&self, body: &crate::ModelBody, source: &SheetEdgeName) -> Vec<usize> {
+        if self.unfolded || self.altered_by.is_some() || self.parts.len() != body.body.face_count() {
             return Vec::new();
         }
-        let Ok(joint) = self.bend_joint_for_edge_name(source) else { return Vec::new() };
-        self.face_names
+        let Ok(joint) = self.bend_joint_for_edge_name(source, body) else { return Vec::new() };
+        self.parts
             .iter()
             .enumerate()
-            .filter_map(|(index, name)| (name.as_deref().and_then(|name| self.bend_joint_for_face(name)) == Some(joint)).then_some(index))
+            .filter_map(|(index, part)| (part.as_ref().and_then(|part| self.bend_joint_for_part(&part.part)) == Some(joint)).then_some(index))
             .collect()
     }
 
     /// The uniquely closed planar flange corners in this sheet, in bend-joint order, identified by
     /// their two named source rims. Unsupported or ambiguous corners are not offered.
-    pub fn corner_join_sources(&self) -> Vec<[SheetEdgeName; 2]> {
+    pub fn corner_join_sources(&self, body: &crate::ModelBody) -> Vec<[SheetEdgeName; 2]> {
         if self.unfolded || self.altered_by.is_some() {
             return Vec::new();
         }
@@ -2549,11 +2580,11 @@ impl SurfaceSheet {
             }
             let bend = |panel: usize| {
                 let name = &self.sheet.panels.get(panel)?.name;
-                self.bend_joint_for_face(&format!("{name}:top"))
+                self.bend_joint_for_part(&SheetPart::Cap { panel: name.clone(), surface: true })
             };
             let (Some(first), Some(second)) = (bend(joint.a.panel), bend(joint.b.panel)) else { continue };
             let key = if first < second { [first, second] } else { [second, first] };
-            let (Ok(first_source), Ok(second_source)) = (self.bend_source_edge(first), self.bend_source_edge(second)) else { continue };
+            let (Ok(first_source), Ok(second_source)) = (self.bend_source_edge(first, body), self.bend_source_edge(second, body)) else { continue };
             match corners.entry(key) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(Some([first_source, second_source]));
@@ -2576,9 +2607,17 @@ impl SurfaceSheet {
         if !(tol.is_finite() && tol >= 0.0) || !picks.iter().all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
             return err("the corner picks and tolerance must be finite");
         }
+        let query = solidcraft_geom::brep::query::Query::new(body.record());
         let bend = |point| {
-            let (face, _) = self.panel_face_at(body, point, tol).ok_or_else(|| DocError::Invalid("pick a flange face of this sheet".into()))?;
-            self.bend_joint_for_face(&face).ok_or_else(|| DocError::Invalid("the picked face has no unique flange bend".into()))
+            let mut bends = query
+                .faces_at(point, tol)
+                .into_iter()
+                .filter_map(|(_, face)| self.parts.get(face).and_then(Option::as_ref).and_then(|part| self.bend_joint_for_part(&part.part)));
+            let first = bends.next().ok_or_else(|| DocError::Invalid("the picked face has no unique flange bend".into()))?;
+            if bends.any(|joint| joint != first) {
+                return err("the picked face has more than one flange bend");
+            }
+            Ok(first)
         };
         let [first, second] = picks;
         let joints = [bend(first)?, bend(second)?];
@@ -4086,8 +4125,8 @@ mod tests {
 
     fn source_params() -> CornerJoinParams {
         serde_json::from_value(serde_json::json!({
-            "covering": "F7.base.l2:rim.far:top",
-            "covered": "F8.base.l1:rim.far:top",
+            "covering": "F7:cap.surface|F7:bend.inner",
+            "covered": "F8:cap.surface|F8:bend.inner",
         }))
         .unwrap()
     }
@@ -4148,8 +4187,8 @@ mod tests {
         feature.remap_refs(&BTreeMap::from([(7, 8), (8, 9)]), &BTreeMap::new());
         feature.remap_bodies(&BTreeMap::from([("B".to_owned(), "B2".to_owned())]));
         let saved = serde_json::to_value(&feature).unwrap();
-        assert_eq!(saved["covering"], "F8.base.l2:rim.far:top");
-        assert_eq!(saved["covered"], "F9.base.l1:rim.far:top");
+        assert_eq!(saved["covering"], "F8:cap.surface|F8:bend.inner");
+        assert_eq!(saved["covered"], "F9:cap.surface|F9:bend.inner");
         assert_eq!(saved["body"], "B2");
         assert_eq!(saved["overlap"], "overlap_length");
         assert_eq!(saved["gap"], "corner_gap");
@@ -4166,8 +4205,8 @@ mod tests {
 
         for kind in ["butt", "partial_overlap", "full_overlap"] {
             let mut corner = serde_json::to_value(source_params()).unwrap();
-            corner["covering"] = serde_json::json!("F12.F7.base.l2.far:rim.far:bottom");
-            corner["covered"] = serde_json::json!("F8.external.panel:rim.side:top");
+            corner["covering"] = serde_json::json!("F12:tab(F7:cap.surface)|F12:bend.inner");
+            corner["covered"] = serde_json::json!("F8:cap.surface|F8:bend.inner");
             corner["kind"] = serde_json::json!(kind);
             corner["overlap"] = serde_json::json!("corner_overlap");
             corner["gap"] = serde_json::json!("corner_gap");
@@ -4188,8 +4227,8 @@ mod tests {
                 *expr = serde_json::from_value(serde_json::json!(format!("copy_{expr}"))).unwrap();
             });
             let saved = serde_json::to_value(&feature).unwrap();
-            assert_eq!(saved["corners"][0]["covering"], "F22.F8.base.l2.far:rim.far:bottom");
-            assert_eq!(saved["corners"][0]["covered"], "F9.external.panel:rim.side:top");
+            assert_eq!(saved["corners"][0]["covering"], "F22:tab(F8:cap.surface)|F22:bend.inner");
+            assert_eq!(saved["corners"][0]["covered"], "F9:cap.surface|F9:bend.inner");
             assert_eq!(saved["corners"][0]["overlap"], if partial { "copy_corner_overlap" } else { "corner_overlap" });
             assert_eq!(saved["corners"][0]["gap"], "copy_corner_gap");
             assert_eq!(saved["height"], "copy_flange_height");
@@ -4227,7 +4266,7 @@ mod tests {
         assert!(saved.get("joints").is_none());
         assert!(saved.get("gap").is_none());
         assert_eq!(serde_json::from_value::<CornerJoinParams>(saved.clone()).unwrap(), params);
-        for name in ["|", "", "F7:side|F7:top", "base:rim.:top", "base:rim.l1:side", "F18446744073709551616.base:rim.far:top"] {
+        for name in ["|", "", "F7:side|", "|F7:top", "base:rim.:top", "base:rim.l1:side", "F18446744073709551616:cap.surface|F7:bend.inner"] {
             let mut bad = saved.clone();
             bad["covering"] = serde_json::json!(name);
             assert!(serde_json::from_value::<CornerJoinParams>(bad).is_err());
@@ -4308,29 +4347,29 @@ mod tests {
         let external = params.covered.clone();
         let params = copied_sources(params, &std::collections::BTreeMap::from([(7, 17)]), &std::collections::BTreeMap::new());
         assert_eq!(params.covered, external);
-        assert_eq!(params.covering.to_string(), "F17.base.l2:rim.far:top");
+        assert_eq!(params.covering.to_string(), "F17:cap.surface|F17:bend.inner");
     }
 
     #[test]
-    fn corner_join_source_copy_remaps_nested_sheet_panel_names() {
+    fn corner_join_source_copy_remaps_nested_central_origins() {
         let mut params = source_params();
-        params.covering = SheetEdgeName::parse("F12.F7.base.l2.far:rim.far:bottom").unwrap();
+        params.covering = SheetEdgeName::parse("F12:tab(F7:cap.surface|F7:rim.curveF7)|F12:bend.inner").unwrap();
         let mapping = std::collections::BTreeMap::from([(7, 8), (8, 9), (12, 22)]);
         let params = copied_sources(params, &mapping, &std::collections::BTreeMap::new());
-        assert_eq!(params.covering.to_string(), "F22.F8.base.l2.far:rim.far:bottom");
-        assert_eq!(params.covered.to_string(), "F9.base.l1:rim.far:top");
+        assert_eq!(params.covering.to_string(), "F22:tab(F8:cap.surface|F8:rim.curveF7)|F22:bend.inner");
+        assert_eq!(params.covered.to_string(), "F9:cap.surface|F9:bend.inner");
     }
 
     #[test]
-    fn corner_join_source_copy_preserves_base_rims_and_side() {
+    fn corner_join_source_copy_preserves_external_central_names() {
         let mut params = source_params();
-        params.covering = SheetEdgeName::parse("base:rim.l2:bottom").unwrap();
+        params.covering = SheetEdgeName::parse("F99:cap.material|F99:bend.outer").unwrap();
         let params = copied_sources(
             params,
             &std::collections::BTreeMap::from([(7, 17)]),
             &std::collections::BTreeMap::from([("Body1".into(), "Body2".into())]),
         );
-        assert_eq!(params.covering.to_string(), "base:rim.l2:bottom");
+        assert_eq!(params.covering.to_string(), "F99:cap.material|F99:bend.outer");
     }
 
     fn corner_sheet() -> SurfaceSheet {
@@ -4389,6 +4428,7 @@ mod tests {
             "rule": "rule",
             "sheet": sheet,
             "places": [null, null, null],
+            "flat": Rigid3::IDENTITY,
             "thickness": 2.0,
             "k_factor": 0.5,
             "regions": [],
@@ -4400,41 +4440,105 @@ mod tests {
         .unwrap()
     }
 
+    fn corner_body(
+        sheet: &mut SurfaceSheet,
+        before: Option<(&crate::ModelBody, &[Option<crate::sheet_surface_convert::SheetFace>])>,
+    ) -> crate::ModelBody {
+        use std::sync::Arc;
+
+        let solid = sheet.build().unwrap();
+        let previous = before.and_then(|(body, parts)| crate::lineage::SheetBefore::of(body, parts));
+        let lineage = crate::lineage::sheet_lineage(previous, sheet, &solid).unwrap();
+        let mut state = crate::ModelState::default();
+        if let Some((body, _)) = before {
+            state.bodies.push(body.clone());
+        }
+        let feature = serde_json::from_value(serde_json::json!({
+            "id": 1, "name": "Corner fixture", "type": "body_transfer", "bodies": [],
+            "from": 0, "to": 1, "transform": crate::IDENTITY,
+        }))
+        .unwrap();
+        let mut body = crate::ModelBody::new(sheet.body.clone(), solid, 1).with_lineage(Some(lineage.clone()));
+        body.names = crate::naming::NameCell::traced(
+            Some(Arc::new(crate::naming::NamingOrigin { feature, before: Arc::new(state), depth: 1, mats: Vec::new(), sheets: Vec::new() })),
+            Some(Arc::new(lineage)),
+        );
+        body
+    }
+
+    fn named_corner(makers: [u64; 2]) -> (SurfaceSheet, crate::ModelBody) {
+        use crate::sheet_surface_convert::{PanelMade, RimEdge};
+
+        let mut sheet = corner_sheet();
+        sheet.places = vec![Some(Rigid3::IDENTITY), None, None];
+        let mut base = sheet.clone();
+        base.sheet.panels.truncate(1);
+        base.sheet.joints.clear();
+        base.places.truncate(1);
+        base.recipes = vec![("support".into(), PanelMade::Sketch { feature: 1 })];
+        base.sketch_curves = base.sheet.panels[0]
+            .region
+            .outer
+            .segs
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| ("support".into(), format!("l{}", index + 1), segment.start(), segment.end()))
+            .collect();
+        let base_body = corner_body(&mut base, None);
+        sheet.sketch_curves = base.sketch_curves.clone();
+        sheet.recipes = vec![
+            ("support".into(), PanelMade::Sketch { feature: 1 }),
+            (
+                "first".into(),
+                PanelMade::Bend {
+                    feature: makers[0],
+                    on: Some(SheetPart::Rim { panel: "support".into(), edge: RimEdge::Sketch { curve: "l1".into() } }),
+                },
+            ),
+            (
+                "second".into(),
+                PanelMade::Bend {
+                    feature: makers[1],
+                    on: Some(SheetPart::Rim { panel: "support".into(), edge: RimEdge::Sketch { curve: "l2".into() } }),
+                },
+            ),
+        ];
+        let body = corner_body(&mut sheet, Some((&base_body, &base.parts)));
+        (sheet, body)
+    }
+
     #[test]
     fn corner_join_named_sources_resolve_after_rebuild_without_pick_order() {
-        let mut sheet = corner_sheet();
-        sheet.sheet.panels[1].name = "F7.support.l1".into();
-        sheet.sheet.panels[2].name = "F8.support.l2".into();
-        let sources = [sheet.bend_source_edge(0).unwrap(), sheet.bend_source_edge(1).unwrap()];
-        assert_eq!(sources[0].to_string(), "support:rim.l1:top");
-        assert_eq!(sources[1].to_string(), "support:rim.l2:top");
+        let (sheet, body) = named_corner([7, 8]);
+        let sources = [sheet.bend_source_edge(0, &body).unwrap(), sheet.bend_source_edge(1, &body).unwrap()];
+        for source in &sources {
+            assert!(crate::naming::edge_names(&body).contains(&source.to_string()));
+            assert!(!source.to_string().contains("support"));
+        }
         let mut params = source_params();
         params.covering = sources[0].clone();
         params.covered = sources[1].clone();
-        assert_eq!(params.joint_pair(|source| sheet.bend_joint_for_edge_name(source)).unwrap(), [0, 1]);
-        let mut bottom = sources[0].clone();
-        bottom.far_face = true;
-        assert_eq!(sheet.bend_joint_for_edge_name(&bottom).unwrap(), 0);
-        let mut rebuilt: SurfaceSheet = serde_json::from_value(serde_json::to_value(&sheet).unwrap()).unwrap();
+        assert_eq!(params.joint_pair(|source| sheet.bend_joint_for_edge_name(source, &body)).unwrap(), [0, 1]);
+        let mut rebuilt = sheet.clone();
         rebuilt.sheet.joints.swap(0, 1);
+        let rebuilt_body = corner_body(&mut rebuilt, Some((&body, &sheet.parts)));
+        assert_eq!(params.joint_pair(|source| rebuilt.bend_joint_for_edge_name(source, &rebuilt_body)).unwrap(), [1, 0]);
         rebuilt.unfolded = true;
-        assert_eq!(params.joint_pair(|source| rebuilt.bend_joint_for_edge_name(source)).unwrap(), [1, 0]);
+        assert!(params.joint_pair(|source| rebuilt.bend_joint_for_edge_name(source, &rebuilt_body)).is_err());
     }
 
     #[test]
     fn corner_join_named_sources_refuse_missing_and_ambiguous_bends_atomically() {
-        let mut sheet = corner_sheet();
-        sheet.sheet.panels[1].name = "F7.support.l1".into();
-        sheet.sheet.panels[2].name = "F8.support.l2".into();
+        let (mut sheet, body) = named_corner([7, 8]);
         let mut params = source_params();
-        params.covering = sheet.bend_source_edge(0).unwrap();
-        params.covered = sheet.bend_source_edge(1).unwrap();
-        let missing = SheetEdgeName::parse("support:rim.missing:top").unwrap();
-        assert!(matches!(sheet.bend_joint_for_edge_name(&missing), Err(DocError::Reselect { .. })));
-        assert!(sheet.bend_source_edge(2).is_err());
+        params.covering = sheet.bend_source_edge(0, &body).unwrap();
+        params.covered = sheet.bend_source_edge(1, &body).unwrap();
+        let missing = SheetEdgeName::parse("F999:cap.surface|F999:bend.inner").unwrap();
+        assert!(matches!(sheet.bend_joint_for_edge_name(&missing, &body), Err(DocError::Reselect { .. })));
+        assert!(sheet.bend_source_edge(2, &body).is_err());
         sheet.sheet.joints.push(sheet.sheet.joints[0].clone());
         let before = sheet.clone();
-        assert!(params.apply(&mut sheet, |source| before.bend_joint_for_edge_name(source), |_| Ok(1.0)).is_err());
+        assert!(params.apply(&mut sheet, |source| before.bend_joint_for_edge_name(source, &body), |_| Ok(1.0)).is_err());
         assert_eq!(sheet, before);
     }
 
@@ -4442,19 +4546,15 @@ mod tests {
     fn corner_join_named_sources_apply_to_the_actual_surface_joint() {
         for covered_maker in [7, 8] {
             for covering_joint in [0, 1] {
-                let mut sheet = corner_sheet();
-                sheet.sheet.panels[1].name = "F7.support.l1".into();
-                sheet.sheet.panels[2].name = format!("F{covered_maker}.support.l2");
-                let sources = [sheet.bend_source_edge(0).unwrap(), sheet.bend_source_edge(1).unwrap()];
-                assert_eq!(sources[0].to_string(), "support:rim.l1:top");
-                assert_eq!(sources[1].to_string(), "support:rim.l2:top");
+                let (mut sheet, body) = named_corner([7, covered_maker]);
+                let sources = [sheet.bend_source_edge(0, &body).unwrap(), sheet.bend_source_edge(1, &body).unwrap()];
                 let mut params = source_params();
                 params.covering = sources[covering_joint].clone();
                 params.covered = sources[1 - covering_joint].clone();
                 params.kind = CornerJoinKind::FullOverlap;
                 let before = sheet.clone();
-                assert_eq!(params.joint_pair(|source| before.bend_joint_for_edge_name(source)).unwrap(), [covering_joint, 1 - covering_joint]);
-                params.apply(&mut sheet, |source| before.bend_joint_for_edge_name(source), |_| Ok(0.0)).unwrap();
+                assert_eq!(params.joint_pair(|source| before.bend_joint_for_edge_name(source, &body)).unwrap(), [covering_joint, 1 - covering_joint]);
+                params.apply(&mut sheet, |source| before.bend_joint_for_edge_name(source, &body), |_| Ok(0.0)).unwrap();
                 let JointKind::Rip(rip) = &sheet.sheet.joints[2].kind else { panic!("the corner stays a rip") };
                 assert_eq!(rip.lap, Lap::Overlap { covering_a: covering_joint == 0, amount: None, gap: 0.5 });
             }
@@ -4575,22 +4675,20 @@ mod tests {
 
     #[test]
     fn corner_join_body_faces_resolve_to_unique_flange_bends() {
-        let mut sheet = corner_sheet();
-        for side in ["top", "bottom", "rim.edge0", "bend.end1", "bend.end2"] {
-            assert_eq!(sheet.bend_joint_for_face(&format!("first:{side}")), Some(0));
-            assert_eq!(sheet.bend_joint_for_face(&format!("second:{side}")), Some(1));
+        let (mut sheet, body) = named_corner([7, 8]);
+        let names = crate::naming::face_names(&body);
+        for (face, part) in sheet.parts.iter().enumerate() {
+            let Some(part) = part else { continue };
+            let expected = sheet.bend_joint_for_part(&part.part);
+            assert_eq!(sheet.bend_joint_for_face(&names[face], &body), expected);
         }
-        assert_eq!(sheet.bend_joint_for_face("support:top"), None);
-        assert_eq!(sheet.bend_joint_for_face("first:bend.end8"), None);
-        assert_eq!(sheet.bend_joint_for_face("missing:top"), None);
-        sheet.sheet.panels[1].name = "renamed".into();
-        assert_eq!(sheet.bend_joint_for_face("first:top"), None);
-        assert_eq!(sheet.bend_joint_for_face("renamed:top"), Some(0));
+        assert_eq!(sheet.bend_joint_for_face("missing:top", &body), None);
+        let first = sheet.parts.iter().position(|part| part.as_ref().and_then(|part| sheet.bend_joint_for_part(&part.part)) == Some(0)).unwrap();
         sheet.sheet.panels.push(sheet.sheet.panels[1].clone());
-        assert_eq!(sheet.bend_joint_for_face("renamed:top"), None);
+        assert_eq!(sheet.bend_joint_for_face(&names[first], &body), None);
         sheet.sheet.panels.pop();
         sheet.sheet.joints.push(sheet.sheet.joints[0].clone());
-        assert_eq!(sheet.bend_joint_for_face("renamed:top"), None);
+        assert_eq!(sheet.bend_joint_for_face(&names[first], &body), None);
     }
 
     fn unequal_corner(first_height: f64, second_height: f64, turn: f64) -> (SurfaceSheet, [usize; 2]) {

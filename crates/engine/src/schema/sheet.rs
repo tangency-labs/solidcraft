@@ -24,7 +24,7 @@ use solidcraft_doc::FlangeEdge;
 use super::check::whole;
 use super::types::{AngleExpr, FaceRef, FeatureCommon, IdOrName, LengthExpr, Point3, ProfilesParam, SketchRef, StringList, feature_common, present};
 
-/// A persistent sheet rim, including its panel and slab side.
+/// A persistent central edge name, obtained from the built body's naming engine.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(transparent)]
 pub struct SheetRimName(pub solidcraft_doc::SheetEdgeName);
@@ -35,9 +35,9 @@ impl JsonSchema for SheetRimName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A named sheet rim: <panel>:rim.<rim>:top or bottom.",
+            "description": "A central edge name from the built flange: <face>|<face>.",
             "type": "string",
-            "pattern": "^[^.:|]+(?:\\.[^.:|]+)*:rim\\.[^:]+:(top|bottom)$"
+            "pattern": "^[^|]+(?:\\|[^|]+)+$"
         })
     }
 }
@@ -56,13 +56,13 @@ impl JsonSchema for CornerJoinType {
     }
 }
 
-/// Join two edge flanges by their persistent source rims.
+/// Join two edge flanges by their centrally named cap/bend boundaries.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CornerJoinParams {
-    /// The source rim of the flange that covers the other.
+    /// The central edge name of the flange that covers the other.
     pub covering: SheetRimName,
-    /// The source rim of the covered flange.
+    /// The central edge name of the covered flange.
     pub covered: SheetRimName,
     /// Butt by default, including an explicit null.
     #[serde(default)]

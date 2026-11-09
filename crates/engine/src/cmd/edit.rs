@@ -2578,6 +2578,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
     }
+    let flange_corners = if matches!(old.kind, FeatureKind::SheetFlange { .. }) && cid == "sheet.flange" {
+        let corners = super::sheet::flange_corners(s, &params, cmd)?;
+        if let Some(parameters) = params.as_object_mut() {
+            parameters.remove("corners");
+        }
+        Some(corners)
+    } else {
+        None
+    };
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
@@ -2654,6 +2663,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
+    }
+    if let (FeatureKind::SheetFlange { corners, .. }, Some(saved)) = (&mut new.kind, flange_corners) {
+        *corners = saved;
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its
