@@ -2104,7 +2104,8 @@ fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
 /// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
 /// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
-    crate::schema::reply(slot_parts(s, p, cmd, c0, c1, w)?)
+    let reply = slot_parts(s, p, cmd, c0, c1, w)?;
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
@@ -2138,7 +2139,8 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
     })?;
     Ok(crate::schema::sketch_shapes::SlotResult {
         drawn: DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() },
-        centre_line: extra.0, middle: extra.1,
+        centre_line: extra.0,
+        middle: extra.1,
     })
 }
 
