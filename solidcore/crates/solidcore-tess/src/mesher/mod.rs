@@ -351,11 +351,18 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         stats.delaunay += s.delaunay;
         stats.lenient.extend(s.lenient);
         stats.averaged_poles.extend(s.averaged_poles);
+        stats.over_tolerance.extend(s.over_tolerance);
     }
     if let Some(e) = first_error
         && stats.unmeshed.len() == faces.len()
     {
         return Err(e);
+    }
+    // Edges a bound of their sampling stopped, named with how far their chords lie off them.
+    for (edge, n) in nodes.iter().enumerate() {
+        if let Some((cap, sag, excess)) = n.capped {
+            stats.edges_capped.push(crate::CappedEdge { edge, cap, sag, excess, tol: rules.tol, within: sag <= rules.tol });
+        }
     }
     plan.edges = nodes.into_iter().map(|n| n.points.into_iter().map(kernel::record_vec3).collect()).collect();
     plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
@@ -1123,6 +1130,8 @@ fn plan_face(
 ) -> Result<FacePlan> {
     let tol = rules.tol;
     let (h, speed) = size;
+    // The memory bounds that limit this face, if any ([`crate::Cap`]).
+    let mut caps: Vec<crate::Cap> = Vec::new();
     let dom = uv::domain(s);
     let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
     let mut projected: Vec<seam::Loop> = loops.to_vec();
@@ -1228,7 +1237,11 @@ fn plan_face(
     } else {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
         let mut vs = uv::divide(s, 1, bbox[1], bbox[0], rules, h, MAX_LINES);
+        let asked = [us.len(), vs.len()];
         grid::thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
+        if [us.len(), vs.len()] != asked {
+            caps.push(crate::Cap::GridThinned { asked, kept: [us.len(), vs.len()] });
+        }
         let structured = match (ranges.len(), if seamed || bare { None } else { grid::quad(&uvs) }) {
             (1, Some(q)) => {
                 // Interior lines: the boundary's own where opposite sides agree (refined where the
@@ -1327,8 +1340,15 @@ fn plan_face(
     if !planar {
         // Which nodes are poles, asked once per node over both passes.
         let poles = sag::Poles::new(s, reach);
-        sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        if sag::refine(s, tol, &poles, &fixed, &mut all, &mut triangles, MAX_REFINE) {
+            caps.push(crate::Cap::Refine);
+        }
         sag::flip(s, tol, &poles, &fixed, &all, &mut triangles);
+        // A face a bound limited is named with the sag its triangles reach.
+        if !caps.is_empty() {
+            let (sag, unmeasured) = sag::worst(s, &poles, &fixed, &all, &triangles);
+            stats.over_tolerance.push(crate::OverTolerance { face: fi, sag, unmeasured, tol, within: sag <= tol && unmeasured == 0, caps: std::mem::take(&mut caps) });
+        }
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {

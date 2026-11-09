@@ -295,6 +295,39 @@ mod refusals {
         }
     }
 
+    /// An edge bent sharply at a corner no halving reaches (a spline turning back on itself at a
+    /// third of its parameter) is halved at the corner until the depth bound: there its chords
+    /// follow it to a hair, but no segment across the corner turns less than a quarter turn. The
+    /// plan names it with that bound, its sag within the tolerance, and how far it exceeds its
+    /// rules. Ported from solidcore-tess's own planner.
+    #[test]
+    fn an_edge_stopped_at_its_depth_bound_is_named_within_its_tolerance() {
+        let mut b = fixture("box_10x6x4");
+        b.edges[2].curve = brep::Curve::Spline { knots: vec![0.0, 0.0, 1.0 / 3.0, 1.0, 1.0], points: vec![[10.0, 0.0, 4.0], [10.0, 2.0, 20.0], [10.0, 6.0, 4.0]] };
+        b.edges[2].nurbs = None;
+        let (_, stats) = ok(plan(&b, &MeshTolerance::chord(0.01), size_of("box_10x6x4")));
+        let [capped] = stats.edges_capped.as_slice() else { panic!("{:?}", stats.edges_capped) };
+        assert_eq!((capped.edge, capped.cap), (2, crate::EdgeCap::Depth), "{capped:?}");
+        assert!(capped.within && capped.sag <= capped.tol, "{capped:?}");
+        assert!(capped.excess > 1.0, "{capped:?}");
+    }
+
+    /// A torus (radii 6 and 1.5) at a chord of 2e-4 mm, no facet angle: its sag refinement adds
+    /// all the points it may with triangles still off the surface, and the face is still meshed
+    /// and named in `PlanStats::over_tolerance` with that bound and the sag its triangles reach,
+    /// past the tolerance. Ported from solidcore-tess's own planner.
+    #[test]
+    fn a_face_whose_refinement_reaches_its_bound_is_named_with_its_sag() {
+        let tol = 2e-4;
+        let b = fixture("torus_6_1_5");
+        let (p, stats) = ok(plan(&b, &MeshTolerance::chord(tol), size_of("torus_6_1_5")));
+        assert!(stats.unmeshed.is_empty(), "{stats:?}");
+        let [o] = stats.over_tolerance.as_slice() else { panic!("{:?}", stats.over_tolerance) };
+        assert_eq!((o.face, o.caps.as_slice()), (0, [crate::Cap::Refine].as_slice()), "{o:?}");
+        assert!(o.sag > tol && o.sag < 10.0 * tol && o.tol == tol && !o.within, "{o:?}");
+        assert!(!p.faces[0].triangles.is_empty());
+    }
+
     fn meshed_faces(p: &TessPlan) -> Vec<u32> {
         p.faces.iter().filter(|f| !f.triangles.is_empty()).map(|f| f.face).collect()
     }

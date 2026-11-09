@@ -17,10 +17,11 @@ use super::{comp, rot3};
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
 /// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `poles`: which
-/// nodes are poles, asked once per node ([`Poles`]).
-pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
+/// nodes are poles, asked once per node ([`Poles`]). True when it stopped at `max_points` with
+/// triangles still to look at.
+pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) -> bool {
     if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
-        return;
+        return false;
     }
     let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
     let mean = |qs: &[[f64; 2]]| poles.mean(qs);
@@ -47,7 +48,7 @@ pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[V
     let mut queue: Vec<u32> = (0..tris.len() as u32).rev().collect();
     while let Some(ti) = queue.pop() {
         if uv.len() >= limit {
-            break;
+            return true;
         }
         let Some(&t) = tris.get(ti as usize) else { continue };
         let p = |i: u32| pos.get(i as usize).copied();
@@ -109,6 +110,36 @@ pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[V
         sag_of.remove(&split);
         queue.extend(split_side(tris, &mut sides, split, mi));
     }
+    false
+}
+
+/// The farthest the triangles `tris` lie from the surface `s` (mm), measured as [`refine`]
+/// measures them: at each triangle's middle and its sides' middles, along the surface's normal
+/// there; and how many of those middles the surface does not evaluate at (a side shared by two
+/// triangles counts twice).
+pub(crate) fn worst(s: &super::poles::Face, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &[[u32; 3]]) -> (f64, usize) {
+    let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
+    let pos: Vec<Vec3> = uv.iter().enumerate().map(|(i, q)| fixed.get(i).copied().unwrap_or_else(|| at(*q))).collect();
+    let (mut worst, mut unmeasured) = (0.0f64, 0usize);
+    // How far the flat point `c` lies from the surface at `q`, `None` where it does not evaluate.
+    let off = |q: [f64; 2], c: Vec3| s.derivs(q[0], q[1]).map(|(p, su, sv)| su.cross(sv).normalized().map_or_else(|| p.dist(c), |n| (p - c).dot(n).abs()));
+    let mut measure = |d: Option<f64>, unmeasured: &mut usize| match d {
+        Some(d) => worst = worst.max(d),
+        None => *unmeasured += 1,
+    };
+    for t in tris {
+        let p = |i: u32| pos.get(i as usize).copied();
+        let q = |i: u32| uv.get(i as usize).copied();
+        let (Some(pa), Some(pb), Some(pc), Some(qa), Some(qb), Some(qc)) = (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) else {
+            unmeasured += 4;
+            continue;
+        };
+        measure(off(poles.mean(&[qa, qb, qc]), (pa + pb + pc) * (1.0 / 3.0)), &mut unmeasured);
+        for ((xa, ua), (xb, ub)) in [((pa, qa), (pb, qb)), ((pb, qb), (pc, qc)), ((pc, qc), (pa, qa))] {
+            measure(off(poles.mean(&[ua, ub]), (xa + xb) * 0.5), &mut unmeasured);
+        }
+    }
+    (worst, unmeasured)
 }
 
 /// Which parameter directions the surface is collapsed along at each node of a face's
