@@ -173,6 +173,38 @@ fn the_schemas_take_what_the_handlers_take() {
     }
 }
 
+/// A slider stopped by contact: the trace ends at the sample where it stopped, and says which
+/// bodies touched, in its reply and in Keep's.
+#[test]
+fn a_trace_stopped_by_contact_replies_with_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+    for (name, x) in [("A", 0), ("B", 20)] {
+        run("component.activate", json!({"component": 0}));
+        let made = run("component.create", json!({"name": name}));
+        run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        if name == "A" {
+            run("occurrence.ground", json!({"occurrence": made["occurrence"], "grounded": true}));
+        }
+    }
+    run("joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+    run("contact.create", json!({"occurrences": ["A", "B"]}));
+    let p = json!({"occurrence": "B", "point": [25, 5, 5], "joint": "Rail", "from": 20, "to": -30, "samples": 6});
+    let traced = output_schema_for::<MotionTraced>();
+    let r = run("motion.trace", p.clone());
+    assert!(conforms(traced.as_value(), traced.as_value(), &r), "{r}");
+    assert!(r.get("param_warnings").is_none(), "{r}");
+    let stopped = r["stopped_at"].as_u64().unwrap_or_else(|| panic!("should stop: {r}"));
+    assert!((1..5).contains(&stopped), "{r}");
+    assert_eq!(r["samples"].as_u64(), Some(stopped + 1), "{r}");
+    assert_eq!(r["points"].as_array().map(|p| p.len() as u64), Some(stopped + 1), "{r}");
+    assert!(r["stopped_by_contact"]["fraction"].is_number() && r["stopped_by_contact"]["a"].is_string() && r["stopped_by_loop"].is_null(), "{r}");
+    let kept = output_schema_for::<MotionTraceKept>();
+    let k = run("motion.trace.keep", p);
+    assert!(conforms(kept.as_value(), kept.as_value(), &k), "{k}");
+    assert_eq!((&k["stopped_at"], &k["stopped_by_contact"]["a"]), (&r["stopped_at"], &r["stopped_by_contact"]["a"]), "{k}");
+}
+
 /// The three commands reply as their output schemas say, in Warn without warnings: the corner's
 /// path, as points and as a kept spline; an edit of the kept trace; and its detach. A misspelt key
 /// is ignored today: Warn says so, and strict refuses it.
