@@ -45,11 +45,9 @@
     <Property Id="REINSTALLMODE" Value="amus" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <!-- The Start menu shortcut is not advertised: it points at [INSTALLFOLDER]solidcraft.exe, so
-         its Start menu app ID comes from that path and stays the same across updates. An
-         advertised shortcut points into C:\Windows\Installer\{ProductCode}, which changes with
-         every build, so Windows dropped its pin on each update (#9366). The shortcut keeps this
-         icon, whose identifier ends in .exe as ICE50 requires for a shortcut to an .exe. -->
+    <!-- This MSI icon is only for Programs and Features. A shortcut must use the installed
+         executable's embedded icon instead: Windows caches an MSI Icon-table image under the
+         ProductCode, then removes that old path on upgrade (#9366). -->
     <Icon Id="SolidcraftIcon.exe" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="SolidcraftIcon.exe" />
     <Property Id="ARPURLINFOABOUT" Value="https://docs.solidcraft.io/" />
@@ -115,8 +113,7 @@
                orphan this file: the component stays installed through an update, so the old
                product never removes it. -->
           <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft CAD"
-              Description="SolidCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="no"
-              Icon="SolidcraftIcon.exe" IconIndex="0" />
+              Description="SolidCraft parametric 3D CAD" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
         </File>
 
         <!-- .sc: SolidCraft's own format; SolidCraft is its default app. -->
