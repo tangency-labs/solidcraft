@@ -10,7 +10,7 @@ use web_time::Instant;
 use solidcore_record::Vec3;
 use solidcraft_doc::apply_point;
 use solidcraft_geom::{Aabb3, Mesh};
-use solidcraft_render::Camera;
+use solidcraft_viewport::Camera;
 
 use super::super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
 use super::super::progress::Stage;
@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn repeated_surface_over_one_million_triangles_keeps_one_mesh_and_exports_all_placements() {
-        use solidcraft_render::StandardView;
+        use solidcraft_viewport::StandardView;
         use std::sync::Arc;
         let mut mesh = Mesh::default();
         for y in 0..=100 {

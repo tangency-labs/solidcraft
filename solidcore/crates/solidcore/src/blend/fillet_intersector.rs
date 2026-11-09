@@ -1457,12 +1457,9 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             return Ok(out);
         }
 
-        // (not upstream, `fixes.fillet_trace_rejects_short_step`, WR-503) a point far short of the
+        // (not upstream, WR-503) a point far short of the
         // step is another root of the equations, not the next point of this trace
-        if k.fixes.fillet_trace_rejects_short_step
-            && !step.clipped
-            && tsect.crv_pos().distance(next_tsp.crv_pos()) < 0.5 * step_size.abs()
-        {
+        if !step.clipped && tsect.crv_pos().distance(next_tsp.crv_pos()) < 0.5 * step_size.abs() {
             demote_singularity(next_tsp);
             return Ok(out);
         }
@@ -2631,6 +2628,8 @@ mod tests {
     struct ClipSolver {
         clip: f64,
         fail: bool,
+        /// `Some(l)`: the step is not clipped, keeps its size and lands `l` along the tangent.
+        unclipped_landing: Option<f64>,
     }
 
     impl FilletSolverOps for ClipSolver {
@@ -2681,9 +2680,16 @@ mod tests {
             next: &mut TsectPnt,
         ) -> Result<()> {
             *flags = StepSolve::default();
-            flags.clipped = true;
+            flags.clipped = self.unclipped_landing.is_none();
             if self.fail {
                 return Err(SolidError::sm_err("test"));
+            }
+            if let Some(landing) = self.unclipped_landing {
+                for s in SRFS {
+                    *next.uv_pos_mut(s) = point.uv_pos(s) + point.uv_deriv(s) * landing;
+                }
+                flags.found_answer = true;
+                return Ok(());
             }
             *step_size = self.clip;
             for s in SRFS {
@@ -2822,6 +2828,7 @@ mod tests {
         let mut s = ClipSolver {
             clip: 0.2,
             fail: false,
+            unclipped_landing: None,
         };
         let r = fi
             .compute_next_point(&mut s, &Kernel::default(), p, 0.5, n)
@@ -2834,11 +2841,56 @@ mod tests {
         let mut s = ClipSolver {
             clip: 0.2,
             fail: true,
+            unclipped_landing: None,
         };
         let r = fi
             .compute_next_point(&mut s, &Kernel::default(), p, 0.5, n)
             .unwrap();
         assert!(!r.found_good_point && r.clipped);
+    }
+
+    #[test]
+    fn wr503_next_point_rejects_unclipped_short_step() {
+        let k = &Kernel::default();
+        let (a, b) = surfaces();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let p = fi
+            .base
+            .base
+            .alloc_point(pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0));
+        let n = fi.base.base.alloc_point(TsectPnt::new());
+
+        // an unclipped step of 0.5 that lands a fifth of the step away is another root of the
+        // equations, not the next point of this trace
+        let mut s = ClipSolver {
+            clip: 0.2,
+            fail: false,
+            unclipped_landing: Some(0.1),
+        };
+        let r = fi.compute_next_point(&mut s, k, p, 0.5, n).unwrap();
+        assert!(!r.found_good_point && !r.clipped && !r.boundary_hit);
+
+        // an unclipped step landing at nine tenths of the step is accepted
+        let mut s = ClipSolver {
+            clip: 0.2,
+            fail: false,
+            unclipped_landing: Some(0.45),
+        };
+        let r = fi.compute_next_point(&mut s, k, p, 0.5, n).unwrap();
+        assert!(r.found_good_point && !r.clipped && !r.boundary_hit);
+        assert_eq!(fi.base.base.point(n).unwrap().curve_parameter, 0.5);
+
+        // a clipped step is accepted however short it is
+        let mut s = ClipSolver {
+            clip: 0.05,
+            fail: false,
+            unclipped_landing: None,
+        };
+        let r = fi.compute_next_point(&mut s, k, p, 0.5, n).unwrap();
+        assert!(r.found_good_point && r.clipped);
+        assert_eq!(fi.base.base.point(n).unwrap().curve_parameter, 0.05);
     }
 
     #[test]
@@ -2854,6 +2906,7 @@ mod tests {
         let mut s = ClipSolver {
             clip: 0.2,
             fail: false,
+            unclipped_landing: None,
         };
         let r = fi
             .compute_next_point(&mut s, &Kernel::default(), p, 0.5, p)

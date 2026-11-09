@@ -906,6 +906,8 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
+
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.extrude";
     let grouped = if let Some(value) = p.get("faces") {
@@ -917,11 +919,31 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|faces| !faces.is_empty() && faces.len() <= 1024)
             .ok_or_else(|| bad(cmd, "faces must contain between 1 and 1024 points"))?;
         let points = faces.iter().map(|point| vec3(point).ok_or_else(|| bad(cmd, "faces must be points [x,y,z]"))).collect::<Result<Vec<_>>>()?;
+        let groups = super::face::face_groups(s, &points, cmd, str_(p, "face_body"))?;
+        // Faces in different planes extrude each by itself. Every face's profile is taken from
+        // the body as picked, before the first extrusion grows it (#11492).
+        if groups.len() > 1 {
+            let mut profiles = Vec::new();
+            for group in &groups {
+                let (id, points, body) = super::face::sketch_of_faces(s, group, cmd, str_(p, "face_body"))?;
+                profiles.push((id, Some(ProfileSel::Points { points }), Some(body)));
+            }
+            let mut reply = Value::Null;
+            for profile in profiles {
+                reply = extrude_from(s, p, Some(profile))?;
+            }
+            return Ok(reply);
+        }
         let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"))?;
         Some((id, Some(ProfileSel::Points { points }), Some(body)))
     } else {
         None
     };
+    extrude_from(s, p, grouped)
+}
+
+fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Result<Value> {
+    let cmd = "solid.extrude";
     // A planar body face extrudes like a profile: its boundary is copied into a sketch on it.
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped
@@ -2550,7 +2572,12 @@ fn finish_pattern(
     let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
     let mut made = Vec::new();
     for c in &comps {
-        let id = s.doc.find_component(c).filter(|id| *id != 0).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let id = s
+            .doc
+            .resolve_component(c)
+            .map_err(|error| bad(cmd, error.to_string()))?
+            .filter(|id| *id != 0)
+            .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         let src = s.doc.occurrence_of(id).cloned().ok_or_else(|| bad(cmd, format!("component `{c}` has no occurrence")))?;
         for m in &mats {
             made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);

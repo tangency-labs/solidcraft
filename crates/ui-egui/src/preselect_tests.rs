@@ -131,6 +131,37 @@ fn confirming_coplanar_body_faces_uses_one_atomic_extrusion() {
     assert!((volume - 11_968.0).abs() < 1e-5, "{volume}");
 }
 
+/// #11492: faces in different planes extrude each by itself, from the body as it was picked.
+/// The top, a side and an end of a 40 x 25 x 3 block, each out 10 mm: a face already grown by an
+/// earlier pick would have taken a taller wall with it.
+#[test]
+fn confirming_faces_in_different_planes_extrudes_each_from_the_picked_body() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":25,"height":3,"body_name":"Block"})).unwrap();
+    let world = h.app.session.world_state().unwrap();
+    let faces = world.body("Block").unwrap().body.faces(0.01).unwrap();
+    let pick = |axis: usize, sign: f64| {
+        let face = faces
+            .iter()
+            .find(|f| f.plane_normal.is_some_and(|n| [n.x, n.y, n.z][axis] * sign > 0.99))
+            .unwrap_or_else(|| panic!("no face with normal {sign} on axis {axis}"));
+        Sel::Face { body: "Block".into(), index: face.index, point: face.centroid }
+    };
+    h.app.session.selection = vec![pick(2, 1.0), pick(1, -1.0), pick(0, 1.0)];
+    h.app.start("solid.extrude");
+    if let Kind::Extrude { distance, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+        *distance = "10".into();
+    }
+    h.frames(3);
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "dialog={:?}", h.app.dialog);
+    let volume = solidcraft_engine::doc::kernel::measure(&h.app.session.model.state().body("Block").unwrap().body).unwrap().volume;
+    // The block, and a prism of 10 mm on each of the three faces: 3000 + 10000 + 1200 + 750.
+    assert!((volume - 14_950.0).abs() < 1e-5, "{volume}");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+}
+
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, apply_commands};
 

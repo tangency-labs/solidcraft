@@ -55,6 +55,8 @@ pub enum LinkSource {
     SketchPoint { sketch: u64, point: String },
     /// The model origin.
     Origin,
+    /// A named construction point (#12075).
+    ConstructionPoint { name: String },
     /// An origin axis (`X`, `Y`, `Z`).
     Axis { name: String },
     /// One of the sketch's own axes (`x` or `y`): the line through the sketch origin along it,
@@ -143,6 +145,7 @@ impl LinkSource {
             LinkSource::SketchCurve { curve, .. } => format!("sketch curve {curve}"),
             LinkSource::SketchPoint { point, .. } => format!("sketch point {point}"),
             LinkSource::Origin => "origin".into(),
+            LinkSource::ConstructionPoint { name } => format!("point {name}"),
             LinkSource::Axis { name } => format!("{name} axis"),
             LinkSource::SketchAxis { name } => format!("sketch {name} axis"),
             LinkSource::Plane { name } => format!("{name} plane"),
@@ -172,6 +175,7 @@ impl LinkSource {
             LinkSource::SketchCurve { .. }
             | LinkSource::SketchPoint { .. }
             | LinkSource::Origin
+            | LinkSource::ConstructionPoint { .. }
             | LinkSource::Axis { .. }
             | LinkSource::SketchAxis { .. }
             | LinkSource::Plane { .. }

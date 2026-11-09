@@ -618,7 +618,7 @@ pub struct Session {
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
     /// view is chosen.
-    pub camera: Option<render::Camera>,
+    pub camera: Option<solidcraft_viewport::Camera>,
     /// Host-owned viewport metadata, never saved or included in history.
     render_viewport: Option<Arc<render::ExecutorDescriptor>>,
     render_jobs: render_jobs::Jobs,
@@ -742,8 +742,8 @@ pub enum CombPick {
 
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
-    pub fn mode(self) -> render::AnalysisMode {
-        use render::AnalysisMode as M;
+    pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
+        use solidcraft_viewport::AnalysisMode as M;
         match self {
             SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
@@ -1278,8 +1278,12 @@ impl Session {
 
     /// A component by its id or name, or by the name of one of its placements (`K:2`); never the
     /// root.
-    pub(crate) fn component_or_placement(&self, key: &str) -> Option<u64> {
-        self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
+    pub(crate) fn component_or_placement(&self, key: &str) -> solidcraft_doc::Result<Option<u64>> {
+        Ok(self
+            .doc
+            .resolve_component(key)?
+            .or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component))
+            .filter(|id| *id != 0))
     }
 
     /// Number of live-model evaluations after this session's initialization.
@@ -1720,7 +1724,10 @@ impl Session {
         };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
-            EngineError::Internal(id, msg) if id.is_empty() => EngineError::Internal(spec.id.to_string(), msg),
+            EngineError::Internal(id, msg) if id.is_empty() => {
+                crash::kernel_caught();
+                EngineError::Internal(spec.id.to_string(), msg)
+            }
             e => e,
         });
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the

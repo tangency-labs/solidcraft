@@ -665,7 +665,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
             } else if strip.title_bar {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                crate::window_chrome::hand_press_to_os(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
         } else if resp.double_clicked() {
             if strip.double_click_renames {
