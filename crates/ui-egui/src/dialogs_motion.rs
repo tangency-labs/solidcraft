@@ -891,7 +891,7 @@ mod tests {
             .session
             .pending_moves
             .iter()
-            .filter(|(id, m)| doc.occurrences.iter().find(|o| o.id == **id).is_some_and(|o| off(&o.transform, *m)))
+            .filter(|(id, m)| doc.occurrences.iter().find(|o| o.id == **id).is_some_and(|o| off(&o.transform, m)))
             .count()
     }
 
