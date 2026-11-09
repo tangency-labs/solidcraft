@@ -33,6 +33,10 @@
 //! the first arc's, instead of reproducing upstream's aliased (dead) centre check.
 //!
 //! Deviations:
+//! - **Proved analytic copies.** `CopyAndAddAnalytics` keeps a recognised plane, cylinder,
+//!   cone, sphere or torus only when the surface lies on it at bound 0
+//!   (`implicit::lies_on`); otherwise the copy is the B-spline. Upstream keeps whatever its
+//!   tolerant recognisers return, which can be off the form by more than rounding.
 //! - **Out-params** become return values (structs where there are several). The
 //!   `SmContext` arguments only choose where upstream allocates and are dropped.
 //! - **Surface type.** Only the plain B-spline is ported, so `GetType()` is always
@@ -390,8 +394,9 @@ pub(crate) fn expand_by_degree(ivl: &mut Extent1d, deg: usize) {
 
 impl BSplineSurface {
     /// A copy of the surface as an analytic surface when its shape is one (plane,
-    /// cone, sphere, surface of revolution or extrusion), else as a B-spline
-    /// (`CopyAndAddAnalytics`).
+    /// cone, sphere, surface of revolution or extrusion) and, for a plane, cylinder, cone,
+    /// sphere or torus, the surface lies on it at bound 0 ([`Self::proved_copy`], not
+    /// upstream), else as a B-spline (`CopyAndAddAnalytics`).
     ///
     /// # Errors
     ///
@@ -402,14 +407,35 @@ impl BSplineSurface {
         // (a surface that is not SmBSplineSurface_TYPE is copied as is: never here)
         // SmPlane
         if let Some(plane) = Plane::is_nurb_surface_plane(k, self, 1.0)? {
-            return Ok(self.analytic_or_exact_copy(k, Surface::from(plane)));
+            return self.proved_copy(k, Surface::from(plane));
         }
         // SmCone, SmSphere, SmSurfOfRevolution, SmSurfOfExtrusion
         if let Some(analytic) = recognise_analytic(k, self)? {
-            return Ok(self.analytic_or_exact_copy(k, analytic));
+            return self.proved_copy(k, analytic);
         }
         // arrive here - make sure it's a copy
         Ok(Surface::from(self.copy()))
+    }
+
+    /// The recognised `analytic` ([`Self::analytic_or_exact_copy`]) when this surface, its
+    /// NURBS form, lies on its plane, cylinder, cone, sphere or torus at bound 0
+    /// ([`implicit::lies_on`](crate::surface::implicit::lies_on), the exact classes'
+    /// rule), else a copy of this B-spline: the recognisers decide at tolerances, and a
+    /// label they find off its form by more than rounding is never carried (not upstream,
+    /// which keeps every recognised surface). A surface of revolution or extrusion other
+    /// than those has no implicit equation and is kept as recognised.
+    ///
+    /// # Errors
+    ///
+    /// Those of the proof (the Bézier decomposition).
+    fn proved_copy(&self, k: &Kernel, analytic: Surface) -> Result<Surface> {
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        if let Some(support) = AnalyticSupport::of(&analytic) {
+            if !lies_on(self, &support.implicit())? {
+                return Ok(Surface::from(self.copy()));
+            }
+        }
+        Ok(self.analytic_or_exact_copy(k, analytic))
     }
 
     /// The recognised analytic `analytic`, or an exact copy when

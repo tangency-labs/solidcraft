@@ -73,6 +73,12 @@
 //!   (upstream copies a null NURB). With the opt-in
 //!   `Kernel::fixes.nurb_cylinder_inside_out_frame` (WR-496, #1463) an inside-out
 //!   NURB gets `IsNurbSurfaceCone`'s frame (top-knot circle, reversed Z).
+//! - **Iso arcs from control points.** The recognisers' end and middle circles are made
+//!   from the iso curves' control points (`iso_arc`, The NURBS Book §7.3, §7.5), not
+//!   fitted through three samples as `IsArc` does: two fitted end circles of an extruded
+//!   arc put its axis off the extrusion's direction by more than rounding (1.4e-13 rad on a
+//!   94 mm r 40 wall), so the analytic surface was off its own NURBS form and failed the
+//!   exact-class proof (`implicit::lies_on`).
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -139,20 +145,103 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
     }
 }
 
-/// `pIsoCrv->IsArc(5, dScaledZero, ..)` of a plain B-spline iso curve.
+/// The circle a rational quadratic iso curve is, made from its control points (not
+/// upstream, which fits a circle through three samples, `pIsoCrv->IsArc(5, dScaledZero, ..)`).
+///
+/// Each Bézier segment `Q0, Q1, Q2` (weights `w0, w1, w2`) of a circular arc has equal
+/// tangent legs `|Q1 − Q0| = |Q2 − Q1|`, and its middle weight in standard form,
+/// `w1 / √(w0 w2)`, is the cosine of the half sweep `α`, the angle between the leg
+/// `Q1 − Q0` and the chord `Q2 − Q0` (The NURBS Book, Piegl and Tiller, §7.3 and §7.5). The
+/// centre is then `Q0 + r n`, `n` the unit normal into the arc in its plane and
+/// `r = |Q2 − Q0| / (2 sin α)`: the circle passes through `Q0` exactly, so an error in `r`
+/// and the matching one in the centre cancel along the arc instead of growing with
+/// `1 / (1 − w1²)` as the centre found from the legs' meeting does. Everything is built from
+/// differences of control points, so rows that are translates of each other (an extruded
+/// arc) give circles that are translates of each other, and the axis through their centres
+/// is the extrusion's direction to rounding, where two independently fitted circles tilt
+/// it (#13536).
+///
+/// The curve is that circle when every segment is, on one circle: the legs equal, the weight
+/// the half sweep's cosine (within `EFF_ZERO_SQRT`), the planes parallel (within
+/// `EFF_ZERO_SQRT`) and the centres and radii the same, the lengths within `scaled_zero`.
+/// The frame's X axis points to the start point and its Z axis about which the curve turns
+/// counter-clockwise; the start angle is `0` and the end angle the sweep in degrees, as
+/// `IsArc` gives them. `None` for a degenerate curve, a degree other than 2, or a curve that
+/// is no circle.
+///
+/// # Errors
+///
+/// Those of the degeneracy test and the Bézier decomposition.
 fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
-    let arc = crate::curve::curve::p5::is_arc_base(
-        k,
-        curve,
-        |c, tol| c.is_degenerate(k, tol, None),
-        5,
-        scaled_zero,
-    )?;
-    Ok(arc.map(|(frame, radius, start_ang, end_ang)| IsoArc {
-        frame,
+    if curve.is_degenerate(k, scaled_zero, None)? {
+        return Ok(None);
+    }
+    let Some(nurb) = curve.nurb.as_ref() else {
+        return Ok(None);
+    };
+    // the circle of the first segment: (centre, unit normal, radius, X axis)
+    let mut circle: Option<(Point3, Vec3, f64, Vec3)> = None;
+    let mut sweep = 0.0_f64;
+    for segment in nurb.decompose_bez()? {
+        if segment.degree() != 2 {
+            return Ok(None);
+        }
+        let points = segment.cpts();
+        let (Some(&a), Some(&b), Some(&c)) = (points.first(), points.get(1), points.get(2)) else {
+            return Ok(None);
+        };
+        if !(a.w > 0.0 && b.w > 0.0 && c.w > 0.0) {
+            return Ok(None);
+        }
+        let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
+        let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
+        if (leg0.length() - leg1.length()).abs() > scaled_zero {
+            return Ok(None);
+        }
+        let Ok(normal) = leg0.cross(leg1).unitize() else {
+            return Ok(None);
+        };
+        let Ok(tangent) = leg0.unitize() else {
+            return Ok(None);
+        };
+        // the half sweep, from the leg and the chord
+        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let weight = b.w / (a.w * c.w).sqrt();
+        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+            return Ok(None);
+        }
+        let inward = normal.cross(tangent);
+        let radius = chord.length() / (2.0 * half.sin());
+        // as `IsArc`: a radius too large for the arc's length makes no accurate circle
+        if !(radius <= (leg0.length() + leg1.length()) / EFF_ZERO_SQRT) {
+            return Ok(None);
+        }
+        let centre = q0 + inward * radius;
+        match circle {
+            None => circle = Some((centre, normal, radius, -inward)),
+            Some((first, first_normal, first_radius, _)) => {
+                if first.distance(centre) > scaled_zero
+                    || (first_radius - radius).abs() > scaled_zero
+                    || first_normal.dot(normal) < 1.0 - EFF_ZERO_SQRT
+                {
+                    return Ok(None);
+                }
+            }
+        }
+        sweep += 2.0 * half;
+    }
+    let Some((centre, normal, radius, x_axis)) = circle else {
+        return Ok(None);
+    };
+    let end_ang = sweep.to_degrees();
+    if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
+        return Ok(None);
+    }
+    Ok(Some(IsoArc {
+        frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
         radius,
-        start_ang,
-        end_ang,
+        start_ang: 0.0,
+        end_ang: end_ang.min(360.0),
     }))
 }
 
@@ -1545,6 +1634,58 @@ mod tests {
 
     fn kernel() -> Kernel {
         Kernel::default()
+    }
+
+    /// The r 40 corner of the battery case's plan outline (#13536): a 0.156 rad arc about
+    /// (-133.12369073537272, -163.5) extruded along z from -1 to 93, its NURBS form as the
+    /// record holds it, which SolidCraft's import recognises. Both recognisers find the
+    /// cylinder on the form at bound 0, with the extrusion's axis. (Their end circles were
+    /// fitted through samples: the cylinder recogniser's axis tilted 1.44e-13 rad, 1.35e-11 mm
+    /// off the form at the top, so the case wall had no exact class and its shell was
+    /// refused.)
+    #[test]
+    fn an_extruded_short_arc_is_recognised_on_its_form() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let w = 0.996_964_674_751_439_2;
+        // (x w, y w, w) of each column, at z = -1 and 93
+        let columns = [
+            (-133.123_690_735_372_72, -203.5, 1.0),
+            (-129.605_407_717_687_06, -202.882_311_311_917_87, w),
+            (-126.914_177_375_687_37, -203.015_085_016_179_46, 1.0),
+        ];
+        let net = columns
+            .into_iter()
+            .map(|(x, y, w)| vec![CPoint::new(x, y, -w, w), CPoint::new(x, y, 93.0 * w, w)])
+            .collect();
+        let knot = 6.234_728_055_932_869;
+        let nurb = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, knot, knot, knot],
+            vec![0.0, 0.0, 94.0, 94.0],
+        )
+        .unwrap();
+        let form = BSplineSurface::from_nurb(nurb, false);
+        let found = [
+            Cone::is_nurb_surface_cylinder(&k, &form, 1.0).unwrap(),
+            Cone::is_nurb_surface_cone(&k, &form, 1.0).unwrap(),
+        ];
+        for cone in found {
+            let surface = crate::surface::surface::Surface::from(cone.expect("a cylinder"));
+            let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+            assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+            let (AnalyticSupport::Cylinder { placement, .. }
+            | AnalyticSupport::Cone { placement, .. }) = support
+            else {
+                panic!("{support:?}");
+            };
+            let axis = placement.z_axis();
+            assert!(axis.x.abs() < 1e-15 && axis.y.abs() < 1e-15, "{axis:?}");
+        }
     }
 
     fn canonical(k: &Kernel, bot: f64, top: f64, h: f64, swap: bool, inside: bool) -> Cone {
