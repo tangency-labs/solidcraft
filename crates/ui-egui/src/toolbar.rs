@@ -5,7 +5,7 @@ use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
-use crate::ribbon::{self, BUTTON_LABEL_PADDING, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
+use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
 use crate::{SolveApp, icons};
 use solidcraft_theme::Tokens;
 
@@ -911,17 +911,11 @@ fn persistent_hint(app: &SolveApp, command: &solidcraft_engine::CommandSpec, ena
     })
 }
 
-/// Paint slots retain original z-order, while their presentation is resolved after every
-/// command interaction in this ribbon pass. These records never survive the current frame.
+/// A ribbon button or grid icon whose command has a persistent effect, painted after every
+/// command of the pass ran ([`ribbon::paint_deferred`]). These records never survive the frame.
 struct PersistentRibbonPaint {
     command: &'static solidcraft_engine::CommandSpec,
-    response: egui::Response,
-    // Keep the allocating layer, clip and opacity when replacing these deferred slots.
-    painter: egui::Painter,
-    rect: Rect,
-    background: egui::layers::ShapeIdx,
-    label_slot: egui::layers::ShapeIdx,
-    neutral: egui::Shape,
+    deferred: ribbon::Deferred,
     label: Option<String>,
     enabled: bool,
     disabled: Option<String>,
@@ -929,60 +923,39 @@ struct PersistentRibbonPaint {
 
 fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<PersistentRibbonPaint>, tab: &str, namespace: &str) {
     let t = Tokens::get();
-    let mut count = 0;
-    for paint in paints {
-        let selected = persistent_pressed(app, paint.command.id);
-        let ink = if !paint.enabled {
-            t.text_dim
-        } else if selected {
-            t.selected_ink
-        } else {
-            t.text
-        };
-        // Resolve the genuine live tool after dispatch too: a click may have ended it.
-        // The compatibility presentation keeps its original transient recipe.
-        let neutral = if app.preferences.persistent_ribbon_pressed && app.tool.as_ref().is_some_and(|tool| tool.cmd == paint.command.id) {
-            let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
-            egui::Shape::Rect(egui::epaint::RectShape::new(
-                paint.rect,
-                t.radius_sm,
-                accent.soft,
-                Stroke::new(1.0, accent.color),
-                egui::StrokeKind::Inside,
-            ))
-        } else {
-            paint.neutral
-        };
-        let background = if selected {
-            count += 1;
-            crate::scenario::publish_target(&format!("{namespace}:pressed:{}", paint.command.id), paint.rect);
-            ui_kit::persistent_button_shape(ui, &paint.response, paint.rect)
-        } else if paint.response.has_focus() && app.preferences.persistent_ribbon_pressed {
-            egui::Shape::Vec(vec![neutral, ui_kit::native_button_focus(ui, &paint.response, paint.rect)])
-        } else {
-            neutral
-        };
-        paint.painter.set(paint.background, background);
-        if paint.response.has_focus() {
-            crate::scenario::publish_target(&format!("{namespace}:focus:{}", paint.command.id), paint.rect);
-        }
-        if let Some(label) = paint.label {
-            let galley = ribbon::button_galley_weight(&paint.painter, &label, paint.rect.width() - BUTTON_LABEL_PADDING, ink, selected);
-            paint
-                .painter
-                .set(paint.label_slot, egui::Shape::galley(pos2(paint.rect.center().x, ribbon::label_top(paint.rect, galley.size().y)), galley, ink));
-        }
-        paint.response.widget_info(|| {
-            if app.preferences.persistent_ribbon_pressed && persistent_available(app, paint.command.id) {
-                egui::WidgetInfo::selected(egui::Role::Button, paint.enabled, selected, persistent_button_name(app, paint.command))
+    let pressed = app.preferences.persistent_ribbon_pressed;
+    let mut tips = Vec::new();
+    let items = paints
+        .into_iter()
+        .map(|paint| {
+            let id = paint.command.id;
+            let checkable = pressed && persistent_available(app, id);
+            let name = if checkable {
+                persistent_button_name(app, paint.command)
             } else {
-                let info = crate::render_workspace::interactive_command_info(app, paint.command);
-                egui::WidgetInfo::labeled(egui::Role::Button, paint.enabled, app.tr_label(info.label))
-            }
-        });
-        let _ = ribbon_tooltip(app, paint.response, paint.command, paint.disabled.as_deref());
+                app.tr_label(crate::render_workspace::interactive_command_info(app, paint.command).label).to_string()
+            };
+            let look = ribbon::DeferredLook {
+                id: id.to_string(),
+                selected: persistent_pressed(app, id),
+                // Resolve the genuine live tool after dispatch too: a click may have ended it.
+                // The compatibility presentation keeps its original transient recipe.
+                running: pressed && app.tool.as_ref().is_some_and(|tool| tool.cmd == id),
+                focus_ring: pressed,
+                label: paint.label,
+                enabled: paint.enabled,
+                name,
+                checkable,
+                accent: solidcraft_theme::TabAccent::for_tab(&t, tab),
+            };
+            tips.push((paint.deferred.response.clone(), paint.command, paint.disabled));
+            (paint.deferred, look)
+        })
+        .collect();
+    ribbon::paint_deferred(ui, items, namespace);
+    for (response, command, disabled) in tips {
+        let _ = ribbon_tooltip(app, response, command, disabled.as_deref());
     }
-    crate::scenario::publish_count(&format!("{namespace}:pressed"), count as f64);
 }
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
@@ -1201,7 +1174,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     // on them, away from the panels.
     let busy = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some())
         || app.viewport.context_menu.is_some()
-        || egui::DragAndDrop::payload::<ToolbarDrag>(&ctx).is_some();
+        || ribbon::dragging(&ctx);
     let left = ctx.input(|i| i.pointer.latest_pos()).is_none_or(|p| !r.expand(t.space_4).contains(p));
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if tab_click == Some(true) || (!busy && (left || escape)) {
@@ -1213,7 +1186,6 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
 /// One ribbon button as SolidCraft sees it: the command pinned there, the one a click runs (a
 /// family's chosen variant), and the component's data for it.
 struct PanelButton {
-    panel: &'static str,
     pinned: &'static solidcraft_engine::CommandSpec,
     selected: &'static solidcraft_engine::CommandSpec,
     /// The family whose first variant is pinned here: its variants' menu hangs under the button.
@@ -1315,7 +1287,6 @@ impl RibbonPanels {
                     };
                     let button_label = crate::workspace::ribbon_button_label(selected);
                     PanelButton {
-                        panel,
                         pinned: c,
                         selected,
                         family,
@@ -1340,7 +1311,6 @@ impl RibbonPanels {
                 let cell = |c: &'static solidcraft_engine::CommandSpec| {
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     PanelButton {
-                        panel,
                         pinned: c,
                         selected: c,
                         family: None,
@@ -1477,6 +1447,8 @@ const RIBBON_HANDLES: ribbon::Handles<'static> = ribbon::Handles {
     collapsed_count: "toolbar_collapsed",
     more_count: "toolbar_more",
     trimmed_count: "toolbar_trimmed",
+    drag: "toolbar_drag",
+    drag_remove: "toolbar_drag:remove",
 };
 
 /// One panel of a tab: its name, every command and the buttons it shows.
@@ -1610,7 +1582,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let mut persistent_paints = Vec::new();
         let top = r.top() + TAB_ROW_HEIGHT;
-        let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;
+        let mut drop: Option<(String, &'static str, Option<String>)> = None;
         let mut menu: Option<(egui::Pos2, &'static str)> = None;
         // A drop-down row's pin icon clicked: pin or unpin that command.
         let mut toggle: Option<&'static str> = None;
@@ -1625,7 +1597,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     && i.events.iter().any(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerGone))
                     && !i.events.iter().any(|e| matches!(e, egui::Event::Touch { .. }))
             })
-            && !egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ui.ctx());
+            && !ribbon::dragging(ui.ctx());
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
         let editing_in_place = app.edit_in_place.active.is_some();
@@ -1683,23 +1655,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         };
         // The app's part of each button: its hover text, drags, the search's preview, deferred
         // persistent paint and a family's variants menu.
-        for d in &out.buttons {
+        for d in &mut out.buttons {
+            let deferred = d.deferred.take();
             let Some(b) = panels.button(d) else { continue };
             let resp = &d.response;
-            if resp.drag_started() {
-                resp.dnd_set_drag_payload(ToolbarDrag { id: b.pinned.id, from_menu: false });
-            }
-            if !d.cell
-                && let Some(dragged) = resp.dnd_hover_payload::<ToolbarDrag>()
-                && dragged.id != b.pinned.id
-            {
-                ui_kit::insertion_marker(&painter, d.rect.left() - 1.0, d.rect.top() + 2.0, d.rect.bottom() - 2.0);
-            }
-            if let Some(dragged) = resp.dnd_release_payload::<ToolbarDrag>()
-                && dragged.id != b.pinned.id
-            {
-                drop = Some((dragged.id, b.panel, Some(b.pinned.id)));
-            }
             if let Some(r) = reveal.as_ref().filter(|r| r.preview) {
                 if d.cell {
                     if r.id == b.pinned.id {
@@ -1711,15 +1670,10 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     reveal_tooltip(app, ui, d.whole, command, egui::RectAlign::BOTTOM_START);
                 }
             }
-            if let Some((background, label_slot, neutral)) = &d.background {
+            if let Some(deferred) = deferred {
                 persistent_paints.push(PersistentRibbonPaint {
                     command: b.selected,
-                    response: resp.clone(),
-                    painter: painter.clone(),
-                    rect: d.whole,
-                    background: *background,
-                    label_slot: *label_slot,
-                    neutral: neutral.clone(),
+                    deferred,
                     label: labels.then(|| persistent_button_name(app, b.selected)),
                     enabled: ui.is_enabled() && b.enabled,
                     disabled: b.disabled.clone(),
@@ -1778,6 +1732,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                         }
                     });
                 }
+                ribbon::Action::Drop { id, group, before } => {
+                    if let Some((panel, _, _)) = lists.get(group) {
+                        drop = Some((id, *panel, before));
+                    }
+                }
                 ribbon::Action::Open { group } => {
                     let Some(popup_id) = panels.popup_id(group) else { continue };
                     ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_panel_open"), popup_id));
@@ -1800,17 +1759,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             // `ribbon_menus_skip_pinned` leaves out of the drop-down.
             let on_ribbon: Vec<&str> =
                 data.large.iter().take(g.buttons).map(|b| b.pinned.id).chain(data.gallery.iter().filter(|_| g.cells).map(|b| b.pinned.id)).collect();
-            // Labels, gaps and margins append; actual buttons keep their insert-before target.
-            // Respect the current layer so a dropdown covering the panel is not a drop target.
-            let over_button = ui.input(|input| input.pointer.hover_pos()).is_some_and(|p| g.slots.iter().any(|slot| slot.contains(p)));
-            if !over_button && ui.rect_contains_pointer(g.rect) && egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).is_some() {
-                ui_kit::insertion_marker(&painter, g.rect.right() - 4.0, top + 4.0, top + 38.0);
-                if ui.input(|input| input.pointer.any_released())
-                    && let Some(d) = egui::DragAndDrop::take_payload::<ToolbarDrag>(ui.ctx())
-                {
-                    drop = Some((d.id, *panel, None));
-                }
-            }
             let open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))) == Some(popup_id);
             // A hovered search result in this drop-down opens it on its row, under the search sheet.
             let previewed = g.previewed && !open;
@@ -1909,7 +1857,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 crate::scenario::publish_rect("toolbar_dropdown", area.response.rect);
                 // A drag out of the drop-down ends with a release elsewhere: not a click elsewhere.
-                let dragging = egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ui.ctx());
+                let dragging = ribbon::dragging(ui.ctx());
                 if open
                     && ((area.response.clicked_elsewhere() && !lresp.clicked() && !opened && !dragging)
                         || ui.input(|i| i.key_pressed(egui::Key::Escape)))
@@ -1950,21 +1898,12 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
 
         // Dragging a command: its icon follows the pointer; a toolbar button dragged off the
         // toolbar (or into the open drop-down) shows it will be removed.
-        let pointer = ui.input(|i| i.pointer.latest_pos());
-        let over_popup = |p: egui::Pos2| popup_rect.is_some_and(|pr| pr.contains(p));
-        let leaves = |p: egui::Pos2| !r.contains(p) || over_popup(p);
-        if let (Some(d), Some(p)) = (egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()), pointer) {
-            let removing = !d.from_menu && leaves(p);
-            drag_ghost(app, ui.ctx(), d.id, p, removing);
-            if ui.input(|i| i.pointer.any_released()) && drop.is_none() {
-                egui::DragAndDrop::clear_payload(ui.ctx());
-                if removing {
-                    crate::toolbar_custom::remove(app, &tab, d.id);
-                }
-            }
+        let icon_of = |id: &str| solidcraft_engine::find_command(id).map(|c| c.info(&app.session).icon.to_string());
+        if let Some(id) = ribbon::drag_end(ui, r, popup_rect, drop.is_some(), &icon_of, &RIBBON_HANDLES) {
+            crate::toolbar_custom::remove(app, &tab, &id);
         }
         if let Some((id, panel, before)) = drop {
-            crate::toolbar_custom::reorder(app, &tab, id, panel, before);
+            crate::toolbar_custom::reorder(app, &tab, &id, panel, before.as_deref());
         }
         if let Some(id) = toggle {
             crate::toolbar_custom::toggle(app, &tab, id);
@@ -2169,9 +2108,6 @@ fn dropdown_row(
 ) -> Option<ribbon::MenuAction> {
     let row = RowData::new(app, c);
     let (action, resp) = ribbon::menu_row(ui, &row.entry(c, pinned), width, revealed, &menu_style(app));
-    if resp.drag_started() {
-        resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: true });
-    }
     if revealed.is_some() {
         reveal_tooltip(app, ui, resp.rect, c, egui::RectAlign::RIGHT_START);
     }
@@ -2245,20 +2181,12 @@ fn grid_cell_extras(
     cell: ribbon::GridCell,
     paints: &mut Vec<PersistentRibbonPaint>,
 ) {
-    if cell.response.drag_started() {
-        cell.response.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: true });
-    }
     let info = c.info(&app.session);
-    if let Some((painter, background, label_slot, rect, neutral)) = cell.background {
+    if let Some(deferred) = cell.deferred {
         // Reuse the native ribbon recipe; only responses/paint slots survive until dispatch.
         paints.push(PersistentRibbonPaint {
             command: c,
-            response: cell.response,
-            painter,
-            rect,
-            background,
-            label_slot,
-            neutral,
+            deferred,
             label: None,
             enabled: ui.is_enabled() && info.enabled,
             disabled: info.disabled_reason,
@@ -2489,26 +2417,6 @@ fn sketch_menu_rows(
             }
         }
     }
-}
-
-type ToolbarDrag = ui_kit::ReorderPayload<&'static str>;
-
-/// The dragged command's icon under the pointer, crossed out when releasing removes it.
-fn drag_ghost(app: &SolveApp, ctx: &egui::Context, id: &str, at: egui::Pos2, removing: bool) {
-    let t = Tokens::get();
-    let Some(c) = solidcraft_engine::find_command(id) else { return };
-    let p = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("sc_toolbar_drag")));
-    let r = Rect::from_center_size(at + vec2(14.0, 16.0), vec2(30.0, 30.0));
-    p.rect(r, t.radius_sm, t.toolbar.gamma_multiply(0.92), Stroke::new(1.0, if removing { t.error } else { t.accent }), egui::StrokeKind::Inside);
-    let info = c.info(&app.session);
-    icons::paint_icon(&p, r.shrink(5.0), info.icon, f32::from(t.icon.a()) / 255.0);
-    if removing {
-        let s = Stroke::new(2.0, t.error);
-        let x = Rect::from_center_size(r.right_top(), vec2(9.0, 9.0));
-        p.circle_filled(x.center(), 7.0, t.toolbar);
-        crate::icons::glyphs::cross(&p, x, s);
-    }
-    crate::scenario::publish_handle(if removing { "toolbar_drag:remove" } else { "toolbar_drag" }, at);
 }
 
 /// The SELECT panel: what a click in the view picks.
@@ -4675,7 +4583,7 @@ mod ribbon_label_tests {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
                         let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon::button_width(&painter, label), ribbon::BUTTON_HEIGHT));
-                        let galley = ribbon::button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, Color32::WHITE);
+                        let galley = ribbon::button_galley(&painter, label, whole.width() - ribbon::BUTTON_LABEL_PADDING, Color32::WHITE);
                         let top = ribbon::label_top(whole, galley.size().y);
                         let at = format!("{} in {}: {label:?}", command.id, catalog.id);
                         // The icon is 26 points square, centred 16 points below the button's top.
@@ -4706,7 +4614,7 @@ mod ribbon_label_tests {
                     for catalog in crate::i18n::LOCALES {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
-                        let width = ribbon::button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                        let width = ribbon::button_width(&painter, label) - ribbon::BUTTON_LABEL_PADDING;
                         let galley = ribbon::button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);
                         assert!(galley.size().x <= width + 0.01, "{}: {label}: {} > {width}", command.id, galley.size().x);
@@ -4753,13 +4661,13 @@ mod ribbon_label_tests {
             }
             for label in ["Rectangular", "Dimension", "Coincident", "Chamfer", "Revolve"] {
                 let width = ribbon::button_width(&painter, label);
-                assert_eq!(ribbon::button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec![label]);
+                assert_eq!(ribbon::button_lines(&painter, label, width - ribbon::BUTTON_LABEL_PADDING), vec![label]);
                 assert!((BUTTON_MIN_WIDTH..=ribbon::BUTTON_MAX_WIDTH).contains(&width));
             }
             let finish = solidcraft_engine::find_command("sketch.finish").unwrap();
             let label = crate::workspace::ribbon_button_label(finish);
             let width = ribbon::button_width(&painter, label);
-            assert_eq!(ribbon::button_lines(&painter, label, width - BUTTON_LABEL_PADDING), vec!["Finish", "Sketch"]);
+            assert_eq!(ribbon::button_lines(&painter, label, width - ribbon::BUTTON_LABEL_PADDING), vec!["Finish", "Sketch"]);
             // Exercise full labels and pinned commands too, not just compact defaults.
             for (label, width, expected) in [
                 ("Coincident", 50.0, vec!["Coincident"]),
@@ -4812,7 +4720,7 @@ mod ribbon_label_tests {
             ] {
                 let command = solidcraft_engine::find_command(id).unwrap();
                 let label = ja.label(crate::workspace::ribbon_button_label(command));
-                let width = ribbon::button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                let width = ribbon::button_width(&painter, label) - ribbon::BUTTON_LABEL_PADDING;
                 assert_eq!(ribbon::button_lines(&painter, label, width), expected, "{id}");
             }
             let comp = solidcraft_engine::find_command("component.create").unwrap();

@@ -149,6 +149,8 @@ const HANDLES: Handles<'static> = Handles {
     collapsed_count: "t:collapsed",
     more_count: "t:in_more",
     trimmed_count: "t:trimmed",
+    drag: "t:drag",
+    drag_remove: "t:drag_remove",
 };
 
 fn button(id: &'static str, enabled: bool) -> Button<'static> {
@@ -197,11 +199,19 @@ struct RowRig {
     time: std::cell::Cell<f64>,
     /// Each text the last frame painted, at its centre.
     texts: std::cell::RefCell<Vec<(String, egui::Pos2)>>,
+    /// The commands dragged off the row.
+    removed: std::cell::RefCell<Vec<String>>,
 }
 
 impl RowRig {
     fn new(width: f32) -> RowRig {
-        let rig = RowRig { ctx: crate::fonts::test_context(), width, time: std::cell::Cell::new(0.0), texts: Default::default() };
+        let rig = RowRig {
+            ctx: crate::fonts::test_context(),
+            width,
+            time: std::cell::Cell::new(0.0),
+            texts: Default::default(),
+            removed: Default::default(),
+        };
         rig.frame(Vec::new());
         rig
     }
@@ -233,6 +243,8 @@ impl RowRig {
         let output = crate::test_support::frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(pos2(0.0, 30.0), vec2(self.width, GROUP_HEIGHT + 1.0));
             actions = show(ui, &row, rect, &mut |_, _| false).actions;
+            let dropped = actions.iter().any(|a| matches!(a, Action::Drop { .. }));
+            self.removed.borrow_mut().extend(drag_end(ui, rect, None, dropped, &|_| Some("box".to_string()), &HANDLES));
         });
         *self.texts.borrow_mut() =
             crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
@@ -541,4 +553,89 @@ fn a_menu_entry_returns_what_was_chosen() {
         let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
         assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)], "grid {grid}");
     }
+}
+
+impl RowRig {
+    /// Press at `from`, move past the drag threshold, then to `to`, and release there.
+    fn drag(&self, from: egui::Pos2, to: egui::Pos2) -> Vec<Action> {
+        let button =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![egui::Event::PointerMoved(from)]);
+        actions.extend(self.frame(vec![button(from, true)]));
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(from + vec2(0.0, 10.0))]));
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(to)]));
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(to)]));
+        actions.extend(self.frame(vec![button(to, false)]));
+        actions
+    }
+}
+
+/// A button dragged onto another goes before it, onto a group's label to its end; dragged off
+/// the row and released it is removed, its ghost crossed out while it would be.
+#[test]
+fn buttons_are_dropped_before_a_button_at_a_groups_end_or_removed_off_the_row() {
+    let rig = RowRig::new(800.0);
+    let drops = |actions: Vec<Action>| actions.into_iter().filter(|a| matches!(a, Action::Drop { .. })).collect::<Vec<_>>();
+    let actions = rig.drag(rig.at("t:button:a.one"), rig.at("t:button:a.two"));
+    assert_eq!(drops(actions), vec![Action::Drop { id: "a.one".into(), group: 0, before: Some("a.two".into()) }]);
+    let actions = rig.drag(rig.at("t:button:a.two"), rig.at("t:section:B"));
+    assert_eq!(drops(actions), vec![Action::Drop { id: "a.two".into(), group: 1, before: None }]);
+    assert!(rig.removed.borrow().is_empty(), "nothing left the row");
+    let from = rig.at("t:button:b.on");
+    let mut actions = rig.frame(vec![egui::Event::PointerMoved(from)]);
+    let press = |pressed| egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    actions.extend(rig.frame(vec![press(true)]));
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(from + vec2(0.0, 10.0))]));
+    let away = pos2(500.0, 300.0);
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(away)]));
+    assert!(solidcraft_ui_registry::handle_at("t:drag_remove").is_some(), "the ghost shows it would be removed");
+    actions.extend(rig.frame(vec![egui::Event::PointerButton {
+        pos: away,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]));
+    assert_eq!(drops(actions), Vec::new());
+    assert_eq!(*rig.removed.borrow(), ["b.on"]);
+}
+
+/// A button the app paints itself is drawn as the app resolves it after the pass: pressed, it
+/// is published and counted.
+#[test]
+fn a_deferred_button_is_painted_as_the_app_resolves_it() {
+    let ctx = crate::fonts::test_context();
+    let t = Tokens::get();
+    let mut on = button("a.on", true);
+    on.app_paints = true;
+    let row = Row {
+        groups: vec![group("A", vec![on, button("a.off", true)])],
+        labels: true,
+        accent: TabAccent::for_tab(&t, "MODEL"),
+        exit: false,
+        reveal: None,
+        more_tip: "More",
+        handles: HANDLES,
+    };
+    solidcraft_ui_registry::clear_handles();
+    let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 400.0))), ..Default::default() };
+    let mut deferred = Vec::new();
+    crate::test_support::frame(&ctx, input, |ui| {
+        let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(800.0, GROUP_HEIGHT + 1.0)), &mut |_, _| false);
+        deferred = out.buttons.into_iter().filter_map(|d| d.deferred).collect();
+        assert_eq!(deferred.len(), 1, "only the button the app paints is deferred");
+        let look = DeferredLook {
+            id: "a.on".into(),
+            selected: true,
+            running: false,
+            focus_ring: true,
+            label: Some("On".into()),
+            enabled: true,
+            name: "On".into(),
+            checkable: true,
+            accent: TabAccent::for_tab(&t, "MODEL"),
+        };
+        paint_deferred(ui, deferred.drain(..).map(|d| (d, look.clone())).collect(), "t:ns");
+    });
+    assert!(solidcraft_ui_registry::rect_of("t:ns:pressed:a.on").is_some(), "the pressed button is published");
+    assert_eq!(solidcraft_ui_registry::count_of("t:ns:pressed"), Some(1.0));
 }

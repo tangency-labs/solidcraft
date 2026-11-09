@@ -365,6 +365,9 @@ pub struct Handles<'a> {
     pub collapsed_count: &'a str,
     pub more_count: &'a str,
     pub trimmed_count: &'a str,
+    /// A dragged command's ghost under the pointer, and the same when releasing removes it.
+    pub drag: &'a str,
+    pub drag_remove: &'a str,
 }
 
 /// The row as the app describes it this frame.
@@ -487,6 +490,8 @@ pub enum Action {
     Section { group: usize },
     /// Group `group`'s collapsed button was clicked: open its menu.
     Open { group: usize },
+    /// Command `id` was dropped in group `group`, before button `before` (None: at its end).
+    Drop { id: String, group: usize, before: Option<String> },
 }
 
 /// A button the row drew, for the app's own part of it (hover text, drags, its menu half's menu).
@@ -501,9 +506,8 @@ pub struct Drawn {
     pub response: egui::Response,
     /// A split button's menu half.
     pub split: Option<egui::Response>,
-    /// An `app_paints` button's places for its background and label, and its background as the
-    /// row would have drawn it.
-    pub background: Option<(egui::layers::ShapeIdx, egui::layers::ShapeIdx, egui::Shape)>,
+    /// An `app_paints` button's paint, for [`paint_deferred`].
+    pub deferred: Option<Deferred>,
 }
 
 /// A group drawn on the row.
@@ -733,9 +737,17 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             if resp.clicked() && b.enabled {
                 out.actions.push(Action::Run { id: b.run.to_string(), rect: whole, place: Place::Button });
             }
-            let mut drawn_button = Drawn { group: gi, index: bi, cell: false, whole, rect: br, response: resp, split: None, background: None };
+            let mut drawn_button = Drawn { group: gi, index: bi, cell: false, whole, rect: br, response: resp, split: None, deferred: None };
             if b.app_paints {
-                drawn_button.background = Some((background, painter.add(egui::Shape::Noop), neutral));
+                let label_slot = painter.add(egui::Shape::Noop);
+                drawn_button.deferred = Some(Deferred {
+                    response: drawn_button.response.clone(),
+                    painter: painter.clone(),
+                    rect: whole,
+                    background,
+                    label_slot,
+                    neutral,
+                });
             } else if let (Some(s), Some(split_id)) = (b.split, split_id) {
                 let ar = if labels {
                     Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
@@ -763,6 +775,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 let galley = button_galley(&painter, b.label, whole.width() - BUTTON_LABEL_PADDING, color);
                 painter.galley(pos2(whole.center().x, label_top(whole, galley.size().y)), galley, t.text);
             }
+            drag_onto(&painter, &drawn_button.response, b.id, Some(br), gi, &mut out.actions);
             out.buttons.push(drawn_button);
         }
         if cells {
@@ -811,7 +824,8 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                 if resp.clicked() && c.enabled {
                     out.actions.push(Action::Run { id: c.id.to_string(), rect: cell, place: Place::Cell });
                 }
-                out.buttons.push(Drawn { group: gi, index, cell: true, whole: cell, rect: cell, response: resp, split: None, background: None });
+                drag_onto(&painter, &resp, c.id, None, gi, &mut out.actions);
+                out.buttons.push(Drawn { group: gi, index, cell: true, whole: cell, rect: cell, response: resp, split: None, deferred: None });
             }
         }
         // The label row is also the group's menu button. The group area ends 1 px above the
@@ -860,6 +874,18 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
         }
         let group_rect = Rect::from_min_max(pos2(px, top + 2.0), pos2(px + width, rect.bottom()));
         solidcraft_ui_registry::publish_rect(&handle(h.group, group.key), group_rect);
+        // Dropped on the group's free space (all of a collapsed group): the command goes to its
+        // end. Labels, gaps and margins append; buttons keep their insert-before target. The
+        // current layer counts, so a menu covering the group is no drop target.
+        let over_button = ui.input(|input| input.pointer.hover_pos()).is_some_and(|p| slots.iter().any(|slot| slot.contains(p)));
+        if !over_button && ui.rect_contains_pointer(group_rect) && egui::DragAndDrop::payload::<DragPayload>(ui.ctx()).is_some() {
+            crate::ui_kit::insertion_marker(&painter, group_rect.right() - 4.0, top + 4.0, top + 38.0);
+            if ui.input(|input| input.pointer.any_released())
+                && let Some(d) = egui::DragAndDrop::take_payload::<DragPayload>(ui.ctx())
+            {
+                out.actions.push(Action::Drop { id: d.id.clone(), group: gi, before: None });
+            }
+        }
         out.groups.push(GroupOut {
             group: gi,
             rect: group_rect,
@@ -1312,6 +1338,9 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
     if resp.has_focus() && !ui.clip_rect().contains_rect(rect) {
         resp.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
     }
+    if resp.drag_started() {
+        resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
+    }
     // The pin at the row's end (above the row, so it takes its own clicks).
     let pr = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(20.0, 20.0));
     let pin = ui.interact(pr, ui.scope_id().with(("dropdown_pin", entry.id)), Sense::click());
@@ -1590,9 +1619,8 @@ pub struct GridCell {
     pub index: usize,
     pub rect: Rect,
     pub response: egui::Response,
-    /// An `app_paints` entry's painter, its shape slots for background and label, the cell they
-    /// fill, and its background as the grid would have drawn it.
-    pub background: Option<(egui::Painter, egui::layers::ShapeIdx, egui::layers::ShapeIdx, Rect, egui::Shape)>,
+    /// An `app_paints` entry's paint, for [`paint_deferred`].
+    pub deferred: Option<Deferred>,
 }
 
 /// The grid drawn: the entry chosen and how, and each icon drawn.
@@ -1685,6 +1713,9 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
     if resp.has_focus() && !ui.clip_rect().contains_rect(rect) {
         resp.scroll_to_me_animation(None, egui::style::ScrollAnimation::none());
     }
+    if resp.drag_started() {
+        resp.dnd_set_drag_payload(DragPayload { id: entry.id.to_string(), from_menu: true });
+    }
     // The pin in the corner, as at a list row's end. It takes clicks (above the cell) only once
     // the pointer has rested on the icon for PIN_DELAY: until then a click anywhere runs the
     // command, so a quick click near the corner never pins or unpins it by accident.
@@ -1712,10 +1743,10 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         neutral.push(egui::Shape::rect_stroke(cell, t.control_radius, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside));
     }
     let neutral = egui::Shape::Vec(neutral);
-    let background = if entry.app_paints {
+    let deferred = if entry.app_paints {
         // Only responses and paint slots survive until the app paints them.
-        let slots = (painter.add(egui::Shape::Noop), painter.add(egui::Shape::Noop));
-        Some((painter.clone(), slots.0, slots.1, cell, neutral))
+        let (background, label_slot) = (painter.add(egui::Shape::Noop), painter.add(egui::Shape::Noop));
+        Some(Deferred { response: resp.clone(), painter: painter.clone(), rect: cell, background, label_slot, neutral })
     } else {
         painter.add(neutral);
         None
@@ -1738,7 +1769,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
         let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
         if pin.backing_on_hover_text(tip).clicked() {
-            return (Some(MenuAction::TogglePin), GridCell { index: 0, rect, response: resp, background });
+            return (Some(MenuAction::TogglePin), GridCell { index: 0, rect, response: resp, deferred });
         }
     }
     let action = if resp.secondary_clicked() {
@@ -1748,7 +1779,164 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
     } else {
         None
     };
-    (action, GridCell { index: 0, rect, response: resp, background })
+    (action, GridCell { index: 0, rect, response: resp, deferred })
+}
+
+/// A command being dragged: off a button or cell of the row, or out of a menu.
+type DragPayload = crate::ui_kit::ReorderPayload<String>;
+
+/// A command is being dragged along the ribbon or out of a menu.
+pub fn dragging(ctx: &egui::Context) -> bool {
+    egui::DragAndDrop::has_payload_of_type::<DragPayload>(ctx)
+}
+
+/// A row button's or cell's part in dragging: it starts a drag, shows where a command dragged
+/// over a button (`marker`: its rect) goes, and takes one dropped on it.
+fn drag_onto(painter: &egui::Painter, resp: &egui::Response, id: &str, marker: Option<Rect>, group: usize, actions: &mut Vec<Action>) {
+    if resp.drag_started() {
+        resp.dnd_set_drag_payload(DragPayload { id: id.to_string(), from_menu: false });
+    }
+    if let Some(at) = marker
+        && let Some(dragged) = resp.dnd_hover_payload::<DragPayload>()
+        && dragged.id != id
+    {
+        crate::ui_kit::insertion_marker(painter, at.left() - 1.0, at.top() + 2.0, at.bottom() - 2.0);
+    }
+    if let Some(dragged) = resp.dnd_release_payload::<DragPayload>()
+        && dragged.id != id
+    {
+        actions.push(Action::Drop { id: dragged.id.clone(), group, before: Some(id.to_string()) });
+    }
+}
+
+/// The end of a ribbon pass while a command is dragged: its icon (`icon_of` its id) follows the
+/// pointer, crossed out when releasing it here removes it from the row: a row button dragged off
+/// `ribbon` or onto the open `menu`. On release (with nothing `dropped` this pass) the drag ends;
+/// returns the command removed.
+pub fn drag_end(
+    ui: &egui::Ui,
+    ribbon: Rect,
+    menu: Option<Rect>,
+    dropped: bool,
+    icon_of: &dyn Fn(&str) -> Option<String>,
+    handles: &Handles,
+) -> Option<String> {
+    let pointer = ui.input(|i| i.pointer.latest_pos());
+    let (Some(d), Some(p)) = (egui::DragAndDrop::payload::<DragPayload>(ui.ctx()), pointer) else { return None };
+    let leaves = !ribbon.contains(p) || menu.is_some_and(|menu| menu.contains(p));
+    let removing = !d.from_menu && leaves;
+    if let Some(icon) = icon_of(&d.id) {
+        drag_ghost(ui, &icon, p, removing, handles);
+    }
+    if ui.input(|i| i.pointer.any_released()) && !dropped {
+        egui::DragAndDrop::clear_payload(ui.ctx());
+        if removing {
+            return Some(d.id.clone());
+        }
+    }
+    None
+}
+
+/// The dragged command's icon under the pointer, crossed out when releasing removes it.
+fn drag_ghost(ui: &egui::Ui, icon: &str, at: Pos2, removing: bool, handles: &Handles) {
+    let t = Tokens::get();
+    let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("ribbon_drag_ghost")));
+    let r = Rect::from_center_size(at + vec2(14.0, 16.0), vec2(30.0, 30.0));
+    p.rect(r, t.radius_sm, t.toolbar.gamma_multiply(0.92), Stroke::new(1.0, if removing { t.error } else { t.accent }), egui::StrokeKind::Inside);
+    crate::icons::paint_icon(&p, r.shrink(5.0), icon, f32::from(t.icon.a()) / 255.0);
+    if removing {
+        let s = Stroke::new(2.0, t.error);
+        let x = Rect::from_center_size(r.right_top(), vec2(9.0, 9.0));
+        p.circle_filled(x.center(), 7.0, t.toolbar);
+        crate::icons::glyphs::cross(&p, x, s);
+    }
+    solidcraft_ui_registry::publish_handle(if removing { handles.drag_remove } else { handles.drag }, at);
+}
+
+/// A button or grid icon the app paints itself after every command of the pass has run, so a
+/// state its click changed shows in the same frame: its response, the painter it was drawn
+/// with (its layer, clip and opacity), its rect, its shape slots for background and label, and
+/// its background as the row would have drawn it.
+pub struct Deferred {
+    pub response: egui::Response,
+    pub painter: egui::Painter,
+    pub rect: Rect,
+    pub background: egui::layers::ShapeIdx,
+    pub label_slot: egui::layers::ShapeIdx,
+    pub neutral: egui::Shape,
+}
+
+/// How a deferred button looks now, as the app resolves it after its commands ran.
+#[derive(Clone, Debug)]
+pub struct DeferredLook {
+    /// Its command id, in handles.
+    pub id: String,
+    /// Its effect is on: drawn pressed, its label semibold.
+    pub selected: bool,
+    /// Its tool runs (outlined in the accent) and it keeps a focus ring while focused: the
+    /// pressed presentation is on.
+    pub running: bool,
+    pub focus_ring: bool,
+    pub label: Option<String>,
+    pub enabled: bool,
+    /// Its accessible name, and whether it announces itself on or off.
+    pub name: String,
+    pub checkable: bool,
+    pub accent: TabAccent,
+}
+
+/// Paints the deferred buttons as they look now. `namespace` prefixes what is published: each
+/// pressed button (`<namespace>:pressed:<id>`), the focused one (`<namespace>:focus:<id>`) and
+/// how many are pressed (`<namespace>:pressed`).
+pub fn paint_deferred(ui: &egui::Ui, items: Vec<(Deferred, DeferredLook)>, namespace: &str) {
+    let t = Tokens::get();
+    let mut count = 0;
+    for (paint, look) in items {
+        let ink = if !look.enabled {
+            t.text_dim
+        } else if look.selected {
+            t.selected_ink
+        } else {
+            t.text
+        };
+        let neutral = if look.running {
+            egui::Shape::Rect(egui::epaint::RectShape::new(
+                paint.rect,
+                t.radius_sm,
+                look.accent.soft,
+                Stroke::new(1.0, look.accent.color),
+                egui::StrokeKind::Inside,
+            ))
+        } else {
+            paint.neutral
+        };
+        let background = if look.selected {
+            count += 1;
+            solidcraft_ui_registry::publish_target(&format!("{namespace}:pressed:{}", look.id), paint.rect);
+            crate::ui_kit::persistent_button_shape(ui, &paint.response, paint.rect)
+        } else if paint.response.has_focus() && look.focus_ring {
+            egui::Shape::Vec(vec![neutral, crate::ui_kit::native_button_focus(ui, &paint.response, paint.rect)])
+        } else {
+            neutral
+        };
+        paint.painter.set(paint.background, background);
+        if paint.response.has_focus() {
+            solidcraft_ui_registry::publish_target(&format!("{namespace}:focus:{}", look.id), paint.rect);
+        }
+        if let Some(label) = &look.label {
+            let galley = button_galley_weight(&paint.painter, label, paint.rect.width() - BUTTON_LABEL_PADDING, ink, look.selected);
+            let at = pos2(paint.rect.center().x, label_top(paint.rect, galley.size().y));
+            paint.painter.set(paint.label_slot, egui::Shape::galley(at, galley, ink));
+        }
+        paint.response.widget_info(|| {
+            if look.checkable {
+                egui::WidgetInfo::selected(egui::Role::Button, look.enabled, look.selected, &look.name)
+            } else {
+                egui::WidgetInfo::labeled(egui::Role::Button, look.enabled, &look.name)
+            }
+        });
+    }
+    solidcraft_ui_registry::publish_count(&format!("{namespace}:pressed"), count as f64);
 }
 
 #[cfg(test)]
