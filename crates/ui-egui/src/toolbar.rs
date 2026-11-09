@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
 use crate::ribbon::{self, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
-use crate::{SolveApp, icons};
+use crate::{SolveApp, app_bar, icons};
 use solidcraft_theme::Tokens;
 
 pub use crate::workspace::TABS;
@@ -48,35 +48,6 @@ fn menu_commands(
     out
 }
 
-/// Room for the version between Report a bug and the caption buttons, at the least.
-const RIGHT_GROUP: f32 = 60.0;
-const CLUSTER_BUTTONS: f32 = 108.0;
-
-/// The least room the document tabs keep when a long version takes its extra width: one tab and
-/// the + button ([`crate::documents::layout`]).
-const TABS_KEPT: f32 = 124.0;
-
-/// The room right of Report a bug for the version (`version_width`, measured), or None where the
-/// bar shows none. The version sits 12 points from the caption buttons with a gap before the
-/// button, so a longer one (`v0.21.0-rc.1`) moves the button left instead of covering it. Its
-/// width over [`RIGHT_GROUP`] comes only from the document tabs' spare room: where it would leave
-/// them less than [`TABS_KEPT`], the version is hidden, as it is on a narrow bar.
-fn version_room(bar: Rect, captions: f32, tabs_start: f32, version_width: f32) -> Option<f32> {
-    if bar.width() < 640.0 {
-        return None;
-    }
-    let need = 12.0 + version_width + 8.0;
-    let room = RIGHT_GROUP.max(need);
-    // The tabs end 8 points before the cluster, with Report a bug as an icon at the least.
-    let tabs = bar.right() - captions - room - 28.0 - CLUSTER_BUTTONS - 8.0 - tabs_start;
-    (need <= RIGHT_GROUP || tabs >= TABS_KEPT).then_some(room)
-}
-
-/// The centre of Help, between Settings and Report a bug.
-fn help_x(report: Rect) -> f32 {
-    report.left() - 18.0
-}
-
 /// The command whose tool or dialog is open right now, shown pressed in the toolbar.
 fn running_command(app: &SolveApp) -> Option<String> {
     match (&app.tool, &app.dialog) {
@@ -98,33 +69,6 @@ pub(crate) fn shows_pressed(app: &SolveApp, id: &str) -> bool {
 /// its tool runs, since `persistent_ribbon_pressed` alone decides how its effect is shown.
 fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
     if persistent_available(app, id) { running_command(app).as_deref() == Some(id) } else { shows_pressed(app, id) }
-}
-
-/// The Report a bug button: labelled when the layout asks for it and there is room for its text
-/// (`label_width`, measured in the current language), otherwise just the icon. An icon-only
-/// layout gives it a square the size of Settings and Help. `version_width` is the measured version.
-fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32, layout: HeaderLayout) -> (Rect, bool) {
-    let room = if layout.version == VersionPlace::Header { version_room(bar, captions, tabs_start, version_width) } else { None };
-    let right = bar.right() - captions - room.unwrap_or(8.0);
-    if layout.report == ReportButton::Icon {
-        return (Rect::from_min_size(pos2(right - 32.0, bar.center().y - 16.0), vec2(32.0, 32.0)), false);
-    }
-    // Icon, text and a margin that mirrors the icon side.
-    let full = REPORT_TEXT_X + label_width + 11.0;
-    let labeled = right - CLUSTER_BUTTONS - tabs_start >= 216.0 + full;
-    let width = if labeled { full } else { 28.0 };
-    (Rect::from_min_size(pos2(right - width, bar.center().y - 13.0), vec2(width, 26.0)), labeled)
-}
-
-/// The closed search field in the application bar, ending `right`: whole when the document tabs
-/// keep the room Report a bug's label leaves them (`tabs_room`: theirs without the field), else
-/// just its magnifier.
-fn header_search_rect(app: &SolveApp, ctx: &egui::Context, bar: Rect, right: f32, tabs_room: f32) -> Rect {
-    let height = 26.0;
-    let full = crate::ui_kit::CommandSearch::closed_width(ctx, crate::keymap::display_for(app, "ui.palette").as_deref());
-    let whole = bar.width() >= 640.0 && tabs_room - full - HEADER_SEARCH_GAP >= 216.0;
-    let width = if whole { full } else { crate::ui_kit::CommandSearch::compact_width(height) };
-    Rect::from_min_size(pos2(right - width, bar.center().y - height / 2.0), vec2(width, height))
 }
 
 /// The height of an application-bar pill ([`offer_pill`]), a little under the bar's 26 px buttons.
@@ -179,11 +123,8 @@ pub(crate) fn offer_pill(
     Some((rect, response))
 }
 
-/// Where the Report a bug text starts, from the button's left edge.
-const REPORT_TEXT_X: f32 = 29.0;
-
 /// The application bar's height: the window's title bar on desktop builds.
-pub const APP_BAR_HEIGHT: f32 = 34.0;
+pub use crate::app_bar::HEIGHT as APP_BAR_HEIGHT;
 
 /// Where the application bar puts command search, Report a bug and the version: chosen by the
 /// app that hosts the UI ([`SolveApp::header`]) before the first frame. The default is the
@@ -240,8 +181,21 @@ pub(crate) fn search_in_header(app: &SolveApp) -> bool {
     app.header.search == SearchPlace::Header && !app.embedded && !app.embed_editor
 }
 
-/// Space between the header search field and Settings.
-const HEADER_SEARCH_GAP: f32 = 4.0;
+/// Where SolidCraft's application bar publishes its parts (scripts and scenarios use these names;
+/// `appbar:folder` and `tab:home` are kept for scripts written against the former folder button
+/// and Home tab).
+const APP_BAR_HANDLES: app_bar::Handles<'static> = app_bar::Handles {
+    home: &["appbar:home", "titlebar:home", "tab:home"],
+    home_rect: &["titlebar:home", "appbar:home"],
+    file: &["appbar:file", "appbar:folder"],
+    file_rect: &["appbar:file"],
+    button: &["appbar:", "titlebar:"],
+    separator: "titlebar:separator:",
+    search: "titlebar:search",
+    report: "titlebar:report",
+    settings: "titlebar:preferences",
+    version: "titlebar:version",
+};
 
 pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -253,82 +207,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // or the caption buttons take its ends.
         let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
-            let left = content.left();
-            // Keep the current header controls and product name when merging the new mark.
-            let compact_actions = r.right() - left < 640.0;
-            // Brand mark: the SolidCraft logo, drawn in code from the SVG's own coordinates
-            // (viewBox 357 x 412). Same 20 px height and centre as the old block.
-            {
-                let c = pos2(left + 20.0, r.center().y);
-                crate::icons::glyphs::brand_mark(ui.painter(), c);
-            }
-            if !compact_actions {
-                ui.painter().text(
-                    pos2(left + 36.0, r.center().y),
-                    Align2::LEFT_CENTER,
-                    "SolidCraft",
-                    crate::ui_kit::type_face::semibold(t.font_heading),
-                    t.app_bar_text,
-                );
-            }
-            let mut x = left + if compact_actions { 56.0 } else { 128.0 };
-            let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
-            let idle = !app.file_load.busy();
-            let home_response = ui.interact(home, ui.scope_id().with("appbar_home"), if idle { Sense::click() } else { Sense::hover() });
-            let home_tip = app.tr("ui.start_page");
-            home_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, home_tip));
-            crate::scenario::publish_handle("appbar:home", home.center());
-            crate::scenario::publish_handle("titlebar:home", home.center());
-            // Compatibility for scenarios that used the former Home tab.
-            crate::scenario::publish_target_as("tab:home", "titlebar:home", home);
-            crate::scenario::publish_rect("appbar:home", home);
-            if idle && (home_response.hovered() || home_response.has_focus()) {
-                ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-            }
-            icons::paint_app_bar(ui.painter(), home.shrink(7.0), "home", if idle { 1.0 } else { 0.35 });
-            if home_response.backing_on_hover_text(home_tip).clicked() && idle {
-                app.home.show(app.session.revision);
-            }
-            x = home.right() + 8.0;
-            app_bar_separator(ui, r, x, "brand");
-            x += 16.0;
             // While a file loads the design waits: no menus or commands from the bar.
-            // The File menu: a text button (New, Open, Save, Save As, Export…). Its handle keeps the
-            // old `appbar:folder` name too, for scripts written against the folder button.
-            let file = {
-                let label = app.tr("ui.file").to_string();
-                let galley = ui.painter().layout_no_wrap(label.clone(), FontId::proportional(t.font_button), t.app_bar_text);
-                let br = Rect::from_min_size(pos2(x - 13.0, r.center().y - 13.0), vec2(galley.size().x + 16.0, 26.0));
-                x = br.right() + 17.0;
-                let resp = ui.interact(br, ui.scope_id().with(("ab", "file")), if idle { Sense::click() } else { Sense::hover() });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, idle, &label));
-                crate::scenario::publish_handle("appbar:file", br.center());
-                crate::scenario::publish_target_as("appbar:folder", "appbar:file", br);
-                let open = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
-                if idle && (resp.hovered() || resp.has_focus() || open) {
-                    ui.painter().rect_filled(br, t.radius_sm, t.app_bar_hover);
-                }
-                let ink = if idle { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.35) };
-                ui.painter().galley(pos2(br.left() + 8.0, br.center().y - galley.size().y / 2.0), galley, ink);
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), br.left()));
-                idle && resp.clicked()
-            };
-            // A disabled button is dimmed and ignores clicks (its tooltip still shows).
-            let click = |ui: &mut egui::Ui, at: f32, icon: &str, tip: &str, enabled: bool| -> bool {
-                let width = if compact_actions && matches!(icon, "save" | "undo" | "redo") { 22.0 } else { 32.0 };
-                let br = Rect::from_center_size(pos2(at, r.center().y), vec2(width, 32.0));
-                let resp = ui.interact(br, ui.scope_id().with(("ab", icon)), if enabled { Sense::click() } else { Sense::hover() });
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
-                crate::scenario::publish_target(&format!("appbar:{icon}"), br);
-                crate::scenario::publish_target(&format!("titlebar:{icon}"), br);
-                if enabled && (resp.hovered() || resp.has_focus()) {
-                    ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-                }
-                icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), icon, if enabled { 1.0 } else { 0.35 });
-                let clicked = resp.backing_on_hover_text(tip).clicked();
-                enabled && clicked
-            };
-            let step = if compact_actions { 22.0 } else { 34.0 };
+            let idle = !app.file_load.busy();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
             let tip = |id: &str, key: &str| {
@@ -336,148 +216,94 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if shown { format!("{label} ({key})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
             let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
-            if click(ui, x, "save", &save_tip, shown) {
-                save(app);
-            }
-            x += step;
-            // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
-            if !compact_actions {
-                if click(ui, x, "undo", &undo_tip, shown) {
-                    FileAction::Undo.run(app);
-                }
-                x += step;
-                if click(ui, x, "redo", &redo_tip, shown) {
-                    FileAction::Redo.run(app);
-                }
-                x += step;
-                x = quick_access_bar(app, ui, r, x, step, shown);
-            }
-            if file {
-                app.ui.palette_open = false;
-                let ctx = ui.ctx().clone();
-                let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
-                let pass = ctx.cumulative_pass_nr();
-                // The File button toggles the menu. Remember the pass it opened on so the same
-                // click isn't also treated as a click outside the menu (which would close it at once).
-                ctx.data_mut(|d| {
-                    d.insert_temp(egui::Id::unique("sc_file_menu"), !open);
-                    d.insert_temp(egui::Id::unique("sc_file_menu_opened"), pass);
-                });
-            }
-            // Document tabs follow the file actions; the house opens the start page.
-            let captions = r.right() - content.right();
-            let separator_x = x - step + if compact_actions { 19.0 } else { 24.0 };
-            app_bar_separator(ui, r, separator_x, "documents");
-            let tabs_start = separator_x + 10.0;
-            let report_text = solidcraft_ui_text::tr("ui.report_a_bug");
-            let report_font = FontId::proportional(t.font_button);
-            let label_width = ui.painter().layout_no_wrap(report_text.to_string(), report_font.clone(), t.app_bar_text).size().x;
-            // The version links to its release notes; measured here so Report a bug leaves it room.
-            let version =
-                ui.painter().layout_no_wrap(format!("v{}", crate::update::current_version()), FontId::proportional(t.font_small), t.app_bar_text);
-            let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version.size().x, app.header);
-            // Settings' left edge; command search, when the bar holds it, sits just before it and
-            // moves the assistant button and the end of the document tabs left by its width.
-            let gear_left = report.left() - 68.0;
-            let search = (search_in_header(app) && design_shown(app))
-                .then(|| header_search_rect(app, ui.ctx(), r, gear_left - HEADER_SEARCH_GAP, report.left() - CLUSTER_BUTTONS - tabs_start));
-            let search_shift = search.map_or(0.0, |s| s.width() + HEADER_SEARCH_GAP);
-            if let Some(search) = search {
-                // shortcut_box::show draws the one search editor wherever this rectangle is.
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
-                crate::scenario::publish_target("titlebar:search", search);
-            }
-            // Assistant, Settings, Help and Report a bug form the right-hand cluster.
-            if click(ui, help_x(report), "help", app.tr("ui.help"), true) {
-                app.help.menu = !app.help.menu;
-                let at = help_x(report);
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::unique("sc_help_opened"), true);
-                    d.insert_temp(egui::Id::unique("sc_help_anchor"), at);
-                });
-            }
-            // A newer release: its Update button stays before the right cluster, in the space up to
-            // the bar's own file actions on the left.
-            let controls_left = report.left() - CLUSTER_BUTTONS - search_shift;
-            let span = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
-            // Labelled where Report a bug is (an icon-only Report a bug leaves the pill to fit by room).
-            let update_labeled = report_label || (app.header.report == ReportButton::Icon && r.width() >= 640.0);
-            let update = crate::update::button(app, ui, span, update_labeled);
-            let tabs_end = update.map_or(controls_left, |u| u.left()) - 8.0;
-            // Narrow title bars can fit only part of the tab strip. Its hit regions must not
-            // extend into the persistent report and window controls.
-            let tabs_rect = Rect::from_min_max(pos2(tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
-            let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
-            tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
-            crate::documents::tabs(app, &mut tabs_ui, r, tabs_start, tabs_end);
-            let response = ui.interact(report, ui.scope_id().with("sc_report_button"), Sense::click());
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), report_text));
-            crate::scenario::publish_target("titlebar:report", report);
-            let hot = response.hovered() || response.has_focus();
-            let tip = if app.header.report == ReportButton::Icon {
-                // Drawn like Settings and Help beside it.
-                if hot {
-                    ui.painter().rect_filled(report.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-                }
-                icons::paint_app_bar(ui.painter(), report.shrink(7.0), "bug_report", 1.0);
-                report_text
-            } else {
-                ui.painter().rect_filled(report, t.radius_sm, if hot { t.app_bar_hover_button } else { t.app_bar });
-                ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
-                let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
-                icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
-                if report_label {
-                    ui.painter().text(
-                        pos2(report.left() + REPORT_TEXT_X, report.center().y),
-                        Align2::LEFT_CENTER,
-                        report_text,
-                        report_font,
-                        t.app_bar_text,
-                    );
-                }
-                solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft")
-            };
-            if response.backing_on_hover_text(tip).clicked() {
-                crate::help::run(app, &ui.ctx().clone(), "report");
-            }
-            // Settings sits immediately left of Help (also Ctrl+,).
-            let gear = Rect::from_center_size(pos2(report.left() - 52.0, r.center().y), vec2(32.0, 32.0));
-            let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
-            if gresp.hovered() || gresp.has_focus() {
-                ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
-            }
-            icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
-            crate::scenario::publish_rect("titlebar:preferences", gear);
-            if crate::agent_chat::app_bar_button_shown(app) {
-                assistant_button(app, ui, Rect::from_center_size(pos2(report.left() - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
-            }
-            crate::scenario::publish_handle("titlebar:preferences", gear.center());
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
                 format!("{} (Ctrl+,)", app.tr("ui.preferences"))
             };
-            if gresp.backing_on_hover_text(prefs_tip).clicked() {
-                crate::prefs::open_at(app, 0);
+            let version = format!("v{}", crate::update::current_version());
+            let url = crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build());
+            let file_open = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
+            let quick = app.toolbar_custom.quick_access.iter().filter(|id| solidcraft_engine::find_command(id).is_some()).count();
+            let action = |id, icon, tip, enabled, wide_only| app_bar::BarButton { id, icon, tip, enabled, narrow: true, wide_only };
+            // Narrow windows retain Save; Undo and Redo remain available from their shortcuts and menus.
+            let bar = app_bar::AppBar {
+                mark: &|painter, at| crate::icons::glyphs::brand_mark(painter, at),
+                name: "SolidCraft",
+                home: app_bar::BarButton { id: "home", icon: "home", tip: app.tr("ui.start_page"), enabled: idle, narrow: false, wide_only: false },
+                file: app.tr("ui.file"),
+                file_open,
+                actions: vec![
+                    action("save", "save", &save_tip, shown, false),
+                    action("undo", "undo", &undo_tip, shown, true),
+                    action("redo", "redo", &redo_tip, shown, true),
+                ],
+                quick,
+                help: app_bar::BarButton { id: "help", icon: "help", tip: app.tr("ui.help"), enabled: true, narrow: false, wide_only: false },
+                settings: app_bar::BarButton { id: "settings", icon: "settings", tip: &prefs_tip, enabled: true, narrow: false, wide_only: false },
+                report: app_bar::Report {
+                    label: solidcraft_ui_text::tr("ui.report_a_bug"),
+                    tip: solidcraft_ui_text::tr_label("Report a bug — review a screenshot and open a GitHub draft"),
+                    icon_only: app.header.report == ReportButton::Icon,
+                },
+                search: search_in_header(app) && design_shown(app),
+                assistant: crate::agent_chat::app_bar_button_shown(app),
+                version: (app.header.version == VersionPlace::Header).then_some(app_bar::Version { text: &version, url: &url }),
+                handles: APP_BAR_HANDLES,
+            };
+            let out = app_bar::show(ui, &bar, r, content);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu_x"), out.file.left()));
+            for action in &out.actions {
+                match action {
+                    app_bar::BarAction::Home => app.home.show(app.session.revision),
+                    app_bar::BarAction::File { .. } => {
+                        app.ui.palette_open = false;
+                        let ctx = ui.ctx().clone();
+                        let open = ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_file_menu")).unwrap_or(false));
+                        let pass = ctx.cumulative_pass_nr();
+                        // The File button toggles the menu. Remember the pass it opened on so the same
+                        // click isn't also treated as a click outside the menu (which would close it at once).
+                        ctx.data_mut(|d| {
+                            d.insert_temp(egui::Id::unique("sc_file_menu"), !open);
+                            d.insert_temp(egui::Id::unique("sc_file_menu_opened"), pass);
+                        });
+                    }
+                    app_bar::BarAction::Button { id } => match id.as_str() {
+                        "save" => save(app),
+                        "undo" => FileAction::Undo.run(app),
+                        "redo" => FileAction::Redo.run(app),
+                        "settings" => crate::prefs::open_at(app, 0),
+                        _ => {}
+                    },
+                    app_bar::BarAction::Help { x } => {
+                        app.help.menu = !app.help.menu;
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::unique("sc_help_opened"), true);
+                            d.insert_temp(egui::Id::unique("sc_help_anchor"), *x);
+                        });
+                    }
+                    app_bar::BarAction::Report => crate::help::run(app, &ui.ctx().clone(), "report"),
+                    app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
+                }
             }
-            if app.header.version == VersionPlace::Header && version_room(r, captions, tabs_start, version.size().x).is_some() {
-                let galley = version;
-                let vrect = Align2::RIGHT_CENTER.anchor_size(pos2(r.right() - 12.0 - captions, r.center().y), galley.size());
-                let vresp = ui.interact(
-                    vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
-                    ui.scope_id().with("sc_version_link"),
-                    Sense::click(),
-                );
-                let url = crate::update::release_notes_url(crate::update::current_version(), crate::update::release_build());
-                let vresp = vresp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(&url);
-                if vresp.hovered() || vresp.has_focus() {
-                    ui.painter().hline(vrect.x_range(), vrect.bottom(), Stroke::new(1.0, t.app_bar_text));
-                }
-                ui.painter().galley(vrect.min, galley, t.app_bar_text);
-                crate::scenario::publish_handle("titlebar:version", vrect.center());
-                if vresp.clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
-                }
+            if let Some((first, step)) = out.quick {
+                quick_access_bar(app, ui, r, first, step, shown);
+            }
+            if let Some(search) = out.search {
+                // shortcut_box::show draws the one search editor wherever this rectangle is.
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_ribbon_search"), search));
+            }
+            // A newer release: its Update button stays before the right cluster.
+            let update = crate::update::button(app, ui, out.offer, out.offer_labeled);
+            let tabs_end = update.map_or(out.controls_left, |u| u.left()) - 8.0;
+            // Narrow title bars can fit only part of the tab strip. Its hit regions must not
+            // extend into the persistent report and window controls.
+            let tabs_rect = Rect::from_min_max(pos2(out.tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
+            let mut tabs_ui = ui.new_child(egui::UiBuilder::new().max_rect(tabs_rect));
+            tabs_ui.set_clip_rect(tabs_rect.intersect(ui.clip_rect()));
+            crate::documents::tabs(app, &mut tabs_ui, r, out.tabs_start, tabs_end);
+            if let Some(at) = out.assistant {
+                assistant_button(app, ui, at);
             }
         });
         if let Some(action) = action {
@@ -1923,16 +1749,14 @@ struct QuickAccessDrag(String);
 /// The quick-access bar (#10223): the commands added from a command's menu, after Save, Undo and
 /// Redo, each with its own icon. A click starts the command as its ribbon button does, a
 /// right-click opens the command's menu (Remove from Quick Access), and a drag along the bar
-/// reorders the buttons. Draws nothing while it is empty. Returns where the next control goes.
-fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32, step: f32, shown: bool) -> f32 {
+/// reorders the buttons. They start at `x`, `step` apart ([`app_bar::BarOut::quick`]).
+fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32, step: f32, shown: bool) {
     let t = Tokens::get();
     let ids: Vec<&'static solidcraft_engine::CommandSpec> =
         app.toolbar_custom.quick_access.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
     if ids.is_empty() {
-        return x;
+        return;
     }
-    app_bar_separator(ui, bar, x - step / 2.0 + 8.0, "quick_access");
-    x += 8.0;
     let first = x;
     let mut buttons = Vec::with_capacity(ids.len());
     let mut start = None;
@@ -1991,17 +1815,6 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
     if let Some((at, id)) = menu {
         crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
     }
-    x
-}
-
-/// A short divider between the brand, file actions and document tabs.
-fn app_bar_separator(ui: &egui::Ui, bar: Rect, x: f32, group: &str) {
-    let rect = Rect::from_center_size(pos2(x, bar.center().y), vec2(1.0, 20.0));
-    ui.painter().line_segment(
-        [rect.center_top(), rect.center_bottom()],
-        Stroke::new(1.0, Tokens::get().app_bar.lerp_to_gamma(Tokens::get().app_bar_separator, 0.4)),
-    );
-    crate::scenario::publish_rect(&format!("titlebar:separator:{group}"), rect);
 }
 
 /// The chat panel's compact entry point. State stays in agent_chat; the bar only paints it.
@@ -2195,6 +2008,16 @@ fn grid_cell_extras(
         let _ = ribbon_tooltip(app, cell.response, c, info.disabled_reason.as_deref());
     }
 }
+
+/// The Report a bug button for this header layout ([`app_bar::report_rect`]).
+#[cfg(test)]
+fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32, layout: HeaderLayout) -> (Rect, bool) {
+    let version = (layout.version == VersionPlace::Header).then_some(version_width);
+    app_bar::report_rect(bar, captions, tabs_start, label_width, version, layout.report == ReportButton::Icon)
+}
+
+#[cfg(test)]
+use app_bar::{CLUSTER_BUTTONS, REPORT_TEXT_X, RIGHT_GROUP, SEARCH_GAP as HEADER_SEARCH_GAP, help_x, version_room};
 
 /// A grid drop-down's commands as the grid lays them out: their ids under their headings.
 #[cfg(test)]
