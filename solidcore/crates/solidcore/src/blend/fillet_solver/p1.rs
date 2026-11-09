@@ -31,7 +31,7 @@
 //! | [`FilletSolver::TYPE`], [`FilletSolver::type_string`], [`FilletSolver::is_kind_of`] | `GetType`, `GetTypeString` (`SM_COMMON`), `IsKindOf` |
 //! | [`FilletSolverOps`] (trait, base methods)              | the virtuals `GetJacobianSize`, `SetupOffsetValues`, `CanMakeAnalytic`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`; `GetSolverType`, `PointOnPlaneSolve` and the `SmConstantDistanceFS::GetDistance` read of `SmFindClippedRadiusEFO` (added by `blend.fillet_solver_p3`) |
 //! | [`FilStatus`] (re-export of `blend.fillet_geom_p1`'s), [`FilletSolverType`], [`FilletSurfaceGeneratorType`] | `SmFilStatus`, `SmFilletSolverType`, `SmFilletSurfaceGeneratorType` |
-//! | [`FilletSurfaceGenerator`]                             | `SmFilletSurfaceGenerator`, `SmLinearCrossSectionFSG`, `SmCircularCrossSectionFSG`, `SmBlendCurveCrossSectionFSG` (constructors, `GetFilletSurfaceGeneratorType`, `GetBlendScale`, `GetContinuity`; `Drop` is each destructor); the circular and blend-curve variants hold `blend.fillet_standard_solver_p1`'s [`CircularCrossSectionFsg`] / [`BlendCurveCrossSectionFsg`] (one type per class) |
+//! | [`FilletSurfaceGenerator`]                             | `SmFilletSurfaceGenerator`, `SmLinearCrossSectionFSG`, `SmCircularCrossSectionFSG` (constructors, `GetFilletSurfaceGeneratorType`, `GetContinuity`; `Drop` is each destructor); the circular variant holds `blend.fillet_standard_solver_p1`'s [`CircularCrossSectionFsg`]; a blend-curve request is the G^n section ([`GnSectionFsg`]; `SmBlendCurveCrossSectionFSG` is retired, WR-685) |
 //! | [`FilletSurfaceGenerator::create_surface`]             | `SmFilletSurfaceGenerator::CreateSurface` (base; the linear one dispatches to [`LinearCrossSectionFsg::create_surface`]) |
 //! | [`FilletSphereSolveEnfo`]                              | `SmFilletSphereSolveENFO` (constructor, `SetPlaneAdjusts`, `Evaluate`) |
 //! | [`RailUvCurveIntersectEnfo`]                           | `SmRailUVCurveIntersectENFO` (constructor, `Evaluate`) |
@@ -126,7 +126,7 @@ use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_intersector::HandlingAlgorithmType;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_standard_solver::p1::{
-    BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg, VariableRadiusFs,
+    CircularCrossSectionFsg, LinearCrossSectionFsg, VariableRadiusFs,
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
@@ -242,12 +242,9 @@ pub enum FilletSurfaceGenerator {
     Circular(CircularCrossSectionFsg),
     /// `SmEiffelTowerCrossSectionFSG` (unit `blend.fillet_custom_solver`).
     EiffelTower,
-    /// `SmBlendCurveCrossSectionFSG` (its members and `CreateSurfaceFromCurves`:
-    /// [`BlendCurveCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
-    BlendCurve(BlendCurveCrossSectionFsg),
     /// The fork's `SmGnSectionFSG` (tangency-labs/smlib@11ea2d9; [`GnSectionFsg`]), of
-    /// type `SM_FSG_BLEND_CURVE`: the executive builds it in place of the blend curve
-    /// (WR-685).
+    /// type `SM_FSG_BLEND_CURVE`: every blend-curve request is built by it.
+    /// `SmBlendCurveCrossSectionFSG` is retired with its flag (WR-685, #2273).
     GnSection(GnSectionFsg),
 }
 
@@ -276,32 +273,17 @@ impl FilletSurfaceGenerator {
         Self::circular(true, 0.05, false, false)
     }
 
-    /// `SmBlendCurveCrossSectionFSG(dBlendScale, lContinuity)`.
-    #[must_use]
-    pub const fn blend_curve(blend_scale: f64, continuity: u32) -> Self {
-        Self::BlendCurve(BlendCurveCrossSectionFsg {
-            continuity,
-            blend_scale,
-        })
-    }
-
-    /// `SmBlendCurveCrossSectionFSG()` with its default arguments (`1.5, 1`).
-    #[must_use]
-    pub const fn blend_curve_default() -> Self {
-        Self::blend_curve(1.5, 1)
-    }
-
     /// `MeetsItsFacesTangentially` (virtual; the fork's, tangency-labs/smlib `8bffb23`):
     /// whether each cross section is tangent, at its ends on the rails, to the faces the
     /// fillet rolls on. The linear section cuts across both faces, an arc about the ball's
     /// centre is square to the faces at each rail unless mirrored about the rails' chord,
-    /// and a blend curve takes its end tangents from that arc; the base generator and any
+    /// and a G^n section takes its end tangents from that arc; the base generator and any
     /// custom one are not known to.
     #[must_use]
     pub const fn meets_its_faces_tangentially(&self) -> bool {
         match self {
             Self::Circular(g) => !g.mirror,
-            Self::BlendCurve(_) | Self::GnSection(_) => true,
+            Self::GnSection(_) => true,
             Self::Base | Self::Linear | Self::EiffelTower => false,
         }
     }
@@ -313,16 +295,7 @@ impl FilletSurfaceGenerator {
             Self::Base | Self::EiffelTower => FilletSurfaceGeneratorType::Unknown,
             Self::Linear => FilletSurfaceGeneratorType::Linear,
             Self::Circular(_) => FilletSurfaceGeneratorType::Circular,
-            Self::BlendCurve(_) | Self::GnSection(_) => FilletSurfaceGeneratorType::BlendCurve,
-        }
-    }
-
-    /// `SmBlendCurveCrossSectionFSG::GetBlendScale` (`None` for the other kinds).
-    #[must_use]
-    pub const fn blend_scale(&self) -> Option<f64> {
-        match self {
-            Self::BlendCurve(g) => Some(g.blend_scale),
-            _ => None,
+            Self::GnSection(_) => FilletSurfaceGeneratorType::BlendCurve,
         }
     }
 
@@ -335,12 +308,10 @@ impl FilletSurfaceGenerator {
         }
     }
 
-    /// `SmBlendCurveCrossSectionFSG::GetContinuity`, `SmGnSectionFSG::GetOrder` (`None`
-    /// for the other kinds).
+    /// `SmGnSectionFSG::GetOrder` (`None` for the other kinds).
     #[must_use]
     pub const fn continuity(&self) -> Option<u32> {
         match self {
-            Self::BlendCurve(g) => Some(g.continuity),
             #[allow(clippy::cast_possible_truncation)]
             Self::GnSection(g) => Some(g.order as u32),
             _ => None,
@@ -358,9 +329,9 @@ impl FilletSurfaceGenerator {
     /// `SM_ERR` for [`FilletSurfaceGenerator::Base`]; those of
     /// `SmEiffelTowerCrossSectionFSG::CreateSurface`,
     /// `SmLinearCrossSectionFSG::CreateSurface` ([`LinearCrossSectionFsg::create_surface`])
-    /// and the circular and blend-curve generators' `CreateSurface`;
+    /// and the circular and G^n generators' `CreateSurface`;
     /// [`SolidError::InvalidInput`] for a missing centre line of the circular and
-    /// blend-curve generators (upstream dereferences `NULL`).
+    /// G^n generators (upstream dereferences `NULL`).
     #[allow(clippy::too_many_arguments)]
     pub fn create_surface(
         &self,
@@ -390,16 +361,6 @@ impl FilletSurfaceGenerator {
                 center_line.ok_or_else(no_center)?,
                 rail1,
                 rail2,
-            ),
-            Self::BlendCurve(g) => g.create_surface(
-                k,
-                approx_tol_3d,
-                solver_type,
-                center_line.ok_or_else(no_center)?,
-                rail1,
-                rail2,
-                side1,
-                side2,
             ),
             Self::GnSection(g) => {
                 // the uv curves rebuilt on the stations are dropped: a caller that owns

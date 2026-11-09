@@ -26,7 +26,6 @@
 //! | `impl FilletSolverOps for VariableRadiusFs`              | the `SmVariableRadiusFS` virtuals (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`, `GetType`, `IsKindOf`, `GetSolverType`) |
 //! | `impl FilletSolverOps for ConstantDistanceFs`            | the `SmConstantDistanceFS` virtuals (`CanMakeAnalytic`, `GetJacobianSize`, `GetSolverType`, `LoadJacobian`, `LoadInitialValues`, `SetupOffsetValues`, `GetType`, `IsKindOf`) and `GetDistance` |
 //! | [`CircularCrossSectionFsg::create_surface`]              | `SmCircularCrossSectionFSG::CreateSurface`            |
-//! | [`BlendCurveCrossSectionFsg::create_surface`]            | `SmBlendCurveCrossSectionFSG::CreateSurface`          |
 //! | [`SurfaceSurfaceFs::new`]                                | `SmSurfaceSurfaceFS::SmSurfaceSurfaceFS`              |
 //! | [`SurfaceSurfaceFs::calc_fillet_geom`], [`SurfaceSurfaceFs::calc_fillet_start`], [`SurfaceSurfaceStart`] | `SmSurfaceSurfaceFS::CalcFilletGeom` (up to `GetPseudoBrep`; the rest is `surface_surface`'s) |
 //! | [`SurfaceSurfaceFs::is_kind_of`]                         | `SmSurfaceSurfaceFS::IsKindOf`                        |
@@ -126,10 +125,10 @@ use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
 use crate::blend::fillet_standard_solver::p1::SolverRails;
 use crate::blend::fillet_standard_solver::p1::{
-    constant_radius_is_kind_of, BlendCurveCrossSectionFsg, BoundaryTrimmingType,
-    CircularCrossSectionFsg, ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs,
-    DistanceInitialValues, FilletLaw, FilletSolverType, JacobianSurfaces, RailSurface,
-    SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE, CURVE_BASED_FS_TYPE,
+    constant_radius_is_kind_of, BoundaryTrimmingType, CircularCrossSectionFsg, ConstantDistanceFs,
+    ConstantRadiusFs, CurveBasedFs, DistanceInitialValues, FilletLaw, FilletSolverType,
+    JacobianSurfaces, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE,
+    CURVE_BASED_FS_TYPE,
 };
 use crate::blend::law_corners::{ArcApproximation, LawCornerPieces};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -3571,46 +3570,6 @@ fn chord_between_planes(
 const OP_LINEAR_DEF: &str =
     "blend::fillet_standard_solver::p2::LinearCrossSectionFsg::definition_surface";
 
-impl BlendCurveCrossSectionFsg {
-    /// `SmBlendCurveCrossSectionFSG::CreateSurface(rFilletSolver, pCenterLine,
-    /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
-    /// rpFilletSurface)`:
-    /// [`BlendCurveCrossSectionFsg::create_surface_from_curves`] at the solver's
-    /// tolerance, with `G1` continuity for a constant-radius solver
-    /// (`SM_FS_CONST_RADIUS`). The fillet points are not used.
-    ///
-    /// # Errors
-    ///
-    /// Those of [`BlendCurveCrossSectionFsg::create_surface_from_curves`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn create_surface(
-        &self,
-        k: &Kernel,
-        approx_tol_3d: f64,
-        solver_type: FilletSolverType,
-        center_line: &mut BSplineCurve,
-        rail1: &mut BSplineCurve,
-        rail2: &mut BSplineCurve,
-        side1: RailSurface<'_>,
-        side2: RailSurface<'_>,
-    ) -> Result<BSplineSurface> {
-        let mut need_g1_continuity = false;
-        if solver_type == FilletSolverType::ConstRadius {
-            need_g1_continuity = true;
-        }
-        self.create_surface_from_curves(
-            k,
-            center_line,
-            rail1,
-            rail2,
-            approx_tol_3d,
-            need_g1_continuity,
-            side1,
-            side2,
-        )
-    }
-}
-
 // ---- SmSurfaceSurfaceFS ---------------------------------------------------------------------------
 
 impl SurfaceSurfaceFs {
@@ -4206,23 +4165,5 @@ mod tests {
             .expect("circular");
         let corner = s.evaluate_point(Point2::new(0.0, 0.0)).expect("point");
         assert!(corner.distance(p(0.0, 0.0, 1.0)) < 1e-6);
-        let none = RailSurface {
-            surface: None,
-            uv_curve: None,
-        };
-        let mut c = line(p(0.0, 1.0, 1.0), p(5.0, 1.0, 1.0));
-        let (mut a, mut b) = (r1.copy(), r2.copy());
-        b.insert_one_knot(0.5, 1).expect("knot");
-        let r = BlendCurveCrossSectionFsg::default().create_surface(
-            &k,
-            1e-6,
-            FilletSolverType::VariableRadius,
-            &mut c,
-            &mut a,
-            &mut b,
-            none,
-            none,
-        );
-        assert!(matches!(r, Err(SolidError::Upstream { .. })));
     }
 }
