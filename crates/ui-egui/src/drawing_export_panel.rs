@@ -5,8 +5,9 @@
 //! again. PDF and DXF show as planned until their writers land on `drawings`.
 //!
 //! The paper is the export's own choice, never the sheet colour on screen; a blueprint theme only
-//! starts it on the matching blue. A view that can't be drawn is named here, before the export
-//! from the drawing's status and after it from the refusal, so a sheet is never refused silently.
+//! starts it on the matching blue. A view that can't be drawn is named here, before the export and
+//! after a refusal alike, from the drawing's status (`drawing.status` lists it as `failed` with its
+//! reason), never from the refusal's text, so a sheet is never refused silently.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -388,29 +389,8 @@ fn distinct(files: Vec<(u64, PathBuf)>) -> Vec<(u64, PathBuf)> {
         .collect()
 }
 
-/// The reason in `error` that follows `needle` up to its closing bracket: the engine names a view
-/// that can't be drawn as `<id> (<why>)`.
-fn bracketed_after<'a>(error: &'a str, needle: &str) -> Option<&'a str> {
-    let start = error.find(needle)? + needle.len();
-    let rest = error.get(start..)?;
-    let mut depth = 1usize;
-    for (at, c) in rest.char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return rest.get(..at);
-                }
-            }
-            _ => {}
-        }
-    }
-    Some(rest)
-}
-
 /// What one finished sheet says in the window.
-fn outcome_lines(d: Option<&Drawing>, sheet: u64, reply: &Value) -> Vec<(StatusTone, String)> {
+fn outcome_lines(d: Option<&Drawing>, views: &[(u64, u64, String, String)], sheet: u64, reply: &Value) -> Vec<(StatusTone, String)> {
     let sheet_name = d.and_then(|d| d.sheets.iter().find(|s| s.id == sheet)).map_or_else(|| ids::encode(sheet), |s| s.name.clone());
     if reply.get("ok").and_then(Value::as_bool) == Some(true) {
         let result = reply.get("result").unwrap_or(&Value::Null);
@@ -442,16 +422,15 @@ fn outcome_lines(d: Option<&Drawing>, sheet: u64, reply: &Value) -> Vec<(StatusT
         let stopped = crate::i18n::tr("ui.drawing_export.stopped");
         return vec![(StatusTone::Warning, crate::i18n::format("ui.drawing_export.failed", &[("sheet", &sheet_name), ("error", stopped)]))];
     }
-    // The refusal names each view that can't be drawn by its id: name it as people know it.
+    // The status lists each view of the sheet that can't be drawn, with its reason: name it as people know it.
     let named: Vec<(StatusTone, String)> = d.map_or_else(Vec::new, |d| {
-        d.views
+        views
             .iter()
-            .filter(|v| v.sheet == sheet)
-            .filter_map(|v| {
-                let reason = bracketed_after(error, &format!("{} (", ids::encode(v.id)))?;
+            .filter(|(_, s, status, _)| *s == sheet && status == "failed")
+            .map(|(view, _, _, reason)| {
                 let text =
-                    crate::i18n::format("ui.drawing_export.refused", &[("sheet", &sheet_name), ("view", &view_name(d, v.id)), ("reason", reason)]);
-                Some((StatusTone::Error, text))
+                    crate::i18n::format("ui.drawing_export.refused", &[("sheet", &sheet_name), ("view", &view_name(d, *view)), ("reason", reason)]);
+                (StatusTone::Error, text)
             })
             .collect()
     });
@@ -470,16 +449,22 @@ fn collect(app: &mut SolveApp) {
     let mut finished = false;
     let mut stopped = false;
     let mut lines = Vec::new();
+    let views = listed(export);
     export.jobs.retain(|job| match job.reply.try_recv() {
         Ok(reply) => {
             stopped |= reply.get("error").and_then(Value::as_str) == Some(CANCELLED);
-            lines.extend(outcome_lines(d.as_deref(), job.sheet, &reply));
+            lines.extend(outcome_lines(d.as_deref(), &views, job.sheet, &reply));
             finished = true;
             false
         }
         Err(TryRecvError::Empty) => true,
         Err(TryRecvError::Disconnected) => {
-            lines.extend(outcome_lines(d.as_deref(), job.sheet, &json!({"ok": false, "error": crate::i18n::tr("ui.drawing_export.stopped")})));
+            lines.extend(outcome_lines(
+                d.as_deref(),
+                &views,
+                job.sheet,
+                &json!({"ok": false, "error": crate::i18n::tr("ui.drawing_export.stopped")}),
+            ));
             finished = true;
             false
         }
