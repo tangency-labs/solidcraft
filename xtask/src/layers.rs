@@ -379,6 +379,110 @@ pub fn seam_check(crates: &[Crate], allow: &str, public: &str) -> Vec<String> {
     errors
 }
 
+/// One rule, one message: solidcore must build from its own tree alone.
+const STANDALONE_RULE: &str = "solidcore must build on its own; see solidcore/docs/layers.md";
+
+/// Collapse `.` and `..` in a relative path without touching the disk. `None` when it climbs above its start.
+fn normalize_rel(path: &str) -> Option<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for part in path.replace('\\', "/").split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                out.pop()?;
+            }
+            p => out.push(p.to_owned()),
+        }
+    }
+    Some(out)
+}
+
+/// The dependency entries of a manifest: (table description, key, spec) for every dependency table (workspace,
+/// target-specific, dev, build and the old spellings) and for `[patch]`/`[replace]`.
+fn manifest_dep_entries(doc: &toml::Table) -> Vec<(String, String, toml::Value)> {
+    const KINDS: [&str; 5] = ["dependencies", "dev-dependencies", "build-dependencies", "dev_dependencies", "build_dependencies"];
+    let mut out = Vec::new();
+    let mut add = |what: String, t: Option<&toml::Value>| {
+        for (k, v) in t.and_then(toml::Value::as_table).into_iter().flatten() {
+            out.push((what.clone(), k.clone(), v.clone()));
+        }
+    };
+    for kind in KINDS {
+        add(format!("[{kind}]"), doc.get(kind));
+        add(format!("[workspace.{kind}]"), doc.get("workspace").and_then(|w| w.get(kind)));
+    }
+    for (cfg, t) in doc.get("target").and_then(toml::Value::as_table).into_iter().flatten() {
+        for kind in KINDS {
+            add(format!("[target.{cfg}.{kind}]"), t.get(kind));
+        }
+    }
+    for (source, t) in doc.get("patch").and_then(toml::Value::as_table).into_iter().flatten() {
+        add(format!("[patch.{source}]"), Some(t));
+    }
+    add("[replace]".into(), doc.get("replace"));
+    out
+}
+
+/// The standalone rule: every manifest under `solidcore/` (`manifests`: repo-relative path, text) builds from
+/// solidcore's own tree. No dependency, `[workspace.dependencies]` entry or `[patch]` may point with `path` outside
+/// `solidcore/`, and none may be a SolidCraft crate (`solidcraft-*`, also behind `package = ...`).
+pub fn standalone_check(manifests: &[(String, String)]) -> Vec<String> {
+    let mut errors = Vec::new();
+    for (file, text) in manifests {
+        let doc = match text.parse::<toml::Table>() {
+            Ok(d) => d,
+            Err(e) => {
+                errors.push(format!("{file}: cannot parse the manifest ({e}); {STANDALONE_RULE}"));
+                continue;
+            }
+        };
+        let dir: Vec<String> = file.rsplit_once('/').map(|(d, _)| d).and_then(normalize_rel).unwrap_or_default();
+        for (what, key, spec) in manifest_dep_entries(&doc) {
+            let real = spec.get("package").and_then(toml::Value::as_str).unwrap_or(&key);
+            if real.starts_with("solidcraft-") || key.starts_with("solidcraft-") {
+                errors.push(format!("{file}: {what} dependency `{key}` is a SolidCraft crate; {STANDALONE_RULE}"));
+            }
+            if let Some(path) = spec.get("path").and_then(toml::Value::as_str) {
+                let joined = normalize_rel(&format!("{}/{path}", dir.join("/")));
+                if !joined.is_some_and(|p| p.first().map(String::as_str) == Some("solidcore")) {
+                    errors.push(format!("{file}: {what} dependency `{key}` has path `{path}`, which leaves solidcore/; {STANDALONE_RULE}"));
+                }
+            }
+        }
+    }
+    errors.sort();
+    errors.dedup();
+    errors
+}
+
+/// Every `Cargo.toml` under `root/solidcore`, as (repo-relative path, text). Skips build output and the
+/// upstream checkout.
+pub fn read_solidcore_manifests(root: &std::path::Path) -> Result<Vec<(String, String)>, String> {
+    fn walk(root: &std::path::Path, rel: &str, out: &mut Vec<(String, String)>) -> Result<(), String> {
+        let dir = root.join(rel);
+        let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
+        let mut entries: Vec<_> = rd.flatten().collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let child = format!("{rel}/{name}");
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                if !matches!(name.as_str(), "target" | "upstream" | ".git" | "node_modules") {
+                    walk(root, &child, out)?;
+                }
+            } else if name == "Cargo.toml" {
+                let text = std::fs::read_to_string(e.path()).map_err(|e| format!("{child}: {e}"))?;
+                out.push((child, text));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(root, "solidcore", &mut out)?;
+    Ok(out)
+}
+
 pub fn describe(class: Option<Class>) -> String {
     match class {
         Some(Class::Layer(l)) => format!("L{l}"),
@@ -615,5 +719,48 @@ mod tests {
         assert!(doc.deps[0].workspace && !doc.deps[1].workspace);
         assert_eq!(doc.deps[2].kind, Dev);
         assert!(check(&g).is_empty());
+    }
+
+    fn sc(name: &str, body: &str) -> Vec<String> {
+        standalone_check(&[(name.into(), body.into())])
+    }
+
+    #[test]
+    fn standalone_clean_manifest_passes() {
+        let m = "[package]\nname = \"solidcore-ops\"\n[dependencies]\nthiserror = \"2\"\nsolidcore = { path = \"../solidcore\" }\n[dev-dependencies]\ngoldens = { path = \"../goldens\" }\n";
+        assert!(sc("solidcore/crates/solidcore-ops/Cargo.toml", m).is_empty());
+        let root = "[workspace]\nmembers = [\"crates/a\"]\n[workspace.dependencies]\nlocal = { path = \"crates/a\" }\n";
+        assert!(sc("solidcore/Cargo.toml", root).is_empty());
+    }
+
+    #[test]
+    fn standalone_path_outside_solidcore_fails() {
+        let m = "[dependencies]\ngeom = { path = \"../../../crates/geom\" }\n";
+        let e = sc("solidcore/crates/ops/Cargo.toml", m);
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].contains("solidcore/crates/ops/Cargo.toml") && e[0].contains("`geom`") && e[0].contains("solidcore must build on its own"));
+        // From the workspace root, one step up is already outside.
+        assert_eq!(sc("solidcore/Cargo.toml", "[workspace.dependencies]\nx = { path = \"../crates/x\" }\n").len(), 1);
+    }
+
+    #[test]
+    fn standalone_solidcraft_crate_fails() {
+        let e = sc("solidcore/crates/ops/Cargo.toml", "[dependencies]\nsolidcraft-geom = \"0.1\"\n");
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].contains("solidcraft-geom"));
+        let renamed = "[dependencies]\ng = { package = \"solidcraft-geom\", version = \"0.1\" }\n";
+        assert_eq!(sc("solidcore/crates/ops/Cargo.toml", renamed).len(), 1);
+    }
+
+    #[test]
+    fn standalone_dev_build_target_and_patch_leaks_fail() {
+        let dev = "[dev-dependencies]\ngeom = { path = \"../../../crates/geom\" }\n";
+        assert_eq!(sc("solidcore/crates/ops/Cargo.toml", dev).len(), 1);
+        let build = "[build-dependencies]\nsolidcraft-testkit = { path = \"../../../crates/testkit\" }\n";
+        assert!(!sc("solidcore/crates/ops/Cargo.toml", build).is_empty());
+        let target = "[target.'cfg(unix)'.dependencies]\ngeom = { path = \"../../../crates/geom\" }\n";
+        assert_eq!(sc("solidcore/crates/ops/Cargo.toml", target).len(), 1);
+        let patch = "[patch.crates-io]\nfoo = { path = \"../crates/foo\" }\n";
+        assert_eq!(sc("solidcore/Cargo.toml", patch).len(), 1);
     }
 }

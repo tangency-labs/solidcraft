@@ -356,9 +356,9 @@ const ELEMENTS: &[Element] = &[
     element!("searchable_icon_dropdown", |ui, _| {
         searchable_icon_dropdown(ui, "spin", "Replace…", &mut String::new(), &[]);
     }),
-    element!("number_pair", |ui, _| {
+    element!("number_pair_preserving", |ui, _| {
         let (mut w, mut h) = (1920, 1080);
-        number_pair(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
+        number_pair_preserving(ui, "Size", [&mut w, &mut h], 1..=16384, 1.0, "");
     }),
     element!("progress_action", |ui, _| {
         progress_action(ui, "gallery:progress", "Rendering", "· 62%", 0.62, "Cancel");
@@ -1239,11 +1239,11 @@ const ELEMENTS: &[Element] = &[
             &mut s.selected,
             &[WindowPage {
                 group: Some("prefs.input"),
-                icon: "settings",
+                icon: Icon::Kit("settings"),
                 label: "ui.general",
                 handle: "gallery:page",
                 scroll: true,
-                draw: |ui, _: &mut ()| {
+                draw: &|ui, _: &mut ()| {
                     text(ui, "General", Text::Inline);
                 },
             }],

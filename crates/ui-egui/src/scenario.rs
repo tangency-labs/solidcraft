@@ -317,7 +317,7 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
-            let page = self.app.prefs_window.open.then(|| rect_of("prefs:page_body")).flatten();
+            let page = self.app.prefs_window.shell.open.then(|| rect_of("prefs:page_body")).flatten();
             let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
             let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
             if page.contains(at) {

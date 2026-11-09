@@ -1623,10 +1623,15 @@ pub(crate) fn ignore_read<T>(r: Result<T>) -> Result<Option<T>> {
             | SolidError::Cancelled { .. }
             | SolidError::Unsupported { .. }),
         ) => Err(e),
-        Err(
-            e
-            @ (SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }),
-        ) if reason == NESTING_LIMIT_REASON => Err(e),
+        Err(e)
+            if matches!(
+                &e,
+                SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }
+                    if *reason == NESTING_LIMIT_REASON
+            ) =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(None),
     }
 }
