@@ -54,6 +54,7 @@ fn task(samples: u8, selected: bool, face_override: bool, shadows: bool) -> Imag
     let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
     camera.set_view(crate::StandardView::Top);
     let options = RaytraceOptions {
+        threads: 1,
         lights: Some(Vec::new()),
         shadows,
         reflections: Some(ReflectionOptions {
@@ -218,6 +219,7 @@ fn spatial_reuse_fixture(s: u8, r: u8, selected: bool, face_override: bool, shad
     let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
     camera.set_view(crate::StandardView::Top);
     let options = RaytraceOptions {
+        threads: 1,
         primary_samples: s,
         lights: Some(Vec::new()),
         shadows,
@@ -251,7 +253,7 @@ fn spatial_reuse_fixture(s: u8, r: u8, selected: bool, face_override: bool, shad
     ImageTask::new_with_environment(scene, request, CancelToken::default(), options, Some(environment())).unwrap()
 }
 
-type SpatialBoundary = (u8, u8, u16, [u64; 6]);
+type SpatialBoundary = (u8, u8, u32, [u64; 6]);
 fn spatial_reference_render(mut task: ImageTask, revoke: bool) -> (Vec<u8>, Vec<SpatialBoundary>) {
     let mut boundaries = Vec::new();
     for _ in 0..1_000_000 {
@@ -300,7 +302,7 @@ fn intra_spatial_nonselected_reuse_matches_uncached_ordered_sums_coverage_and_pn
                     for (ordinal, boundary) in fast.1.iter().enumerate() {
                         assert_eq!(boundary.0, (ordinal / usize::from(r)) as u8);
                         assert_eq!(boundary.1, (ordinal % usize::from(r)) as u8 + 1);
-                        assert_eq!(boundary.2, ordinal as u16 + 1);
+                        assert_eq!(boundary.2, ordinal as u32 + 1);
                     }
                     if !face_override {
                         assert!(
@@ -449,7 +451,7 @@ fn mixed_pixels_spatial_hits_misses_and_independent_jobs_do_not_share_reuse() {
             assert_eq!(fast.1.len(), 3 * usize::from(s) * 4);
             assert!(fast.1.iter().any(|b| b.2 == 0), "fixture must include primary misses");
             assert!(fast.1.iter().any(|b| b.2 > 0), "fixture must include primary hits");
-            assert!(fast.1.iter().any(|b| b.0 == s - 1 && b.1 == 4 && b.2 == u16::from(s) * 2), "middle pixel must retain half spatial coverage");
+            assert!(fast.1.iter().any(|b| b.0 == s - 1 && b.1 == 4 && b.2 == u32::from(s) * 2), "middle pixel must retain half spatial coverage");
             // A new captured job with different sources/seed/coverage has its own
             // actual reference; prior jobs must not contribute state to it.
             let changed = (s, 4, 16, 0xfedc_ba98, shadows);

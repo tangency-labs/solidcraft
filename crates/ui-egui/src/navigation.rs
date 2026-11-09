@@ -446,7 +446,7 @@ pub(crate) struct KeyHold {
 
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
-    (app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_LAYOUT)
+    (app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_LAYOUT)
         || egui::Popup::is_any_open(ctx)
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
@@ -719,7 +719,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
         && !view_keys_blocked(app, ui.ctx(), Some(resp.id))
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !crate::dim_view::editing();
     if primary_pressed {
         app.viewport.zoom_shortcut_drag = inside && zoom_held;
@@ -2953,8 +2953,8 @@ mod view_key_tests {
         let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
             assert!(ui.memory(|memory| memory.focused().is_none()));
             assert!(!egui::Popup::is_any_open(ui.ctx()));
-            app.prefs_window.open = true;
-            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            app.prefs_window.shell.open = true;
+            app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
             let log = app.session.log.len();
             assert!(!super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
@@ -2962,11 +2962,11 @@ mod view_key_tests {
             assert_eq!(app.session.log.len(), log);
             assert!(app.viewport.key_hold.is_none());
 
-            app.prefs_window.section = crate::prefs::PAGE_GENERAL;
+            app.prefs_window.shell.section = crate::prefs::PAGE_GENERAL;
             assert!(super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
             assert!(app.viewport.key_hold.is_some(), "General retains unfocused arrow camera preview");
             app.now += super::TAP_SECONDS + 1.0;
-            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
             assert!(ui.input(|input| input.key_down(egui::Key::ArrowLeft)));
             super::step_key_hold(&mut app, ui.ctx());

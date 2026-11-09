@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use super::{
     BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
-    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
 use super::{SurfaceSweepParams, SweepParams};
 use crate::Session;
@@ -49,6 +49,31 @@ fn schemas_and_the_key_check_agree() {
             "through_all",
             "to",
             "to_offset",
+            "touching",
+        ],
+    );
+    assert_keys(
+        input_schema_for::<RevolveParams>(),
+        &[
+            "angle",
+            "angle2",
+            "axis",
+            "body",
+            "body_name",
+            "body_names",
+            "convention",
+            "direction",
+            "exact_regions",
+            "face",
+            "face_body",
+            "name",
+            "operation",
+            "participants",
+            "profiles",
+            "sketch",
+            "symmetric",
+            "targets",
+            "to",
             "touching",
         ],
     );
@@ -165,6 +190,41 @@ fn strict_keeps_todays_errors() {
         ("solid.extrude", json!({"distance": 5, "convention": "per_side"})),
         ("solid.extrude", json!({"distance": "  "})),
         ("solid.extrude", json!({"distance": 5, "operation": "x".repeat(1000)})),
+        ("solid.revolve", json!({"axis": "y", "operation": "bogus"})),
+        ("solid.revolve", json!({"axis": "y", "operation": "auto"})),
+        ("solid.revolve", json!({"axis": "y", "angle": "no_such_parameter"})),
+        ("solid.revolve", json!({"axis": "y", "angle2": "no_such_parameter"})),
+        ("solid.revolve", json!({"axis": "y", "to": [1, 2]})),
+        ("solid.revolve", json!({"axis": "y", "to": null})),
+        ("solid.revolve", json!({"axis": "y", "convention": "per_side"})),
+        ("solid.revolve", json!({"axis": "y", "convention": "SKETCH_NORMAL"})),
+        ("solid.revolve", json!({"axis": "y", "convention": null})),
+        ("solid.revolve", json!({"axis": "y", "sketch": true})),
+        ("solid.revolve", json!({"axis": "y", "sketch": null})),
+        ("solid.revolve", json!({"axis": "y", "sketch": "Missing"})),
+        ("solid.revolve", json!({"axis": "y", "profiles": []})),
+        ("solid.revolve", json!({"axis": "y", "profiles": [{"point": [1]}]})),
+        ("solid.revolve", json!({"axis": "y", "profiles": [true]})),
+        ("solid.revolve", json!({"axis": "y", "participants": ["Missing"]})),
+        ("solid.revolve", json!({"axis": null})),
+        ("solid.revolve", json!({"axis": 5})),
+        ("solid.revolve", json!({"axis": [0, 1, 0]})),
+        ("solid.revolve", json!({"axis": true})),
+        ("solid.revolve", json!({"axis": {}})),
+        ("solid.revolve", json!({"axis": {"origin": [0, 0, 0]}})),
+        ("solid.revolve", json!({"axis": {"dir": [0, 1]}})),
+        ("solid.revolve", json!({"axis": {"dir": "y"}})),
+        ("solid.revolve", json!({"axis": {"origin": [0, 0], "dir": [0, 1, 0]}})),
+        ("solid.revolve", json!({"axis": {"origin": "o", "dir": [0, 1, 0]}})),
+        ("solid.revolve", json!({"axis": {"origin": null, "dir": [0, 1, 0]}})),
+        ("solid.revolve", json!({"axis": {"origin": ["no_such_parameter", 0, 0], "dir": [0, 1, 0]}})),
+        ("solid.revolve", json!({"axis": {"type": "world"}})),
+        ("solid.revolve", json!({"axis": {"type": "world", "axis": "y"}})),
+        ("solid.revolve", json!({"axis": {"type": "world", "axis": 5}})),
+        ("solid.revolve", json!({"axis": {"edge": "x"}})),
+        ("solid.revolve", json!({"axis": {"face": [1, 2]}})),
+        ("solid.revolve", json!({"axis": {"type": "edge"}})),
+        ("solid.revolve", json!({"axis": {"edge": [1, 2, 3]}})),
         ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": "W"})),
         ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": " w "})),
         ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": [0, 0, 0]})),
@@ -865,4 +925,110 @@ fn converted_primitives_and_body_commands_reply_with_feature_result() {
     let r = s.execute("solid.sphere", &json!({"radius": 1, "center": [22, 0, 0], "operation": "intersect"})).unwrap_or_else(|e| panic!("{e}"));
     let (changed, removed) = (r["changed_bodies"].as_array().cloned(), r["removed_bodies"].as_array().cloned());
     assert!(changed.is_some_and(|c| c.contains(&json!("Bounding"))) && removed.is_some_and(|r| r.contains(&json!("Peg"))), "{r}");
+}
+
+/// A 2 x 10 profile standing off the Y axis in the XY plane, a box to join to or turn a face of,
+/// and a construction axis to turn about.
+fn revolve_rig(level: ParamCheck) -> Session {
+    let mut s = Session { param_check: level, ..Session::default() };
+    for (id, p) in [
+        ("sketch.create", json!({"name": "Profile", "plane": "XY"})),
+        ("sketch.rectangle.two_point", json!({"p0": [2, 0], "p1": [4, 10]})),
+        ("sketch.finish", json!({})),
+        ("solid.box", json!({"corner": [20, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Block"})),
+        ("construct.axis.two_points", json!({"a": {"point": [0, 0, 0]}, "b": {"point": [0, 1, 0]}, "name": "Spindle"})),
+    ] {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    }
+    s
+}
+
+/// Every form a revolve call takes.
+fn revolve_calls() -> Vec<Value> {
+    vec![
+        json!({"sketch": "Profile", "axis": "y", "angle": "90 deg", "operation": "new", "name": "A", "body_name": "A"}),
+        json!({"axis": "Y", "angle": 45, "direction": "Symmetric", "body_names": ["B"]}),
+        json!({"sketch": 1, "axis": {"origin": ["0 mm", 0, 0], "dir": {"x": 0, "y": 1, "z": 0}}, "symmetric": true, "convention": "legacy_axis_start"}),
+        json!({"axis": {"dir": [0, 1, 0]}, "angle": "30 deg", "angle2": "15 deg", "profiles": "all", "exact_regions": true}),
+        json!({"axis": {"type": "world", "axis": "Y"}, "angle": 20, "profiles": [0], "convention": "sketch_normal"}),
+        json!({"axis": "Spindle", "angle": 10, "direction": null, "symmetric": null, "touching": null}),
+        json!({"axis": {"type": "sketch_line", "dir": [0, 1, 0]}, "to": [0, 5, 3], "angle": 5, "angle2": null}),
+        json!({"axis": "y", "angle": "60 deg", "operation": "union", "targets": ["Block"], "participants": [], "touching": "one_body"}),
+        json!({"axis": "y", "angle": 15, "operation": "join", "participants": ["A"], "name": "Join"}),
+        json!({"axis": "y", "angle": 15, "operation": "cut", "targets": "A"}),
+        json!({"axis": {"origin": [0, 0, 5], "dir": [0, 1, 0]}, "face": [22.5, 2.5, 5], "face_body": "Block", "body": "Block", "angle": 90}),
+    ]
+}
+
+/// `solid.revolve` replies with `FeatureResult` in each of its forms, its contract taking each: in
+/// Warn a contract that refused one would still run it, so the replies are checked for warnings.
+#[test]
+fn revolve_replies_match_the_output_schema_and_forms_are_accepted() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let mut s = revolve_rig(ParamCheck::Warn);
+    for p in revolve_calls() {
+        let r = s.execute("solid.revolve", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+    }
+    // Warn reports what the contract refuses and runs the call anyway.
+    let typo = s.execute("solid.revolve", &json!({"axis": "y", "angel": 10})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(typo["param_warnings"], json!(["unknown key `angel`"]));
+    assert!(conforms(schema, schema, &typo), "{typo}");
+}
+
+/// The check changes nothing about the reply: each call gives the same JSON with the check off
+/// and in strict (`ms`, the time it took, apart), and its keys are the ones the command always
+/// answered with.
+#[test]
+fn revolve_reply_keeps_its_old_shape_whatever_the_check() {
+    let (mut off, mut strict) = (revolve_rig(ParamCheck::Off), revolve_rig(ParamCheck::Strict));
+    for p in revolve_calls() {
+        let run = |s: &mut Session| {
+            let mut r = s.execute("solid.revolve", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+            let keys: BTreeSet<String> = r.as_object().into_iter().flat_map(|o| o.keys().cloned()).collect();
+            assert!(r["ms"].is_null() || r["ms"].is_number(), "{r}");
+            r["ms"] = Value::Null;
+            (r, keys)
+        };
+        let (a, a_keys) = run(&mut off);
+        let (b, _) = run(&mut strict);
+        assert_eq!(a, b, "{p}");
+        let old = ["bodies", "changed_bodies", "created_bodies", "feature", "ms", "name", "removed_bodies", "warning"];
+        assert!(old.iter().all(|k| a_keys.contains(*k)), "{a}");
+        assert!(a_keys.iter().all(|k| old.contains(&k.as_str()) || matches!(k.as_str(), "component" | "notice")), "{a}");
+    }
+}
+
+/// What the handler ignores or reads as left out, strict refuses; off and warn run it as before.
+#[test]
+fn revolve_wrong_typed_keys_are_reported() {
+    for (key, value) in [
+        ("direction", json!("negative")),
+        ("direction", json!(true)),
+        ("symmetric", json!("yes")),
+        ("exact_regions", json!(1)),
+        ("angle", json!(true)),
+        ("angle", json!("  ")),
+        ("angle2", json!([])),
+        ("face", json!("x")),
+        ("face", json!([1, 2])),
+        ("face_body", json!(5)),
+        ("body", json!(5)),
+        ("name", json!(5)),
+        ("body_name", json!(5)),
+        ("operation", json!(5)),
+        ("colour", json!("red")),
+    ] {
+        let p = json!({"axis": "y", "angle": 30, key: value});
+        let mut off = revolve_rig(ParamCheck::Off);
+        let r = off.execute("solid.revolve", &p);
+        assert!(r.is_ok(), "{p}: {r:?}");
+        let mut warn = revolve_rig(ParamCheck::Warn);
+        let r = warn.execute("solid.revolve", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r["param_warnings"].as_array().is_some_and(|w| w.len() == 1), "{p}: {r}");
+        let mut strict = revolve_rig(ParamCheck::Strict);
+        assert!(strict.execute("solid.revolve", &p).is_err(), "{p}");
+    }
 }
