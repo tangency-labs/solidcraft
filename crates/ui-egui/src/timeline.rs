@@ -18,14 +18,14 @@ use solidcraft_theme::Tokens;
 
 /// Historical effects and current selections share the engine's query in both timelines.
 pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    let menu = crate::ui_kit::Menu::button(ui, crate::i18n::tr("timeline.effects.title"), |ui| {
+    let menu = crate::ui_kit::Menu::button(ui, solidcraft_ui_text::tr("timeline.effects.title"), |ui| {
         let effects = app.session.feature_effects(id);
         if !effects.evaluated {
-            ui.label(crate::i18n::tr("timeline.effects.unevaluated"));
+            ui.label(solidcraft_ui_text::tr("timeline.effects.unevaluated"));
             return;
         }
         if effects.created_bodies.is_empty() && effects.changed_bodies.is_empty() && effects.removed_bodies.is_empty() {
-            ui.label(crate::i18n::tr("timeline.effects.empty"));
+            ui.label(solidcraft_ui_text::tr("timeline.effects.empty"));
             return;
         }
         egui::ScrollArea::vertical().max_height(Tokens::get().space_24 * 12.0).show(ui, |ui| {
@@ -37,16 +37,16 @@ pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u6
                 if bodies.is_empty() {
                     continue;
                 }
-                ui.strong(crate::i18n::tr(label));
+                ui.strong(solidcraft_ui_text::tr(label));
                 for body in bodies {
                     let label = match body.component_name {
-                        Some(component) => crate::i18n::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)]),
+                        Some(component) => solidcraft_ui_text::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)]),
                         None => body.name.clone(),
                     };
                     let available = !body.selectable_bodies.is_empty();
                     let response = ui.add_enabled_ui(available, |ui| crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)).inner;
                     crate::scenario::publish_handle(&format!("timeline:affected:{}", body.name), response.rect.center());
-                    if response.on_disabled_hover_text(crate::i18n::tr("timeline.effects.unavailable")).clicked() {
+                    if response.on_disabled_hover_text(solidcraft_ui_text::tr("timeline.effects.unavailable")).clicked() {
                         let items: Vec<_> = body.selectable_bodies.iter().map(|name| json!({"type": "body", "name": name})).collect();
                         let _ = app.run("select.set", json!({"items": items}));
                         ui.close();
@@ -62,8 +62,8 @@ pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u6
 /// from the same `timeline.effects` query as [`affected_bodies_menu`]. A row selects the body's
 /// current instances; one consumed later is listed but disabled.
 fn affected_bodies_item(app: &SolveApp, id: u64) -> Item {
-    let mut item = Item::action("timeline.effects", crate::i18n::tr("timeline.effects.title"), "inspect").with(json!({ "feature": id }));
-    let note = |key: &str| Item::action("-note", crate::i18n::tr(key), "inspect").on_if(false);
+    let mut item = Item::action("timeline.effects", solidcraft_ui_text::tr("timeline.effects.title"), "inspect").with(json!({ "feature": id }));
+    let note = |key: &str| Item::action("-note", solidcraft_ui_text::tr(key), "inspect").on_if(false);
     let effects = app.session.feature_effects(id);
     if !effects.evaluated {
         item.children.push(note("timeline.effects.unevaluated"));
@@ -80,10 +80,10 @@ fn affected_bodies_item(app: &SolveApp, id: u64) -> Item {
     ] {
         for body in bodies {
             let name = match &body.component_name {
-                Some(component) => crate::i18n::format("timeline.effects.body_component", &[("body", &body.name), ("component", component)]),
+                Some(component) => solidcraft_ui_text::format("timeline.effects.body_component", &[("body", &body.name), ("component", component)]),
                 None => body.name.clone(),
             };
-            let label = format!("{}: {name}", crate::i18n::tr(section));
+            let label = format!("{}: {name}", solidcraft_ui_text::tr(section));
             let items: Vec<_> = body.selectable_bodies.iter().map(|name| json!({"type": "body", "name": name})).collect();
             item.children
                 .push(Item::action("select.set", &label, "select").with(json!({ "items": items })).on_if(!body.selectable_bodies.is_empty()));
