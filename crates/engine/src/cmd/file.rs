@@ -778,9 +778,29 @@ impl Session {
         // first undo after opening evaluated the whole timeline again (82-93 s in a
         // 5,484-feature design). The pinned names are the ones the file's bodies have, so
         // opening is no change: the pinned design is the saved one.
+        let unpinned = session.doc.reserved_body_names.is_empty() && session.doc.features.iter().all(|f| f.body_names.is_empty());
+        let before = session.doc.clone();
         session.pin_body_names();
+        if unpinned || !std::sync::Arc::ptr_eq(&before, &session.doc) {
+            session.pin_rolled_back_body_names();
+        }
         session.saved = session.doc.clone();
         session
+    }
+
+    /// Pin the names of the bodies the features after the timeline marker make, in a design
+    /// saved rolled back before names were pinned (#14008). Those features were never evaluated,
+    /// so [`Session::pin_body_names`] left them unpinned: a body then made at the marker took the
+    /// number of a later body, every later counted body shifted, and a combine that names them
+    /// failed or joined another body. The names are the ones the whole timeline gives, which is
+    /// what the design called those bodies when it was saved. The design stays rolled back.
+    fn pin_rolled_back_body_names(&mut self) {
+        let Some(marker) = self.doc.marker.filter(|m| *m < self.doc.features.len()) else { return };
+        self.doc_mut().marker = None;
+        self.refresh();
+        self.pin_body_names();
+        self.doc_mut().marker = Some(marker);
+        self.refresh();
     }
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.

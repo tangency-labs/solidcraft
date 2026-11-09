@@ -1234,6 +1234,42 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
 }
 
+/// A design saved before body names were pinned, and saved rolled back, is pinned as it opens
+/// for the features after the marker too (#14008): a body made at the marker does not take the
+/// number of a later body, so the later bodies keep the names they were saved with and a combine
+/// that names them still joins the same bodies.
+#[test]
+fn counted_body_names_after_the_marker_stay_in_a_design_saved_before_pinning() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40), ("D", 50)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": name}));
+    }
+    run(&mut s, "solid.combine", json!({"target": "Body3", "tools": ["Body4"], "operation": "join", "name": "Join"}));
+    // As a file written before names were pinned: no stored names, and rolled back to after A.
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    doc.marker = Some(1);
+    let mut s = Session::opened_at(solidcraft_doc::Document::from_json(&doc.to_json()).unwrap(), None, None);
+    assert_eq!(s.doc.find_feature("C").map(|f| f.body_names.clone()), Some(vec!["Body3".to_string()]));
+    assert!(["Body1", "Body2", "Body3", "Body4"].iter().all(|n| s.doc.reserved_body_names.contains(*n)));
+    // Opening changed nothing the user can see: the design is still rolled back, and not dirty.
+    assert_eq!(s.doc.marker, Some(1));
+    assert_eq!(s.model.state().bodies.len(), 1);
+
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0], "name": "N"}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let st = s.model.state();
+    let names: Vec<(String, String)> =
+        st.bodies.iter().map(|b| (b.name.clone(), s.doc.feature(b.feature).map(|f| f.name.clone()).unwrap_or_default())).collect();
+    let want: Vec<(String, String)> =
+        [("Body1", "A"), ("Body5", "N"), ("Body2", "B"), ("Body3", "C")].iter().map(|(b, f)| (b.to_string(), f.to_string())).collect();
+    assert_eq!(names, want, "C and D are joined into Body3, N takes a new number");
+    assert!(s.doc.features.iter().all(|f| s.model.result(f.id).is_some_and(|r| r.error.is_none())));
+}
+
 /// Pinning reads each feature's bodies once and keeps them with the state it read them from;
 /// the names it pins and reserves, and the fingerprints it leaves, are those of reading every
 /// feature's bodies again: random boxes (named and counted), moves, suppressions, deletions,
