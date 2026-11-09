@@ -334,6 +334,7 @@ mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
 pub mod window_chrome;
+mod wireframe_outline;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;

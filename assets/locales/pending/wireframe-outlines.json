@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.wireframe_outlines": "Outlines of curved surfaces in Wireframe",
+    "prefs.wireframe_outlines_help": "Wireframe draws where curved surfaces turn away from the view, so a sphere shows as a circle. When off, Wireframe draws edges only."
+  },
+  "ar": {
+    "prefs.wireframe_outlines": "حدود الأسطح المنحنية في الإطار السلكي",
+    "prefs.wireframe_outlines_help": "يرسم الإطار السلكي المواضع التي تنعطف فيها الأسطح المنحنية بعيدًا عن العرض، فتظهر الكرة دائرةً. عند الإيقاف، يرسم الإطار السلكي الحواف فقط."
+  },
+  "de": {
+    "prefs.wireframe_outlines": "Umrisse gekrümmter Flächen im Drahtmodell",
+    "prefs.wireframe_outlines_help": "Das Drahtmodell zeichnet, wo sich gekrümmte Flächen von der Ansicht abwenden, sodass eine Kugel als Kreis erscheint. Aus: Das Drahtmodell zeichnet nur Kanten."
+  },
+  "he": {
+    "prefs.wireframe_outlines": "קווי מתאר של משטחים מעוקלים במצב מסגרת תיל",
+    "prefs.wireframe_outlines_help": "מסגרת התיל מציירת את המקומות שבהם משטחים מעוקלים פונים הרחק מהתצוגה, כך שכדור מוצג כמעגל. כשהאפשרות כבויה, מסגרת התיל מציירת קצוות בלבד."
+  },
+  "ja": {
+    "prefs.wireframe_outlines": "ワイヤーフレームで曲面の輪郭を表示",
+    "prefs.wireframe_outlines_help": "ワイヤーフレームで、曲面がビューから向きを変える位置を描画します。球は円として表示されます。オフにすると、ワイヤーフレームはエッジのみを描画します。"
+  },
+  "ko": {
+    "prefs.wireframe_outlines": "와이어프레임에서 곡면 윤곽선 표시",
+    "prefs.wireframe_outlines_help": "와이어프레임에서 곡면이 뷰에서 돌아서는 위치를 그려 구가 원으로 보이게 합니다. 끄면 와이어프레임은 모서리만 그립니다."
+  },
+  "vi": {
+    "prefs.wireframe_outlines": "Đường viền của bề mặt cong trong chế độ Khung dây",
+    "prefs.wireframe_outlines_help": "Khung dây vẽ nơi bề mặt cong quay khỏi hướng nhìn, để hình cầu hiện thành một đường tròn. Khi tắt, Khung dây chỉ vẽ các cạnh."
+  },
+  "zh": {
+    "prefs.wireframe_outlines": "线框模式下显示曲面轮廓",
+    "prefs.wireframe_outlines_help": "线框模式会绘制曲面背离视图的位置，使球体显示为圆。关闭后，线框模式只绘制边线。"
+  }
+}

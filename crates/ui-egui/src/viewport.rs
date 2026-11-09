@@ -612,6 +612,8 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     // Finished sketches are drawn over the bodies when the preference says so.
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
+    // Wireframe's outlines of curved surfaces follow the view (#13347).
+    app.preferences.wireframe_outlines.hash(&mut h);
     // The grid previews the plane Create Sketch would take (#6975).
     previewed_sketch_plane(app).map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
     // Conflicting curves in their own colour, or as before (#7244).
@@ -1829,6 +1831,31 @@ pub(crate) fn seam_width(order: Option<solidcraft_engine::kernel::Continuity>) -
     2.6 + past_g2 as f32
 }
 
+/// Most outline pieces Wireframe draws in one view (#13347): past this, the rest of the model is
+/// drawn with its edges only.
+const MAX_OUTLINE_LINES: usize = 2_000_000;
+
+/// The outlines of the shown bodies' curved surfaces as seen now, in Wireframe's edge colour
+/// (#13347). They follow the camera, so they are part of the view-dependent scene.
+fn wireframe_outlines(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sc: &mut GpuScene, colour: Color32) {
+    use crate::wireframe_outline::{Eye, folds_of, outline};
+    let eye = if app.cam.fov > 0.0 { Eye::At(app.cam.eye()) } else { Eye::Along(app.cam.basis().2) };
+    let col = sc.color(c4(colour));
+    let active_bodies = active_body_names(app);
+    let replaced = app.preview.effective_replaced();
+    let mut budget = MAX_OUTLINE_LINES;
+    for b in st.bodies.iter().filter(|b| app.body_visible(&b.name) && !replaced.contains(&b.name)) {
+        let mesh = shown_mesh(app, b, &active_bodies);
+        for (a, c) in outline(&folds_of(&mesh), eye).take(budget) {
+            sc.line(a.to_f32(), c.to_f32(), col, 1.3, false);
+            budget -= 1;
+        }
+        if budget == 0 {
+            break;
+        }
+    }
+}
+
 /// Rebuild the sketch scene when what it shows has changed.
 pub(crate) fn refresh_sketch_scene(app: &mut SolveApp, proj: &Proj) {
     let sk = sketch_scene_key(app, proj);
@@ -1856,6 +1883,9 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     {
         // A hidden shadow must not keep an earlier document's whole model alive.
         *cache = None;
+    }
+    if app.ui.visual_style == 2 && app.preferences.wireframe_outlines {
+        wireframe_outlines(app, &st, &mut sc, tk.text);
     }
     let mut fill_budget = 131_072;
     // The open sketch's plane in the model this frame shows.
@@ -10916,6 +10946,37 @@ mod tests {
         dialog_pick(&mut app, &hit, sel);
         assert!(app.highlighted().contains(&Sel::Body { name: body.name.clone() }));
         assert_eq!(build_highlight(&app).merged().tris.len(), expected, "hover must not duplicate the selected body's faces");
+    }
+
+    /// #13347: Wireframe draws a sphere's outline as the camera sees it, where before it drew
+    /// nothing (a sphere's only edge is a seam). The preference turned off draws Wireframe as
+    /// before, and a box, whose outline is all edges, draws the same lines either way.
+    #[test]
+    fn wireframe_draws_the_outline_of_curved_surfaces_unless_turned_off() -> Result<(), Box<dyn std::error::Error>> {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(640., 480.));
+        let lines = |app: &SolveApp| build_sketch_scene(app, &projection(app, rect)).merged().lines.len() / crate::gpu::LINE_SIZE;
+        for (command, params, curved) in
+            [("solid.sphere", json!({"radius": 20}), true), ("solid.box", json!({"length": 30, "width": 20, "height": 10}), false)]
+        {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.ui.show_grid = false;
+            app.run(command, params)?;
+            app.ui.visual_style = 2;
+            assert!(app.preferences.wireframe_outlines, "on by default");
+            let on = lines(&app);
+            app.preferences.wireframe_outlines = false;
+            let off = lines(&app);
+            if curved {
+                assert!(on >= off + 24, "{command}: {on} lines with outlines, {off} without");
+            } else {
+                assert_eq!(on, off, "{command}: no outline beyond its edges");
+            }
+            // The shaded styles draw outlines on the GPU, not here.
+            app.preferences.wireframe_outlines = true;
+            app.ui.visual_style = 0;
+            assert_eq!(lines(&app), off, "{command}: shaded");
+        }
+        Ok(())
     }
 
     #[test]

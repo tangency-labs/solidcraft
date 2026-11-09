@@ -340,6 +340,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.preferences.section_hatch = *style;
                 }
             });
+            let outlines = setting::wireframe_outlines(app, ui).backing_on_hover_text(app.tr("prefs.wireframe_outlines_help"));
+            crate::scenario::publish_target("prefs:wireframe_outlines", outlines.rect);
             let tint_new = setting::preview_tint_new_faces(app, ui).backing_on_hover_text(app.tr("prefs.preview_tint_new_faces_help"));
             crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
             let cut_tint = setting::cut_preview_tint(app, ui).backing_on_hover_text(app.tr("prefs.cut_preview_tint_help"));

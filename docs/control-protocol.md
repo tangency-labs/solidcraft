@@ -995,6 +995,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `viewport_theme` (`theme` (default: the theme's own), `light`, `dark`: the 3D view in the Light or Dark theme's colours whatever the window uses, #4146)
 - `wheel_zoom_speed` (0.25 to 4, default 1: how far each wheel step zooms; the 3D mouse keeps its own speed)
 - `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
+- `wireframe_outlines` (default true: the Wireframe visual style draws the outlines of curved surfaces as seen from the camera, so a sphere shows as a circle and a cylinder shows its sides; false: Wireframe draws edges only, as before #13347)
 - `zoom_reverse`
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
