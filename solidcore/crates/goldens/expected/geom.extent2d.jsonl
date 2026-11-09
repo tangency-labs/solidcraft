@@ -3029,7 +3029,7 @@
 {"case":"my_test_extent2d_classify_point_tol_v","deferred":null,"error":null,"ints":{"classify":[1,0],"contains":[1,1],"left_eval":[1,1],"on_boundary":[0],"on_boundary_bits":[0,0]},"topology":null,"values":{"binormal":[0.0,0.0],"clamp":[1.1,2.1],"outside_dist":[0.0]}}
 {"case":"my_test_extent2d_clip_line","deferred":null,"error":null,"ints":{},"topology":null,"values":{"t":[1.0]}}
 {"case":"my_test_extent2d_contains_periodic","deferred":null,"error":null,"ints":{"contained":[0],"contained_again":[0]},"topology":null,"values":{"periodic_point":[4.9,3.0]}}
-{"case":"my_test_extent2d_contains_periodic_tol","deferred":null,"error":null,"ints":{"contained":[1],"contained_again":[1]},"topology":null,"values":{"periodic_point":[1.0,3.0]}}
+{"case":"my_test_extent2d_contains_periodic_tol","deferred":null,"error":null,"ints":{"contained":[1],"contained_again":[1]},"topology":null,"values":{"periodic_point":[0.9000000000000004,3.0]}}
 {"case":"my_test_extent2d_contains_point","deferred":null,"error":null,"ints":{"classify":[4,1],"contains":[0,0],"left_eval":[1,1],"on_boundary":[0],"on_boundary_bits":[0,0]},"topology":null,"values":{"binormal":[0.0,0.0],"clamp":[1.0,3.0],"outside_dist":[0.09999999999999998]}}
 {"case":"my_test_extent2d_contains_point_tol","deferred":null,"error":null,"ints":{"classify":[0,1],"contains":[1,1],"left_eval":[1,1],"on_boundary":[1],"on_boundary_bits":[1,1]},"topology":null,"values":{"binormal":[1.0,0.0],"clamp":[1.0,3.0],"outside_dist":[0.0]}}
 {"case":"my_test_extent2d_e1_from_points","deferred":null,"error":null,"ints":{},"topology":null,"values":{"extent":[1.0,2.0,3.0,4.0]}}

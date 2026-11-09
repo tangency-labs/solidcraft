@@ -97,7 +97,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
         for (name, d, want) in [("x", Vec3::X, t.axis_x), ("y", Vec3::Y, t.axis_y), ("z", Vec3::Z, t.axis_z)] {
             let at = c + vec2(32.0, 0.0);
             let mut out =
-                ctx.run_ui(egui::RawInput::default(), |ui| crate::icons::navigation::axis_tip(ui.painter(), c, name, &d, at, 0.5, false, t));
+                ctx.run_ui(egui::RawInput::default(), |ui| crate::icons::navigation::axis_tip(ui.painter(), c, name, d.into(), at, 0.5, false, t));
             out.textures_delta.clear();
             let end = out.shapes.iter().find_map(|s| match &s.shape {
                 egui::Shape::Circle(e) if e.center == at => Some(e.fill),
@@ -158,6 +158,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
     ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
+    ("render_workspace_quality.rs", 1, "the denoise guide legend reproduces categorical mask pixels; colour is exported image data"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
@@ -165,7 +166,6 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
-    ("toolbar.rs", 1, "the version text"),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[
