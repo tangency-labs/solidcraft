@@ -1120,7 +1120,7 @@ const ELEMENTS: &[Element] = &[
         FileView::sample_grid(
             ui,
             "gallery:file:sample",
-            &[SampleCard { title: "Sample Plate", description: "Parametric plate with holes and a bored boss", icon: "new", thumbnail: None }],
+            &[SampleCard { title: "Sample Plate", description: "Parametric plate with holes and a bored boss", icon: "new".into(), thumbnail: None }],
         );
     }),
     element!("file_recovery", |ui, _| {

@@ -7,9 +7,7 @@ doc.recover
 doc.recovery_discard
 doc.recovery_list
 face.delete
-file.insert_mesh
 file.insert_step
-file.slicers
 motion.export_animation
 motion.trace
 motion.trace.edit
@@ -21,7 +19,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-solid.align
 solid.coil
 solid.draft
 solid.emboss
