@@ -538,6 +538,25 @@ fn a_changed_seed_list_keeps_a_line_drawn_from_a_copys_end_point() {
 }
 
 #[test]
+fn a_changed_seed_list_survives_retiring_an_earlier_pattern_seeded_by_a_copy() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["a"]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,5],[20,5]],"ids":["b"]}));
+    run(&mut s, "sketch.line", json!({"points":[[10,-50],[20,-50]],"ids":["x"]}));
+    let earlier = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["x"],"count":2,"spacing":10,"dir":[0,-1]}));
+    let later = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["a"],"count":3,"spacing":10}));
+    let copy = ids(&later["curves"])[0].clone();
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":earlier["pattern"],"entities":[copy]}));
+
+    let out = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":later["pattern"],"entities":["a","b"]}));
+    assert_eq!(ids(&out["curves"]).len(), 4);
+    let sk = sketch(&s);
+    assert_eq!(sk.patterns.len(), 1, "the earlier pattern lost its seed");
+    assert_eq!(json!(sk.patterns[0].id), later["pattern"]);
+    check_relations(&s);
+}
+
+#[test]
 fn malformed_pattern_edits_roll_back_and_deleted_seed_does_not_panic() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["l1"]}));

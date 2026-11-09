@@ -200,7 +200,8 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             None => sk.fresh("pat")?,
         };
         let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
-        let index = old_index.unwrap_or(sk.patterns.len());
+        // Removing old copies can retire an earlier pattern seeded by one, so the old index may be past the end.
+        let index = old_index.unwrap_or(sk.patterns.len()).min(sk.patterns.len());
         let pattern = SketchPattern {
             id: id.clone(),
             entities: entity_ids,
@@ -209,7 +210,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             expressions,
             count_expression,
         };
-        sk.patterns.insert(index.min(sk.patterns.len()), pattern);
+        sk.patterns.insert(index, pattern);
         sk.update_pattern(index, kind)?;
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
         let curves: Vec<_> = pattern.instances.iter().flat_map(|i| i.curves.iter().cloned()).collect();
