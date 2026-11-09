@@ -5,7 +5,7 @@ Hollow out a solid to an even wall thickness, leaving the faces you pick open: a
 - You need a solid body.
 - Pick the faces to remove. They become the openings. Pick the top face of a block to get an open box.
 - To make a closed hollow part with no openings, click the body instead of a face.
-- Add fillets and chamfers on the outside before you shell, so the wall follows them.
+- Round or chamfer the edges around the opening after you shell, not before. Shell can fail on a round that runs into the opening.
 
 #### Options
 
@@ -27,10 +27,9 @@ Hollow out a solid to an even wall thickness, leaving the faces you pick open: a
 #### Tips and common mistakes
 
 - **Do** pick Direction from the dimension that matters. Inside holds the outside size, Outside holds the inside size.
-- **Do** round the outside edges before you shell. The inside corners follow the round.
-- **Don't** shell Inside with a wall thicker than the smallest outside fillet radius. The inside of that round has nowhere to go and the shell can fail. Use a thinner wall or a bigger fillet.
+- **Do** shell first and round the rim after. Shell then doesn't have to follow the rounds.
 - **Don't** click the body when you want an opening. Clicking the body makes a closed hollow part with no way in.
 
 #### See also
 
-{{#command solid.fillet}} rounds the outside edges before you shell. {{#command solid.extrude}} makes the block to start from.
+{{#command solid.fillet}} rounds the rim after you shell. {{#command solid.extrude}} makes the block to start from.
