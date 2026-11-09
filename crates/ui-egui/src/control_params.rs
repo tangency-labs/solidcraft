@@ -356,6 +356,10 @@ pub(crate) enum Menu {
 
 impl Menu {
     pub fn parse(p: &Value) -> Result<Menu, String> {
+        // A wrong-typed field is refused even beside `close`.
+        field::<f64>(p, "x")?;
+        field::<f64>(p, "y")?;
+        field::<crate::context_menu::Target>(p, "target")?;
         if field::<bool>(p, "close")?.unwrap_or(false) {
             return Ok(Menu::Close);
         }
@@ -574,6 +578,7 @@ mod tests {
         assert!(matches!(Menu::parse(&json!({})).unwrap(), Menu::Describe));
         assert!(matches!(Menu::parse(&json!({"x": 1, "y": 2})).unwrap(), Menu::Open { .. }));
         assert!(Menu::parse(&json!({"x": 1})).is_err());
+        assert!(Menu::parse(&json!({"close": true, "x": "bad"})).is_err());
     }
 
     #[test]

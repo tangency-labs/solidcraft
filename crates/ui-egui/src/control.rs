@@ -1021,6 +1021,21 @@ fn ui_file(app: &mut SolveApp, q: params::File) -> Outcome {
 
 /// `ui.home {open?, sample?}`: the Home page.
 fn ui_home(app: &mut SolveApp, q: params::Home) -> Outcome {
+    // The index is checked before anything changes: `open_sample` drops an index that names
+    // no sample and says nothing, so the request would look like it had worked (#9087).
+    let sample = match q.sample {
+        Some(sample) => {
+            let count = solidcraft_engine::sample::samples().len();
+            let Some(index) = sample.as_i64() else {
+                return err(format!("`sample` must be an index from 0 to {}", count - 1));
+            };
+            if !(0..count as i64).contains(&index) {
+                return err(format!("`sample` must be an index from 0 to {}, not {index}", count - 1));
+            }
+            Some(index as usize)
+        }
+        None => None,
+    };
     match q.open {
         Some(true) => {
             let rev = app.session.revision;
@@ -1030,17 +1045,8 @@ fn ui_home(app: &mut SolveApp, q: params::Home) -> Outcome {
         Some(false) => app.home.open = false,
         None => {}
     }
-    if let Some(sample) = q.sample {
-        // The index is checked here: `open_sample` drops an index that names no sample
-        // and says nothing, so the request would look like it had worked (#9087).
-        let count = solidcraft_engine::sample::samples().len();
-        let Some(index) = sample.as_i64() else {
-            return err(format!("`sample` must be an index from 0 to {}", count - 1));
-        };
-        if !(0..count as i64).contains(&index) {
-            return err(format!("`sample` must be an index from 0 to {}, not {index}", count - 1));
-        }
-        crate::home::open_sample(app, index as usize);
+    if let Some(index) = sample {
+        crate::home::open_sample(app, index);
     }
     ok(json!({"open": app.home.open, "recent": app.home.recent}))
 }
@@ -3587,6 +3593,10 @@ mod tests {
             let error = r["error"].as_str().unwrap_or_default();
             assert!(error.contains(&format!("0 to {}", count - 1)), "the error names the valid range: {bad}: {r}");
         }
+        // A refused sample leaves Home as it was, even beside `open: false`.
+        h.call("ui.home", json!({"open": true}));
+        assert_eq!(h.call("ui.home", json!({"open": false, "sample": 99}))["ok"], false);
+        assert_eq!(h.call("ui.home", json!({}))["result"]["open"], true, "Home is still open");
         // A sample that exists still opens.
         let r = h.call("ui.home", json!({"sample": 0}));
         assert_eq!(r["ok"], true, "{r}");
