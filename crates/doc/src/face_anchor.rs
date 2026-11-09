@@ -155,6 +155,10 @@ impl Document {
         if !solid || body.body.is_mesh() || body.definition_name() != target.body || !at.is_finite() {
             return None;
         }
+        // The checks below compare the body as built, before its offset: an offset body stays lost.
+        if self.model_body_offset(body).is_some_and(|offset| *offset != crate::IDENTITY) {
+            return None;
+        }
         // The certified cap must be gone: while some body still has it, the attachment is exact.
         let certified = |source: &Option<solidcraft_kernel::FaceSource>| {
             matches!(source, Some(solidcraft_kernel::FaceSource::CertifiedExtrudeCap { producer, sketch: from, high: end, outer: around, holes: inside, .. })

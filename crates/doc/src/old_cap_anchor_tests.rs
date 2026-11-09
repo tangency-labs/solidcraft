@@ -4,7 +4,7 @@ use solidcraft_geom::prelude::*;
 /// Sketch1 (a stadium) and Extrude1, Sketch2 on Extrude1's bottom cap and Extrude2 joined from it,
 /// then Sketch3 on the same cap, as 0.30.1 saved them (#13323): the attachments carry an
 /// `extrude_cap` certificate, which the SMLib kernel's join no longer marks the cap with.
-fn old_design(edit: impl FnOnce(&mut serde_json::Value)) -> crate::Model {
+fn old_doc(edit: impl FnOnce(&mut serde_json::Value)) -> Document {
     let mut fixture: serde_json::Value = serde_json::from_str(include_str!("old_cap_anchor_fixture.json")).unwrap();
     edit(&mut fixture["features"]);
     let doc = Document {
@@ -12,10 +12,29 @@ fn old_design(edit: impl FnOnce(&mut serde_json::Value)) -> crate::Model {
         params: serde_json::from_value(fixture["params"].take()).unwrap(),
         ..Document::default()
     };
-    let doc = crate::format::read(&doc.to_json()).unwrap();
+    crate::format::read(&doc.to_json()).unwrap()
+}
+
+fn evaluate(doc: &Document) -> crate::Model {
     let mut model = crate::Model::new();
-    model.evaluate(&doc);
+    model.evaluate(doc);
     model
+}
+
+fn old_design(edit: impl FnOnce(&mut serde_json::Value)) -> crate::Model {
+    evaluate(&old_doc(edit))
+}
+
+#[test]
+fn the_name_does_not_rescue_a_cap_on_an_offset_body() {
+    // Moved 5 mm along the cap's own plane: the plane and the saved point still match the body as
+    // built, but the sketch would stay behind at the old place. It stays lost instead.
+    let mut doc = old_doc(|_| {});
+    let mut offset = crate::IDENTITY;
+    offset[3][0] = 5.;
+    doc.body_offsets.insert("Body1".into(), offset);
+    let model = evaluate(&doc);
+    assert!(model.result(5).unwrap().error.is_some(), "{:?}", model.result(5));
 }
 
 fn sketch3(features: &mut serde_json::Value) -> &mut serde_json::Value {
