@@ -10,6 +10,16 @@
 
 `layers.md` says each job lives in one layer: the kernel computes, ops decides and sequences, record is data, convert is the one record↔kernel conversion, tess draws, and apps hold state with no geometry math. Today SolidCraft still carries its own copy of most of those jobs. This RFC lists those copies, orders the work of removing them, and sets the gate each PR must pass. It fits inside the plan already agreed for solidcore-ops: the local-operation sprint, the solidcore#3005 follow-ups, stage 3b, blends last, then the switch commit. It adds no stage of its own.
 
+## Goals
+
+**solidcore is a general-purpose kernel that any application can use, like OpenCASCADE, and the best one.** "Like OpenCASCADE" means comparable scope, nothing more. For this plan, that means:
+- **ops is the complete public modelling API, not SolidCraft's API.** It covers every operation a CAD app needs: primitives, booleans, fillets and chamfers, shell and offset, sweeps and lofts, surface construction, sewing and healing, measuring, import and export. Nothing SolidCraft-specific goes in it (no defaults, command ids or UI; layers.md's "never in it" column).
+- **Stable and versioned:** semver on ops, tess and record, with `cargo-semver-checks` in CI and a changelog.
+- **Documented with examples:** rustdoc on every public item, and a small `examples/` set that runs in CI.
+- **Usable outside SolidCraft:** a second consumer exercises the API in CI, so assumptions only SolidCraft makes get caught.
+
+Each consolidation PR below keeps ops free of shapes that only fit SolidCraft: parameters a general caller would pass, results a general caller can read.
+
 ## 1. Inventory
 
 Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" counts the source files that use the code, by crate. Measured comparisons come from the mesher bake-off (#13625: 1,267 bodies, display and export settings) and the STEP bake-off (#13624: 320 files, 219 with a solid).
@@ -132,7 +142,19 @@ After the new blend algorithm lands in the kernel: the fillet, chamfer, variable
 
 jyviko's commit in SolidCraft's kernel crate: about 100 places that reach into the kernel body call `solidcore-ops` instead, with no temporary public API in ops and no per-family switching. `crates/smlib` (22k with tests) and the `crates/kernel` copies are deleted, and the seam allowlist becomes empty. Gate: every gate above, the same counts and values.
 
-### Phase 6: the rest
+### Phase 6: solidcore as a product
+
+| PR | What | Gate | Parallel |
+|---|---|---|---|
+| 6.1 | Semver on `solidcore-ops`, `solidcore-tess` and `solidcore-record`: `cargo-semver-checks` in CI and a changelog per crate | a breaking change without a major bump fails | from now |
+| 6.2 | Rustdoc on every public item (`missing_docs` denied in the three crates) | `cargo doc` with `-D warnings` | 6.1 |
+| 6.3 | `examples/`: make a part, fillet it, export STEP, mesh it; each runs in CI | the examples run and check their results | after 1.3, 1.6 |
+| 6.4 | A second consumer in CI (a small example app, or the existing harness) that uses only the public API | builds and passes without SolidCraft | after 6.3 |
+| 6.5 | Later: our own C ABI and Python bindings, and a wasm package. Never OCP, pythonOCC or any GPL/LGPL wrapper, and nobody reads them | binding tests in CI | after Phase 5 |
+
+6.1 and 6.2 can start now. Each later API addition lands with its docs and example.
+
+### Phase 7: the rest
 
 The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster per PR, until both are empty and `mesh-decisions` retires (layers §6).
 
@@ -141,6 +163,7 @@ The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster 
 - **Literature first.** Show the problem, read the papers that solve it, and say in the issue how the design follows them (solidcore `AGENTS.md` §1).
 - **No fallbacks or try-chains.** One construction per job. An old path is deleted when its replacement lands, never kept behind it (§4b).
 - **One topic per PR**: one job moved, its callers switched, the old copy deleted, its ledger lines removed.
+- **ops stays general.** Nothing SolidCraft-specific goes in it: no defaults, command ids, UI or document types. SolidCraft passes those in as parameters.
 - **Branches.** Kernel-only PRs (`solidcore/` alone) target `kernel`. PRs that also touch SolidCraft's crates target `main`.
 - **No compatibility flags.** No switch between old and new, no `UpstreamFixes` field, no preference for the old result.
 - **Claim first** on the job's tracking issue, and name the surviving copy with its measurement.
