@@ -4336,6 +4336,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-io",
  "solidcraft-kernel",
+ "solidcraft-machining",
  "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
@@ -4421,6 +4422,17 @@ dependencies = [
  "spade",
  "thiserror 2.0.21",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-machining"
+version = "0.40.0-rc.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "solidcraft-geom",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

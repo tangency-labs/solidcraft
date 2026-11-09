@@ -113,6 +113,7 @@ pub mod section;
 pub mod select;
 pub mod sheet;
 pub mod silhouette;
+pub mod sim;
 pub mod sketch;
 pub mod sketch_3d;
 pub mod sketch_clipboard;
