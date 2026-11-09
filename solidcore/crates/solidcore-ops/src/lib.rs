@@ -19,8 +19,8 @@
 //! - [`provenance`]: the hook an application's construction history rides on.
 //!
 //! The families: [`measure`] (mass properties, area, box, point class, gap samples, the picks'
-//! distances and normals), [`boolean`], [`stitch`], [`prism`] (planar region booleans and
-//! extrusion, prism sections).
+//! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
+//! [`boolean`], [`stitch`], [`prism`] (planar region booleans and extrusion, prism sections).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -32,6 +32,7 @@ pub mod blend;
 pub mod body;
 pub mod boolean;
 pub mod check;
+pub mod contact;
 pub mod error;
 pub mod extend;
 pub mod file;
@@ -42,8 +43,10 @@ pub mod prism;
 pub mod provenance;
 pub mod session;
 pub mod split;
+pub mod step_assembly;
 pub mod stitch;
 pub mod sweep;
+pub mod tangent;
 pub mod untrim;
 
 pub use blend::{
@@ -54,6 +57,7 @@ pub use blend::{
 pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body};
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
+pub use contact::Gap;
 pub use error::{Error, FitKind, Result, RoomReason, Unblendable};
 pub use measure::{
     point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
@@ -61,7 +65,10 @@ pub use measure::{
 };
 pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
 pub use order::Order;
+pub use step_assembly::{placed_bodies, PlacedBody};
 
+#[cfg(test)]
+mod noisy_round_tests;
 #[cfg(test)]
 mod test_corpus;
 #[cfg(test)]

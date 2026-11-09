@@ -2,6 +2,7 @@ use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
 use serde_json::json;
 use solidcraft_engine::Sel;
+use solidcraft_engine::geom::MeshGeom;
 
 #[test]
 fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {

@@ -1,6 +1,6 @@
 //! Description-driven details content. No tool, document or command knowledge lives here.
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use egui::{RichText, Ui};
 use solidcraft_theme::Tokens;
 

@@ -1336,7 +1336,7 @@ pub struct ViewListResult {
 /// The camera `view.apply` turns to, as the handler reads it: `up` is refused, `roll` is finite,
 /// the pitch within ±π/2 and the rest finite with a positive distance.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ApplyCamera(pub solidcraft_render::Camera);
+pub struct ApplyCamera(pub solidcraft_viewport::Camera);
 
 impl<'de> Deserialize<'de> for ApplyCamera {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {

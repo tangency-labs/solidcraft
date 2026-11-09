@@ -1508,12 +1508,7 @@ impl Cone {
         hv: usize,
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec3>> {
-        let rows = self.evaluate_rows(k, uv, hu, hv, flags)?;
-        let mut d = Vec::with_capacity((hu + 1) * (hv + 1));
-        for row in rows {
-            d.extend(row);
-        }
-        Ok(d)
+        Ok(self.evaluate_rows(k, uv, hu, hv, flags)?.concat())
     }
 
     /// [`Self::evaluate`] as `D[i][j]` rows: exactly `hu + 1` rows of `hv + 1` entries

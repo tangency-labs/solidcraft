@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 serde = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

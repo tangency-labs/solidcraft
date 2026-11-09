@@ -23,7 +23,7 @@ struct Params {
     // ray epsilon, test environment radiance, studio scale, reserved
     lighting: vec4<f32>,
     environment: vec4<f32>, // RGB radiance, enabled flag
-    light_count: vec4<f32>, // x: hard directional count, y: point/spot count, w: rectangle count
+    light_count: vec4<f32>, // directional count, point/spot count, metal energy flag, rectangle count
     area_lights: array<AreaLight,4>,
     environment_map: vec4<f32>, // cosine rotation, sine rotation, intensity, enabled
     sun_direction: vec4<f32>, // normalized toward sun, cosine angular radius
@@ -37,6 +37,8 @@ struct Params {
     directional_lights: array<DirectionalLight,8>,
     punctual_lights: array<PunctualLight,8>,
     studio_weights: vec4<f32>,
+    // Global first pixel and local film-plane length; zero length is the full-image test layout.
+    page: vec4<u32>,
 
 };
 @group(0) @binding(0) var<uniform> u: Params;
@@ -49,6 +51,9 @@ struct EnvironmentData { header: vec4<u32>, texels: array<EnvironmentTexel> };
 // Count low, first pixel/bounce/sample/code, count high, first-writer flag, spare.
 // Two atomic words count jobs with more than 2^32 paths without wrapping to zero.
 @group(0) @binding(6) var<storage, read_write> failures: array<atomic<u32>>;
+fn film_pixels()->u32 {return select(u.image.x*u.image.y,u.page.y,u.page.y!=0u);}
+fn film_index(pixel:u32)->u32 {return pixel-u.page.x;}
+
 // Codes: 1 escaped inside a medium, 2 exit with no medium, 3 exit from another
 // medium, 4 ambiguous origin/certificate, invalid entry or beyond16 nested media.
 fn medium_failure(radiance: vec3<f32>, coverage: f32, pixel: u32, bounce: u32, code: u32) -> vec4<f32> {
@@ -185,8 +190,11 @@ fn brdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> vec3<f32> {
     let ratio = (t.parameters.z - 1.0) / (t.parameters.z + 1.0);
     let f0 = mix(vec3<f32>(ratio*ratio), t.base.xyz, t.parameters.x);
     let diffuse = t.base.xyz * ((1.0-t.parameters.x)/PI);
-    let base = base_fresnel(f0,dot(v,h),t.parameters.x,t.parameters.z) * (d*0.25*gv*gl)
+    var base = base_fresnel(f0,dot(v,h),t.parameters.x,t.parameters.z) * (d*0.25*gv*gl)
         + (vec3<f32>(1.0)-base_fresnel(f0,nv,t.parameters.x,t.parameters.z)) * (vec3<f32>(1.0)-base_fresnel(f0,nl,t.parameters.x,t.parameters.z)) * diffuse;
+    if u.light_count.z > 0.0 && t.parameters.x > 0.0 && t.parameters.y > 0.35 {
+        base += metal_multiple_scattering(t.base.xyz,t.parameters.x,t.parameters.y,nv,nl);
+    }
     if t.coat.x <= 0.0 || t.coat.z == 1.0 { return base; }
     let coat_a = t.coat.y*t.coat.y;
     let coat_a2 = coat_a*coat_a;
@@ -871,17 +879,21 @@ fn sample_surface(t: Triangle, n: vec3<f32>, v: vec3<f32>, rng: ptr<function,u32
     let component = random(rng); let x = random(rng); let y = random(rng);
     return sample_surface_values(t,n,v,vec3<f32>(component,x,y));
 }
+fn visible_ggx_reflection_pdf(nh: f32, nv: f32, roughness: f32) -> f32 {
+    let alpha = roughness*roughness;
+    let a2 = alpha*alpha;
+    let root = sqrt(nv*nv+a2*(1.0-nv*nv));
+    return distribution(nh,a2)/(2.0*(nv+root));
+}
 // Conditional opaque mixture density; branch selection is accounted for by callers.
 fn surface_pdf(t: Triangle, n: vec3<f32>, v: vec3<f32>, l: vec3<f32>) -> f32 {
     let nl = dot(n,l);
-    if nl<=0.0 || dot(n,v)<=0.0 { return 0.0; }
-    let h = unit(v+l); let vh = max(dot(v,h),1e-20);
-    let nh = max(dot(n,h),0.0);
-    let alpha = t.parameters.y*t.parameters.y;
-    let base = 0.5*nl/PI+0.5*distribution(nh,alpha*alpha)*nh/(4.0*vh);
+    let nv = min(dot(n,v),1.0);
+    if nl<=0.0 || nv<=0.0 { return 0.0; }
+    let nh = clamp(dot(n,unit(v+l)),0.0,1.0);
+    let base = 0.5*nl/PI+0.5*visible_ggx_reflection_pdf(nh,nv,t.parameters.y);
     if t.coat.x<=0.0 { return base; }
-    let coat_alpha = t.coat.y*t.coat.y;
-    let coat_pdf = distribution(nh,coat_alpha*coat_alpha)*nh/(4.0*vh);
+    let coat_pdf = visible_ggx_reflection_pdf(nh,nv,t.coat.y);
     return (1.0-t.coat.x*0.5)*base+t.coat.x*0.5*coat_pdf;
 }
 fn power_weight(a: f32, b: f32) -> f32 {
@@ -891,9 +903,10 @@ fn power_weight(a: f32, b: f32) -> f32 {
     return 1.0/(1.0+ratio*ratio);
 }
 struct EmitterHit { distance: f32, index: u32 };
-fn emitter_hit_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f32) -> EmitterHit {
+fn emitter_hit_precise_except(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f32, excluded: u32) -> EmitterHit {
     var hit = EmitterHit(FAR,0xffffffffu);
     for (var i=0u; i<u32(u.light_count.w); i+=1u) {
+        if i==excluded {continue;}
         let light = u.area_lights[i];
         let normal = unit(cross(light.u.xyz,light.v.xyz));
         let cosine = dot(normal,d);
@@ -908,6 +921,9 @@ fn emitter_hit_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f3
         }
     }
     return hit;
+}
+fn emitter_hit_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, minimum: f32) -> EmitterHit {
+    return emitter_hit_precise_except(o,o_low,d,minimum,0xffffffffu);
 }
 fn emitter_hit_bounded(o: vec3<f32>, d: vec3<f32>, minimum: f32) -> EmitterHit {
     return emitter_hit_precise(o,vec3<f32>(0.0),d,minimum);
@@ -1142,6 +1158,9 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
     var previous_pdf = 0.0;
     var previous_delta = true;
     var continuous_prefix=false;
+    // Receiver plus its uninterrupted smooth closed-glass continuation.
+    // Zero means there is no opaque receiver eligible for area or environment photons.
+    var smooth_tail=0u;
     var optical_lights:array<vec4<u32>,6>;var optical_light_count=0u;
     var optical_light_rng=pixel*0x68bc21ebu ^ ordinal*0x02e5be93u ^ u.sampling.x ^ salt ^ lane*0x967a889bu ^ 0x5bd1e995u;
     var media: array<Medium,MEDIUM_CAPACITY>;
@@ -1201,6 +1220,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // refracting-boundary suffixes use photons when enabled. Finite
                 // source endpoints retain the random walk's complete weight.
                 d=sample_hg(d,current.scatter.y,&rng);
+                smooth_tail=0u;
                 previous_delta=true;previous_pdf=0.0;suppress_direct=false;
                 previous_position=position;previous_position_low=vec3<f32>(0.0);
                 previous_scatter_position=position;previous_scatter_position_low=vec3<f32>(0.0);
@@ -1239,6 +1259,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                     if remaining==0u { break; }
                     let next=volume_sample(d,&rng);
                     previous_pdf=volume_phase(dot(d,next));
+                    smooth_tail=0u;
                     previous_delta=false;
                     previous_scatter_position=position;
                     previous_scatter_position_low=vec3<f32>(0.0);
@@ -1266,7 +1287,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 }
                 let scatter_segment = ray_segment_precise(o,o_low,previous_scatter_position,previous_scatter_position_low,d,emitter.distance);
                 let pdf = area_pdf(light,scatter_segment);
-                if pdf>0.0 && !suppress_direct {
+                if pdf>0.0 && !suppress_direct && !photon_owns_smooth_tail(smooth_tail,false) {
                     let weight = select(power_weight(previous_pdf,pdf),1.0,previous_delta);
                     radiance += throughput*light.radiance.xyz*weight;
                 }
@@ -1281,7 +1302,9 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
                 // The backplate remains request.background; environment lights covered paths.
                 if bounce>0u && !suppress_direct {
                     let weight = select(power_weight(previous_pdf,env_pdf(d)),1.0,previous_delta);
-                    radiance += throughput*env_eval(d)*weight;
+                    if !photon_owns_smooth_tail(smooth_tail,true) {
+                        radiance += throughput*env_eval(d)*weight;
+                    }
                     let sun_weight=select(power_weight(previous_pdf,sun_pdf(d)),1.0,previous_delta);
                     radiance += throughput*sun_eval(d)*sun_weight;
                 }
@@ -1322,6 +1345,8 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         // making the texture sampling temporaries live.
         if !OPAQUE_SCENE && captured.base.w > 0.0 && random(&rng) < captured.base.w {
             let t=captured;
+            if smooth_tail>0u && t.parameters.w<0.0 && t.glass.x==0.0 {smooth_tail+=1u;}
+            else {smooth_tail=0u;}
             let interpolated=unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
             let winding_normal=select(interpolated,-interpolated,dot(interpolated,geometric)<0.0);
             var n=select(geometric,winding_normal,dot(winding_normal,v)>0.0);
@@ -1476,7 +1501,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         let mapped_normal=texture_normal(map_record,mapped_surface.normal,original_normal,geometric);
         let n=select(original_normal,mapped_normal,dot(mapped_normal,v)>0.0);
         radiance += throughput*direct_light(t,shading_position,physical,o,n,geometric,v,u.sampling.y-bounce-1u,&rng);
-        radiance += throughput*photon_gather(t,shading_position,n,geometric,v);
+        radiance += throughput*photon_gather(t,shading_position,n,geometric,v,u.sampling.y-bounce-1u);
         d = sample_surface(t,n,v,&rng);
         let nl = dot(n,d);
         if nl<=0.0 || dot(geometric,d)<=0.0 { break; }
@@ -1486,6 +1511,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         previous_scatter_position=position; previous_scatter_position_low=position_low;
         previous_delta = false;
         suppress_direct=false;
+        smooth_tail=select(0u,1u,t.base.w<=0.0);
         throughput *= brdf(t,n,v,d) * (nl/pdf);
         if medium_count>0u {
             o=position;o_low=position_low;ray_excluded=hit.triangle;ray_minimum=0.0;
@@ -1529,42 +1555,42 @@ fn adaptive_target(mean: vec4<f32>, m2: vec4<f32>) -> u32 {
 // publish one bounded request per tile; a separate native program resolves its
 // visibility before entering this update, including final adaptive normalization.
 fn accumulate_path(pixel:u32,value:vec4<f32>) {
-    let pixels=u.image.x*u.image.y;let pilots=u.adaptive_budget.x;
+    let pixels=film_pixels();let local=film_index(pixel);let pilots=u.adaptive_budget.x;
     let strata=max(1u,u.adaptive_budget.z);let lane=u32(u.adaptive_error.w);
     var budget_count=0u;
-    if pilots>0u && u.image.z>=pilots {budget_count=u32(accumulation[2u*pixels+pixel].x);}
+    if pilots>0u && u.image.z>=pilots {budget_count=u32(accumulation[2u*pixels+local].x);}
     if pilots == 0u {
         let sample = value/f32(strata);
-        if u.image.z == 0u && lane == 0u { accumulation[pixel] = sample; }
-        else { accumulation[pixel] += sample; }
+        if u.image.z == 0u && lane == 0u { accumulation[local] = sample; }
+        else { accumulation[local] += sample; }
         return;
     }
     if u.image.z < pilots {
-        var mean = accumulation[pixels+pixel];
-        var m2 = accumulation[2u*pixels+pixel];
+        var mean = accumulation[pixels+local];
+        var m2 = accumulation[2u*pixels+local];
         if u.image.z == 0u { mean=vec4<f32>(0.0); m2=vec4<f32>(0.0); }
         let delta=value-mean;
         mean += delta/f32(u.image.z+1u);
         m2 += delta*(value-mean);
-        accumulation[pixels+pixel]=mean;
-        accumulation[2u*pixels+pixel]=m2;
+        accumulation[pixels+local]=mean;
+        accumulation[2u*pixels+local]=m2;
         if u.image.z+1u == pilots {
-            accumulation[2u*pixels+pixel]=vec4<f32>(f32(adaptive_target(mean,m2)),0.0,0.0,0.0);
-            accumulation[pixel]=vec4<f32>(0.0);
+            accumulation[2u*pixels+local]=vec4<f32>(f32(adaptive_target(mean,m2)),0.0,0.0,0.0);
+            accumulation[local]=vec4<f32>(0.0);
         }
         return;
     }
     let ordinal=u.image.z-pilots;
-    accumulation[pixel] += value/f32(strata);
+    accumulation[local] += value/f32(strata);
     // Per-pixel production means enter both raw EXR and denoising. Pilots do not.
-    if ordinal+1u == budget_count && lane+1u == strata { accumulation[pixel] /= f32(budget_count); }
+    if ordinal+1u == budget_count && lane+1u == strata { accumulation[local] /= f32(budget_count); }
 }
 @compute @workgroup_size(32)
 fn main(@builtin(global_invocation_id) gid:vec3<u32>) {
     let pixel=u.image.w+gid.x;let pixels=u.image.x*u.image.y;
     if gid.x>=u.sampling.z || pixel>=pixels {return;}
     let pilots=u.adaptive_budget.x;
-    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*pixels+pixel].x) {return;}
+    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*film_pixels()+film_index(pixel)].x) {return;}
     if GLASS_DELTA_LIGHTS {accumulation[glass_tile_address(pixel)+6u]=vec4<f32>(0.0);}
     let value=sample_path(pixel);
     if GLASS_DELTA_LIGHTS {accumulation[glass_tile_address(pixel)+7u]=value;return;}
@@ -1577,7 +1603,7 @@ fn optical_resolve(@builtin(global_invocation_id) gid:vec3<u32>) {
     let pixel=u.image.w+gid.x;let pixels=u.image.x*u.image.y;
     if gid.x>=u.sampling.z || pixel>=pixels {return;}
     let pilots=u.adaptive_budget.x;
-    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*pixels+pixel].x) {return;}
+    if pilots>0u && u.image.z>=pilots && u.image.z-pilots>=u32(accumulation[2u*film_pixels()+film_index(pixel)].x) {return;}
     let address=glass_tile_address(pixel);let header=accumulation[address+6u];
     var packet:array<vec4<u32>,6>;
     if header.x>0.0 {
@@ -1655,9 +1681,7 @@ fn sample_surface_values(t: Triangle, n: vec3<f32>, v: vec3<f32>, variates: vec3
     }
     let roughness = select(t.parameters.y,t.coat.y,component >= 1.0-coat_probability);
     let alpha = roughness*roughness;
-    let cosine = sqrt((1.0-x)/(1.0+(alpha*alpha-1.0)*x));
-    let sine = sqrt(max(0.0,1.0-cosine*cosine));
-    let h = from_local(vec3<f32>(sine*cos(phi),sine*sin(phi),cosine),n);
+    let h = glass_visible_normal(n,v,alpha,variates.yz);
     return reflect(-v,h);
 }
 
