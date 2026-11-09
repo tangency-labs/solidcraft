@@ -2432,6 +2432,7 @@
   "parts.dimension.width": "Width",
   "parts.family.bearing": "Deep groove ball bearing (envelope)",
   "parts.family.button_head_cap_screw": "Button head cap screw",
+  "parts.family.countersunk_socket_screw": "Countersunk socket screw",
   "parts.family.dowel_pin": "Parallel pin (dowel)",
   "parts.family.hex_bolt": "Hex head bolt / screw",
   "parts.family.hex_cap_screw_inch": "Hex cap screw (inch)",

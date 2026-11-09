@@ -2432,6 +2432,7 @@
   "parts.dimension.width": "العرض",
   "parts.family.bearing": "محمل كريات أخدودي عميق (الغلاف)",
   "parts.family.button_head_cap_screw": "برغي برأس زرّي بتجويف سداسي",
+  "parts.family.countersunk_socket_screw": "برغي برأس غاطس بتجويف سداسي",
   "parts.family.dowel_pin": "مسمار توجيه أسطواني",
   "parts.family.hex_bolt": "برغي سداسي الرأس",
   "parts.family.hex_cap_screw_inch": "برغي سداسي الرأس (بوصة)",

@@ -2222,6 +2222,7 @@
   "parts.dimension.width": "Breite",
   "parts.family.bearing": "Rillenkugellager (Hüllform)",
   "parts.family.button_head_cap_screw": "Linsenkopfschraube mit Innensechskant",
+  "parts.family.countersunk_socket_screw": "Senkschraube mit Innensechskant",
   "parts.family.dowel_pin": "Zylinderstift",
   "parts.family.hex_bolt": "Sechskantschraube",
   "parts.family.hex_cap_screw_inch": "Sechskantschraube (Zoll)",

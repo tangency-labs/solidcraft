@@ -2432,6 +2432,7 @@
   "parts.dimension.width": "רוחב",
   "parts.family.bearing": "מסב כדורי חריץ עמוק (מעטפת)",
   "parts.family.button_head_cap_screw": "בורג ראש כפתור עם שקע משושה",
+  "parts.family.countersunk_socket_screw": "בורג ראש שקוע עם שקע משושה",
   "parts.family.dowel_pin": "פין גלילי",
   "parts.family.hex_bolt": "בורג ראש משושה",
   "parts.family.hex_cap_screw_inch": "בורג ראש משושה (אינץ')",
