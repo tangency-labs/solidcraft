@@ -57,8 +57,9 @@ solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param 
 
 `from_json` reads a snapshot and checks it (`Snapshot::validate`): every index refers to
 something there, every direction is a unit vector, coordinates are finite, NURBS patches are
-well formed, body names are unique. A `Snapshot` in hand can therefore be walked safely, by
-reference rather than by index: `body.triangles()` (each with its face and corner positions),
+well formed (knots fit the points, each degree below its points), body names are unique. A
+`Snapshot` in hand can therefore be walked safely, by reference rather than by index:
+`body.triangles()` (each with its face and corner positions),
 `body.edges_of(face)`, `body.edges_at(corner)`, `edge.points(&body)`, `body.face_named(..)`,
 `body.tagged_triangles()` (one triangle list over `positions` with each triangle's face index),
 `body.triangle_count()`, `snapshot.triangle_count()`, `parameter.quantity()`.
@@ -138,17 +139,18 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
   `conditions` it holds at and its card `source`.
 - **Bodies.** In world coordinates, in the design's order. Each has the kernel's `size` (the
   diagonal of its B-rep vertices' bounding box) and `shells` (boundary shells: 1 for a solid in
-  one piece without voids), and with `with_mass(true)` its `mass` (`volume`, `area`, `centroid`,
-  bounding box `min` and `max`) as the kernel measures it from converged tessellations. A face's
-  `inferred` is true when its name was worked out from the geometry rather than followed through
+  one piece without voids), and with `with_mass(true)` its `mass` (`volume` in mm³, `area` in
+  mm², `centroid`, bounding box `min` and `max`; a density in kg/m³ needs the volume in m³) as
+  the kernel measures it from converged tessellations. A face's `inferred` is true when its name was worked out from the geometry rather than followed through
   the design's history. In an assembly every placement of a
   component's body is its own body: the first keeps the body's name, every further one adds its
   occurrence path in brackets (`Body1 [Arm:2]`).
 - **Mesh.** One tessellation per body, the one the tagged 3MF export writes
   ([3mf-face-tags.md](3mf-face-tags.md)): welded watertight (vertices within 10⁻⁶ of the body size
   merged, T-junctions split), vertices shared across faces, triangles counter-clockwise seen from
-  outside. `closed` says every side is used once each way. The chord tolerance is 2·10⁻⁴ of the
-  body's size by default, never below 1 µm.
+  outside. `closed` says every side is used once each way; welding does not close every mesh (a
+  surface body's never), so check `closed` before taking a mesh as a solid. The chord tolerance
+  is 2·10⁻⁴ of the body's size by default, never below 1 µm.
 - **Faces.** In the body's face order, with the persistent name, the features that made or
   shaped the face, and its surface: `plane` (`point`, `normal` out of the material), `cylinder`
   (`origin`, `axis`, `radius`), `cone` (`apex`, `axis` into the cone, `half_angle`), `sphere`
@@ -167,8 +169,8 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
 - **Record.** With `Options::with_record` (CLI `--record`), each body's exact B-rep as
   solidcore's record (`solidcore_record::brep::Brep`, its own serde form and version, solidcore's
   docs/native-brep.md): every surface and curve as the kernel holds it, pcurves, loops and shells,
-  its faces, edges and vertices numbered as the body's `faces`, `edges` and `vertices`. Left out
-  otherwise, and for a mesh body. Surfaces, curves and corners above come from it.
+  its faces, edges and vertices numbered as the body's `faces`, `edges` and `vertices`. `null`
+  without `--record` and for a mesh body. Surfaces, curves and corners above come from it.
 - **Corners.** The B-rep's vertices: named after the faces that meet there (`~k` when repeated),
   with the mesh vertex at the point and the edges that end there.
 - **Features.** The timeline's modelling features in order (sketches and construction geometry
@@ -182,8 +184,9 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
   is `other`, named by `kind_name`. `inputs` lists every numeric input with its label and typed
   value. `bodies` names the snapshot's bodies the feature made faces of or names.
 - **Edits.** Each edit with the features it became and the bodies it cut: `suppress` (the
-  feature), `partition` (one split per body the plane crosses; a body it misses is left as it is;
-  the cut faces are `F<id>:section`), `split_face` (the pieces are `<face>#[<neighbour>]`).
+  feature), `partition` (one split per body the plane crosses; a body it misses is left as it is,
+  and so is a mesh body or one the kernel fails to split, so the edit's `bodies` says which were
+  cut; the cut faces are `F<id>:section`), `split_face` (the pieces are `<face>#[<neighbour>]`).
   Suppressing a feature that makes a body takes the body away; one a later feature needs fails
   the snapshot.
 - **Attributes.** Key/value maps on bodies and faces for downstream semantics (ports, boundary

@@ -325,7 +325,7 @@ fn snapshots_are_checked_when_read() {
         *at = value;
         from_json(&v.to_string())
     };
-    let cases: [(&[&str], serde_json::Value); 8] = [
+    let cases: [(&[&str], serde_json::Value); 9] = [
         (&["bodies", "0", "faces", "0", "triangles", "0"], serde_json::json!([0, 1, 999_999])),
         (&["bodies", "0", "faces", "1", "index"], serde_json::json!(7)),
         (&["bodies", "0", "edges", "0", "bounds"], serde_json::json!({"between": [0, 99]})),
@@ -336,6 +336,11 @@ fn snapshots_are_checked_when_read() {
         (
             &["bodies", "0", "faces", "0", "surface"],
             serde_json::json!({"type": "nurbs", "u": {"degree": 1, "knots": [0, 1]}, "v": {"degree": 1, "knots": [0, 0, 1, 1]}, "net": [[{"point": [0, 0, 0], "weight": 1}, {"point": [1, 0, 0], "weight": 1}]]}),
+        ),
+        // Knots that fit, but a degree as high as the points each way.
+        (
+            &["bodies", "0", "faces", "0", "surface"],
+            serde_json::json!({"type": "nurbs", "u": {"degree": 1, "knots": [0, 0, 1]}, "v": {"degree": 1, "knots": [0, 0, 1]}, "net": [[{"point": [0, 0, 0], "weight": 1}]]}),
         ),
     ];
     for (path, value) in cases {

@@ -69,6 +69,7 @@ fn surface(s: &Surface) -> Result {
 }
 
 fn knots(k: &Knots, points: usize) -> Result {
+    check((k.degree as usize) < points, || format!("degree {} needs more than {points} points", k.degree))?;
     let want = points.checked_add(k.degree as usize + 1);
     check(want == Some(k.knots.len()), || format!("{} knots for {points} points of degree {} (want points + degree + 1)", k.knots.len(), k.degree))?;
     check(k.knots.iter().all(|x| x.is_finite()) && k.knots.windows(2).all(|w| w[0] <= w[1]), || "the knots are not finite and non-decreasing".into())

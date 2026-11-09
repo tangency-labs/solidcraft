@@ -45,7 +45,8 @@ pub use error::{Error, FeatureFailure, Result};
 pub use options::{Options, Override, Tolerance};
 pub use schema::*;
 
-/// Largest design file [`open`] reads (the design reader's own limit).
+/// Largest design file [`open`] reads by default (the design reader's own limit); a raised
+/// limit (`solidcraft_io::limits`, the CLI's `--max-file-size`) replaces it.
 pub const MAX_DESIGN_BYTES: usize = solidcraft_io::MAX_DESIGN_BYTES;
 /// The newest design format [`open`] reads (`"format": "solidcraft/N"`), the one SolidCraft writes.
 pub const DESIGN_FORMAT: u32 = solidcraft_doc::format::FORMAT;
@@ -79,8 +80,9 @@ pub const DEFAULT_RELATIVE_TOLERANCE: f64 = 2e-4;
 /// Open a design file's bytes (`.sc`, a legacy `.solidcraft`/`.solvecraft` container, or the
 /// plain JSON design).
 pub fn open(bytes: &[u8]) -> Result<Design> {
-    if bytes.len() > MAX_DESIGN_BYTES {
-        return Err(Error::Limit(format!("the design is {} MB, over the {} MB a design file may hold", bytes.len() >> 20, MAX_DESIGN_BYTES >> 20)));
+    let limit = solidcraft_io::limits::max_design_bytes();
+    if bytes.len() > limit {
+        return Err(Error::Limit(format!("the design is {} MB, over the {} MB a design file may hold", bytes.len() >> 20, limit >> 20)));
     }
     let doc = solidcraft_io::read_design(bytes).map_err(|e| Error::Read(e.to_string()))?;
     Ok(Design { doc, model: Mutex::new(Model::new()) })
