@@ -1000,8 +1000,11 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 _ => solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name),
             };
             let label = format!("{shown_name}{}", if *dirty { " •" } else { "" });
-            let text =
-                ui.painter().layout_no_wrap(label, crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button), t.app_bar_text).size().x;
+            let text = ui
+                .painter()
+                .layout_no_wrap(label, crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button), t.app_bar_text)
+                .size()
+                .x;
             (text + 40.0).clamp(72.0, MAX_FIT)
         })
         .collect();
@@ -1089,7 +1092,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         let name_display = solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name);
         let label = format!("{name_display}{}", if *dirty { " •" } else { "" });
         let font = if active {
-            crate::fonts::semibold(solidcraft_theme::Tokens::get().font_button)
+            crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_button)
         } else {
             FontId::proportional(solidcraft_theme::Tokens::get().font_button)
         };

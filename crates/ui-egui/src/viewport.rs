@@ -6220,7 +6220,7 @@ fn paint_toast_ext(
     // The × keeps the top-right corner: the text stops short of its ring.
     let radius = toast_close_radius();
     let close_room = if extras.close.is_some() { 2.0 * radius + t.space_4 + t.space_8 - 12.0 } else { 0.0 };
-    let galley = painter.layout(text, crate::fonts::medium(t.font_label), t.text, (wrap - close_room).max(0.0));
+    let galley = painter.layout(text, crate::ui_kit::type_face::medium(t.font_label), t.text, (wrap - close_room).max(0.0));
     // The buttons: each as wide as its text and a margin, in rows no wider than the text may be.
     let gap = t.space_8;
     let button_height = crate::ui_kit::row_height();
@@ -6232,7 +6232,7 @@ fn paint_toast_ext(
         .map(|(label, kind)| {
             let width = toast_button_width(ui.ctx(), label, *kind).unwrap_or_else(|| {
                 let padding = if *kind == ToastKind::Primary { t.space_16 } else { t.space_12 };
-                painter.layout_no_wrap((*label).to_string(), crate::fonts::medium(t.font_label), t.text).size().x + 2.0 * padding
+                painter.layout_no_wrap((*label).to_string(), crate::ui_kit::type_face::medium(t.font_label), t.text).size().x + 2.0 * padding
             });
             (width.min(row_width), *kind)
         })
@@ -6320,7 +6320,7 @@ fn paint_toast_ext(
     let mut close = None;
     let mut closed = false;
     if let Some(handle) = extras.close {
-        let line = painter.layout_no_wrap("A".into(), crate::fonts::medium(t.font_label), t.text).size().y;
+        let line = painter.layout_no_wrap("A".into(), crate::ui_kit::type_face::medium(t.font_label), t.text).size().y;
         let centre = pos2(r.right() - t.space_8 - radius, (text_top.y + line * 0.5).max(r.top() + 6.0 + radius));
         let at = Rect::from_center_size(centre, vec2(2.0 * radius, 2.0 * radius));
         let mut close_ui = egui::Ui::new(
@@ -12062,7 +12062,7 @@ mod tests {
             frame(&mut app, Some(exposed), -120.0);
             assert_ne!(app.cam.half_height(), height);
             // Closing the popup returns its former area to the viewport.
-            app.prefs_window.open = false;
+            app.prefs_window.shell.open = false;
             for _ in 0..12 {
                 frame(&mut app, Some(list), 0.0);
             }

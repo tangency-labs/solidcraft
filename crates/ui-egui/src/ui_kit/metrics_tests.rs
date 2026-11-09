@@ -137,8 +137,8 @@ fn sample_grid_stretches_each_row_without_clipping_long_descriptions() {
         |ui| {
             ui.set_width(680.0);
             cards = FileView::sample_grid(ui, "samples", &[
-                SampleCard { title: "Plate", description: "Short description", icon: "new", thumbnail: None },
-                SampleCard { title: "Enclosure", description: "Long descriptive sample text that wraps across several lines while preserving every word through the final marker.", icon: "new", thumbnail: None },
+                SampleCard { title: "Plate", description: "Short description", icon: "new".into(), thumbnail: None },
+                SampleCard { title: "Enclosure", description: "Long descriptive sample text that wraps across several lines while preserving every word through the final marker.", icon: "new".into(), thumbnail: None },
             ]);
         },
     );

@@ -24,14 +24,25 @@ use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
 use crate::schema::file::ExportResult;
+use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
+use crate::schema::new_design::{NewDesignParams, NewDesignResult};
 use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
+use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
+        .icon("new")
+        .key("Ctrl+N")
+        .noundo()
+        .contract(&NEW_DESIGN_CONTRACT)
+        .output(output_schema_for::<NewDesignResult>)
+        .params("name?"),
     CommandSpec::new("doc.open", "Open", open)
         .icon("open")
         .key("Ctrl+O")
@@ -41,9 +52,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
-    CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
+    CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
+        .contract(&INSERT_MESH_CONTRACT)
+        .output(output_schema_for::<MeshInserted>)
         .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made)"),
     CommandSpec::new("file.save", "Save", crate::checked!("file.save", save))
         .icon("save")
@@ -122,8 +135,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("mesh_export")
         .noundo()
         .params("consent: bool (required: true only once the user has agreed to upload the model to Printables' servers; it stays there for 30 minutes and opening it needs a Printables sign-in); bodies?: [names] (default: the selected bodies); format?: 3mf|stl (default 3mf, in millimetres) → uploads the bodies to EasyPrint, Printables' slicer in the browser, and opens it in the browser. 100 MB at most. Works in the desktop app and the browser build; the CLI has no way to upload yet"),
-    CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
+    CommandSpec::new("file.slicers", "Installed Slicers", crate::checked!("file.slicers", slicers))
+        .icon("export")
         .noundo()
+        .contract(&SLICERS_CONTRACT)
+        .output(output_schema_for::<SlicersResult>)
         .params("→ the slicers found on this machine: [{id, name, program, icon?}]; pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
 ];
 
@@ -132,8 +148,11 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.replace_design(Session::new(Document::new(name)));
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    Ok(json!({"name": name}))
+    let reply = NewDesignResult { name: name.to_string(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
+
+const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new();
 
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
@@ -142,6 +161,7 @@ const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::Ex
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
 const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const SLICERS_CONTRACT: TypedContract<SlicersParams> = TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
 const SAVE_MESH_CONTRACT: crate::schema::TypedContract<crate::schema::save_mesh::SaveMeshParams> = crate::schema::TypedContract::new();
 
@@ -316,18 +336,24 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>,
     // After the turn, so it is the stood-up mesh that sits on Z = 0.
     let moved = if origin { import::move_to_origin(s, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "created_bodies": bodies, "warnings": mf.warnings});
-    placed.report(&mut out);
-    if let Some(shift) = moved {
-        out["moved_to_origin"] = json!([shift.x, shift.y, shift.z]);
-    }
-    if let Some((name, _)) = unit {
-        out["units"] = json!(name);
-    }
-    if let Some(turned) = turned {
-        out["stand_up"] = json!(turned);
-    }
-    Ok(out)
+    let reply = MeshInserted {
+        path: path.to_string(),
+        feature: id,
+        name: fname,
+        bodies: bodies.clone(),
+        created_bodies: bodies,
+        warnings: mf.warnings,
+        component: placed.component,
+        component_name: placed.name.clone(),
+        occurrence: placed.occurrence,
+        subcomponents: (placed.components > 0).then_some(placed.components),
+        rigid_joints: (placed.components > 0).then_some(placed.joints.len()),
+        moved_to_origin: moved.map(|shift| [shift.x, shift.y, shift.z]),
+        units: unit.map(|(name, _)| name.to_string()),
+        stand_up: turned,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad("file.insert_mesh", e.to_string()))
 }
 
 /// Turn an import's component a quarter turn about X (the file's Y up becomes Z up), contents
@@ -1234,11 +1260,16 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn slicers(_: &mut Session, _: &Value) -> Result<Value> {
-    let list: Vec<Value> = crate::slicers::detect()
+    let slicers = crate::slicers::detect()
         .iter()
-        .map(|d| json!({"id": d.id, "name": d.name, "program": d.command.first(), "icon": d.icon.as_ref().map(|i| i.path().to_string_lossy().into_owned())}))
+        .map(|d| SlicerInfo {
+            id: d.id.clone(),
+            name: d.name.clone(),
+            program: d.command.first().cloned(),
+            icon: d.icon.as_ref().map(|i| i.path().to_string_lossy().into_owned()),
+        })
         .collect();
-    Ok(json!({ "slicers": list }))
+    serde_json::to_value(SlicersResult { slicers, param_warnings: Vec::new() }).map_err(|e| bad("file.slicers", e.to_string()))
 }
 
 fn recovery_dir(p: &Value, cmd: &str) -> Result<std::path::PathBuf> {
