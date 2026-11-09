@@ -45,33 +45,6 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
 }
 
 #[test]
-fn catalogue_slot_descriptions_explain_slots_without_settings_jargon() {
-    crate::i18n::install();
-    for slot in CATALOGUE {
-        for language in ["en", "ja", "zh"] {
-            let description = solidcraft_ui_text::Locale::for_language(language).text(slot.description);
-            assert!(!description.trim().is_empty() && description != slot.description, "{language}: {} needs a description", slot.id);
-            assert!(description.ends_with(['.', '。']), "{language}: {} must be a sentence", slot.id);
-            let lower = description.to_lowercase();
-            assert!(!lower.contains("icon only") && !lower.contains("icon and value"), "{language}: {} describes settings controls", slot.id);
-            // The owner's exact Grid/Shadow copy uses "Shows" as a visibility verb,
-            // rather than naming the inspector's Shows setting.
-            let words = if language == "en" && matches!(slot.id, "grid" | "ground_shadow") {
-                description.strip_prefix("Shows or hides ").expect("the specified visibility description")
-            } else {
-                description
-            };
-            assert!(
-                !words.split(|c: char| !c.is_alphabetic()).any(|word| word.eq_ignore_ascii_case("shows")),
-                "{language}: {} names the Shows setting",
-                slot.id
-            );
-        }
-    }
-    assert!(find("future_slot").is_none(), "unknown slots have no catalogue description");
-}
-
-#[test]
 fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
     let prefs = NavigationBar { labels: Labels::Labels, ..Default::default() };
     for width in [5.0, 39.0, 46.0, 90.0, 160.0, 250.0, 310.0, 700.0, 1400.0] {

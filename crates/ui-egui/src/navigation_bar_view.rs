@@ -685,4 +685,31 @@ mod tests {
         let in_more = solidcraft_ui_registry::handle_at("nav:slot:display").expect("More lists the View slot");
         assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(in_more));
     }
+
+    #[test]
+    fn catalogue_slot_descriptions_explain_slots_without_settings_jargon() {
+        crate::i18n::install();
+        for slot in CATALOGUE {
+            for language in ["en", "ja", "zh"] {
+                let description = solidcraft_ui_text::Locale::for_language(language).text(slot.description);
+                assert!(!description.trim().is_empty() && description != slot.description, "{language}: {} needs a description", slot.id);
+                assert!(description.ends_with(['.', '。']), "{language}: {} must be a sentence", slot.id);
+                let lower = description.to_lowercase();
+                assert!(!lower.contains("icon only") && !lower.contains("icon and value"), "{language}: {} describes settings controls", slot.id);
+                // The owner's exact Grid/Shadow copy uses "Shows" as a visibility verb,
+                // rather than naming the inspector's Shows setting.
+                let words = if language == "en" && matches!(slot.id, "grid" | "ground_shadow") {
+                    description.strip_prefix("Shows or hides ").expect("the specified visibility description")
+                } else {
+                    description
+                };
+                assert!(
+                    !words.split(|c: char| !c.is_alphabetic()).any(|word| word.eq_ignore_ascii_case("shows")),
+                    "{language}: {} names the Shows setting",
+                    slot.id
+                );
+            }
+        }
+        assert!(find("future_slot").is_none(), "unknown slots have no catalogue description");
+    }
 }

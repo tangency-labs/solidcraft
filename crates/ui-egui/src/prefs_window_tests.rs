@@ -137,7 +137,6 @@ fn click(ctx: &egui::Context, fake: &mut Fake, handle: &str) -> Option<Button> {
 }
 
 fn opened() -> (egui::Context, Fake) {
-    crate::i18n::install();
     let ctx = crate::ui_kit::test_support::context();
     let mut fake = Fake::default();
     fake.window.open_at(0, PAGES.len());
@@ -249,7 +248,6 @@ fn a_hostile_page_index_shows_the_last_page_and_no_pages_draws_no_body() {
 
 #[test]
 fn every_name_the_window_publishes_starts_with_the_hosts_prefix() {
-    crate::i18n::install();
     let ctx = crate::ui_kit::test_support::context();
     let mut fake = Fake::default();
     fake.window.open_at(1, PAGES.len());

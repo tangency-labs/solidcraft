@@ -4,10 +4,21 @@ use super::*;
 use egui::{Event, FullOutput, RawInput, Shape, Ui, vec2};
 use solidcraft_ui_registry as registry;
 
+/// The kit's own English test catalog: the messages its tests read, with the same English a host
+/// gives them. Catalogs are host data; the kit's tests never rely on SolidCraft's.
+static ENGLISH: solidcraft_ui_text::Catalog = solidcraft_ui_text::Catalog::new("en", "English", include_str!("test_support/catalog.json"));
+static CATALOGS: [&solidcraft_ui_text::Catalog; 1] = [&ENGLISH];
+
+/// Install the kit's test catalog (once per process) and read the system language as English.
+pub(crate) fn install_catalog() {
+    solidcraft_ui_text::pin_system_language();
+    solidcraft_ui_text::install(&CATALOGS);
+}
+
 /// A context for the kit's tests: egui's default faces with the kit's weight families bound to
-/// them, and the English catalog.
+/// them, and the kit's English test catalog.
 pub(crate) fn context() -> egui::Context {
-    crate::i18n::install();
+    install_catalog();
     let ctx = egui::Context::default();
     type_face::install_weight_families(&ctx);
     ctx

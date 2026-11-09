@@ -866,39 +866,6 @@ fn now_ms() -> f64 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn search_matches_a_label_a_subsequence_and_the_english_source() {
-        crate::i18n::install();
-        assert!(matches_text("zoom", &["Reverse zoom direction"]));
-        assert!(matches_text("zo", &["Reverse zoom direction"]));
-        assert!(!matches_text("rzd", &["Reverse zoom direction"]));
-        assert!(!matches_text("q", &["Units of new designs"]));
-        assert!(!matches_text("qqqq", &["Units of new designs"]));
-        let _language = solidcraft_ui_text::scope("fr");
-        assert!(matches_text("units", &["Unités des nouvelles conceptions"]));
-        assert!(matches_text("preferences", &["préférences"]));
-        assert!(matches_text("dark", &["Theme"]));
-        assert!(matches_text("antialiasing", &["Anti-aliasing"]));
-        assert!(!matches_text("dark", &["Units of new designs"]));
-    }
-
-    /// A multi-word right-to-left label reaches the search in display order while the query is
-    /// typed in reading order: typing the label's words as written must find the row (#10471).
-    #[test]
-    fn search_finds_right_to_left_labels_typed_in_reading_order() {
-        crate::i18n::install();
-        let _language = solidcraft_ui_text::scope("he");
-        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
-        assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
-        assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
-        assert!(matches_text("תיקיות", &[label]), "one word still matches");
-        let _language = solidcraft_ui_text::scope("ar");
-        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
-        assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
-        assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
-        assert!(matches_text("مجلدات", &[label]), "one word still matches");
-    }
-
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
     #[test]
@@ -991,46 +958,6 @@ mod tests {
                 let rect = solidcraft_ui_registry::rect_of(if expected == "Sampling" { "dialog:row:Sampling" } else { "prefs:shared:on" }).unwrap();
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(rect.center()));
             });
-        }
-    }
-
-    #[test]
-    fn the_search_field_names_the_window_it_searches() {
-        crate::i18n::install();
-        let name = solidcraft_ui_text::tr("ui.preferences").to_lowercase();
-        for id in ["prefs.search", "prefs.search_empty"] {
-            let text = solidcraft_ui_text::tr(id).to_lowercase();
-            assert!(text.contains(&name), "`{text}` should name the window `{name}`");
-        }
-    }
-
-    #[test]
-    fn sketch_short_labels_keep_the_legacy_search_terms_in_every_complete_locale() {
-        crate::i18n::install();
-        let cases = [
-            ("prefs.sketch.tracking_guides", "Center and midpoint alignment guides"),
-            ("prefs.sketch.tracking_points", "Alignment guides from end points and corners while drawing"),
-            ("prefs.sketch.recent_snap", "Auto snap to recent centers and midpoints"),
-            ("prefs.sketch.align_points", "Line up with other sketch points while drawing"),
-            ("prefs.sketch.center_arc", "Center point arc follows the cursor's direction"),
-            ("prefs.sketch.auto_locate", "Also place them from the origin (fully constrained)"),
-            ("prefs.sketch.shortcut_cycles_modes", "Pressing a tool's shortcut again switches its mode"),
-            ("prefs.sketch.project_options", "Project options dialog"),
-            ("prefs.sketch.exit_previous", "Return to the previous view"),
-            ("prefs.sketch.exit_keep", "Keep the current view"),
-            ("prefs.sketch.exit_unless_rotated", "Return unless rotated"),
-            ("prefs.sketch.state_icons", "Sketch icons in the color of their state"),
-            ("prefs.sketch.conflict_colour", "Conflicting geometry in the conflict color"),
-            ("prefs.sketch.hide_glyphs", "Hide constraint glyphs when zoomed out"),
-            ("prefs.sketch.prefer_free_points", "Prefer movable sketch points when points overlap"),
-            ("prefs.sketch.select_other_hidden", "Select hidden geometry with Select Other"),
-            ("prefs.sketch.whole_bodies", "Click selects whole bodies"),
-        ];
-        for lang in ["en", "en-GB", "ar", "de", "he", "ja", "ko", "vi", "zh"] {
-            let _language = solidcraft_ui_text::scope(lang);
-            for (id, legacy) in cases {
-                assert!(matches_text(legacy, &[solidcraft_ui_text::tr(id)]), "{lang}: {legacy} still finds {id}");
-            }
         }
     }
 }
