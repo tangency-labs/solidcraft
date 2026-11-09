@@ -55,6 +55,8 @@ mod tests {
             Self { ctx, app, width, time: 0.0, maximized: false, full: false }
         }
 
+        /// One frame with `events`, the input going through `release_press_taken_by_os` first
+        /// as in the desktop app.
         fn frame(&mut self, events: Vec<Event>) -> egui::FullOutput {
             self.time += 0.05;
             let mut input = RawInput {
