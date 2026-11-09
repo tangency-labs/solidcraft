@@ -235,13 +235,17 @@ fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label
         let stops = super::settings_search::nav_len(ui);
         let (result, rect) = settings_block_body(ui, label, hint, label_width, add);
         // The arrow keys reach it too, unless a control inside already gave it a stop.
+        // A block found only by its hint is a stop too; its label is what Enter opens.
         if super::settings_search::nav_len(ui) == stops {
-            super::settings_search::remember(ui, label, rect);
+            super::settings_search::remember_matched(ui, label, hint, rect);
         }
         super::settings_search::block_finish(ui, &gate, true, before);
         return result;
     }
-    settings_block_body(ui, label, hint, label_width, add).0
+    let (result, rect) = settings_block_body(ui, label, hint, label_width, add);
+    // After Enter opened this block's page from a search, scroll to it and outline it.
+    super::settings_search::follow(ui, label, rect);
+    result
 }
 
 fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> (R, Rect) {

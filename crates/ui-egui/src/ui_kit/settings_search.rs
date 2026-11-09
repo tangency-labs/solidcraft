@@ -794,7 +794,13 @@ pub(crate) fn store_nav(ui: &Ui) {
 
 /// A row whose own words matched. Section titles and controls both call this once they have a rect.
 pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
-    if !ui.is_visible() || !querying(ui) || label.is_empty() || !text_hit(ui, label) {
+    remember_matched(ui, label, None, rect);
+}
+
+/// [`remember`] for a row whose hint can match too: a row found only by its hint is still a
+/// stop for the arrow keys, and its label stays the target Enter opens.
+pub(crate) fn remember_matched(ui: &mut Ui, label: &str, hint: Option<&str>, rect: Rect) {
+    if !ui.is_visible() || !querying(ui) || label.is_empty() || !(text_hit(ui, label) || hint.is_some_and(|hint| text_hit(ui, hint))) {
         return;
     }
     if with(ui, |state| state.hiding > 0).unwrap_or(true) {
@@ -1185,6 +1191,43 @@ mod tests {
             assert_eq!(matching.len(), 1, "{label} must have one stop for the arrow keys: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
             assert_eq!(matching[0].page, crate::prefs::PAGE_SKETCH);
         }
+    }
+
+    /// Enter on such a row opens its page, scrolls to the row and outlines it.
+    #[test]
+    fn enter_on_a_matching_row_with_a_plain_number_field_reveals_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SKETCH);
+        h.app.prefs_window.shell.filter = "window steps".into();
+        h.frames(4);
+        let (_, _, hits) = nav(&h.ctx);
+        let at = hits.iter().position(|hit| hit.label == "Window steps").expect("Window steps is a stop");
+        set_cursor(&h.ctx, at);
+        h.frames(2);
+        h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+        h.frames(30);
+        assert!(h.app.prefs_window.shell.filter.is_empty(), "Enter clears the search");
+        let row = crate::scenario::rect_of("dialog:row:Window steps").expect("the row is drawn");
+        let revealed = crate::scenario::handle_at("prefs:revealed").expect("Enter outlines the row");
+        assert!(revealed.distance(row.center()) <= 1.0, "the outline is on Window steps");
+    }
+
+    /// A row found only by its hint is a stop for the arrow keys too, named by its label.
+    #[test]
+    fn a_row_found_only_by_its_hint_has_a_stop() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SKETCH);
+        // Only Dimension values' hint says this; its label and options do not.
+        h.app.prefs_window.shell.filter = "arrows that step".into();
+        h.frames(4);
+        let (_, _, hits) = nav(&h.ctx);
+        let matching: Vec<_> = hits.iter().filter(|hit| hit.label == "Dimension values").collect();
+        assert_eq!(matching.len(), 1, "one stop: {:?}", hits.iter().map(|h| &h.label).collect::<Vec<_>>());
+        assert_eq!(matching[0].page, crate::prefs::PAGE_SKETCH);
     }
 
     #[test]
