@@ -9,8 +9,9 @@
 //!   under the model's, which leaves them out: so they never cover it.
 //!
 //! A view's group holds its pictures under its lines ([`picture_items`]), and [`ViewPictures`] has
-//! their pixels for a writer: placed by the [`solidcraft_geom::drawing_view::ViewFrame`] that placed
-//! the lines. Nothing is kept between exports yet: each renders again.
+//! their pixels for a writer: of the parts the view shows, placed by the
+//! [`solidcraft_geom::drawing_view::ViewFrame`] that placed the lines. Nothing is kept between exports
+//! yet: each renders again.
 
 use std::cell::{Cell, OnceCell};
 use std::collections::BTreeMap;
@@ -86,6 +87,18 @@ pub fn picture_items(view: u64, parts: &[Vec<Part>], rect: Aabb2) -> Vec<Item> {
     (0..parts.len()).map(|i| Item::Picture(Picture { source: source(view, i, parts.len()), rect, opacity: 1.0 })).collect()
 }
 
+/// `parts`, one for each body `chosen` holds, as one for each of the `whole` bodies the design places:
+/// each at its body's place among them ([`crate::drawing_view::Shown::index`]), every other body left out.
+fn on_the_whole(chosen: &ShownSet, parts: Vec<Part>, whole: usize) -> Vec<Part> {
+    let mut all = vec![Part::Left; whole];
+    for (body, part) in chosen.bodies.iter().zip(parts) {
+        if let Some(slot) = all.get_mut(body.index) {
+            *slot = part;
+        }
+    }
+    all
+}
+
 /// What placed a view's lines, as the renderer takes it.
 fn ortho(frame: &ViewFrame) -> OrthoFrame {
     let basis = frame.basis();
@@ -116,19 +129,21 @@ impl<'a> ViewPictures<'a> {
     /// to show, a view is a placeholder and has none.
     pub fn new(s: &'a Session, d: &Drawing, sheet: u64) -> Result<ViewPictures<'a>> {
         let (mut pictures, mut spent) = (BTreeMap::new(), BTreeMap::new());
-        if let Ok(set) = crate::drawing_view::shown(s) {
+        let shown = crate::drawing_view::shown(s);
+        if let Ok(whole) = &shown {
             for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
                 // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_exploded`]).
                 if crate::drawing_view::not_drawable_exploded(&view).is_some() {
                     continue;
                 }
-                let parts = view_parts(&set, Styles::from(&view));
-                let Ok(extents) = crate::drawing_view::measure(&set, &view.basis) else { continue };
+                // What the view chooses to show, as its lines do ([`crate::drawing_view::measured`]).
+                let Ok((chosen, extents)) = crate::drawing_view::measured(&shown, &view) else { continue };
+                let parts = view_parts(&chosen, Styles::from(&view));
                 let frame = ortho(&crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, centre, CMD)?);
                 let count = parts.len();
                 for (i, parts) in parts.into_iter().enumerate() {
                     spent.entry(id).or_default();
-                    let picture = ViewPicture { view: id, frame, parts };
+                    let picture = ViewPicture { view: id, frame, parts: on_the_whole(&chosen, parts, whole.bodies.len()) };
                     if pictures.insert(source(id, i, count), picture).is_some() {
                         return Err(bad(CMD, format!("view {}: its picture's number is another's", ids::encode(id))));
                     }
