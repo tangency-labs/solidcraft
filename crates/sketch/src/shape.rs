@@ -176,6 +176,13 @@ fn nearest_crossing_with_extents(x: &Shape, y: &Shape, near: Vec2, infinite: [bo
 /// cannot meet near the cursor and are ignored. Infinite lines use their full support;
 /// ordinary segments and arcs keep their bounds.
 pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec2, usize, usize)> {
+    nearest_curve_intersection_among(sk, p, tol, |_| true)
+}
+
+/// [`nearest_curve_intersection`] among the curves (by index) `take` accepts: the others are
+/// not there for it, so a crossing of two taken curves is found even where a left-out curve
+/// crosses them at the same place.
+pub fn nearest_curve_intersection_among(sk: &Sketch, p: Vec2, tol: f64, take: impl Fn(usize) -> bool) -> Option<(Vec2, usize, usize)> {
     if !p.is_finite() || !tol.is_finite() || tol <= 0.0 {
         return None;
     }
@@ -183,6 +190,9 @@ pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec
     for (i, curve) in sk.curves.iter().enumerate() {
         if candidates.len() >= MAX_INTERSECTION_CANDIDATES {
             break;
+        }
+        if !take(i) {
+            continue;
         }
         let Some(sh) = sk.shape(i) else { continue };
         if snap_distance(&sh, curve.infinite, p) <= tol {
@@ -356,6 +366,21 @@ mod intersection_snap_tests {
         sk.add_line(v(0.0, 20.0), v(20.0, 0.0), None, None, None).unwrap();
         sk.add_point(v(10.0, 10.0), None).unwrap();
         assert!(nearest_curve_intersection(&sk, v(10.1, 10.0), 1.0).is_none());
+    }
+
+    /// A left-out curve (a hidden sketch axis's line, #9330) neither crosses nor hides the
+    /// crossing of two others at the same place.
+    #[test]
+    fn nearest_curve_intersection_among_leaves_out_the_curves_not_taken() {
+        let mut sk = Sketch::new();
+        let axis = sk.add_line(v(-100.0, 0.0), v(100.0, 0.0), None, None, None).unwrap();
+        let a = sk.add_line(v(0.0, -10.0), v(20.0, 10.0), None, None, None).unwrap();
+        let b = sk.add_line(v(20.0, -10.0), v(0.0, 10.0), None, None, None).unwrap();
+        let (at, i, j) = nearest_curve_intersection_among(&sk, v(10.1, 0.1), 1.0, |c| c != axis).expect("the two lines still cross");
+        assert!(at.dist(v(10.0, 0.0)) < 1e-9 && (i, j) == (a, b), "{at:?} {i} {j}");
+        let lone = sk.add_line(v(30.0, -10.0), v(30.0, 10.0), None, None, None).unwrap();
+        assert!(nearest_curve_intersection(&sk, v(30.1, 0.1), 1.0).is_some_and(|(_, i, j)| (i, j) == (axis, lone)));
+        assert!(nearest_curve_intersection_among(&sk, v(30.1, 0.1), 1.0, |c| c != axis).is_none(), "only the left-out curve crosses there");
     }
 
     #[test]

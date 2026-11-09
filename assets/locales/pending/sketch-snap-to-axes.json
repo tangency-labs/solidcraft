@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.sketch.snap_to_axes": "الالتقاط إلى محوري X وY في الرسم",
+    "prefs.sketch.snap_to_axes_note": "أثناء الرسم مع إظهار الأصل، تستقر النقطة الموضوعة قرب محور X أو Y للرسم على المحور وتبقى عليه. عند الإيقاف: تتبع النقطة الشبكة هناك."
+  },
+  "de": {
+    "prefs.sketch.snap_to_axes": "An den X- und Y-Achsen der Skizze fangen",
+    "prefs.sketch.snap_to_axes_note": "Wird beim Zeichnen mit eingeblendetem Ursprung ein Punkt nahe der X- oder Y-Achse der Skizze gesetzt, landet er auf der Achse und bleibt darauf. Aus: der Punkt folgt dort dem Raster."
+  },
+  "en": {
+    "prefs.sketch.snap_to_axes": "Snap to the sketch's X and Y axes",
+    "prefs.sketch.snap_to_axes_note": "While drawing with the Origin shown, a point placed near the sketch's X or Y axis lands on the axis and stays on it. Off: the point follows the grid there."
+  },
+  "he": {
+    "prefs.sketch.snap_to_axes": "הצמדה לצירי X ו־Y של הסקיצה",
+    "prefs.sketch.snap_to_axes_note": "בשרטוט כשהראשית מוצגת, נקודה שממוקמת ליד ציר X או Y של הסקיצה נוחתת על הציר ונשארת עליו. כבוי: הנקודה עוקבת שם אחר הרשת."
+  },
+  "ja": {
+    "prefs.sketch.snap_to_axes": "スケッチのX軸とY軸にスナップ",
+    "prefs.sketch.snap_to_axes_note": "原点を表示して作図しているとき、スケッチのX軸またはY軸の近くに置いた点は軸上に配置され、軸上に保持されます。オフ: その点はグリッドに従います。"
+  },
+  "ko": {
+    "prefs.sketch.snap_to_axes": "스케치 X축과 Y축에 스냅",
+    "prefs.sketch.snap_to_axes_note": "원점이 표시된 상태에서 그릴 때 스케치 X축 또는 Y축 근처에 놓은 점은 축 위에 놓이고 축에 고정됩니다. 끄기: 그 점은 격자를 따릅니다."
+  },
+  "vi": {
+    "prefs.sketch.snap_to_axes": "Bắt vào trục X và Y của phác thảo",
+    "prefs.sketch.snap_to_axes_note": "Khi vẽ lúc đang hiện Gốc tọa độ, điểm đặt gần trục X hoặc Y của phác thảo sẽ nằm trên trục và được giữ trên đó. Tắt: điểm đi theo lưới tọa độ tại đó."
+  },
+  "zh": {
+    "prefs.sketch.snap_to_axes": "捕捉草图的X轴和Y轴",
+    "prefs.sketch.snap_to_axes_note": "显示原点时绘图，在草图X轴或Y轴附近放置的点会落在该轴上并保持在轴上。关闭：该点跟随网格。"
+  }
+}

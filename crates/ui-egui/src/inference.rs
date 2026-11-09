@@ -160,8 +160,8 @@ pub fn through_center(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inf
 }
 
 /// Directions and places from lines: parallel or perpendicular to a line (from `prev`), or on
-/// the extension of a line beyond its ends.
-pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
+/// the extension of a line beyond its ends. Only the lines (by index) `take` accepts count.
+pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64, take: impl Fn(usize) -> bool) -> Option<Inference> {
     let mut best: Option<Inference> = None;
     let mut offer = |i: Inference| {
         if best.as_ref().is_none_or(|b| i.dist < b.dist) {
@@ -173,7 +173,7 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
         return keep(None);
     }
     for (i, c) in sk.curves.iter().enumerate() {
-        if c.construction && c.link.is_none() {
+        if (c.construction && c.link.is_none()) || !take(i) {
             continue;
         }
         let Some((a, b)) = line_ends(sk, i) else { continue };
@@ -649,18 +649,18 @@ mod tests {
     #[test]
     fn parallel_and_perpendicular_from_the_previous_point() {
         let s = sk();
-        let i = lines(&s, Vec2::new(0.0, 20.0), Vec2::new(10.2, 29.9), 0.5).expect("parallel");
+        let i = lines(&s, Vec2::new(0.0, 20.0), Vec2::new(10.2, 29.9), 0.5, |_| true).expect("parallel");
         assert_eq!(i.kind, Kind::Parallel);
         assert!((i.at - Vec2::new(0.0, 20.0)).cross(Vec2::new(1.0, 1.0)).abs() < 1e-9);
-        let i = lines(&s, Vec2::new(0.0, 20.0), Vec2::new(10.1, 10.0), 0.5).expect("perpendicular");
+        let i = lines(&s, Vec2::new(0.0, 20.0), Vec2::new(10.1, 10.0), 0.5, |_| true).expect("perpendicular");
         assert_eq!(i.kind, Kind::Perpendicular);
-        assert!(lines(&s, Vec2::new(0.0, 20.0), Vec2::new(10.0, 25.0), 0.5).is_none());
+        assert!(lines(&s, Vec2::new(0.0, 20.0), Vec2::new(10.0, 25.0), 0.5, |_| true).is_none());
     }
 
     #[test]
     fn extension_beyond_the_end() {
         let s = sk();
-        let i = lines(&s, Vec2::new(30.0, 15.0), Vec2::new(20.1, 19.9), 0.5).expect("extension");
+        let i = lines(&s, Vec2::new(30.0, 15.0), Vec2::new(20.1, 19.9), 0.5, |_| true).expect("extension");
         assert_eq!(i.kind, Kind::Extension);
         assert!((i.at.x - i.at.y).abs() < 1e-9 && i.at.x > 10.0);
     }
