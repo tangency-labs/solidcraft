@@ -352,6 +352,7 @@ pub(crate) fn contains_uv_point_with_topology(
     uv: Point2,
     _tol_3d: f64,
 ) -> Result<UvContainment> {
+    k.work_counters.add_loop_walk();
     // Work from Loopuses, because they will give us an ordered list of Edgeuses.
     let lu = b
         .loop_(l)?

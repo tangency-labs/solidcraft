@@ -168,6 +168,7 @@ pub struct WorkCounters {
     mass_iso_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
     containment_edge_drops: Cell<u64>,
+    loop_walks: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -249,6 +250,15 @@ impl WorkCounters {
         self.containment_edge_drops.get()
     }
 
+    /// Walks of a loop's UV trim curves around a point to classify it against that loop
+    /// (`SmLoop::ContainsUVPoint`, [`crate::query::r#loop::contains_uv_point`]): each one
+    /// drops the point's surface point on every edge curve of the loop and steps along
+    /// every trim. Not the fork's.
+    #[must_use]
+    pub fn loop_walks(&self) -> u64 {
+        self.loop_walks.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -260,6 +270,7 @@ impl WorkCounters {
         self.mass_iso_evaluations.set(0);
         self.coincident_curves_classified.set(0);
         self.containment_edge_drops.set(0);
+        self.loop_walks.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -313,6 +324,11 @@ impl WorkCounters {
     pub(crate) fn add_containment_edge_drop(&self) {
         self.containment_edge_drops
             .set(self.containment_edge_drops.get().saturating_add(1));
+    }
+
+    /// Counts one walk of a loop around a point.
+    pub(crate) fn add_loop_walk(&self) {
+        self.loop_walks.set(self.loop_walks.get().saturating_add(1));
     }
 }
 
@@ -1751,19 +1767,23 @@ mod tests {
                 w.loops_classified(),
                 w.wall_body_copies(),
                 w.proto_edge_intersections(),
+                w.loop_walks(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
         w.add_wall_body_copy();
         w.add_proto_edge_intersection();
-        assert_eq!(counts(w), (2, 1, 1, 1));
+        w.add_loop_walk();
+        w.add_loop_walk();
+        w.add_loop_walk();
+        assert_eq!(counts(w), (2, 1, 1, 1, 3));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0));
     }
 
     #[test]
