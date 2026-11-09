@@ -582,10 +582,12 @@ fn parity(stride: usize) {
             missing.is_empty(),
             "pinned bodies that no longer differ: {missing:#?}"
         );
+        // The corpus grows as cases are added, so the totals aren't pinned: every body that
+        // differs is pinned above, and the rest must be identical or within rounding.
         assert_eq!(
-            (t.bodies, t.identical, t.rounding_only),
-            (1332, 1256, 36),
-            "bodies, identical, within rounding"
+            (t.bodies - t.identical - t.rounding_only, t.rounding_only),
+            (pinned.len(), 36),
+            "bodies that differ, bodies within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)
         assert!(t.rounding_largest <= 4.9e-16, "{:e}", t.rounding_largest);
