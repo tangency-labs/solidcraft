@@ -110,6 +110,12 @@
 //!   WR-493, the SolidCraft fork's tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere`
 //!   tests the half meridian within `180 + 360 * SM_EFF_ZERO` degrees and the sphere it
 //!   finds keeps the tested NURB (`SetFromGwNurb`). Off by default (upstream).
+//! - **Far spheres** (#3131, by default): `IsNurbSurfaceSphere` and
+//!   `RebuildSTEPFromNURBParameters` add to their fixed half-meridian tolerances, and
+//!   `IsNurbSurfaceSphere` to its generator's STEP interval test, the angles' rounding at
+//!   the points' size ([`meridian_rounding`]): upstream's fixed degrees refused a sphere of
+//!   radius 2.5 at 1e5 (180 + 6.7e-10 degrees). Near the origin the default half-meridian
+//!   test widens from `1e-12` to about `1e-12 + 8e-12` degrees for radius 2.5.
 //! - **Parent calls.** `Transform` finishes in `SmSurfOfRevolution::Transform` (status
 //!   ignored), its polar-converter rebuild given the sphere's iso circles as upstream's
 //!   virtual call does; `ReadFromDB` reads the parent record with
@@ -133,12 +139,15 @@ use crate::geom::tol::{are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{asin, sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::math::{
+    max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
+};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest, IsoCurveOptions, LocationType, SurfParamType,
 };
+use crate::nurbs::math::gamma;
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::nurbs_srf::copy_nurb_surface;
 use crate::surface::cone::Cone;
@@ -2029,7 +2038,11 @@ impl Sphere {
     /// (WR-493) the half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the
     /// sphere then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
     /// (`SetFromGwNurb`); by default `180 + SM_EFF_ZERO` and the NURB made from the
-    /// fitted circles, as upstream.
+    /// fitted circles, as upstream. Not upstream: in both modes the half-meridian test, and
+    /// the test of the generator's STEP interval against the sphere's (within `SM_EFF_ZERO`
+    /// upstream), also allow the angles' rounding at the points' size,
+    /// [`meridian_rounding`] of the corner points' size and the circle's radius: `4
+    /// gamma_K (1 + |corners| + 2 r) / r` radians (#3131).
     ///
     /// # Errors
     ///
@@ -2109,14 +2122,18 @@ impl Sphere {
         } else {
             EFF_ZERO
         };
+        // not upstream: the angles' rounding at the points' size (`meridian_rounding`)
+        let corners = min_pnt.max_dimension().max(max_pnt.max_dimension());
+        let (p, q) = (test.degree(SurfParamType::U), test.degree(SurfParamType::V));
+        let rounding = |radius: Option<f64>| meridian_rounding(p, q, corners, radius);
         let is_sphere_with_swap_uv = iso_u.parallel_planes
             && !iso_u.same_plane // [ 080625 ]
             && iso_v.coaxial_centers
-            && angles_v.length() <= 180.0 + half_meridian_tol;
+            && angles_v.length() <= 180.0 + half_meridian_tol + rounding(iso_v.radius);
         let is_sphere_no_swap_uv = iso_v.parallel_planes
             && !iso_v.same_plane // [ 080625 ]
             && iso_u.coaxial_centers
-            && angles_u.length() <= 180.0 + half_meridian_tol;
+            && angles_u.length() <= 180.0 + half_meridian_tol + rounding(iso_u.radius);
 
         // quit when not a properly oriented sphere
         if !is_sphere_with_swap_uv && !is_sphere_no_swap_uv {
@@ -2224,9 +2241,10 @@ impl Sphere {
         // If pCircle's STEP interval does not match the v-interval of sAnalUVDomain,
         // then the Sphere constructor will complain and the resulting bad surface can
         // lead to crashes.  [B414]
+        // (not upstream: its angles to the same rounding as the half meridian's)
         if !circle
             .step_interval()
-            .are_equal(&anal_uv_domain.v_interval(), EFF_ZERO)
+            .are_equal(&anal_uv_domain.v_interval(), EFF_ZERO + rounding(Some(rad)))
         {
             // upstream: WARN("Bad result in IsNurbSurfaceSphere(): GenCurve STEP
             // interval does not match sAnalUVDomain VInterval")
@@ -2333,16 +2351,23 @@ impl Sphere {
 
         // see if we have a U or a V oriented sphere
         // Tol: compensate for using degrees.  [B279]
+        // (not upstream: and the angles' rounding at the points' size, `meridian_rounding`)
+        let corners = nurb_min_point
+            .max_dimension()
+            .max(nurb_max_point.max_dimension());
+        let (p, q) = (srf.degree(SurfParamType::U), srf.degree(SurfParamType::V));
         let angles_u = iso_u.angles.unwrap_or(Extent1d::new());
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
         let is_sphere_with_swap_uv = iso_u.parallel_planes
             && !iso_v.same_plane // [ 080625 ]
             && iso_v.coaxial_centers
-            && angles_v.length() <= 180.0 + 360.0 * EFF_ZERO;
+            && angles_v.length()
+                <= 180.0 + 360.0 * EFF_ZERO + meridian_rounding(p, q, corners, iso_v.radius);
         let is_sphere_no_swap_uv = iso_v.parallel_planes
             && !iso_v.same_plane // [ 080625 ]
             && iso_u.coaxial_centers
-            && angles_u.length() <= 180.0 + 360.0 * EFF_ZERO;
+            && angles_u.length()
+                <= 180.0 + 360.0 * EFF_ZERO + meridian_rounding(p, q, corners, iso_u.radius);
 
         // quit when not a properly oriented sphere
         if !is_sphere_with_swap_uv && !is_sphere_no_swap_uv {
@@ -2985,6 +3010,34 @@ fn convert_uv_from_nurbs_to_step(
     Ok(Point2::new(step_x, polar_param))
 }
 
+/// Not upstream: the rounding, in degrees, of the length of the half meridian (or of a
+/// circle's STEP interval) that [`Sphere::is_nurb_surface_sphere`] and
+/// [`Sphere::rebuild_step_from_nurb_parameters`] read off a form of degrees `(p, q)` whose
+/// corner points are at most `corners` from the origin, its circle of radius `radius`; 0
+/// without a radius.
+///
+/// The angles are read off points of the form: an evaluation is within `gamma_K |P|` of
+/// the exact point (`K = 16 (p + q + 2)`, a few ulps for each of the rational evaluation's
+/// operations), `|P| <= 1 + corners + 2 r` (a point of the sphere is at most its
+/// diameter from a corner). The circle's centre is fitted to such points; its error is taken
+/// to be the same again, which is measured, not derived (the fit's conditioning is not
+/// bounded here: `far_sphere_recognised.rs` measures the excess over this allowance on
+/// spheres of radius 1e-3 to 1e3, at 0 to 1e7 from the origin, turned off the axes: at most
+/// 0.0055 of this allowance). An
+/// angle at radius `r` is then known to `2 gamma_K |P| / r` radians at each end, and the half
+/// turn's length to twice that: `4 gamma_K |P| / r`. As a position, `r` times that is
+/// `4 gamma_K |P|`, below the iso-circle tests' `100 SM_EFF_ZERO (1 + |corners|)` for every
+/// size, so it admits no form those tests refuse.
+pub(crate) fn meridian_rounding(p: usize, q: usize, corners: f64, radius: Option<f64>) -> f64 {
+    match radius {
+        Some(r) if r > 0.0 => {
+            let size = 1.0 + corners + 2.0 * r;
+            rad_to_deg(4.0 * gamma(16 * (p + q + 2)) * size / r)
+        }
+        _ => 0.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2999,6 +3052,18 @@ mod tests {
 
     fn canonical(k: &Kernel, radius: f64) -> Sphere {
         Sphere::create_canonical(k, &frame(), radius).expect("sphere")
+    }
+
+    /// `meridian_rounding` for radius 2.5 against numbers recomputed independently of it:
+    /// 1.8e-11 degrees with corners at 12.5 (the origin) and 9.77e-8 degrees with corners at
+    /// 100012.5 (1e5 out), so a doubled or halved allowance fails here (#3131).
+    #[test]
+    fn the_meridian_allowance_is_its_closed_form() {
+        for (corners, degrees) in [(12.5, 1.8e-11), (100_012.5, 9.77e-8)] {
+            let got = meridian_rounding(2, 2, corners, Some(2.5));
+            assert!((got / degrees - 1.0).abs() < 0.02, "{corners}: {got:e}");
+        }
+        assert_eq!(meridian_rounding(2, 2, 1.0, None), 0.0);
     }
 
     #[test]

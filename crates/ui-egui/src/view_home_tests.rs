@@ -4,7 +4,7 @@ use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::StandardView;
+use solidcraft_viewport::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
 /// origin, used by the extrude (so not drawn).
@@ -25,7 +25,7 @@ fn near_box(a: Aabb3, lo: [f64; 3], hi: [f64; 3]) {
 }
 
 /// The camera Home gives: the iso view framing what is shown.
-fn home(h: &Harness) -> solidcraft_engine::render::Camera {
+fn home(h: &Harness) -> solidcraft_viewport::Camera {
     let mut cam = h.app.cam;
     cam.set_view(StandardView::Iso);
     h.app.fitted(cam)
@@ -37,7 +37,7 @@ fn spot(h: &Harness) -> egui::Pos2 {
     d.left_top() + egui::vec2(d.width() * 0.3, d.height() * 0.7)
 }
 
-fn same_cam(a: &solidcraft_engine::render::Camera, b: &solidcraft_engine::render::Camera) -> bool {
+fn same_cam(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
     a.target.dist(b.target) < 1e-6 && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
 }
 

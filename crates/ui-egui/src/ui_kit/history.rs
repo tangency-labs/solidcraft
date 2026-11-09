@@ -13,7 +13,7 @@ pub(crate) struct StripHeading(std::sync::Arc<egui::Galley>);
 impl StripHeading {
     pub fn new(painter: &Painter, title: &str) -> Self {
         let t = Tokens::get();
-        Self(painter.layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_heading), t.text))
+        Self(painter.layout_no_wrap(title.to_owned(), crate::ui_kit::type_face::semibold(t.font_heading), t.text))
     }
 
     pub fn width(&self) -> f32 {
@@ -73,7 +73,7 @@ pub(crate) struct HistoryChip<'a> {
 
 /// Share the feature classification across chips and name rows. Surface aliases also
 /// cover Patch/Stitch/Thicken and other surface features without a Surface-prefixed kind.
-fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
+pub(crate) fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     let tab = if kind.starts_with("Sketch") {
         "SKETCH"
     } else if kind.starts_with("Surface") || icon.starts_with("surface_") || icon == "continuity" {
@@ -89,8 +89,15 @@ fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
 }
 
 impl HistoryChip<'_> {
-    /// All strip variants use this painter; no connections are drawn between features.
+    /// All strip variants use this painter; no connections are drawn between features. The
+    /// icon takes the accent of the feature's kind ([`feature_icon_accent`]).
     pub fn paint(&self, painter: &Painter, rect: Rect, style: HistoryStyle) {
+        self.paint_with_accent(painter, rect, style, feature_icon_accent(self.kind, self.icon));
+    }
+
+    /// [`HistoryChip::paint`] with the icon's accent given (an icon palette name; `None`: its
+    /// artwork's own colours).
+    pub fn paint_with_accent(&self, painter: &Painter, rect: Rect, style: HistoryStyle, icon_accent: Option<&str>) {
         let t = Tokens::get();
         let mut p = painter.clone();
         if self.dim || self.suppressed {
@@ -139,7 +146,7 @@ impl HistoryChip<'_> {
             Rect::from_center_size(if names { pos2(rect.left() + t.space_8 + side / 2.0, rect.center().y) } else { rect.center() }, vec2(side, side));
         match self.ink {
             Some(ink) => icons::paint_ink(&p, icon, self.icon, ink),
-            None => icons::paint_accented(&p, icon, self.icon, feature_icon_accent(self.kind, self.icon), 1.0),
+            None => icons::paint_accented(&p, icon, self.icon, icon_accent, 1.0),
         }
         if names {
             let ink = if self.selected {
@@ -149,7 +156,7 @@ impl HistoryChip<'_> {
             } else {
                 t.text
             };
-            let font = if self.selected { crate::fonts::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
+            let font = if self.selected { crate::ui_kit::type_face::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
             let text_rect = Rect::from_min_max(
                 pos2(icon.right() + t.space_6 + 1.0, rect.top()),
                 pos2(rect.right() - if self.error || self.warning { t.space_16 } else { t.space_8 }, rect.bottom()),
@@ -233,11 +240,18 @@ impl HistoryTransport {
         })
     }
 
-    /// `playing` turns the Play button into Stop; the other controls ignore it.
+    /// `playing` turns the Play button into Stop; the other controls ignore it. Published as
+    /// `history:` and its [`HistoryTransport::id`].
     pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
+        self.show_as(ui, rect, playing, "history:")
+    }
+
+    /// [`HistoryTransport::show`], published in the widget registry as `prefix` followed by its
+    /// [`HistoryTransport::id`].
+    pub fn show_as(self, ui: &mut egui::Ui, rect: Rect, playing: bool, prefix: &str) -> egui::Response {
         let t = Tokens::get();
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
-        solidcraft_ui_registry::publish_target(&format!("history:{}", self.id()), rect);
+        solidcraft_ui_registry::publish_target(&format!("{prefix}{}", self.id()), rect);
         if response.hovered() {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
         }
@@ -393,7 +407,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
         tip.popup = tip.popup.anchor(seam.pill).align(egui::RectAlign::RIGHT_START).frame(frame);
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             let t = Tokens::get();
-            ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_body)).color(t.text));
+            ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::semibold(t.font_body)).color(t.text));
             ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
         });
     }

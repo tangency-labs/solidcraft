@@ -983,9 +983,12 @@ enum Thing {
 /// down its left), and a faint bar on each row leading to it.
 #[derive(Default)]
 struct Lit {
-    /// Selected, or part of something selected: a body for its faces, edges and vertices, a
-    /// sketch for its curves, points and profiles.
+    /// Selected, or part of something selected: a sketch for its curves, points and profiles.
     selected: std::collections::HashSet<Thing>,
+    /// Bodies holding a selected face, edge or vertex. Each keeps the faint bar of a row with
+    /// something lit inside it, so the tree still shows where the selection is once the pointer
+    /// leaves the model (#11547), without lighting the body as if it were selected.
+    holding: std::collections::HashSet<Thing>,
     /// Under the pointer in the 3D view.
     hovered: Option<Thing>,
     /// The placements holding a lit body, and the components holding a lit sketch or plane.
@@ -997,6 +1000,7 @@ impl Lit {
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
+        let mut holding = std::collections::HashSet::new();
         // Bodies chosen in an open dialog light up even when the click was in the 3D view,
         // which does not rewrite the browser selection.
         let dialog_picks = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
@@ -1004,8 +1008,14 @@ impl Lit {
             let thing = match s {
                 Sel::Body { name } => Thing::Body(name.clone()),
                 // A picked face, edge or vertex lights the feature it belongs to (see
-                // `browser::features`), not the whole body as if the body were selected.
-                Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } => continue,
+                // `browser::features`), not the whole body as if the body were selected; its body
+                // keeps a faint bar. The origin's vertex belongs to no body.
+                Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    if !body.is_empty() {
+                        holding.insert(Thing::Body(body.clone()));
+                    }
+                    continue;
+                }
                 Sel::Feature { id } => Thing::Sketch(*id),
                 Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
                     Thing::Sketch(*sketch)
@@ -1042,7 +1052,7 @@ impl Lit {
         }
         let doc = app.session.doc.clone();
         let (mut paths, mut components) = (Vec::new(), Vec::new());
-        for thing in selected.iter().chain(&hovered) {
+        for thing in selected.iter().chain(&holding).chain(&hovered) {
             match thing {
                 Thing::Body(b) if follows => {
                     if let Some(path) = app.tree.model.as_mut().and_then(|model| model.body_path(&app.session, b)) {
@@ -1071,11 +1081,14 @@ impl Lit {
                 ),
             }
         }
-        Lit { selected, hovered, paths, components }
+        // A body both holding the selection and under the pointer leads to its placement once.
+        paths.sort_unstable();
+        paths.dedup();
+        Lit { selected, holding, hovered, paths, components }
     }
 
     fn any(&self) -> bool {
-        !self.selected.is_empty() || self.hovered.is_some()
+        !self.selected.is_empty() || !self.holding.is_empty() || self.hovered.is_some()
     }
 
     /// Whether `thing` is lit: (selected, under the pointer).
@@ -1090,9 +1103,18 @@ impl Lit {
         (e.is_selected(app) || selected, hovered)
     }
 
+    /// A folder entry's row: its selection flag and mark. A body holding a selected face, edge or
+    /// vertex, itself neither selected nor under the pointer, gets the faint bar.
+    fn row(&self, app: &SolveApp, e: &Entry) -> (bool, Mark) {
+        match lit_row(self.entry(app, e)) {
+            (false, Mark::None) if self.holding.contains(&e.thing) => (false, Mark::Branch),
+            row => row,
+        }
+    }
+
     /// The mark of a row holding these entries: a faint bar when any of them is lit.
     fn branch<'e>(&self, app: &SolveApp, entries: impl IntoIterator<Item = &'e Entry>) -> Mark {
-        if entries.into_iter().any(|e| self.entry(app, e) != (false, false)) { Mark::Branch } else { Mark::None }
+        if entries.into_iter().any(|e| self.row(app, e) != (false, Mark::None)) { Mark::Branch } else { Mark::None }
     }
 
     /// The mark of a placement row: a faint bar when a lit body is placed in it or below it, or
@@ -1397,7 +1419,8 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     if response.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
-    let galley = ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
+    let galley =
+        ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::ui_kit::type_face::semibold(t.font_body), t.text);
     let title = Rect::from_min_max(rect.min + vec2(0.0, title_top), rect.max);
     ui.painter().add(
         egui::epaint::TextShape::new(title.center() - galley.size() / 2.0, galley, t.text)
@@ -1487,7 +1510,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let title = solidcraft_ui_text::tr("ui.browser_title").to_string();
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
-    let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
+    let galley = ui.painter().layout_no_wrap(title, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
     ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
     let mut right = rect.right() - t.space_6;
     if collapsible {
@@ -2106,10 +2129,10 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
     if draw_row(ui, ui.scope_id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
-        if app.prefs_window.open {
-            crate::prefs::close(app, true);
+        if app.prefs_window.shell.open {
+            crate::prefs_window::close(app, true);
         } else {
-            app.prefs_window.open = true;
+            app.prefs_window.shell.open = true;
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
@@ -3205,7 +3228,7 @@ fn entry_row(
         None => Vec::new(),
     };
     let built_key = built_key.filter(|_| !built.is_empty());
-    let (selected, mark) = lit_row(acts.lit.entry(app, e));
+    let (selected, mark) = acts.lit.row(app, e);
     let visible = e.is_visible(app);
     let locked = match &e.sel {
         Some(Sel::Body { name }) => app.session.visibility.locked_bodies.contains(name),
@@ -3696,7 +3719,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             );
             let size = galley.size() + vec2(6.0, 2.0);
             let half = Vec2::new(f64::from(size.x) * 0.5 * px, f64::from(size.y) * 0.5 * px);
-            let lay = dim_layout_reaching(&frame, c.text.or_else(|| default_text(&frame, middle, px)), px, half, dim_reach(sk, &c.kind));
+            let lay = dim_layout_reaching(&frame, c.text.or_else(|| default_text(&frame, middle, px, half)), px, half, dim_reach(sk, &c.kind));
             for line in &lay.lines {
                 painter.add(egui::Shape::line(line.iter().filter_map(|q| to(*q)).collect(), Stroke::new(1.0, col)));
             }

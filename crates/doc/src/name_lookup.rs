@@ -50,8 +50,11 @@ pub struct EdgeHit {
 }
 
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
-/// between the faces it names exactly (see [`exactly`]). `Err` explains when there is none: no
-/// such edge, the named edge split into several, or a name saved before format 14.
+/// between the faces it names exactly (see [`exactly`]). A numbered name (`~k`) was one of
+/// several edges between its faces, told apart only by where they lay, so the one edge left
+/// between them is it only where the reference's point still lies on it. `Err` explains when
+/// there is none: no such edge, the named edge split into several, one of several edges whose
+/// faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
     if legacy_name(name).is_some() {
         return Err(format!("edge `{name}` was named by a build before format 14"));
@@ -81,7 +84,13 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         keep_best(&mut best, level, i);
     }
     let (_, cands) = best.ok_or_else(|| format!("edge `{name}` no longer exists"))?;
+    // When the faces of several numbered edges bound one edge now, every one of their names
+    // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
+    let numbered = wanted.len() != name.len();
     match cands.as_slice() {
+        [i] if numbered && !edge_near(b, &m, *i, near) => {
+            Err(format!("edge `{name}` was one of several between its faces, and the one left is elsewhere"))
+        }
         [i] => exact(*i),
         _ => Err(format!("edge `{name}` is no longer one edge")),
     }
@@ -325,7 +334,8 @@ impl EdgeHit {
 }
 
 /// The face a stored face name finds, on any body: the face with that name, or the named piece
-/// told apart by the faces around it. `None` when no face does, or several do.
+/// told apart by the faces around it, or a numbered piece of a face that is whole now (see
+/// [`recover_numbered_face_in`]). `None` when no face does, or several do.
 pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     if crate::sheet::split_sheet_face_name(name).is_some() {
         return sheet_locate(st, name, p).ok();
@@ -336,7 +346,30 @@ pub fn locate_face(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
     // Every body's names are read below: work out the ones not known yet on all cores first
     // (each body's names are its own, whichever thread works them out).
     naming::warm_names(st.bodies.iter().filter(|b| !b.body.is_mesh()));
-    locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p).ok()
+    match locate_in(st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()), name, p) {
+        Ok(hit) => Some(hit),
+        Err(Miss::Gone) => recover_numbered_face_in(st, name, p),
+        Err(Miss::Several) => None,
+    }
+}
+
+/// A numbered piece of a round face (`F2:side:c1#2`, from the kernel before SMLib) on whichever
+/// one body recovers it as its whole face (#13252): see [`recover_numbered_projected_face`] for
+/// when that is safe. `None` when no body, or more than one, does.
+fn recover_numbered_face_in(st: &ModelState, name: &str, p: Vec3) -> Option<FaceHit> {
+    if !name.contains('#') {
+        return None;
+    }
+    let mut found = None;
+    for (body, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()) {
+        if let Some((face, point)) = recover_numbered_projected_face(b, name, p) {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(FaceHit { body, face, point, verified: true, on_point: true });
+        }
+    }
+    found
 }
 
 /// The one body of `st` with a face the stored face name finds, as [`locate_face`] looks for it.
@@ -461,7 +494,7 @@ pub(crate) fn locate_on(body: &ModelBody, name: &str, p: Vec3) -> Option<FaceHit
 /// Find a saved manual Project face in its body. Older designs can name a numbered piece of
 /// a face that now evaluates whole. Recover it only when the original feature directly made
 /// the exact whole face and the face contains the
-/// old pick. Other face references still require the stored name as picked.
+/// old pick. [`locate_face`] does the same for the other stored face references (#13252).
 pub(crate) fn locate_projected_face(body: &ModelBody, name: &str, p: Vec3) -> Option<(usize, Vec3)> {
     if body.body.is_mesh() {
         return None;

@@ -911,6 +911,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
                     positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0.]),
                     triangles: Arc::from([0, 1, 2]),
                     color: None,
+                    corner_normals: Default::default(),
                 }],
             },
             None,
@@ -924,7 +925,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
     Arc::make_mut(&mut doc).occurrences[0].transform = rigid(Vec3::new(10., 0., 0.), Vec3::ZERO, Vec3::Z, 0.3);
     assert!(!model.evaluate_shared(&doc));
     assert!(Arc::ptr_eq(&original, &model.state()));
-    for edit in 0..5 {
+    for edit in 0..6 {
         let FeatureKind::MeshImport { meshes, .. } = &mut Arc::make_mut(&mut doc).feature_mut(feature).unwrap().kind else { panic!("mesh") };
         let mesh = &mut meshes[0];
         match edit {
@@ -932,6 +933,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
             1 => Arc::make_mut(&mut mesh.triangles).swap(1, 2),
             2 => mesh.color = Some([0.2, 0.4, 0.6]),
             3 => mesh.name = "Renamed".into(),
+            4 => mesh.corner_normals = Arc::from([0., 1., 1., 0., 1., 1., 0., 1., 1.]),
             _ => mesh.positions = Arc::from(mesh.positions.to_vec()),
         }
         assert!(model.evaluate_shared(&doc), "mesh edit {edit} must invalidate");
@@ -1044,6 +1046,7 @@ fn comparing_a_copied_mesh_does_not_read_its_shared_arrays() {
         positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., f64::NAN]),
         triangles: Arc::from([0, 1, 2]),
         color: None,
+        corner_normals: Default::default(),
     };
     let copy = mesh.clone();
     assert!(copy == mesh, "a copy shares the arrays and is the same mesh without reading them");
@@ -1704,6 +1707,35 @@ fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
     assert!((v - (disc - 16.0 * hole)).abs() < 1e-3 * hole, "{v}");
 }
 
+#[test]
+fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
+    // 48 holes on a 40 mm circle, 5.2 mm apart: the 47 copies are more than one joined tool
+    // takes, so they are cut as two (#8765). The disc comes out as cutting all of them in one go
+    // leaves it: the same volume, the same faces, named the same.
+    let disc = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("perforated");
+        disc_with_hole_pattern(&mut doc, 40.0, 48);
+        let mut model = Model::new();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        assert_eq!(st.bodies.len(), 1);
+        let mut names = crate::naming::face_names(&st.bodies[0]).to_vec();
+        names.sort();
+        (disc_volume(&model), st.bodies[0].body.face_count(), names, work.cut_tools)
+    };
+    let (volume, faces, names, tools) = disc(super::MAX_JOINED_TOOLS);
+    let (one_volume, one_faces, one_names, one_tools) = disc(usize::MAX);
+    assert_eq!((tools, one_tools), (2, 1));
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    assert!((volume - one_volume).abs() < 1e-6 * hole, "{volume} vs {one_volume}");
+    assert!((one_volume - (std::f64::consts::PI * 2500.0 * 1.5 - 48.0 * hole)).abs() < 1e-3 * hole, "{one_volume}");
+    assert_eq!(faces, one_faces);
+    assert_eq!(names, one_names);
+}
+
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
 /// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
@@ -1771,6 +1803,7 @@ fn imported_meshes() -> Document {
             positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
             triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
             color: Some([0.2, 0.4, 0.6]),
+            corner_normals: Default::default(),
         })
         .collect();
     let id = doc.add_feature(FeatureKind::MeshImport { file: "tetrahedra.stl".into(), meshes }, Some("Meshes")).unwrap();
@@ -1802,6 +1835,16 @@ fn same_as_fresh(doc: &Document, model: &Model) {
 #[test]
 fn unchanged_mesh_payloads_are_not_read_again_for_rigid_motion() {
     let mut doc = imported_meshes();
+    for mesh in meshes_mut(&mut doc) {
+        mesh.generate_crease_normals(10.0).unwrap();
+        assert!(!mesh.corner_normals.is_empty());
+    }
+    let compact: serde_json::Value = serde_json::from_str(&super::feature_json(&doc.features[0], &super::ImportDigests::default())).unwrap();
+    for mesh in compact[0]["meshes"].as_array().unwrap() {
+        assert_eq!(mesh["positions"], serde_json::json!([]));
+        assert_eq!(mesh["triangles"], serde_json::json!([]));
+        assert!(mesh.get("corner_normals").is_none(), "the fingerprint must hash the retained digest without serializing shading payloads");
+    }
     let mut model = Model::new();
     assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 2);
     for k in 1..5 {

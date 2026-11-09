@@ -35,6 +35,15 @@ pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
 }
 
+thread_local! {
+    static ID_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A search of every id in a sketch (is this id taken?) on this thread.
+pub(crate) fn count_id_scan() {
+    ID_SCANS.with(|c| c.set(c.get() + 1));
+}
+
 /// Run `f` with the constructive seed on or off, without the seed-on/seed-off comparison (for
 /// tests that measure the difference).
 pub(crate) fn seeded<T>(on: bool, f: impl FnOnce() -> T) -> T {
@@ -1861,6 +1870,42 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
+/// in proportion to the square of its size (about 40 s for 60000 lines). A batch searches no
+/// sketch for an id, and gives the points and curves exactly the ids, checks and refusals that
+/// adding them one at a time does, including after ids a damaged counter would reuse.
+#[test]
+fn a_batch_adds_points_and_curves_without_searching_for_ids() {
+    let mut base = Sketch::new();
+    base.add_point(v(0.0, 0.0), Some("p2")).unwrap();
+    base.add_point(v(1.0, 0.0), Some("l1")).unwrap();
+    let mut one_by_one = base.clone();
+    let mut batched = base.clone();
+    let lines = 2000;
+    for i in 0..lines {
+        let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+        let a = one_by_one.add_point(v(x, y), None).unwrap();
+        let b = one_by_one.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+        one_by_one.add_curve(CurveKind::Line { a, b }, None).unwrap();
+    }
+    ID_SCANS.with(|c| c.set(0));
+    {
+        let mut batch = batched.batch();
+        for i in 0..lines {
+            let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+            let a = batch.add_point(v(x, y), None).unwrap();
+            let b = batch.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+            batch.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        }
+        assert!(matches!(batch.add_point(v(0.0, 0.0), Some("p2")), Err(SketchError::Duplicate(_))), "a taken id is refused");
+        assert!(matches!(batch.add_curve(CurveKind::Line { a: 0, b: usize::MAX }, None), Err(SketchError::Invalid(_))), "the same checks");
+        assert_eq!(batch.sketch().points.len(), one_by_one.points.len());
+    }
+    assert_eq!(ID_SCANS.with(std::cell::Cell::get), 0, "id searches of the whole sketch in a batch");
+    assert_eq!(batched, one_by_one, "the same ids as one at a time");
+    assert_eq!(batched.fresh("p").unwrap(), one_by_one.fresh("p").unwrap(), "the counters carry on alike");
 }
 
 /// A fillet whose corner the solve leaves where it is stays that corner's arc, even when the

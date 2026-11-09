@@ -18,6 +18,11 @@
 //! Nothing here knows an app's state: closing is a [`WindowAction::Close`] the app answers (it may
 //! ask about unsaved work first).
 //!
+//! A move or resize hands the press to the OS, which keeps the pointer until the button goes up.
+//! On X11 the window manager then receives that release, not the app, so egui would keep the
+//! button down and the next press would only end the old drag: the bar moved the window every
+//! other time (#13334). An app calls [`release_press_taken_by_os`] first in its raw-input hook.
+//!
 //! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
 
 use crate::icons::glyphs::paint_glyph;
@@ -181,7 +186,32 @@ pub fn drag_area(ui: &Ui, rect: Rect) {
     if resp.double_clicked() {
         toggle_maximize(ctx);
     } else if resp.drag_started_by(PointerButton::Primary) && ctx.data(|d| d.get_temp(resp.id).unwrap_or(false)) {
-        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+        hand_press_to_os(ctx, ViewportCommand::StartDrag);
+    }
+}
+
+/// Where the press handed to the OS by a window move or resize was, until the next frame.
+fn press_taken_by_os_id() -> Id {
+    Id::unique("titlebar-press-taken-by-os")
+}
+
+/// Start an OS window move or resize (`StartDrag` or `BeginResize`) with the press egui is
+/// handling, and remember that press for [`release_press_taken_by_os`].
+pub fn hand_press_to_os(ctx: &egui::Context, cmd: ViewportCommand) {
+    let pos = ctx.input(|i| i.pointer.interact_pos());
+    ctx.send_viewport_cmd(cmd);
+    if let Some(pos) = pos {
+        ctx.data_mut(|d| d.insert_temp(press_taken_by_os_id(), pos));
+    }
+}
+
+/// On the frame after a window move or resize started, release the primary button where it was
+/// pressed, before the frame's own events. The OS's release may never reach the app (X11); where
+/// it does arrive later, egui ignores it, as no button is down then and it is no click.
+pub fn release_press_taken_by_os(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    if let Some(pos) = ctx.data_mut(|d| d.remove_temp::<Pos2>(press_taken_by_os_id())) {
+        let release = egui::Event::PointerButton { pos, button: PointerButton::Primary, pressed: false, modifiers: ctx.input(|i| i.modifiers) };
+        raw.events.insert(0, release);
     }
 }
 
@@ -286,7 +316,7 @@ pub fn resize_zones(ui: &mut Ui) {
     for (i, (r, dir, cursor)) in zones(w, edge).into_iter().enumerate() {
         let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
-            ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
+            hand_press_to_os(&ctx, ViewportCommand::BeginResize(dir));
         }
     }
 }

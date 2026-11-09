@@ -139,7 +139,9 @@ pub(crate) fn editor_layout(stage: Rect, prefs: &NavigationBar, label_width: imp
 pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> BarLayout {
     let t = Tokens::get();
     let label_width = |slot: &Slot| {
-        ctx.fonts_mut(|fonts| fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::fonts::medium(ui_kit::NAV_TEXT), t.form_ink).size().x)
+        ctx.fonts_mut(|fonts| {
+            fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink).size().x
+        })
     };
     let mut bar = measure(content, &app.preferences.navigation_bar, navigation_bar::canvas_caps(app), label_width);
     let Some(_) = app.universal_panel_frame() else {

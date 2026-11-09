@@ -25,8 +25,9 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
-A kernel-only pull request targets the `kernel` branch. A change that touches the kernel and the
-app goes to `main` as one pull request, with a code owner approving the `solidcore/` part.
+A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
+pull request. A big feature in several steps goes as stacked pull requests into `main`, each one landing in order
+on top of the one before.
 Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore
@@ -37,7 +38,7 @@ contributors without write access can't push to them. To update one:
 1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
    `git switch moved/solidcore-N`.
 2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
-3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+3. Open a PR against `main` that says "Replaces #M" (M is the moved PR's number). The moved one
    gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
@@ -448,7 +449,7 @@ comments only when they're about crashes, wrong results, data loss or security.
 
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
 
 ## Labels and triage
 
