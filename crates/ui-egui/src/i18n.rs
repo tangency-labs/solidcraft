@@ -191,6 +191,13 @@ pub fn tr_engine_error(error: &str) -> String {
     use solidcraft_ui_text::{format, tr};
     // `EngineError::BadParams` carries `invalid parameters for `<command>`: ` in front.
     let text = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, text)| text);
+    if let Some((name, ids)) = text
+        .strip_prefix("ambiguous component `")
+        .and_then(|rest| rest.strip_suffix("; use a numeric component ID"))
+        .and_then(|rest| rest.rsplit_once("`; matching IDs: "))
+    {
+        return format("component.error.ambiguous_name", &[("name", name), ("ids", ids)]);
+    }
     if text == "nothing to break at there" {
         return tr("sketch.error.nothing_to_break").to_string();
     }
@@ -243,6 +250,18 @@ mod tests {
         for language in ["en", "de", "ja", "unknown"] {
             assert_eq!(super::panel_direction(language), Direction::Ltr);
         }
+    }
+
+    #[test]
+    fn component_ambiguity_is_translated_without_truncating_names() {
+        install();
+        let _scope = scope("de");
+        let name = "A`; matching IDs: 99";
+        let message = format!("ambiguous component `{name}`; matching IDs: 1, 3; use a numeric component ID");
+        let expected = format!("Mehrere Komponenten heißen `{name}`. Verwende eine numerische Komponenten-ID: 1, 3.");
+        assert_eq!(super::tr_engine_error(&message), expected);
+        assert_eq!(super::tr_engine_error(&format!("invalid parameters for `component.delete`: {message}")), expected);
+        assert_eq!(super::tr_engine_error("another error"), "another error");
     }
 
     #[test]
