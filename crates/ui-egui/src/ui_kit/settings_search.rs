@@ -48,12 +48,16 @@ pub(crate) struct Reveal {
     pub page: usize,
     pub label: String,
     pub until: f64,
+    /// What the outlined row's name starts with: `{prefix}:revealed`.
+    pub prefix: String,
 }
 
 #[derive(Clone, Default)]
 struct State {
     live: bool,
     query: String,
+    /// What the names this pass publishes start with: `{prefix}:search:current`, `{prefix}:revealed`.
+    prefix: String,
     page: String,
     page_shown: bool,
     section: String,
@@ -97,8 +101,9 @@ impl Drop for SearchFrame {
     }
 }
 
-/// Start a pass over the preferences body. An empty filter leaves every control drawn.
-pub(crate) fn begin(ui: &Ui, filter: &str) -> SearchFrame {
+/// Start a pass over the preferences body. An empty filter leaves every control drawn. The names
+/// the pass publishes start with `prefix`.
+pub(crate) fn begin(ui: &Ui, filter: &str, prefix: &str) -> SearchFrame {
     let query: String = filter.trim().chars().take(256).collect::<String>().to_lowercase();
     ui.ctx().data_mut(|data| {
         let state = data.get_temp_mut_or_insert_with(Id::unique(STATE), State::default);
@@ -110,6 +115,8 @@ pub(crate) fn begin(ui: &Ui, filter: &str) -> SearchFrame {
         }
         state.live = true;
         state.query = query;
+        state.prefix.clear();
+        state.prefix.push_str(prefix);
         state.page.clear();
         state.page_shown = false;
         state.section.clear();
@@ -790,19 +797,17 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     let selected = with(ui, |state| {
         let selected = state.nav.len() == cursor;
         state.nav.push(PaintedHit { page: state.page_index, label: label.to_string() });
-        selected
+        selected.then(|| state.prefix.clone())
     })
-    .unwrap_or(false);
-    if !selected {
-        return;
-    }
+    .flatten();
+    let Some(prefix) = selected else { return };
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
     // Only when Up/Down moved the cursor: following it every frame pins the list to the match.
     if scroll {
         ui.scroll_to_rect(rect, Some(egui::Align::Center));
     }
-    solidcraft_ui_registry::publish_handle("prefs:search:current", rect.center());
+    solidcraft_ui_registry::publish_handle(&format!("{prefix}:search:current"), rect.center());
 }
 
 pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
@@ -815,8 +820,8 @@ pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
     });
 }
 
-pub(crate) fn reveal_for(page: usize, label: &str) -> Reveal {
-    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS }
+pub(crate) fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
+    Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
 }
 
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
@@ -832,7 +837,7 @@ pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     ui.scroll_to_rect(rect, Some(egui::Align::Center));
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
-    solidcraft_ui_registry::publish_handle("prefs:revealed", rect.center());
+    solidcraft_ui_registry::publish_handle(&format!("{}:revealed", reveal.prefix), rect.center());
 }
 
 /// Wall clock in milliseconds, for how long a reveal stays outlined.
@@ -1050,7 +1055,7 @@ mod tests {
             let mut miss = Rect::NOTHING;
             let mut draw = |filter: &str| {
                 crate::test_support::frame(&ctx, Default::default(), |ui| {
-                    let _search = begin(ui, filter);
+                    let _search = begin(ui, filter, "prefs");
                     begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
                     for label in ["Performance", "Quality"] {
                         let card =
@@ -1077,11 +1082,11 @@ mod tests {
             let (_, _, hits) = nav(&ctx);
             assert_eq!(hits.len(), 1, "control {kind} owns one real keyboard target");
             assert_eq!((hits[0].page, hits[0].label.as_str()), (crate::prefs::PAGE_LAYOUT, "Quality"));
-            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_LAYOUT, label: "Quality".into(), until: f64::MAX }));
+            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_LAYOUT, label: "Quality".into(), until: f64::MAX, prefix: "prefs".into() }));
             crate::scenario::clear_handles();
             // The search is cleared before the selected setting is revealed.
             crate::test_support::frame(&ctx, Default::default(), |ui| {
-                let _search = begin(ui, "");
+                let _search = begin(ui, "", "prefs");
                 begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
                 let card = Card {
                     label: "Quality",
@@ -1113,7 +1118,7 @@ mod tests {
             let ctx = crate::fonts::test_context();
             for _ in 0..4 {
                 crate::test_support::frame(&ctx, Default::default(), |ui| {
-                    let _search = begin(ui, query);
+                    let _search = begin(ui, query, "prefs");
                     begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
                     assert_eq!(ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true), None);
                     store_nav(ui);
@@ -1123,9 +1128,9 @@ mod tests {
             assert_eq!(hits.len(), 1, "{query} has one target");
             assert_eq!(hits[0].label, expected);
             assert_eq!(hits[0].page, crate::prefs::PAGE_GRAPHICS);
-            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_GRAPHICS, label: expected.into(), until: f64::MAX }));
+            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_GRAPHICS, label: expected.into(), until: f64::MAX, prefix: "prefs".into() }));
             crate::test_support::frame(&ctx, Default::default(), |ui| {
-                let _search = begin(ui, "");
+                let _search = begin(ui, "", "prefs");
                 begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
                 ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true);
                 let rect = crate::scenario::rect_of(if expected == "Sampling" { "dialog:row:Sampling" } else { "prefs:shared:on" }).unwrap();

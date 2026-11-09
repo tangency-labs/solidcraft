@@ -54,7 +54,8 @@ pub struct Labels<'a> {
 pub struct Options<'a, S> {
     pub id: egui::Id,
     /// Registry names are this followed by `:` and the part: `defaults`, `search`, `search:frame`,
-    /// `search:clear`, `page_body`, `window`, `footer`, `ok`, `apply`, `cancel`, `actions`.
+    /// `search:clear`, `search:current`, `revealed`, `page_body`, `window`, `footer`, `ok`, `apply`,
+    /// `cancel`, `actions`.
     pub prefix: &'a str,
     pub labels: Labels<'a>,
     pub sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
@@ -306,7 +307,7 @@ fn page_path<S>(pages: &[Page<S>], index: usize) -> String {
 
 fn search_header<S: Host>(ui: &mut Ui, host: &mut S, options: &Options<'_, S>) {
     let id = search_id(options.id);
-    let typed = drive_search(ui, host, id);
+    let typed = drive_search(ui, host, id, options.prefix);
     let field = ui_kit::preferences_search_field(ui, id, &mut host.window().filter, options.labels.search, options.prefix);
     if typed {
         place_search_cursor(ui.ctx(), id, host.window_ref().filter.chars().count());
@@ -322,7 +323,7 @@ fn search_header<S: Host>(ui: &mut Ui, host: &mut S, options: &Options<'_, S>) {
 
 /// Keys for the search field: Cmd+F focuses it, typing anywhere goes to it, Up/Down move through
 /// the results, Enter opens one, Esc clears it. A control taking the keys keeps them.
-fn drive_search<S: Host>(ui: &mut Ui, host: &mut S, id: egui::Id) -> bool {
+fn drive_search<S: Host>(ui: &mut Ui, host: &mut S, id: egui::Id, prefix: &str) -> bool {
     let ctx = ui.ctx().clone();
     if host.keys_captured() {
         return false;
@@ -366,7 +367,7 @@ fn drive_search<S: Host>(ui: &mut Ui, host: &mut S, id: egui::Id) -> bool {
         settings_search::set_cursor(&ctx, cursor.saturating_sub(1));
     } else if fresh && !hits.is_empty() && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
         if let Some(hit) = hits.get(cursor) {
-            open_result(host, hit.page, &hit.label);
+            open_result(host, hit.page, &hit.label, prefix);
             ctx.memory_mut(|memory| memory.surrender_focus(id));
         }
     } else {
@@ -387,13 +388,13 @@ fn place_search_cursor(ctx: &egui::Context, id: egui::Id, chars: usize) {
 }
 
 /// Show the result's page with the matching row outlined, and leave search.
-fn open_result<S: Host>(host: &mut S, page: usize, label: &str) {
+fn open_result<S: Host>(host: &mut S, page: usize, label: &str, prefix: &str) {
     host.result_opened(page);
     let window = host.window();
     window.filter.clear();
     window.search_from = None;
     window.section = page;
-    window.reveal = Some(settings_search::reveal_for(page, label));
+    window.reveal = Some(settings_search::reveal_for(page, label, prefix));
 }
 
 /// An empty field returns to the page that was up when the search started.
@@ -416,7 +417,7 @@ fn page_body<S: Host>(ui: &mut Ui, host: &mut S, pages: &[Page<S>], options: &Op
         above(ui, host);
     }
     let filter = host.window_ref().filter.clone();
-    let _search = settings_search::begin(ui, &filter);
+    let _search = settings_search::begin(ui, &filter, options.prefix);
     if settings_search::querying(ui) {
         // Paint only the pages that match. A first pass is invisible, so rows drawn later cannot
         // land on top of the setting that did match.

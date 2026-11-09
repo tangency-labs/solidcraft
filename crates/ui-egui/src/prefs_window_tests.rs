@@ -158,13 +158,13 @@ fn the_window_switches_page_searches_and_highlights_and_cancel_restores_the_snap
     let (query, _, hits) = settings_search::nav(&ctx);
     assert_eq!(query, "grid");
     assert_eq!(hits.iter().map(|hit| (hit.page, hit.label.as_str())).collect::<Vec<_>>(), [(0, "Show grid")], "the match on the other page");
-    assert!(registry::handle_at("prefs:search:current").is_some(), "the current match is outlined");
+    assert!(registry::handle_at("test:search:current").is_some(), "the current match is outlined");
 
     frame(&ctx, &mut fake, key(egui::Key::Enter));
     assert_eq!((fake.window.section, fake.window.filter.as_str()), (0, ""), "Enter opens the match's page and leaves search");
     frame(&ctx, &mut fake, Vec::new());
     assert_eq!(fake.drawn, ["alpha"]);
-    assert!(registry::handle_at("prefs:revealed").is_some(), "the opened row is outlined");
+    assert!(registry::handle_at("test:revealed").is_some(), "the opened row is outlined");
 
     fake.values.grid = true;
     frame(&ctx, &mut fake, Vec::new());
@@ -222,18 +222,27 @@ fn every_name_the_window_publishes_starts_with_the_hosts_prefix() {
     crate::i18n::install();
     let ctx = crate::fonts::test_context();
     let mut fake = Fake::default();
-    fake.window.open_at(0, PAGES.len());
-    for events in [Vec::new(), Vec::new(), vec![egui::Event::Text("zz".into())], Vec::new()] {
+    fake.window.open_at(1, PAGES.len());
+    let no_prefs_names = |when: &str| {
+        assert_eq!(registry::handles("prefs:"), Vec::new(), "{when}: no handle of another window's");
+        assert_eq!(registry::rects("prefs:"), Vec::new(), "{when}: no rect of another window's");
+    };
+    for events in [Vec::new(), Vec::new(), vec![egui::Event::Text("grid".into())], Vec::new(), Vec::new()] {
         frame_as(&ctx, &mut fake, events, "x");
     }
-    assert_eq!(fake.window.filter, "zz", "the search shows its clear button");
-    for name in ["x:defaults", "x:search", "x:search:clear", "x:ok", "x:apply", "x:cancel"] {
+    assert_eq!(fake.window.filter, "grid", "the search shows its clear button and a match");
+    for name in ["x:defaults", "x:search", "x:search:clear", "x:search:current", "x:ok", "x:apply", "x:cancel"] {
         assert!(registry::handle_at(name).is_some(), "{name} is published");
     }
     for name in ["x:search:frame", "x:page_body", "x:window", "x:footer", "x:actions"] {
         assert!(registry::rect_of(name).is_some(), "{name} is published");
     }
-    assert_eq!(registry::handles("prefs:"), Vec::new(), "no handle of another window's");
-    assert_eq!(registry::rects("prefs:"), Vec::new(), "no rect of another window's");
+    no_prefs_names("searching");
     assert!(ctx.memory(|memory| memory.has_focus(search_id(egui::Id::unique(("test_prefs_window", "x"))))), "the field's id is the window's");
+
+    frame_as(&ctx, &mut fake, key(egui::Key::Enter), "x");
+    frame_as(&ctx, &mut fake, Vec::new(), "x");
+    assert_eq!(fake.window.section, 0, "Enter opened the match");
+    assert!(registry::handle_at("x:revealed").is_some(), "the opened row is published under the prefix");
+    no_prefs_names("revealing");
 }
