@@ -1943,9 +1943,25 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
             q.pos = meet;
         }
     }
-    // One corner point: b's moved end becomes a's, and what held b's end holds the corner.
-    if let Some(held) = sk.points.get(nb).map(|q| (q.fixed, q.exprs.clone(), q.link.clone()))
-        && let Some(q) = sk.points.get_mut(na)
+    // One corner point: b's moved end becomes a's, and what held b's end holds the corner. The
+    // sketch origin is never the one merged away: it stays the corner, so what else ends there
+    // keeps sharing it.
+    let (keep, gone) = if nb == 0 { (nb, na) } else { (na, nb) };
+    let placed = |sk: &Sketch, e: usize| sk.points.get(e).map(|q| (q.exprs.clone(), q.link.clone())).unwrap_or_default();
+    let (keep_placed, gone_placed) = (placed(sk, keep), placed(sk, gone));
+    // The merged-away end's placement must be one the kept end already has, or take on (the
+    // origin takes on none).
+    fn clash<T: PartialEq>(keep_is_origin: bool, k: &Option<T>, g: &Option<T>) -> bool {
+        g.is_some() && (keep_is_origin || k.is_some()) && k != g
+    }
+    if clash(keep == 0, &keep_placed.0, &gone_placed.0) || clash(keep == 0, &keep_placed.1, &gone_placed.1) {
+        return Err(bad(
+            cmd,
+            "the lines' ends at the corner are each placed by their own expressions or reference, and one corner point can't follow both",
+        ));
+    }
+    if let Some(held) = sk.points.get(gone).map(|q| (q.fixed, q.exprs.clone(), q.link.clone()))
+        && let Some(q) = sk.points.get_mut(keep)
     {
         q.fixed |= held.0;
         if q.exprs.is_none() {
@@ -1956,14 +1972,14 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
         }
     }
     for c in sk.curves.iter_mut() {
-        c.kind.map_points(&|x| if x == nb { na } else { x });
+        c.kind.map_points(&|x| if x == gone { keep } else { x });
     }
     // Only a constraint the move changed can now repeat another: such a repeat is said once. Equal
     // constraints elsewhere in the sketch are not this fillet's to touch.
     let mut moved: Vec<(solidcraft_sketch::Constraint, bool)> = Vec::with_capacity(sk.constraints.len());
     for mut k in std::mem::take(&mut sk.constraints) {
         let before = k.kind.clone();
-        k.kind.remap(&|x| Some(if x == nb { na } else { x }), &Some);
+        k.kind.remap(&|x| Some(if x == gone { keep } else { x }), &Some);
         let changed = k.kind != before;
         moved.push((k, changed));
     }
@@ -1971,14 +1987,11 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     let repeats: Vec<bool> = moved
         .iter()
         .enumerate()
-        .map(|(i, (k, changed))| {
-            *changed && moved.iter().enumerate().any(|(j, (o, o_changed))| j != i && same(k, o) && (j < i || !*o_changed))
-        })
+        .map(|(i, (k, changed))| *changed && moved.iter().enumerate().any(|(j, (o, o_changed))| j != i && same(k, o) && (j < i || !*o_changed)))
         .collect();
-    let kept: Vec<solidcraft_sketch::Constraint> =
-        moved.into_iter().zip(repeats).filter(|(_, repeat)| !repeat).map(|((k, _), _)| k).collect();
+    let kept: Vec<solidcraft_sketch::Constraint> = moved.into_iter().zip(repeats).filter(|(_, repeat)| !repeat).map(|((k, _), _)| k).collect();
     sk.constraints = kept;
-    sk.remove_points(&[nb]);
+    sk.remove_points(&[gone]);
     Ok(())
 }
 
