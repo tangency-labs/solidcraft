@@ -1,29 +1,97 @@
 //! ISO 10303-21 ("Part 21") exchange structure parser: the HEADER and the DATA section's entity
-//! instances, simple (`#1=NAME(...)`) and complex (`#2=(A(...) B(...))`). Written from the
-//! public standard. Input is hostile: sizes, entity counts and nesting depth are capped and every
-//! error is a message, never a panic.
+//! instances, simple (`#1=NAME(...)`) and complex (`#2=(A(...) B(...))`), with the string escapes
+//! decoded (`\X\hh`, `\X2\…\X0\`, `\X4\…\X0\`, `\S\c`, `\\`). Written from the public ISO 10303-21
+//! specification.
+//!
+//! Input is hostile: the text size ([`MAX_BYTES`]), the entity count ([`MAX_ENTITIES`]), the record
+//! count ([`MAX_RECORDS`]), the parameter count ([`MAX_PARAMS`]), the parameter nesting depth
+//! (`MAX_DEPTH`, private) and the parts of a complex instance (`MAX_COMPLEX_PARTS`, private) are
+//! capped, nothing is allocated from a count read out of the file (lists grow as their items are
+//! read), and every refusal is an [`Error`], never a panic.
+//!
+//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). With the STEP
+//! merge (#2577) this becomes solidcore's one Part 21 implementation; `step-import`'s `part21.rs`
+//! goes with #2585.
+//!
+//! Deviations from SolidCraft: [`Exchange::entities`] is a `BTreeMap` (was a `HashMap`), so
+//! iterating it is in id order on every platform; what is stored and which definition wins a
+//! duplicate id are unchanged. The complex-instance part limit is the named `MAX_COMPLEX_PARTS`
+//! (was the literal 64). Otherwise only lint-driven rewrites that keep the same result (`map_or`,
+//! `u32::from`, or-patterns, the error line number counted as the newline-split pieces) and doc
+//! comments on every public item.
+//!
+//! Changed in review (#2591): a parse refuses with a typed [`Error`] (the messages are
+//! SolidCraft's); unterminated `\X2\`/`\X4\` runs decode in linear time; the parameter count is
+//! capped ([`MAX_PARAMS`]), so is the record count ([`MAX_RECORDS`]), and a repeated id counts
+//! against [`MAX_ENTITIES`]; a number with no digit and an integer beyond i64 are refused; a
+//! leading byte order mark is skipped; `\S\` before a UTF-8 character is kept as written.
+//!
+//! Limit: an ANCHOR, REFERENCE or SIGNATURE section (edition 3) is skipped to the first `ENDSEC;`
+//! in the raw text, so one inside a string in such a section ends the skip early and the rest is
+//! read as sections. No corpus file has these sections.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
+use std::num::IntErrorKind;
 
 /// Largest STEP text we parse.
 pub const MAX_BYTES: usize = 512 << 20;
-/// Most entity instances in one file.
+/// Most entity instances in one file, a repeated id counted each time.
 pub const MAX_ENTITIES: usize = 20_000_000;
 /// Deepest parameter list nesting.
 const MAX_DEPTH: usize = 64;
+/// A complex instance is refused when more than this many of its parts have been read and
+/// another follows.
+const MAX_COMPLEX_PARTS: usize = 64;
+/// Most records in one file's DATA sections, each part of a complex instance counted.
+///
+/// A record holds no parameter when its list is empty, so [`MAX_PARAMS`] does not bound them:
+/// `A()` is three bytes and its [`Record`] 48 (on a 64-bit target) plus its name, so a text at
+/// the size cap of empty complex-instance parts could ask for about 8 GB of record slots. This
+/// cap holds them to under 1 GB there; the whole corpus holds under a million instances.
+pub const MAX_RECORDS: usize = 20_000_000;
+/// Most parameters in one file, nested ones and the header's included.
+///
+/// [`MAX_BYTES`] alone does not bound memory: `$,` is two bytes and its [`Param`] 48 (on a
+/// 64-bit target), so a text at the size cap could ask for about 13 GB. This cap holds the
+/// parameters themselves to under 1 GB there, and less on wasm32, where a `Param` is smaller.
+/// The densest corpus file (NIST `nist_stc_09_asme1_ap242-e3.stp`, about 5.4 bytes a parameter
+/// counting its separators) would reach it at about 110 MB; it holds under a million.
+pub const MAX_PARAMS: usize = 20_000_000;
+
+/// The counts a parse refuses beyond: [`MAX_ENTITIES`] and [`MAX_PARAMS`] for every caller,
+/// smaller in tests so a limit is reached with a short text.
+#[derive(Clone, Copy)]
+struct Limits {
+    entities: usize,
+    records: usize,
+    params: usize,
+}
+
+const LIMITS: Limits = Limits {
+    entities: MAX_ENTITIES,
+    records: MAX_RECORDS,
+    params: MAX_PARAMS,
+};
 
 /// A parameter value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Param {
+    /// An integer.
     Int(i64),
+    /// A real (`1.`, `1.5E1`, `1.E-3`).
     Real(f64),
+    /// A string, its escapes decoded.
     Str(String),
     /// `.NAME.` (`.T.`/`.F.` included).
     Enum(String),
+    /// An entity instance name, `#n`.
     Ref(u64),
+    /// `(a, b, ...)`.
     List(Vec<Param>),
     /// `NAME(params)` (a typed value such as `LENGTH_MEASURE(1.)`).
     Typed(String, Vec<Param>),
+    /// `"hex"`, the text between the quotes as written.
     Binary(String),
     /// `$`
     Null,
@@ -32,6 +100,7 @@ pub enum Param {
 }
 
 impl Param {
+    /// A finite real, an integer as a real, or a typed value holding one of them.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Param::Real(x) => Some(*x).filter(|x| x.is_finite()),
@@ -40,6 +109,7 @@ impl Param {
             _ => None,
         }
     }
+    /// An integer, or a real with no fraction below `9e15` in magnitude.
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Param::Int(i) => Some(*i),
@@ -47,18 +117,21 @@ impl Param {
             _ => None,
         }
     }
+    /// The id of an entity reference.
     pub fn as_ref_id(&self) -> Option<u64> {
         match self {
             Param::Ref(r) => Some(*r),
             _ => None,
         }
     }
+    /// The text of a string.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Param::Str(s) => Some(s),
             _ => None,
         }
     }
+    /// The name of an enumeration, without its dots.
     pub fn as_enum(&self) -> Option<&str> {
         match self {
             Param::Enum(s) => Some(s),
@@ -73,6 +146,7 @@ impl Param {
             _ => None,
         }
     }
+    /// The items of a list.
     pub fn as_list(&self) -> Option<&[Param]> {
         match self {
             Param::List(v) => Some(v),
@@ -84,54 +158,64 @@ impl Param {
 /// One record of an entity instance: a simple instance has one, a complex one several.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record {
+    /// The entity type name, upper case.
     pub name: String,
+    /// The record's parameters, in file order.
     pub params: Vec<Param>,
 }
 
 /// An entity instance.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entity {
+    /// Its records, in file order.
     pub records: Vec<Record>,
 }
 
 impl Entity {
+    /// Whether the instance has more than one record.
     pub fn is_complex(&self) -> bool {
         self.records.len() > 1
     }
     /// Name of a simple instance (the first record of a complex one).
     pub fn name(&self) -> &str {
-        self.records.first().map(|r| r.name.as_str()).unwrap_or("")
+        self.records.first().map_or("", |r| r.name.as_str())
     }
     /// Parameters of the record called `name`.
     pub fn record(&self, name: &str) -> Option<&[Param]> {
-        self.records.iter().find(|r| r.name == name).map(|r| r.params.as_slice())
+        self.records
+            .iter()
+            .find(|r| r.name == name)
+            .map(|r| r.params.as_slice())
     }
+    /// Whether the instance has a record called `name`.
     pub fn has(&self, name: &str) -> bool {
         self.records.iter().any(|r| r.name == name)
     }
     /// Parameters of a simple instance.
     pub fn params(&self) -> &[Param] {
-        self.records.first().map(|r| r.params.as_slice()).unwrap_or(&[])
+        self.records.first().map_or(&[], |r| r.params.as_slice())
     }
 }
 
 /// A parsed exchange file.
 #[derive(Clone, Debug, Default)]
 pub struct Exchange {
-    /// FILE_SCHEMA names.
+    /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
-    /// FILE_NAME originating system.
+    /// `FILE_NAME` originating system.
     pub originating_system: String,
-    /// FILE_NAME preprocessor version.
+    /// `FILE_NAME` preprocessor version.
     pub preprocessor: String,
-    /// FILE_DESCRIPTION text, its lines joined by a space.
+    /// `FILE_DESCRIPTION` text, its lines joined by a space.
     pub description: String,
-    pub entities: HashMap<u64, Entity>,
+    /// The DATA sections' entity instances by id.
+    pub entities: BTreeMap<u64, Entity>,
     /// Ids defined more than once (the first definition is kept).
     pub duplicates: Vec<u64>,
 }
 
 impl Exchange {
+    /// The entity instance `#id`.
     pub fn get(&self, id: u64) -> Option<&Entity> {
         self.entities.get(&id)
     }
@@ -140,24 +224,86 @@ impl Exchange {
 struct Lexer<'a> {
     s: &'a [u8],
     i: usize,
+    /// Parameters read so far, header and data.
+    params: usize,
+    /// The most parameters to read.
+    max_params: usize,
+    /// DATA records read so far.
+    records: usize,
+    /// The most records to read.
+    max_records: usize,
 }
 
-fn err<T>(msg: impl Into<String>) -> Result<T, String> {
-    Err(msg.into())
+/// Why a text was refused. Its message is the one `parse` returned as a string before it had
+/// a type; `String::from` gives it back for callers that collect messages.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum Error {
+    /// The text is longer than [`MAX_BYTES`].
+    #[error("STEP file too large ({} MB, limit {} MB)", .bytes >> 20, MAX_BYTES >> 20)]
+    TooLarge {
+        /// The text's length.
+        bytes: usize,
+    },
+    /// The text does not start with `ISO-10303-21;`.
+    #[error("not a STEP file (no ISO-10303-21 header)")]
+    NotStep,
+    /// The text ends before `END-ISO-10303-21;`.
+    #[error("STEP file ends without END-ISO-10303-21")]
+    MissingEnd,
+    /// More entity instances than the limit.
+    #[error("STEP file has more than {limit} entities")]
+    TooManyEntities {
+        /// The limit, [`MAX_ENTITIES`].
+        limit: usize,
+    },
+    /// More records than the limit.
+    #[error("STEP file has more than {limit} records")]
+    TooManyRecords {
+        /// The limit, [`MAX_RECORDS`].
+        limit: usize,
+    },
+    /// More parameters than the limit.
+    #[error("STEP file has more than {limit} parameters")]
+    TooManyParams {
+        /// The limit, [`MAX_PARAMS`].
+        limit: usize,
+    },
+    /// The [`Progress`] watcher cancelled.
+    #[error("STEP import cancelled")]
+    Cancelled,
+    /// The text breaks the exchange structure's syntax.
+    #[error("STEP syntax error at line {line}: {message}")]
+    Syntax {
+        /// The line, counted from 1.
+        line: usize,
+        /// What was wrong.
+        message: String,
+    },
 }
 
-impl<'a> Lexer<'a> {
-    fn line(&self) -> usize {
-        self.s.get(..self.i).map(|b| b.iter().filter(|c| **c == b'\n').count() + 1).unwrap_or(0)
+impl From<Error> for String {
+    fn from(e: Error) -> String {
+        e.to_string()
     }
-    fn fail<T>(&self, msg: &str) -> Result<T, String> {
-        err(format!("STEP syntax error at line {}: {msg}", self.line()))
+}
+
+impl Lexer<'_> {
+    fn line(&self) -> usize {
+        self.s
+            .get(..self.i)
+            .map_or(0, |b| b.split(|c| *c == b'\n').count())
+    }
+    fn fail<T>(&self, msg: &str) -> Result<T, Error> {
+        Err(Error::Syntax {
+            line: self.line(),
+            message: msg.to_string(),
+        })
     }
     fn peek(&self) -> Option<u8> {
         self.s.get(self.i).copied()
     }
     /// Skip whitespace and comments.
-    fn ws(&mut self) -> Result<(), String> {
+    fn ws(&mut self) -> Result<(), Error> {
         loop {
             match self.peek() {
                 Some(c) if c.is_ascii_whitespace() => self.i += 1,
@@ -172,7 +318,7 @@ impl<'a> Lexer<'a> {
             }
         }
     }
-    fn eat(&mut self, c: u8) -> Result<bool, String> {
+    fn eat(&mut self, c: u8) -> Result<bool, Error> {
         self.ws()?;
         if self.peek() == Some(c) {
             self.i += 1;
@@ -181,10 +327,14 @@ impl<'a> Lexer<'a> {
             Ok(false)
         }
     }
-    fn expect(&mut self, c: u8) -> Result<(), String> {
-        if self.eat(c)? { Ok(()) } else { self.fail(&format!("expected `{}`", c as char)) }
+    fn expect(&mut self, c: u8) -> Result<(), Error> {
+        if self.eat(c)? {
+            Ok(())
+        } else {
+            self.fail(&format!("expected `{}`", c as char))
+        }
     }
-    fn keyword(&mut self) -> Result<String, String> {
+    fn keyword(&mut self) -> Result<String, Error> {
         self.ws()?;
         let st = self.i;
         if self.peek() == Some(b'!') {
@@ -202,7 +352,7 @@ impl<'a> Lexer<'a> {
         }
         Ok(String::from_utf8_lossy(self.s.get(st..self.i).unwrap_or(&[])).to_ascii_uppercase())
     }
-    fn number(&mut self) -> Result<Param, String> {
+    fn number(&mut self) -> Result<Param, Error> {
         let st = self.i;
         while let Some(c) = self.peek() {
             if c.is_ascii_digit() || matches!(c, b'+' | b'-' | b'.' | b'E' | b'e') {
@@ -212,20 +362,41 @@ impl<'a> Lexer<'a> {
             }
         }
         let t = std::str::from_utf8(self.s.get(st..self.i).unwrap_or(&[])).unwrap_or("");
-        if !t.contains(['.', 'E', 'e'])
-            && let Ok(i) = t.parse::<i64>()
-        {
-            return Ok(Param::Int(i));
+        // Part 21 numbers start with a digit after the sign; a lone `.` or `+.` (or `-.E3`)
+        // would otherwise become 0.0 through the `1.` fix-up below.
+        let mantissa = t.split(['E', 'e']).next().unwrap_or("");
+        if !mantissa.bytes().any(|c| c.is_ascii_digit()) {
+            return self.fail(&format!("bad number `{t}`"));
+        }
+        if !t.contains(['.', 'E', 'e']) {
+            return match t.parse::<i64>() {
+                Ok(i) => Ok(Param::Int(i)),
+                // An integer is a count or an index: one beyond i64 is refused, not rounded
+                // into a real.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        IntErrorKind::PosOverflow | IntErrorKind::NegOverflow
+                    ) =>
+                {
+                    self.fail(&format!("integer `{t}` out of range"))
+                }
+                Err(_) => self.fail(&format!("bad number `{t}`")),
+            };
         }
         // STEP allows `1.` and `1.E-3`.
         let fixed = t.replace(".E", ".0E").replace(".e", ".0e");
-        let fixed = if fixed.ends_with('.') { format!("{fixed}0") } else { fixed };
+        let fixed = if fixed.ends_with('.') {
+            format!("{fixed}0")
+        } else {
+            fixed
+        };
         match fixed.parse::<f64>() {
             Ok(x) => Ok(Param::Real(x)),
             Err(_) => self.fail(&format!("bad number `{t}`")),
         }
     }
-    fn string(&mut self) -> Result<String, String> {
+    fn string(&mut self) -> Result<String, Error> {
         // Opening quote consumed by the caller.
         let mut raw = Vec::new();
         loop {
@@ -240,7 +411,7 @@ impl<'a> Lexer<'a> {
                         break;
                     }
                 }
-                Some(b'\n') | Some(b'\r') => self.i += 1,
+                Some(b'\n' | b'\r') => self.i += 1,
                 Some(c) => {
                     raw.push(c);
                     self.i += 1;
@@ -249,12 +420,20 @@ impl<'a> Lexer<'a> {
         }
         Ok(decode_string(&raw))
     }
-    fn param(&mut self, depth: usize) -> Result<Param, String> {
+    fn param(&mut self, depth: usize) -> Result<Param, Error> {
         if depth > MAX_DEPTH {
             return self.fail("parameters nested too deeply");
         }
+        if self.params >= self.max_params {
+            return Err(Error::TooManyParams {
+                limit: self.max_params,
+            });
+        }
+        self.params += 1;
         self.ws()?;
-        let Some(c) = self.peek() else { return self.fail("unexpected end of file") };
+        let Some(c) = self.peek() else {
+            return self.fail("unexpected end of file");
+        };
         match c {
             b'$' => {
                 self.i += 1;
@@ -285,15 +464,23 @@ impl<'a> Lexer<'a> {
                     self.i += 1;
                 }
                 let t = std::str::from_utf8(self.s.get(st..self.i).unwrap_or(&[])).unwrap_or("");
-                t.parse::<u64>().map(Param::Ref).or_else(|_| self.fail("bad entity reference"))
+                t.parse::<u64>()
+                    .map(Param::Ref)
+                    .or_else(|_| self.fail("bad entity reference"))
             }
-            b'.' if self.s.get(self.i + 1).is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_') => {
+            b'.' if self
+                .s
+                .get(self.i + 1)
+                .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_') =>
+            {
                 self.i += 1;
                 let st = self.i;
                 while self.peek().is_some_and(|c| c != b'.') {
                     self.i += 1;
                 }
-                let v = String::from_utf8_lossy(self.s.get(st..self.i).unwrap_or(&[])).trim().to_ascii_uppercase();
+                let v = String::from_utf8_lossy(self.s.get(st..self.i).unwrap_or(&[]))
+                    .trim()
+                    .to_ascii_uppercase();
                 self.expect(b'.')?;
                 Ok(Param::Enum(v))
             }
@@ -311,7 +498,7 @@ impl<'a> Lexer<'a> {
         }
     }
     /// Parameters after an opening `(` up to and including the `)`.
-    fn list_rest(&mut self, depth: usize) -> Result<Vec<Param>, String> {
+    fn list_rest(&mut self, depth: usize) -> Result<Vec<Param>, Error> {
         let mut v = Vec::new();
         if self.eat(b')')? {
             return Ok(v);
@@ -325,24 +512,47 @@ impl<'a> Lexer<'a> {
             return Ok(v);
         }
     }
-    fn record(&mut self) -> Result<Record, String> {
+    fn record(&mut self) -> Result<Record, Error> {
+        if self.records >= self.max_records {
+            return Err(Error::TooManyRecords {
+                limit: self.max_records,
+            });
+        }
+        self.records += 1;
         let name = self.keyword()?;
         self.expect(b'(')?;
-        Ok(Record { name, params: self.list_rest(1)? })
+        Ok(Record {
+            name,
+            params: self.list_rest(1)?,
+        })
     }
 }
 
 /// Decode the Part 21 string escapes (`\X\hh`, `\X2\…\X0\`, `\X4\…\X0\`, `\S\c`, `\\`).
 fn decode_string(raw: &[u8]) -> String {
-    decode_string_with_end(raw, |rest| rest.windows(4).position(|w| w == b"\\X0\\"))
+    decode_string_with(raw, |rest| rest.windows(4).position(|w| w == b"\\X0\\"))
 }
 
-/// The decoder with its terminator search supplied, so tests can bound search work directly.
-fn decode_string_with_end(raw: &[u8], mut find_end: impl FnMut(&[u8]) -> Option<usize>) -> String {
+/// [`decode_string`] with the search for a run's `\X0\` given, so a test can count its steps.
+/// `find_end(rest)` is the offset of the first `\X0\` in `rest`.
+///
+/// A `\X2\` or `\X4\` with no `\X0\` after it is kept as written. The search for the
+/// terminator is remembered: the first `\X0\` at or after one position is also the first at or
+/// after every later position up to it, and when none follows one position none follows any
+/// later one. So a search starts only past the terminator the last one found, the searches
+/// cover disjoint stretches of `raw`, and decoding is linear however many unterminated runs the
+/// string holds (searching again from each one made it quadratic).
+fn decode_string_with(raw: &[u8], mut find_end: impl FnMut(&[u8]) -> Option<usize>) -> String {
     let mut out = String::new();
     let mut i = 0;
-    let mut no_more_run_ends = false;
-    let hex = |b: &[u8]| std::str::from_utf8(b).ok().and_then(|t| u32::from_str_radix(t, 16).ok());
+    // The last search's answer: the position in `raw` of the first `\X0\` it found (`None`:
+    // none to the end). `None` outside: no search yet.
+    let mut next_end: Option<Option<usize>> = None;
+    let hex = |b: &[u8]| {
+        std::str::from_utf8(b)
+            .ok()
+            .and_then(|t| u32::from_str_radix(t, 16).ok())
+    };
     while let Some(&c) = raw.get(i) {
         if c == b'\\' {
             let rest = raw.get(i..).unwrap_or(&[]);
@@ -360,15 +570,19 @@ fn decode_string_with_end(raw: &[u8], mut find_end: impl FnMut(&[u8]) -> Option<
             }
             let mut run = false;
             for (tag, width) in [(&b"\\X2\\"[..], 4usize), (&b"\\X4\\"[..], 8)] {
-                if rest.starts_with(tag) && !no_more_run_ends {
-                    let Some(end) = find_end(rest) else {
-                        // No terminator exists anywhere in the remaining input. Keep the
-                        // existing literal recovery, but never scan this tail again. A
-                        // successful search consumes its run, so all searches together
-                        // inspect at most the input's length.
-                        no_more_run_ends = true;
-                        break;
-                    };
+                if !rest.starts_with(tag) {
+                    continue;
+                }
+                let found = match next_end {
+                    Some(Some(end)) if end >= i => Some(end),
+                    Some(None) => None,
+                    _ => {
+                        let found = find_end(rest).map(|end| i + end);
+                        next_end = Some(found);
+                        found
+                    }
+                };
+                if let Some(end) = found.and_then(|end| end.checked_sub(i)) {
                     let body = rest.get(4..end).unwrap_or(&[]);
                     let units: Vec<u32> = body.chunks(width).filter_map(hex).collect();
                     if width == 4 {
@@ -382,14 +596,19 @@ fn decode_string_with_end(raw: &[u8], mut find_end: impl FnMut(&[u8]) -> Option<
                     break;
                 }
             }
-            // A run may be followed straight away by the backslash of the next escape (#2344).
+            // A run may be followed straight away by the backslash of the next escape
+            // (SolidCraft #2344).
             if run {
                 continue;
             }
+            // `\S\` takes a basic-alphabet character (space to `~`); before any other byte,
+            // the start of a UTF-8 character, adding 128 would split it into mojibake, so the
+            // escape is kept as written.
             if rest.starts_with(b"\\S\\")
                 && let Some(&ch) = rest.get(3)
+                && (b' '..=b'~').contains(&ch)
             {
-                out.push(char::from_u32(ch as u32 + 128).unwrap_or('?'));
+                out.push(char::from_u32(u32::from(ch) + 128).unwrap_or('?'));
                 i += 4;
                 continue;
             }
@@ -407,7 +626,6 @@ fn decode_string_with_end(raw: &[u8], mut find_end: impl FnMut(&[u8]) -> Option<
     out
 }
 
-/// Parse a Part 21 file.
 /// Someone waiting for a long parse: told how far it is, and able to stop it.
 pub trait Progress {
     /// Stop at the next check.
@@ -417,26 +635,44 @@ pub trait Progress {
 }
 
 /// Parse an exchange structure.
-pub fn parse(text: &str) -> Result<Exchange, String> {
+pub fn parse(text: &str) -> Result<Exchange, Error> {
     parse_with(text, None)
 }
 
 /// [`parse`], reporting progress to `watch` and stopping when it cancels.
-pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, String> {
+pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, Error> {
+    parse_limited(text, watch, LIMITS)
+}
+
+/// [`parse_with`] with the counts it refuses beyond given.
+fn parse_limited(
+    text: &str,
+    watch: Option<&dyn Progress>,
+    limits: Limits,
+) -> Result<Exchange, Error> {
     if text.len() > MAX_BYTES {
-        return err(format!("STEP file too large ({} MB, limit {} MB)", text.len() >> 20, MAX_BYTES >> 20));
+        return Err(Error::TooLarge { bytes: text.len() });
     }
-    let mut lx = Lexer { s: text.as_bytes(), i: 0 };
+    // Some writers start the file with a UTF-8 byte order mark.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut lx = Lexer {
+        s: text.as_bytes(),
+        i: 0,
+        params: 0,
+        max_params: limits.params,
+        records: 0,
+        max_records: limits.records,
+    };
     let magic = lx.keyword()?;
     if magic != "ISO-10303-21" {
-        return err("not a STEP file (no ISO-10303-21 header)");
+        return Err(Error::NotStep);
     }
     lx.expect(b';')?;
     let mut ex = Exchange::default();
     loop {
         lx.ws()?;
         if lx.peek().is_none() {
-            return err("STEP file ends without END-ISO-10303-21");
+            return Err(Error::MissingEnd);
         }
         let kw = lx.keyword()?;
         match kw.as_str() {
@@ -454,17 +690,32 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                     match k.as_str() {
                         "FILE_SCHEMA" => {
                             if let Some(Param::List(v)) = params.first() {
-                                ex.schemas = v.iter().filter_map(|p| p.as_str().map(str::to_string)).collect();
+                                ex.schemas = v
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect();
                             }
                         }
                         "FILE_DESCRIPTION" => {
                             if let Some(Param::List(v)) = params.first() {
-                                ex.description = v.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>().join(" ");
+                                ex.description = v
+                                    .iter()
+                                    .filter_map(|p| p.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
                             }
                         }
                         "FILE_NAME" => {
-                            ex.preprocessor = params.get(4).and_then(Param::as_str).unwrap_or("").to_string();
-                            ex.originating_system = params.get(5).and_then(Param::as_str).unwrap_or("").to_string();
+                            ex.preprocessor = params
+                                .get(4)
+                                .and_then(Param::as_str)
+                                .unwrap_or("")
+                                .to_string();
+                            ex.originating_system = params
+                                .get(5)
+                                .and_then(Param::as_str)
+                                .unwrap_or("")
+                                .to_string();
                         }
                         _ => {}
                     }
@@ -491,7 +742,10 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                     while lx.peek().is_some_and(|c| c.is_ascii_digit()) {
                         lx.i += 1;
                     }
-                    let id: u64 = match std::str::from_utf8(lx.s.get(st..lx.i).unwrap_or(&[])).ok().and_then(|t| t.parse().ok()) {
+                    let id: u64 = match std::str::from_utf8(lx.s.get(st..lx.i).unwrap_or(&[]))
+                        .ok()
+                        .and_then(|t| t.parse().ok())
+                    {
                         Some(id) => id,
                         None => return lx.fail("bad entity id"),
                     };
@@ -499,7 +753,7 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                     let records = if lx.eat(b'(')? {
                         let mut rs = Vec::new();
                         while !lx.eat(b')')? {
-                            if rs.len() > 64 {
+                            if rs.len() > MAX_COMPLEX_PARTS {
                                 return lx.fail("complex entity with too many parts");
                             }
                             rs.push(lx.record()?);
@@ -513,18 +767,21 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                         && let Some(w) = watch
                     {
                         if w.cancelled() {
-                            return err("STEP import cancelled");
+                            return Err(Error::Cancelled);
                         }
                         w.progress("reading", lx.i, lx.s.len());
                     }
-                    if ex.entities.len() >= MAX_ENTITIES {
-                        return err(format!("STEP file has more than {MAX_ENTITIES} entities"));
+                    // A duplicate's records were read too, so it counts as an instance.
+                    if ex.entities.len() + ex.duplicates.len() >= limits.entities {
+                        return Err(Error::TooManyEntities {
+                            limit: limits.entities,
+                        });
                     }
                     // A duplicate id is invalid; some writers emit them for geometry nobody
                     // reads. Keep the first definition and report it.
                     match ex.entities.entry(id) {
-                        std::collections::hash_map::Entry::Occupied(_) => ex.duplicates.push(id),
-                        std::collections::hash_map::Entry::Vacant(v) => {
+                        Entry::Occupied(_) => ex.duplicates.push(id),
+                        Entry::Vacant(v) => {
                             v.insert(Entity { records });
                         }
                     }
@@ -534,7 +791,8 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                 lx.expect(b';')?;
                 return Ok(ex);
             }
-            // ANCHOR / REFERENCE / SIGNATURE sections (Part 21 edition 3): skip to ENDSEC.
+            // ANCHOR / REFERENCE / SIGNATURE sections (Part 21 edition 3): skip to the first
+            // `ENDSEC;` in the raw text (the limit in the module documentation).
             "ANCHOR" | "REFERENCE" | "SIGNATURE" => {
                 let rest = lx.s.get(lx.i..).unwrap_or(&[]);
                 match rest.windows(7).position(|w| w == b"ENDSEC;") {
@@ -552,40 +810,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unterminated_unicode_escape_search_is_linear() {
-        // A separator keeps the closing backslash from pairing with the next opening
-        // backslash as an escaped `\\`. Without it, only the first tag is searched.
-        for (tag, literal) in [(b"\\X2\\ ", "\\X2\\ "), (b"\\X4\\ ", "\\X4\\ ")] {
-            let raw = tag.repeat(100_000);
-            let mut comparisons = 0;
-            let decoded = decode_string_with_end(&raw, |rest| {
-                rest.windows(4).position(|w| {
-                    comparisons += 1;
-                    assert!(comparisons <= raw.len(), "the decoder searched the same tail repeatedly");
-                    w == b"\\X0\\"
-                })
-            });
-            assert_eq!(decoded, literal.repeat(100_000));
-        }
-    }
-
-    #[test]
-    fn terminated_runs_and_literal_recovery_keep_their_text() {
-        let raw = b"\\X2\\00E9\\X0\\".repeat(1_000);
-        let mut comparisons = 0;
-        let decoded = decode_string_with_end(&raw, |rest| {
-            rest.windows(4).position(|w| {
-                comparisons += 1;
-                assert!(comparisons <= raw.len());
-                w == b"\\X0\\"
-            })
-        });
-        assert_eq!(decoded, "\u{e9}".repeat(1_000));
-        assert_eq!(decode_string(b"\\X2\\oops \\X\\41 \\S\\a"), "\\X2\\oops A \u{e1}");
-        assert_eq!(decode_string(b"\\X2\\\\X2\\"), "\\X2\\X2\\");
-    }
-
-    #[test]
     fn parses_simple_and_complex() {
         let t = "ISO-10303-21;\nHEADER;FILE_DESCRIPTION((''),'2;1');\nFILE_NAME('a','',(''),(''),'','sys','');\nFILE_SCHEMA(('AUTOMOTIVE_DESIGN'));ENDSEC;\nDATA;\n#1=CARTESIAN_POINT('p',(0.,1.5E1,-2));\n/* c */ #2=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));\n#3=X('it''s','\\X2\\00E9\\X0\\',$,#1,LENGTH_MEASURE(1.E-3),\"0F\");\nENDSEC;\nEND-ISO-10303-21;\n";
         let ex = parse(t).unwrap();
@@ -593,7 +817,12 @@ mod tests {
         assert_eq!(ex.originating_system, "sys");
         let p = ex.get(1).unwrap();
         assert_eq!(p.name(), "CARTESIAN_POINT");
-        let xyz: Vec<f64> = p.params()[1].as_list().unwrap().iter().filter_map(Param::as_f64).collect();
+        let xyz: Vec<f64> = p.params()[1]
+            .as_list()
+            .unwrap()
+            .iter()
+            .filter_map(Param::as_f64)
+            .collect();
         assert_eq!(xyz, vec![0.0, 15.0, -2.0]);
         let u = ex.get(2).unwrap();
         assert!(u.is_complex() && u.has("SI_UNIT"));
@@ -606,22 +835,45 @@ mod tests {
         assert_eq!(x[4].as_f64(), Some(1e-3));
     }
 
+    /// A DATA section holding `data`, with no header.
+    fn data(data: &str) -> String {
+        format!("ISO-10303-21;DATA;{data}ENDSEC;END-ISO-10303-21;")
+    }
+
     #[test]
     fn hostile_text_is_an_error() {
         for t in [
-            "",
-            "garbage",
-            "ISO-10303-21;",
-            "ISO-10303-21;DATA;#1=A(",
-            "ISO-10303-21;DATA;#1=A('x",
-            "ISO-10303-21;DATA;#1=A(/*",
-            "ISO-10303-21;DATA;#=A();ENDSEC;END-ISO-10303-21;",
-            "ISO-10303-21;DATA;#99999999999999999999999=A();ENDSEC;END-ISO-10303-21;",
-            "ISO-10303-21;DATA;#1=A(1e999999.);ENDSEC;END-ISO-10303-21;",
+            String::new(),
+            "garbage".into(),
+            "ISO-10303-21;".into(),
+            "ISO-10303-21;DATA;#1=A(".into(),
+            "ISO-10303-21;DATA;#1=A('x".into(),
+            "ISO-10303-21;DATA;#1=A(/*".into(),
+            data("#=A();"),
+            data("#99999999999999999999999=A();"),
+            // An exponent written with a fraction is no number: `bad number`.
+            data("#1=A(1e999999.);"),
+            // A number needs a digit before its exponent.
+            data("#1=A(.);"),
+            data("#1=A(+.);"),
+            data("#1=A(-.E3);"),
+            // An integer beyond i64 is refused, not read as a real.
+            data("#1=A(99999999999999999999);"),
         ] {
-            let _ = parse(t);
+            assert!(parse(&t).is_err(), "{t:?} parsed");
         }
-        let deep = format!("ISO-10303-21;DATA;#1=A({}{});ENDSEC;END-ISO-10303-21;", "(".repeat(10_000), ")".repeat(10_000));
+        // A real beyond f64 parses as infinity, which `as_f64` refuses where it is used.
+        let big = parse(&data("#1=A(1.E999999);")).unwrap();
+        let p = &big.get(1).unwrap().params()[0];
+        assert_eq!(*p, Param::Real(f64::INFINITY));
+        assert_eq!(p.as_f64(), None);
+        // A byte order mark before the header is skipped.
+        assert!(parse(&format!("\u{feff}{}", data(""))).is_ok());
+        let deep = format!(
+            "ISO-10303-21;DATA;#1=A({}{});ENDSEC;END-ISO-10303-21;",
+            "(".repeat(10_000),
+            ")".repeat(10_000)
+        );
         assert!(parse(&deep).is_err());
         let dup = parse("ISO-10303-21;DATA;#1=A(1);#1=B();ENDSEC;END-ISO-10303-21;").unwrap();
         assert_eq!(dup.duplicates, vec![1]);
@@ -629,8 +881,106 @@ mod tests {
         assert_eq!(decode_string(b"\\X\\E9"), "\u{e9}");
         assert_eq!(decode_string(b"a\\X2\\00E900E8\\X0\\b"), "a\u{e9}\u{e8}b");
         assert_eq!(decode_string(b"\\"), "\\");
-        // One run per character, as `step_out` writes them (#2344).
-        assert_eq!(decode_string(b"\\X2\\5706\\X0\\\\X2\\89D2\\X0\\20"), "\u{5706}\u{89d2}20");
-        assert_eq!(decode_string(b"\\X4\\0001F600\\X0\\\\X2\\00E9\\X0\\\\S\\a"), "\u{1f600}\u{e9}\u{e1}");
+        // One run per character, as SolidCraft's `step_out` writes them (SolidCraft #2344).
+        assert_eq!(
+            decode_string(b"\\X2\\5706\\X0\\\\X2\\89D2\\X0\\20"),
+            "\u{5706}\u{89d2}20"
+        );
+        assert_eq!(
+            decode_string(b"\\X4\\0001F600\\X0\\\\X2\\00E9\\X0\\\\S\\a"),
+            "\u{1f600}\u{e9}\u{e1}"
+        );
+        // `\S\` takes a basic-alphabet character; before a UTF-8 one it is kept as written.
+        assert_eq!(decode_string("\\S\\\u{e9}".as_bytes()), "\\S\\\u{e9}");
+    }
+
+    /// The decoded text, with the windows its terminator searches compare counted: the test
+    /// stops at the first one beyond the text's length, which a decoder searching the same
+    /// tail again reaches.
+    fn decode_counted(raw: &[u8]) -> String {
+        let mut steps = 0;
+        decode_string_with(raw, |rest| {
+            rest.windows(4).position(|w| {
+                steps += 1;
+                assert!(
+                    steps <= raw.len(),
+                    "more search steps than {} bytes",
+                    raw.len()
+                );
+                w == b"\\X0\\"
+            })
+        })
+    }
+
+    #[test]
+    fn run_terminators_are_searched_once() {
+        // The space keeps a tag's closing backslash from pairing with the next tag's opening one
+        // as an escaped `\\`, which would leave only the first tag to search from.
+        for tag in [&b"\\X2\\ "[..], b"\\X4\\ "] {
+            let raw = tag.repeat(100_000);
+            // No `\X0\` anywhere: every tag is kept as written.
+            assert_eq!(decode_counted(&raw).as_bytes(), raw.as_slice());
+        }
+        let raw = b"\\X2\\00E9\\X0\\".repeat(100_000);
+        assert_eq!(decode_counted(&raw), "\u{e9}".repeat(100_000));
+    }
+
+    #[test]
+    fn parameters_are_counted_against_the_limit() {
+        // `$`, the list, its `$`, the typed value and its `1.`: five parameters.
+        let t = data("#1=A($,($),T(1.));");
+        let at = |params| parse_limited(&t, None, Limits { params, ..LIMITS });
+        assert!(at(5).is_ok());
+        assert_eq!(at(4).unwrap_err(), Error::TooManyParams { limit: 4 });
+        // The count runs over the whole file, not one entity.
+        let two = data("#1=A($,$);#2=A($,$);");
+        assert_eq!(
+            parse_limited(
+                &two,
+                None,
+                Limits {
+                    params: 3,
+                    ..LIMITS
+                }
+            )
+            .unwrap_err(),
+            Error::TooManyParams { limit: 3 }
+        );
+    }
+
+    #[test]
+    fn records_are_counted_against_the_limit() {
+        // Empty parts of complex instances hold no parameter but each is a record.
+        let t = data("#1=(A()B()C());");
+        let at = |records| parse_limited(&t, None, Limits { records, ..LIMITS });
+        assert!(at(3).is_ok());
+        assert_eq!(at(2).unwrap_err(), Error::TooManyRecords { limit: 2 });
+        // The count runs over the whole file, simple instances included.
+        let two = data("#1=(A()B());#2=C();");
+        assert_eq!(
+            parse_limited(
+                &two,
+                None,
+                Limits {
+                    records: 2,
+                    ..LIMITS
+                }
+            )
+            .unwrap_err(),
+            Error::TooManyRecords { limit: 2 }
+        );
+    }
+
+    #[test]
+    fn duplicate_instances_count_against_the_entity_limit() {
+        let limits = Limits {
+            entities: 2,
+            ..LIMITS
+        };
+        assert!(parse_limited(&data("#1=A();#2=A();"), None, limits).is_ok());
+        assert_eq!(
+            parse_limited(&data("#1=A();#1=A();#1=A();"), None, limits).unwrap_err(),
+            Error::TooManyEntities { limit: 2 }
+        );
     }
 }
