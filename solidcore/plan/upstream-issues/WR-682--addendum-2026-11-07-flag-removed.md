@@ -32,7 +32,7 @@ found no curve (`fillet_geom::p2`).
 - **Known failing:** upstream's `cyl_on_box1.smb` edge 12 r 2 (the goldens'
   `private-upstream-rollover-404-cyl-on-box1-edge12-r2`) fails in the rollover (1001) once the
   trace is taken. Main's default built it. The trace's curves agree with the two-points
-  intersector's to the tolerance, so the cause isn't found yet (tangency-labs/solidcore#3072).
+  intersector's to the tolerance, so the cause isn't found yet (tangency-labs/solidcraft#13694, moved from tangency-labs/solidcore#3072).
 - **Tests:** `wr682_surface_plane_curve` keeps the trace's tests on the default kernel. Its
   flag-off case is removed, and the cases that compared the flag on and off assert those answers
   themselves. The tests that set the flag drop the setting.
