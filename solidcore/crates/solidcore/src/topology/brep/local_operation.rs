@@ -2009,6 +2009,33 @@ mod tests {
         given_its_own(k, b, s, 2.0 * std::f64::consts::PI.powi(2) * 3.0);
     }
 
+    /// A whole torus's one face, meeting only itself across its seams, given the coaxial
+    /// torus a half wider (its offset by 0.5): it has no neighbour, so no reach to bound,
+    /// and the body grows to the new torus, `2 π² R r²`, with the same face, edges and
+    /// vertex. (The reach used to be asked of the torus's class first, which has no
+    /// certified bound, and the move was refused.)
+    #[test]
+    fn a_torus_given_a_wider_coaxial_torus_moves_to_it() {
+        use crate::primitive::api_primitives as ap;
+        let mut k = Kernel::default();
+        let mut b = ap::create_torus(&mut k, Point3::ZERO, 3.0, 1.0).unwrap();
+        let face = curved_face(&b);
+        let before = (b.faces().len(), b.edges().len(), b.vertices().len());
+        let s = Surface::from(ap::create_torus_surface(&k, Point3::ZERO, 3.0, 1.5).unwrap());
+        with_notifications(&mut b, |b, notes| {
+            local_operation(&mut k, b, &[face], vec![s], notes)
+        })
+        .unwrap();
+        let (v, manifold) = volume_and_manifold(&k, &mut b);
+        assert!(manifold);
+        let want = 2.0 * std::f64::consts::PI.powi(2) * 3.0 * 1.5 * 1.5;
+        assert!((v - want).abs() <= 1e-6 * want, "{v} vs {want}");
+        assert_eq!(
+            (b.faces().len(), b.edges().len(), b.vertices().len()),
+            before
+        );
+    }
+
     /// A plane through the origin with normal `(0, -t, 1)` (axes `x`, `(0, 1, t)`), and the
     /// parallel plane through `(0, s, 0)`, apart by `t s` along the normal. With `s`
     /// subnormal, or `t s` below the least normal, the products `t s` round to zero and
