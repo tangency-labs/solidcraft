@@ -965,5 +965,11 @@ fn two_pieces_that_both_answer_to_a_stored_name_are_not_guessed_between() {
     let stored = format!("F{block}:side:l1#[F{block}:top]");
     s.doc_mut().feature_mut(push).unwrap().face_names = vec![stored.clone()];
     s.refresh();
+    // Both pieces answer the same name: the feature asks for the face again rather than pick one.
     assert_eq!(reselect(&s, "Push"), Some(stored), "{:?}", error(&s, "Push"));
+    // Without the slot the wall is one piece again and the same name finds it, so the refusal
+    // above was the second piece answering, not a name that finds nothing.
+    run(&mut s, "timeline.suppress", json!({"feature": "SlotCut", "suppressed": true}));
+    assert_eq!(error(&s, "Push"), None, "{:?}", error(&s, "Push"));
+    assert!(solid_at(&s, [20.0, -1.0, 5.0]), "the front side moved out");
 }
