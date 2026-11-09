@@ -19,9 +19,9 @@ reviews:
     - path: "**"
       instructions: |
         Project rule: don't change anyone's existing UX defaults unless the change is purely additive and belongs in the application.
-        A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default. Flag any change to something a user already relies on: a default setting or preference value, what a command or tool does when used the usual way, the UI's default layout or behaviour, a keyboard or mouse shortcut.
+        A changed default is when something people already rely on in the UI changes for everyone who didn't opt in: an existing control, interaction or setting value. Examples the owner declined or reverted: right click becoming select while left click orbits (make it opt-in instead); a PR that removed all camera animation when only orbit lag was to be fixed. Flag any change to something a user already relies on: a default setting or preference value, what a command or tool does when used the usual way, the UI's default layout or behaviour, a keyboard or mouse shortcut.
         A changed kernel or geometry result (different faces or volumes, a case that now builds or is now refused), including anything under solidcore/, is not a changed default; don't flag it as one, and expect `Changes a default: no` for it.
-        Don't flag purely additive changes: a new command, a new setting whose default keeps today's behaviour, or a new option that appears only when someone chooses it. Don't flag bug fixes that only turn a crash or an error into the result the feature always promised.
+        Not defaults: bug fixes and more correct results, kernel or geometry result changes, new options that are off by default, and CI or tooling config. Don't flag purely additive changes: a new command, a new setting whose default keeps today's behaviour, or a new option that appears only when someone chooses it. Don't flag bug fixes that only turn a crash or an error into the result the feature always promised.
         When you flag one, start the comment with "Changes a default:", say what a user sees before and after, whether a setting keeps the old behaviour, and whether the PR description's `Changes a default:` line says so.
 
     # Where code goes, SolidCraft or SolidCore: solidcore/docs/layers.md.
