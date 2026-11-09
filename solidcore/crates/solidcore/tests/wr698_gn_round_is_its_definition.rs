@@ -1159,7 +1159,7 @@ fn a_body_s_circle_round_offsets_to_its_round_of_r_minus_d() {
 }
 
 /// #2487: with every fix on the chamfered box offsets (it was refused with status 1001:
-/// the offset's fold certificate, `shell_one_construction`, raised the G2 rounds' rational
+/// the offset's fold certificate, S1's `certify_regular`, raised the G2 rounds' rational
 /// septic nets to degree 112, past its Bernstein forms' cap), to the same faces as with
 /// #2388's fix set.
 #[test]

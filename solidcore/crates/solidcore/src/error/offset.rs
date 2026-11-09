@@ -33,7 +33,7 @@ use crate::topology::{EdgeId, FaceId};
 #[non_exhaustive]
 pub enum OffsetFailure {
     /// The offset of `face` by `distance` folds: the wall is thicker than a radius of
-    /// curvature of the face on its side (opt-in `fixes.shell_one_construction`).
+    /// curvature of the face on its side (WR-718; every offset but the local operation).
     Folds {
         /// The face whose offset folds.
         face: FaceId,
