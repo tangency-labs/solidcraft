@@ -154,6 +154,14 @@ codegen-units = 16
 # binary). See docs/crash-reports.md.
 debug = "line-tables-only"
 
+# The browser build (apps/solidcraft-web): optimised for size. The page downloads and compiles
+# the whole app before it starts, which is most of the wait on an old or low-memory PC.
+[profile.web-release]
+inherits = "release"
+opt-level = "s"
+# wasm-opt strips line tables from the page's wasm anyway; leaving them out makes the link faster.
+debug = false
+
 
 # Vendored crates with SolidCraft fixes (see vendor/README.md and ATTRIBUTION.md).
 [patch.crates-io]

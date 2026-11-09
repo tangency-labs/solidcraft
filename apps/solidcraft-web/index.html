@@ -19,7 +19,8 @@
   <meta name="twitter:description" content="Open-source parametric CAD built in Rust. Desktop, browser, and MCP for AI agents.">
   <meta name="twitter:image" content="https://docs.solidcraft.io/og.png">
   <meta name="twitter:image:alt" content="SolidCraft: open-source parametric CAD built in Rust">
-  <link data-trunk rel="rust" data-bin="solidcraft-web" data-wasm-opt="z" data-weak-refs />
+  <!-- Release builds use the web-release profile (Cargo.toml): optimised for size, the download and compile an old PC waits for. -->
+  <link data-trunk rel="rust" data-bin="solidcraft-web" data-cargo-profile-release="web-release" data-wasm-opt="z" data-weak-refs />
   <link data-trunk rel="copy-file" href="../../assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf" data-target-path="fonts" />
   <link data-trunk rel="copy-file" href="../../assets/fonts/biz-udp-gothic/OFL.txt" data-target-path="fonts" />
   <link data-trunk rel="copy-file" href="../../assets/fonts/craft-ui-sc/CraftUI-SC.otf" data-target-path="fonts" />

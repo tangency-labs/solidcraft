@@ -1,0 +1,62 @@
+{
+  "en": {
+    "web.no_graphics_acceleration": "Turn on graphics acceleration in the browser's settings, then restart the browser. Chrome and Edge: Settings > System. Firefox: Settings > General > Performance.",
+    "web.no_graphics_chrome": "Chrome or Edge with an older graphics card: open chrome://flags (edge://flags in Edge), turn on Override software rendering list, and restart the browser.",
+    "web.no_graphics_firefox": "Firefox with an older graphics card: open about:config, set webgl.force-enabled to true, and restart the browser.",
+    "web.no_graphics_title": "SolidCraft can't draw in this browser",
+    "web.no_graphics_update": "Update the browser and the graphics card's driver.",
+    "web.no_graphics_why": "SolidCraft needs WebGL 2 or WebGPU. This browser has turned both off on this computer, which often happens with older graphics cards and drivers.",
+    "web.start_failed_details": "Technical details",
+    "web.start_failed_retry": "Try again",
+    "web.start_failed_title": "SolidCraft failed to start",
+    "web.start_failed_why": "Something went wrong while SolidCraft started in the browser."
+  },
+  "de": {
+    "web.no_graphics_acceleration": "Schalten Sie in den Einstellungen des Browsers die Grafikbeschleunigung ein und starten Sie den Browser neu. Chrome und Edge: Einstellungen > System. Firefox: Einstellungen > Allgemein > Leistung.",
+    "web.no_graphics_chrome": "Chrome oder Edge mit einer älteren Grafikkarte: Öffnen Sie chrome://flags (in Edge edge://flags), schalten Sie Override software rendering list ein und starten Sie den Browser neu.",
+    "web.no_graphics_firefox": "Firefox mit einer älteren Grafikkarte: Öffnen Sie about:config, setzen Sie webgl.force-enabled auf true und starten Sie den Browser neu.",
+    "web.no_graphics_title": "SolidCraft kann in diesem Browser nicht zeichnen",
+    "web.no_graphics_update": "Aktualisieren Sie den Browser und den Treiber der Grafikkarte.",
+    "web.no_graphics_why": "SolidCraft braucht WebGL 2 oder WebGPU. Dieser Browser hat beides auf diesem Computer abgeschaltet. Das kommt bei älteren Grafikkarten und Treibern oft vor.",
+    "web.start_failed_details": "Technische Details",
+    "web.start_failed_retry": "Erneut versuchen",
+    "web.start_failed_title": "SolidCraft konnte nicht starten",
+    "web.start_failed_why": "Beim Start von SolidCraft im Browser ist ein Fehler aufgetreten."
+  },
+  "ja": {
+    "web.no_graphics_acceleration": "ブラウザーの設定でグラフィックアクセラレーションを有効にし、ブラウザーを再起動してください。Chrome と Edge: 設定 > システム。Firefox: 設定 > 一般 > パフォーマンス。",
+    "web.no_graphics_chrome": "古いグラフィックカードで Chrome または Edge を使う場合: chrome://flags (Edge では edge://flags) を開き、Override software rendering list を有効にして、ブラウザーを再起動してください。",
+    "web.no_graphics_firefox": "古いグラフィックカードで Firefox を使う場合: about:config を開き、webgl.force-enabled を true にして、ブラウザーを再起動してください。",
+    "web.no_graphics_title": "このブラウザーでは SolidCraft を描画できません",
+    "web.no_graphics_update": "ブラウザーとグラフィックカードのドライバーを更新してください。",
+    "web.no_graphics_why": "SolidCraft には WebGL 2 または WebGPU が必要です。このブラウザーはこのコンピューターで両方を無効にしています。古いグラフィックカードやドライバーでよく起こります。",
+    "web.start_failed_details": "技術的な詳細",
+    "web.start_failed_retry": "再試行",
+    "web.start_failed_title": "SolidCraft を起動できませんでした",
+    "web.start_failed_why": "ブラウザーで SolidCraft を起動中にエラーが発生しました。"
+  },
+  "ko": {
+    "web.no_graphics_acceleration": "브라우저 설정에서 그래픽 가속을 켠 다음 브라우저를 다시 시작하세요. Chrome과 Edge: 설정 > 시스템. Firefox: 설정 > 일반 > 성능.",
+    "web.no_graphics_chrome": "오래된 그래픽 카드에서 Chrome 또는 Edge를 사용하는 경우: chrome://flags(Edge에서는 edge://flags)를 열고 Override software rendering list를 켠 다음 브라우저를 다시 시작하세요.",
+    "web.no_graphics_firefox": "오래된 그래픽 카드에서 Firefox를 사용하는 경우: about:config를 열고 webgl.force-enabled를 true로 설정한 다음 브라우저를 다시 시작하세요.",
+    "web.no_graphics_title": "이 브라우저에서는 SolidCraft를 그릴 수 없습니다",
+    "web.no_graphics_update": "브라우저와 그래픽 카드 드라이버를 업데이트하세요.",
+    "web.no_graphics_why": "SolidCraft에는 WebGL 2 또는 WebGPU가 필요합니다. 이 브라우저는 이 컴퓨터에서 둘 다 꺼 두었습니다. 오래된 그래픽 카드와 드라이버에서 흔히 일어나는 일입니다.",
+    "web.start_failed_details": "기술 정보",
+    "web.start_failed_retry": "다시 시도",
+    "web.start_failed_title": "SolidCraft를 시작하지 못했습니다",
+    "web.start_failed_why": "브라우저에서 SolidCraft를 시작하는 중에 오류가 발생했습니다."
+  },
+  "zh": {
+    "web.no_graphics_acceleration": "在浏览器设置中开启图形加速，然后重启浏览器。Chrome 和 Edge：设置 > 系统。Firefox：设置 > 常规 > 性能。",
+    "web.no_graphics_chrome": "在较旧显卡上使用 Chrome 或 Edge：打开 chrome://flags（Edge 中为 edge://flags），开启 Override software rendering list，然后重启浏览器。",
+    "web.no_graphics_firefox": "在较旧显卡上使用 Firefox：打开 about:config，将 webgl.force-enabled 设为 true，然后重启浏览器。",
+    "web.no_graphics_title": "SolidCraft 无法在此浏览器中绘图",
+    "web.no_graphics_update": "更新浏览器和显卡驱动程序。",
+    "web.no_graphics_why": "SolidCraft 需要 WebGL 2 或 WebGPU。此浏览器在这台电脑上关闭了这两项，这在较旧的显卡和驱动程序上很常见。",
+    "web.start_failed_details": "技术详情",
+    "web.start_failed_retry": "重试",
+    "web.start_failed_title": "SolidCraft 启动失败",
+    "web.start_failed_why": "在浏览器中启动 SolidCraft 时出错。"
+  }
+}

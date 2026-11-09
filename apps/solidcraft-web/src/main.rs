@@ -22,6 +22,8 @@ mod install;
 mod linked;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(any(target_arch = "wasm32", test))]
+mod start_failure;
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
 /// it (#5227); plain Tab and Shift+Tab still move between the app's fields. (Ctrl+PageUp and
@@ -194,6 +196,49 @@ mod web {
 
     /// Take the loading screen away once the animation has played to the finished mark: wait out
     /// what is left of `LOADING_MIN_MS`, fade it, then remove it.
+    /// The loading overlay becomes a page saying why SolidCraft did not start and what to try
+    /// (`crate::start_failure`), in the browser's language. Text only: the error is never markup.
+    fn show_start_failure(document: &web_sys::Document, el: &web_sys::Element, error: &str) {
+        log::error!("SolidCraft failed to start: {error}");
+        let webgl2 = document
+            .create_element("canvas")
+            .ok()
+            .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+            .and_then(|c| c.get_context("webgl2").ok().flatten())
+            .is_some();
+        let webgpu = web_sys::window().is_some_and(|w| js_sys::Reflect::has(&w.navigator(), &"gpu".into()).unwrap_or(false));
+        let _language = solidcraft_ui_egui::i18n::scope(solidcraft_ui_egui::i18n::system_language());
+        let notice = crate::start_failure::notice(error, webgl2, webgpu);
+        let append = |parent: &web_sys::Element, tag: &str, text: &str| {
+            let child = document.create_element(tag).ok()?;
+            if !text.is_empty() {
+                child.set_text_content(Some(text));
+            }
+            parent.append_child(&child).ok()?;
+            Some(child)
+        };
+        el.set_inner_html("");
+        let _ = el.set_attribute("class", "failed");
+        let _ = el.set_attribute("role", "alert");
+        append(el, "h1", &notice.title);
+        append(el, "p", &notice.why);
+        if !notice.steps.is_empty()
+            && let Some(list) = append(el, "ol", "")
+        {
+            for step in &notice.steps {
+                append(&list, "li", step);
+            }
+        }
+        if let Some(retry) = append(el, "a", &notice.retry) {
+            // An empty link is this page: loading it again starts SolidCraft again.
+            let _ = retry.set_attribute("href", "");
+        }
+        if let Some(details) = append(el, "details", "") {
+            append(&details, "summary", &notice.details_label);
+            append(&details, "pre", &notice.details);
+        }
+    }
+
     fn dismiss_loading(el: web_sys::Element) {
         let Some(window) = web_sys::window() else {
             el.remove();
@@ -1033,9 +1078,7 @@ mod web {
             if let Some(el) = document.get_element_by_id(LOADING_ID) {
                 match result {
                     Ok(()) => dismiss_loading(el),
-                    Err(e) => {
-                        el.set_inner_html(&format!("<p>SolidCraft failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>"))
-                    }
+                    Err(e) => show_start_failure(&document, &el, &format!("{e:?}")),
                 }
             }
         });
