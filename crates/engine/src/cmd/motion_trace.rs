@@ -409,7 +409,7 @@ pub(super) fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().assembly.traces.remove(i);
         Arc::make_mut(&mut s.motion_traces.entries).remove(&id);
         Arc::make_mut(&mut s.motion_traces.history).remove(&id);
-        return Ok(json!({"sketch":id,"auto_update":false}));
+        return reply(id, false);
     }
     let mut t = s.doc.assembly.traces.get(i).cloned().ok_or_else(|| bad(CMD, "trace is missing"))?;
     if p.get("study").is_some() || p.get("joint").is_some() {
@@ -435,5 +435,11 @@ pub(super) fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *slot = t;
     }
-    Ok(json!({"sketch":id,"auto_update":true}))
+    reply(id, true)
+}
+
+/// Edit Motion Trace's reply, from its type.
+fn reply(sketch: u64, auto_update: bool) -> Result<Value> {
+    let edited = crate::schema::motion_trace::MotionTraceEdited { sketch, auto_update, param_warnings: Vec::new() };
+    serde_json::to_value(edited).map_err(|e| bad(CMD, e.to_string()))
 }

@@ -330,7 +330,20 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
-        Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
+        Target::Body { name } => {
+            let mut v = body_items(app, std::slice::from_ref(name), true);
+            // A selected browser body hands every selected body to the mesh dialogs (#12334).
+            // A row outside the selection still opens them with only the body right-clicked.
+            let selected = sel_bodies(app);
+            if selected.len() > 1 && selected.contains(name) {
+                for item in &mut v {
+                    if item.id == "ui.saveMesh" || item.id == "ui.sendToSlicer" {
+                        item.params = Some(json!({ "bodies": selected }));
+                    }
+                }
+            }
+            v
+        }
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
@@ -625,20 +638,26 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
         }
-        v.push(cmd(app, "sketch.create", "Create Sketch"));
-        v.push(cmd(app, "solid.extrude", "Extrude"));
-        v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        let planar =
+            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
+        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
+        // A curved face, or several faces, have no one plane to sketch on, offset or extrude from;
+        // Press Pull offsets them.
+        if one_flat {
+            v.push(cmd(app, "sketch.create", "Create Sketch"));
+            v.push(cmd(app, "solid.extrude", "Extrude"));
+            v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        } else {
+            v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
         v.push(cmd(app, "solid.shell", "Shell"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
-        let planar =
-            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
         let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
-        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
@@ -651,8 +670,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
         v.push(Item::sep());
-        v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        if one_flat {
+            v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
         v.push(cmd(app, "inspect.measure", "Measure"));
+        // What cannot act on these faces is left out.
+        v.retain(|i| i.enabled || i.is_sep());
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let hidden = app.session.visibility.hidden_bodies.contains(&body);
@@ -1603,15 +1626,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let (Some(path), name) = (p.get("path").and_then(Value::as_str), p.get("name").and_then(Value::as_str).unwrap_or_default()) else {
                 return;
             };
-            // The design is open here, so its file's place is already the user's choice.
-            let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
-            let inserted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
-            if inserted.is_ok() {
-                app.fit_view();
-                if p.get("unsaved").and_then(Value::as_bool) == Some(true) {
-                    app.set_status(solidcraft_ui_text::format("ui.insert_design.saved_file", &[("name", name)]), false);
-                }
-            }
+            // The design is open here, so its file's place is already the user's choice. Its saved
+            // file is read beside the window, as a picked one is (#11593).
+            let note = (p.get("unsaved").and_then(Value::as_bool) == Some(true))
+                .then(|| solidcraft_ui_text::format("ui.insert_design.saved_file", &[("name", name)]));
+            app.insert_design_async(path, note);
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
@@ -3324,7 +3343,7 @@ mod tests {
         h.frames(90);
         assert!(h.app.cam.back().dist(flat.plane_normal.unwrap()) < 2e-6);
         h.app.session.selection = vec![Sel::Face { body: body.name.clone(), index: curved.index, point: curved.centroid }];
-        assert!(items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to" && !i.enabled));
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to"));
     }
 
     #[test]
@@ -3445,7 +3464,7 @@ mod workspace_menu_tests {
             })
             .collect();
         assert_eq!(titles.len(), 1, "workspace titles must never be drawn twice");
-        assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(14.0));
+        assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(14.0));
     }
 
     #[test]

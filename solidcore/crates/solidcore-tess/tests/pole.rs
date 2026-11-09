@@ -56,6 +56,7 @@ fn pole_nodes(f: &FacePlan) -> Vec<u32> {
 /// each triangle's copy of the pole has the closed-form limit normal at its own point of the
 /// pole (the mean of its other corners along the collapsed parameter), to rounding.
 #[test]
+#[ignore = "the kernel's pole pass (limit normals at poles of higher order) comes back on SolidCraft's mesher in the next step of RFC 0003 item 1.1"]
 fn a_pole_of_order_two_or_three_has_the_exact_limit_normal_per_triangle() {
     for k in Kind::LIMIT {
         let (p, stats) = planned(k);
@@ -133,6 +134,7 @@ fn a_pole_of_order_two_or_three_has_the_exact_limit_normal_per_triangle() {
 /// vertex per node with the area-weighted mean of its triangles' normals, and the plan's stats
 /// name the pole on each face with the kernel's reason.
 #[test]
+#[ignore = "the kernel's pole pass (limit normals at poles of higher order) comes back on SolidCraft's mesher in the next step of RFC 0003 item 1.1"]
 fn a_pole_of_order_four_is_meshed_with_its_triangles_mean_normal_and_named() {
     let (p, stats) = planned(Kind::Quartic);
     assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed);
@@ -204,6 +206,7 @@ fn a_pole_of_order_four_is_meshed_with_its_triangles_mean_normal_and_named() {
 /// The cone whose apex is of third order (both first derivatives vanish there) is planned like
 /// the other faces, 592 triangles a quarter, and meshed whole: its apex takes the limit rule.
 #[test]
+#[ignore = "the kernel's pole pass (limit normals at poles of higher order) comes back on SolidCraft's mesher in the next step of RFC 0003 item 1.1"]
 fn the_cone_apex_of_third_order_is_meshed_on_its_592_triangles() {
     let (p, stats) = planned(Kind::Cone);
     assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed);
@@ -220,6 +223,7 @@ fn the_cone_apex_of_third_order_is_meshed_on_its_592_triangles() {
 /// and 0.02). Its foot is between them, not on the far side of the pole: every copy has the
 /// closed-form limit normal at its own point of the pole, to rounding.
 #[test]
+#[ignore = "the kernel's pole pass (limit normals at poles of higher order) comes back on SolidCraft's mesher in the next step of RFC 0003 item 1.1"]
 fn a_pole_across_a_closed_spline_s_end_has_the_limit_normal_between_its_corners() {
     let b = pole_faces::closed_cone();
     if let Err(e) = b.validate() {

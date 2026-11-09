@@ -23,12 +23,26 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+use crate::schema::file::ExportResult;
+use crate::schema::insert_mesh::{InsertMeshParams, MeshInserted};
+use crate::schema::new_design::{NewDesignParams, NewDesignResult};
 use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
+use crate::schema::slicers::{SlicerInfo, SlicersParams, SlicersResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_MESH_CONTRACT: TypedContract<InsertMeshParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("file.new", "New Design", crate::checked!("file.new", new_doc))
+        .icon("new")
+        .key("Ctrl+N")
+        .noundo()
+        .contract(&NEW_DESIGN_CONTRACT)
+        .output(output_schema_for::<NewDesignResult>)
+        .params("name?"),
     CommandSpec::new("doc.open", "Open", open)
         .icon("open")
         .key("Ctrl+O")
@@ -38,10 +52,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); folder?: bool (default false; true: an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N`); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
-    CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
+    CommandSpec::new("file.insert_mesh", "Insert Mesh", crate::checked!("file.insert_mesh", insert_mesh))
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made)"),
+        .contract(&INSERT_MESH_CONTRACT)
+        .output(output_schema_for::<MeshInserted>)
+        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made); crease_angle_degrees?: 0..180 (0 clears imported shading normals for the previous flat-shading behavior; positive angles regenerate angle-weighted normals across manifold edges below this crease angle; omitted keeps authored OBJ normals/smoothing groups, or flat shading when absent; geometry stays unchanged)"),
     CommandSpec::new("file.save", "Save", crate::checked!("file.save", save))
         .icon("save")
         .key("Ctrl+S")
@@ -102,10 +118,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_URDF_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
         .params("path; mesh_prefix?; effort? (default 1000); velocity? (default 10) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md"),
-    CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
+    CommandSpec::new("file.save_mesh", "Save As Mesh", crate::checked!("file.save_mesh", save_mesh))
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
+        .contract(&SAVE_MESH_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::save_mesh::SaveMeshResult>)
         .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
     CommandSpec::new("file.send_to_slicer", "Send to Slicer", send_to_slicer)
         .enabled(starts_programs)
@@ -117,8 +135,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("mesh_export")
         .noundo()
         .params("consent: bool (required: true only once the user has agreed to upload the model to Printables' servers; it stays there for 30 minutes and opening it needs a Printables sign-in); bodies?: [names] (default: the selected bodies); format?: 3mf|stl (default 3mf, in millimetres) → uploads the bodies to EasyPrint, Printables' slicer in the browser, and opens it in the browser. 100 MB at most. Works in the desktop app and the browser build; the CLI has no way to upload yet"),
-    CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
+    CommandSpec::new("file.slicers", "Installed Slicers", crate::checked!("file.slicers", slicers))
+        .icon("export")
         .noundo()
+        .contract(&SLICERS_CONTRACT)
+        .output(output_schema_for::<SlicersResult>)
         .params("→ the slicers found on this machine: [{id, name, program, icon?}]; pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
 ];
 
@@ -127,8 +148,11 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     s.replace_design(Session::new(Document::new(name)));
     // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
     s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
-    Ok(json!({"name": name}))
+    let reply = NewDesignResult { name: name.to_string(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad("file.new", e.to_string()))
 }
+
+const NEW_DESIGN_CONTRACT: TypedContract<NewDesignParams> = TypedContract::new();
 
 const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
 const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
@@ -137,7 +161,9 @@ const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::Ex
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
 const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
+const SLICERS_CONTRACT: TypedContract<SlicersParams> = TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
+const SAVE_MESH_CONTRACT: crate::schema::TypedContract<crate::schema::save_mesh::SaveMeshParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
     str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
@@ -273,11 +299,19 @@ fn created_bodies(s: &Session, feature: u64) -> Vec<String> {
 /// Add a MeshImport feature for a 3MF, STL, OBJ or glTF file, in a new component named after the
 /// file. A glTF file's nodes become components in it, and its materials the bodies' looks; it is
 /// in metres with Y up, so unless `y_up` is false its component is turned to Z up (#1505).
-fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>, unit: Option<(&'static str, f64)>, origin: bool) -> Result<Value> {
+fn add_mesh(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    y_up: Option<bool>,
+    unit: Option<(&'static str, f64)>,
+    origin: bool,
+    crease_angle: Option<f64>,
+) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
-    let (mf, plan, looks) = if gltf {
+    let (mut mf, plan, looks) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
             |name: &str| solidcraft_io::vfs::read(&dir.join(name).to_string_lossy(), solidcraft_io::MAX_GLTF_BYTES).map_err(|e| e.to_string());
@@ -289,6 +323,19 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>,
     } else {
         (solidcraft_io::mesh_import_feature_in(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?, None, Vec::new())
     };
+    if let Some(angle) = crease_angle
+        && let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut mf.kind
+    {
+        for mesh in meshes {
+            if angle == 0.0 {
+                // Keep the original flat display path, including its normalization
+                // and storage behavior, when the caller opts out of imported shading.
+                mesh.corner_normals = Default::default();
+            } else {
+                mesh.generate_crease_normals(angle).map_err(|e| bad("file.insert_mesh", e.to_string()))?;
+            }
+        }
+    }
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
     let cname = import::component_name(path, name);
     let tree = match &plan {
@@ -310,18 +357,24 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>,
     // After the turn, so it is the stood-up mesh that sits on Z = 0.
     let moved = if origin { import::move_to_origin(s, &placed)? } else { None };
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": bodies, "created_bodies": bodies, "warnings": mf.warnings});
-    placed.report(&mut out);
-    if let Some(shift) = moved {
-        out["moved_to_origin"] = json!([shift.x, shift.y, shift.z]);
-    }
-    if let Some((name, _)) = unit {
-        out["units"] = json!(name);
-    }
-    if let Some(turned) = turned {
-        out["stand_up"] = json!(turned);
-    }
-    Ok(out)
+    let reply = MeshInserted {
+        path: path.to_string(),
+        feature: id,
+        name: fname,
+        bodies: bodies.clone(),
+        created_bodies: bodies,
+        warnings: mf.warnings,
+        component: placed.component,
+        component_name: placed.name.clone(),
+        occurrence: placed.occurrence,
+        subcomponents: (placed.components > 0).then_some(placed.components),
+        rigid_joints: (placed.components > 0).then_some(placed.joints.len()),
+        moved_to_origin: moved.map(|shift| [shift.x, shift.y, shift.z]),
+        units: unit.map(|(name, _)| name.to_string()),
+        stand_up: turned,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad("file.insert_mesh", e.to_string()))
 }
 
 /// Turn an import's component a quarter turn about X (the file's Y up becomes Z up), contents
@@ -376,7 +429,20 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let up = mesh_up(p, path, cmd)?;
     let unit = mesh_units(p, path, cmd)?;
-    add_mesh(s, path, str_(p, "name"), up, unit, mesh_origin(p, cmd)?)
+    let crease_angle = mesh_crease_angle(p.get("crease_angle_degrees")).map_err(|message| bad(cmd, message))?;
+    add_mesh(s, path, str_(p, "name"), up, unit, mesh_origin(p, cmd)?, crease_angle)
+}
+
+/// The shading-only crease reader, shared by the handler and its typed contract.
+pub(crate) fn mesh_crease_angle(value: Option<&Value>) -> std::result::Result<Option<f64>, &'static str> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .filter(|v| v.is_finite() && (0.0..=180.0).contains(v))
+            .map(Some)
+            .ok_or("crease_angle_degrees must be between 0 and 180 degrees"),
+    }
 }
 
 /// `origin`: whether a mesh import is moved to the origin (#12543). Off unless asked, so a mesh
@@ -469,7 +535,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
-            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?, mesh_origin(p, "doc.open")?)?
+            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?, mesh_origin(p, "doc.open")?, None)?
         };
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
@@ -853,7 +919,7 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
     for body in &world.bodies {
         let mesh = body.cached_mesh()?;
         bytes =
-            bytes.saturating_add(mesh.positions.len().saturating_mul(24)).saturating_add(mesh.triangles.len().saturating_mul(12)).saturating_add(24);
+            bytes.saturating_add(mesh.positions.len().saturating_mul(24)).saturating_add(mesh.triangles.len().saturating_mul(84)).saturating_add(32);
         triangles = triangles.saturating_add(mesh.triangles.len());
         if bytes > 8 << 20 || triangles > 100_000 {
             return None;
@@ -863,6 +929,7 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
             positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: mesh.triangles.iter().flatten().copied().collect(),
             color: s.doc.body_color(body),
+            corner_normals: mesh.triangles.iter().flatten().filter_map(|&i| mesh.normals.get(i as usize)).flat_map(|n| [n.x, n.y, n.z]).collect(),
         });
     }
     Some(preview)
@@ -980,7 +1047,9 @@ fn export_to(
         solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
+    let reply =
+        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), files: Vec::new(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// [`export_to`] for a mesh file a slicer is sent (STL or 3MF): each body laid on its print face.
@@ -998,9 +1067,16 @@ fn export_laid_to(
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let mut out = json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")});
-    laid.report(&mut out);
-    Ok(out)
+    let reply = SaveMeshResult {
+        path: path.to_string(),
+        bytes: bytes.len(),
+        format: format!("{format:?}"),
+        print_faces: laid.bodies,
+        warnings: laid.warnings,
+        delivery: SlicerDelivery::default(),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1219,11 +1295,16 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn slicers(_: &mut Session, _: &Value) -> Result<Value> {
-    let list: Vec<Value> = crate::slicers::detect()
+    let slicers = crate::slicers::detect()
         .iter()
-        .map(|d| json!({"id": d.id, "name": d.name, "program": d.command.first(), "icon": d.icon.as_ref().map(|i| i.path().to_string_lossy().into_owned())}))
+        .map(|d| SlicerInfo {
+            id: d.id.clone(),
+            name: d.name.clone(),
+            program: d.command.first().cloned(),
+            icon: d.icon.as_ref().map(|i| i.path().to_string_lossy().into_owned()),
+        })
         .collect();
-    Ok(json!({ "slicers": list }))
+    serde_json::to_value(SlicersResult { slicers, param_warnings: Vec::new() }).map_err(|e| bad("file.slicers", e.to_string()))
 }
 
 fn recovery_dir(p: &Value, cmd: &str) -> Result<std::path::PathBuf> {
@@ -1999,6 +2080,95 @@ mod tests {
         let measured = reopened.execute("inspect.measure", &json!({})).unwrap();
         assert!((measured["bodies"][0]["volume_mm3"].as_f64().unwrap() - 12000.).abs() < 1e-6);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mesh_import_explicit_crease_normals_are_undoable_and_survive_cached_reopen() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-mesh-normals-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fold.obj");
+        std::fs::write(&path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 -0.8660254037844386 0.5\nf 1 2 3\nf 2 1 4\n").unwrap();
+        let mut session = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+        let before = session.doc.to_json();
+        for bad_angle in [json!(-1), json!(181), json!("smooth")] {
+            let result = session.execute("file.insert_mesh", &json!({"path":path, "crease_angle_degrees":bad_angle}));
+            assert!(result.unwrap_err().to_string().contains("crease_angle_degrees"));
+            assert_eq!(session.doc.to_json(), before);
+        }
+        session.execute("file.insert_mesh", &json!({"path":path, "crease_angle_degrees":40})).unwrap();
+        let normals = |s: &Session| s.model.state().bodies[0].mesh().normals.clone();
+        let expected = normals(&session);
+        assert!(expected[0].y > 0.2 && expected[0].z > 0.9);
+        session.execute("edit.undo", &json!({})).unwrap();
+        assert!(session.model.state().bodies.is_empty());
+        session.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(normals(&session), expected);
+        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        let cached = solidcraft_io::read_design_geometry(&bytes).expect("shaded mesh retains native cache");
+        assert!(!cached.bodies[0].body.triangle_corner_normals().unwrap().is_empty());
+        let saved_path = dir.join("shaded.sc");
+        std::fs::write(&saved_path, &bytes).unwrap();
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":saved_path})).unwrap();
+        assert_eq!(normals(&reopened), expected);
+        let doc = solidcraft_io::read_design(&bytes).unwrap();
+        let cold = Session::new(doc);
+        assert_eq!(normals(&cold), expected);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mesh_import_zero_crease_restores_legacy_flat_shading_and_survives_reopen() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-obj-flat-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vertices = "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 -0.8660254037844386 0.5\n";
+        let faces = "f 1 2 3\nf 2 1 4\n";
+        let reference_path = dir.join("reference.obj");
+        std::fs::write(&reference_path, format!("{vertices}{faces}")).unwrap();
+        let mut reference = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+        reference.execute("file.insert_mesh", &json!({"path":reference_path})).unwrap();
+        let display = |s: &Session| {
+            let mesh = s.model.state().bodies[0].mesh();
+            (mesh.positions.clone(), mesh.triangles.clone(), mesh.normals.clone())
+        };
+        let expected = display(&reference);
+        for (name, source) in
+            [("groups", format!("{vertices}s 1\n{faces}")), ("authored", format!("{vertices}vn 0 1 1\nf 1//1 2//1 3//1\nf 2//1 1//1 4//1\n"))]
+        {
+            let path = dir.join(format!("{name}.obj"));
+            std::fs::write(&path, source).unwrap();
+            let mut annotated = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+            annotated.execute("file.insert_mesh", &json!({"path":path})).unwrap();
+            assert_ne!(display(&annotated).2, expected.2, "{name} must exercise imported shading");
+            let mut session = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+            session.execute("file.insert_mesh", &json!({"path":path, "crease_angle_degrees":0})).unwrap();
+            assert_eq!(display(&session), expected, "{name} uses the exact former flat display path");
+            let meshes = session
+                .doc
+                .features
+                .iter()
+                .find_map(|f| match &f.kind {
+                    solidcraft_doc::FeatureKind::MeshImport { meshes, .. } => Some(meshes),
+                    _ => None,
+                })
+                .unwrap();
+            assert!(meshes.iter().all(|mesh| mesh.corner_normals.is_empty()));
+            session.execute("edit.undo", &json!({})).unwrap();
+            assert!(session.model.state().bodies.is_empty());
+            session.execute("edit.redo", &json!({})).unwrap();
+            assert_eq!(display(&session), expected);
+            let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+            let cached = solidcraft_io::read_design_geometry(&bytes).unwrap();
+            assert!(cached.bodies[0].body.triangle_corner_normals().unwrap().is_empty());
+            let saved_path = dir.join(format!("{name}.sc"));
+            std::fs::write(&saved_path, &bytes).unwrap();
+            let mut reopened = Session::default();
+            reopened.execute("doc.open", &json!({"path":saved_path})).unwrap();
+            assert_eq!(display(&reopened), expected);
+            let cold = Session::new(solidcraft_io::read_design(&bytes).unwrap());
+            assert_eq!(display(&cold), expected);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// #9170: a design holding a mesh body (an inserted STL) keeps its saved model and opens from

@@ -57,6 +57,7 @@ mod text;
 mod text_menu;
 mod theme_picker;
 mod tree;
+pub mod type_face;
 mod value_focus;
 mod viewport_status;
 mod wheel;
@@ -83,6 +84,7 @@ pub(crate) use disclosure::*;
 pub(crate) use drag::*;
 pub(crate) use fields::*;
 pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor};
+pub use file_view::Icon;
 pub(crate) use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub(crate) use framing::*;
 pub(crate) use history::*;
@@ -162,3 +164,6 @@ pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt:
 // Share the existing CPU rasteriser with page-level artwork regressions.
 #[cfg(test)]
 pub(crate) use checks::tests::raster as raster_test_shapes;
+
+#[cfg(test)]
+pub(crate) use checks::tests::textures_update;

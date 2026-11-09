@@ -174,6 +174,7 @@ pub fn shift(text: &str, by: u32) -> String {
 }
 
 /// How a marker is drawn.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub struct Look {
     pub background: Color32,
@@ -184,6 +185,7 @@ pub struct Look {
 
 /// `text` as a layout job: the markers `look` returns something for are drawn as pills, the rest is
 /// plain. The text keeps every character, so the caret and the selection are those of the box.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn job(text: &str, font: &FontId, color: Color32, wrap_width: f32, look: &dyn Fn(u32) -> Option<Look>) -> LayoutJob {
     let plain = TextFormat { font_id: font.clone(), color, ..Default::default() };
     let mut job = LayoutJob::default();

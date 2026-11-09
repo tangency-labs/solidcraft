@@ -99,7 +99,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_walls_touch_refused = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_missing_surface_fails = true;
@@ -180,7 +179,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.ssi_singular_start_inside_direction = true;
     k.fixes.ssi_pole_point_keeps_its_tangent = true;
     k.fixes.ssi_tangent_curve_tracer = true;
-    k.fixes.fillet_trace_rejects_short_step = true;
     k.fixes.curve_tight_box_interval_knots = true;
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.delete_vertex_joins_seam_iso_curve = true;

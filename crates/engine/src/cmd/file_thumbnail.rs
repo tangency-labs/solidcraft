@@ -1,7 +1,8 @@
 //! A portable picture from warm display meshes only; never evaluate on save.
 use crate::Session;
 use solidcraft_geom::Aabb3;
-use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
+use solidcraft_geom::MeshGeom;
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
     let (scene, camera) = scene(s)?;
@@ -44,7 +45,7 @@ fn scene(s: &Session) -> Option<(Scene, Camera)> {
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_render::view_bounds(&bounds));
     camera.distance *= 0.7;
     scene.radius = (bounds.diagonal() * 0.5).max(camera.half_height()).max(10.);
     scene.background = Some((crate::view::colors::BG_TOP, crate::view::colors::BG_BOTTOM));

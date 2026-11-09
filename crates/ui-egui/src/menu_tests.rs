@@ -255,6 +255,38 @@ fn face_menu_hides_and_finds_the_body() {
     assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
 }
 
+/// A curved face, or several faces, offer Press Pull where a flat face offers Create Sketch, Extrude
+/// and Offset Plane; nothing that cannot act on the faces is listed.
+#[test]
+fn face_menu_lists_only_what_acts_on_the_faces() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    app.run("solid.hole", json!({"position":[20,15,20],"diameter":8})).unwrap();
+    let count = app.session.world_state().unwrap().body("Plate").map(|b| solidcraft_engine::doc::naming::face_names(b).len()).unwrap_or(0);
+    let planar = |app: &SolveApp, i: usize| crate::dialogs::planar_face(&app.session, "Plate", i).is_some();
+    let flat: Vec<usize> = (0..count).filter(|&i| planar(&app, i)).collect();
+    let curved = (0..count).find(|&i| !planar(&app, i)).expect("the hole has a curved wall");
+    let face = |i: usize| json!({"type": "face", "body": "Plate", "index": i, "point": [0, 0, 0]});
+    let labels = |app: &mut SolveApp, faces: Vec<serde_json::Value>| {
+        app.run("select.set", json!({ "items": faces })).unwrap();
+        let items = context_menu::items(app, &Target::Viewport);
+        assert!(items.iter().all(|i| i.enabled || i.id == "-"), "a greyed-out item in {:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
+        items.into_iter().map(|i| i.label).collect::<Vec<_>>()
+    };
+    let one = labels(&mut app, vec![face(flat[0])]);
+    for l in ["Create Sketch", "Extrude", "Offset Plane", "Look At", "Print Face", "Press Pull"] {
+        assert!(one.iter().any(|x| x == l), "no `{l}` for a flat face in {one:?}");
+    }
+    for faces in [vec![face(curved)], vec![face(flat[0]), face(flat[1])]] {
+        let got = labels(&mut app, faces);
+        for l in ["Create Sketch", "Extrude", "Offset Plane", "Print Face"] {
+            assert!(!got.iter().any(|x| x == l), "`{l}` in {got:?}");
+        }
+        assert_eq!(got.iter().filter(|x| *x == "Press Pull").count(), 1, "{got:?}");
+        assert!(got.iter().position(|x| x == "Press Pull") < got.iter().position(|x| x == "Shell"), "{got:?}");
+    }
+}
+
 #[test]
 fn body_menu_isolates_renames_locks_and_deletes() {
     let mut app = sample_app();
@@ -1085,7 +1117,7 @@ fn named_views_save_restore_rename_and_delete() {
     act(&mut app, &Target::NamedViews, "New Named View");
     assert_eq!(app.session.doc.named_views.len(), 1);
     let saved = app.cam;
-    app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+    app.cam.set_view(solidcraft_viewport::StandardView::Top);
     let t = Target::NamedView { name: "Named View1".into() };
     act(&mut app, &t, "Restore");
     assert_eq!(app.cam_anim.map(|a| a.to), Some(saved), "animates back to the saved camera");
@@ -1671,8 +1703,7 @@ fn contribution_unresolvable_face_does_not_edit_the_body_creator() {
     app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
     app.session.selection = vec![solidcraft_engine::Sel::Face { body: "Plate".into(), index: usize::MAX, point: solidcore_record::Vec3::ZERO }];
     let items = context_menu::items(&app, &Target::Viewport);
-    assert!(!find(&items, "Edit Feature").enabled);
-    assert!(!find(&items, "Find in Timeline").enabled);
+    assert!(!items.iter().any(|i| i.label == "Edit Feature" || i.label == "Find in Timeline"));
     assert!(find(&items, "Find in Browser").enabled, "the body is still known");
 }
 
@@ -1817,6 +1848,32 @@ fn appearance_browser_selection_reaches_the_editor_without_other_bodies() {
         for name in ["One", "Two", "Other"] {
             let color = if expected.contains(&name) { [196, 40, 36] } else { [36, 92, 180] };
             assert_eq!(app.session.doc.appearances.bodies[name].color, color, "clicked {clicked}, body {name}");
+        }
+    }
+}
+
+/// #12334: Save As Mesh and Send to Slicer on a selected browser row open their dialog with every
+/// selected body; a row outside the selection, or a lone selected one, opens it with that row only.
+#[test]
+fn mesh_export_from_a_selected_browser_body_takes_the_selected_bodies() {
+    let cases = [
+        ("One", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Two", vec!["One", "Two"], vec!["One", "Two"]),
+        ("Other", vec!["One", "Two"], vec!["Other"]),
+        ("One", vec!["One"], vec!["One"]),
+    ];
+    for label in ["Send to Slicer", "Save As Mesh"] {
+        for (clicked, selected, expected) in &cases {
+            let mut app = appearance_selection_app();
+            // Send to Slicer needs a way to start a program.
+            app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+            let items: Vec<_> = selected.iter().map(|name| json!({"type":"body","name":name})).collect();
+            app.run("select.set", json!({ "items": items })).unwrap();
+            let item = find(&context_menu::items(&app, &Target::Body { name: (*clicked).into() }), label);
+            context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+            let dialog = app.dialog.as_ref().unwrap_or_else(|| panic!("{label} opens its dialog"));
+            let bodies: Vec<_> = expected.iter().map(|name| solidcraft_engine::Sel::Body { name: (*name).into() }).collect();
+            assert_eq!(dialog.inputs[0].items, bodies, "{label}: clicked {clicked}, selected {selected:?}");
         }
     }
 }
@@ -2256,10 +2313,14 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
         "a saved design, one with unsaved changes, one never saved; not the blank new tab"
     );
 
+    // Each is read beside the window, as a file picked under Browse… is (#11593).
     act(&mut h.app, &Target::InsertDesign, &names[0]);
+    assert!(h.app.file_load.busy(), "the design is read off the window thread");
+    h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 1);
     assert!(h.app.status.as_ref().is_none_or(|(s, _, _)| !s.contains("unsaved")), "{:?}", h.app.status);
     act(&mut h.app, &Target::InsertDesign, &names[1]);
+    h.settle();
     assert_eq!(linked(&h.app, "plate.solidcraft"), 1);
     assert!(
         h.app.status.as_ref().is_some_and(|(s, _, error)| !*error && s.contains("unsaved changes") && s.contains("Update Links")),
@@ -2271,6 +2332,7 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.step(&json!({"choose_file": "bracket.solidcraft"})).unwrap();
     act(&mut h.app, &Target::InsertDesign, "Browse…");
     h.frames(3);
+    h.settle();
     assert_eq!(linked(&h.app, "bracket.solidcraft"), 2);
 
     // The preference off: straight to the picker.
@@ -2280,6 +2342,7 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.app.start("component.insert_design");
     assert!(!menu_open(&h.app));
     h.frames(3);
+    h.settle();
     assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
 }
 

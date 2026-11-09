@@ -15,7 +15,9 @@ use super::CommandSpec;
 use super::features::{add_feature, axis_param, check_expr, extent_param, feature_sketch, operation, plane_param, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
 use crate::schema::features::{FeatureResult, SurfaceSweepParams};
-use crate::schema::surface::{FairParams, OffsetParams, ReverseNormalParams, StitchParams, ThickenParams, UnstitchParams, UntrimParams};
+use crate::schema::surface::{
+    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceTrimParams, ThickenParams, UnstitchParams, UntrimParams,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -26,6 +28,8 @@ const THICKEN_CONTRACT: TypedContract<ThickenParams> = TypedContract::new();
 const OFFSET_CONTRACT: TypedContract<OffsetParams> = TypedContract::new();
 const UNTRIM_CONTRACT: TypedContract<UntrimParams> = TypedContract::new();
 const FAIR_CONTRACT: TypedContract<FairParams> = TypedContract::new();
+const SURFACE_EXTEND_CONTRACT: TypedContract<SurfaceExtendParams> = TypedContract::new();
+const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::new();
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -45,13 +49,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&THICKEN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?"),
-    CommandSpec::new("surface.extend", "Extend", extend)
+    CommandSpec::new("surface.extend", "Extend", crate::checked!("surface.extend", extend))
         .at("SURFACE", "MODIFY")
         .icon("surface_extend")
+        .contract(&SURFACE_EXTEND_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
-    CommandSpec::new("surface.trim", "Trim", trim)
+    CommandSpec::new("surface.trim", "Trim", crate::checked!("surface.trim", trim))
         .at("SURFACE", "MODIFY")
         .icon("surface_trim")
+        .contract(&SURFACE_TRIM_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
     CommandSpec::new("surface.extrude", "Surface Extrude", surface_extrude)
         .at("SURFACE", "CREATE")

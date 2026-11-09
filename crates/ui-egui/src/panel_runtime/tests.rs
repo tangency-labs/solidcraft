@@ -13292,7 +13292,7 @@ fn production_setting_cancel_preserves_classic_and_apply_enables_the_real_host()
     crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Layout"})).unwrap();
     h.app.preferences.shared_panel_layout = true;
     crate::prefs::control(&mut h.app, &serde_json::json!({"button":"apply"})).unwrap();
-    assert!(h.app.prefs_window.open, "Apply keeps Preferences open");
+    assert!(h.app.prefs_window.shell.open, "Apply keeps Preferences open");
     assert!(h.app.panel_runtime().is_some(), "Apply accepts the production-host preference");
     h.app.preferences.shared_panel_layout = false;
     crate::prefs::control(&mut h.app, &serde_json::json!({"button":"cancel"})).unwrap();
