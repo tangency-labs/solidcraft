@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-config-activate-unknown-row-refused",
+  "expected": {
+    "method": "no row Nope: a clean refusal naming it",
+    "outcome": "refused",
+    "refusal": "configuration `Nope`",
+    "source": "invariants",
+    "sources": [],
+    "what": "config.activate of a row the table does not have"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 6 (config.activate): invalid parameters for `config.activate`: unknown configuration `Nope`",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 6 (config.activate): invalid parameters for `config.activate`: unknown configuration `Nope`",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.activate of a row the table does not have",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 6 (config.activate): invalid parameters for `config.activate`: unknown configuration `Nope`"
+  ]
+}

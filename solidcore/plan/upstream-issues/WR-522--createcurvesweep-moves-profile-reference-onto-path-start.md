@@ -1,0 +1,11 @@
+#### WR-522. `CreateCurveSweep` always moves the profile's reference point onto the path's start, so a profile lying beside the path cannot keep its place
+- **Severity:** Wrong result
+- **Area:** Primitive creation / sweeps
+- **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp`, `SmPrimitiveCreation::CreateCurveSweep`, "Move Profiles to orgin": `sProfileRefPt` is the first profile curve's start, or with `bMoveProfileCenterToPath` the profiles' box centre; `SmSweepOptions` (`source/SMLib/inc/SmPrimitiveCreation.h`) has no option to use the path's start.
+- **What happens:** the profile is translated so its reference point lies on the path's start before sweeping. A profile placed round or beside its path, as a sketch profile is, loses its offset; round a bend it is swept at the wrong radius. A disc of radius 1 centred on the start of a path of 10 along x and a quarter arc of radius 10 sweeps to volume 85.699 (its rim point moved onto the path) instead of the tube's 80.764.
+- **Trigger:** `SmApiCreateCurveSweep` with a profile that does not start on the path's start, along a curved path.
+- **How found:** reported from SolidCraft (tangency-labs/solidcore#1450); fixed in the SolidCraft fork tangency-labs/smlib 2dd71a0 (`SmSweepOptions::bProfileAtPathStart`, off by default).
+- **Confirmed:** no (read at the pin; the default stays at parity with the C++ reference, which has no such option)
+- **Fix:** an option making the path's start the reference point, so the profile moves with the path's start and keeps its place relative to the path (`bMoveProfileCenterToPath` and `bMoveToProfile` then change nothing).
+- **Rust port:** `SweepOptions::profile_at_path_start` (`crates/solidcore/src/primitive/primitive_creation.rs`, used in `prepare_curve_sweep`), a per-call option off by default like the fork's, not a `Kernel::fixes` field: the fork's own internal sweeps (pipe, planar-path) keep upstream's reference point. Test: `crates/solidcore/tests/issue_1450_curve_sweep_profile_placement.rs`.
+- Fixes tangency-labs/solidcore#1450 (with WR-523).

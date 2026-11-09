@@ -1,0 +1,193 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -9.165151389911674,
+                  5.612036656678126e-16,
+                  4.0
+                ],
+                [
+                  9.165151389911683,
+                  0.0,
+                  3.999999999999998
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  9.165151389911683,
+                  0.0,
+                  3.999999999999998
+                ],
+                [
+                  -9.165151389911674,
+                  5.612036656678126e-16,
+                  4.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              -3.9968028886505635e-15,
+              9.165151389911678,
+              4.0
+            ],
+            [
+              -3.6306006367701385e-15,
+              -9.165151389911678,
+              4.0
+            ]
+          ],
+          "tolerance": 1.4997178940358522
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-exact-sphere-plane-rim-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the ball's centre runs on the sphere R8 and the plane z = 2: the circle of radius sqrt 60 about z, so the round is the ball's arc turned about z, a rational B-spline of degrees (2, 2). V0 = 4000 pi / 3 - 288 pi; the round removes 2 pi times the first moment about z of its section (Pappus), from contact (sqrt 60, 4) on the plane to (1.25 sqrt 60, 2.5) on the sphere: 22.492758031524. The round's faces, each of those degrees: a closed round is two faces (split at the seam of its closed surface).",
+    "source": "analytic",
+    "sources": [],
+    "splines": [
+      {
+        "degree": [
+          2,
+          2
+        ]
+      },
+      {
+        "degree": [
+          2,
+          2
+        ]
+      }
+    ],
+    "surface_types": [
+      "bspline",
+      "plane",
+      "sphere"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 3261.518762521006,
+    "what": "a ball R10 cut flat at z = 4: its rim rounded r2"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 7,
+      "faces": 4,
+      "vertices": 5
+    }
+  },
+  "records": "cov-fillet-exact-sphere-plane-rim-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Ball",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1121.0469678825116,
+      "body_count": 1,
+      "edges": 7,
+      "faces": 4,
+      "vertices": 5,
+      "volume_mm3": 3261.518762641344
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "make_sphere",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a ball R10 cut flat at z = 4: its rim rounded r2",
+  "why_not": []
+}

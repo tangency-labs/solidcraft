@@ -1,0 +1,12 @@
+id = "geom.extent2d"
+upstream = ["source/SMLib/inc/SmExtent2d.h", "source/SMLib/src/SmExtent2d.cpp"]
+rust_module = "geom::extent2d"
+depends_on = ["geom.extent1d", "geom.vector2d"]
+soft_depends_on = ["geom.extent3d", "geom.tol", "geom.vector3d"]
+est_lines = 766
+layer = 3
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-geom.extent2d-a1"
+claimed_at = "2026-10-12T20:02:32Z"
+notes = "55 fns; largest: SmExtent2d::IntersectWithInfiniteLine, SmExtent2d::ClipLine2d, SmExtent2d::Inversion, SmExtent2d::ClassifyPoint2d; unit-SCC #22 (220 units); 317 upstream test entry points reach this unit; GREEN: difftest 3069 cases (69 fixture + 3000 generated), all bit-identical, 0 deferred, max_rel_err 0; 30k-seed run clean; only the 55 owned fns ported (rest of SmExtent2d is in unused_functions.txt); wired UNPORTED(geom.extent2d) SmTol::GetScaledZero(const SmExtent2d&) in geom/tol.rs (geom.tol still green, 3440 cases)"
