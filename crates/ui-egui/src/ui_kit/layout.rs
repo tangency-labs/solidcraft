@@ -68,7 +68,7 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
 /// selected elements (#11804). Every other theme keeps its look. Tokens: `form_primary,
 /// selected_bg, selected_ink`.
 pub(crate) fn selection_ink(t: &Tokens) -> egui::Color32 {
-    if crate::theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+    if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
 
 /// Below this contrast with `selected_bg`, a form's primary colour counts as the selection's own
@@ -957,7 +957,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
 #[cfg(test)]
 mod selection_ink_tests {
     use super::selection_ink;
-    use crate::theme::{Tokens, contrast_ratio};
+    use solidcraft_theme::{Tokens, contrast_ratio};
 
     /// Selected text in a form field stands out from the selection in every built-in theme
     /// (#11804): none draws it in the selection's own colour.
