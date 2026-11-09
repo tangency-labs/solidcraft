@@ -25,10 +25,10 @@ solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.m
 `skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
 `crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
 
-A kernel pull request targets `main` like any other, with a code owner (jyviko or me) approving the
-`solidcore/` part; a change that touches the kernel and the app is one pull request. The `kernel` branch
-is only for multi-step kernel work that isn't safe on `main` until every step has landed: send those
-steps to `kernel`, and it merges into `main` when the work is done.
+A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
+pull request. Work in several steps that isn't safe on `main` until every step has landed goes as stacked
+pull requests into `main`, or on a feature branch for that one piece of work (like `drawings`) that
+lands on `main` through one pull request when it's done.
 Crashes and data loss are still taken first.
 
 ### Updating a PR that was moved from solidcore
@@ -39,7 +39,7 @@ contributors without write access can't push to them. To update one:
 1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
    `git switch moved/solidcore-N`.
 2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
-3. Open a PR against `kernel` that says "Replaces #M" (M is the moved PR's number). The moved one
+3. Open a PR against `main` that says "Replaces #M" (M is the moved PR's number). The moved one
    gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
