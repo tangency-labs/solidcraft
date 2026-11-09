@@ -1837,9 +1837,13 @@ const MAX_OUTLINE_LINES: usize = 2_000_000;
 
 /// The outlines of the shown bodies' curved surfaces as seen now, in Wireframe's edge colour
 /// (#13347). They follow the camera, so they are part of the view-dependent scene.
-fn wireframe_outlines(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sc: &mut GpuScene, colour: Color32) {
-    use crate::wireframe_outline::{Eye, folds_of, outline};
-    let eye = if app.cam.fov > 0.0 { Eye::At(app.cam.eye()) } else { Eye::Along(app.cam.basis().2) };
+fn wireframe_outlines(app: &SolveApp, proj: &Proj, st: &solidcraft_engine::doc::ModelState, sc: &mut GpuScene, colour: Color32) {
+    use crate::wireframe_outline::folds_of;
+    use solidcore_tess::{Eye, outline};
+    // The camera the view draws with: its perspective follows the Perspective toggle and the
+    // open-sketch rule (`app.view_fov`), not the stored camera's field of view.
+    let cam = &proj.cam;
+    let eye = if cam.fov > 0.0 { Eye::At(cam.eye()) } else { Eye::Along(cam.basis().2) };
     let col = sc.color(c4(colour));
     let active_bodies = active_body_names(app);
     let replaced = app.preview.effective_replaced();
@@ -1885,7 +1889,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         *cache = None;
     }
     if app.ui.visual_style == 2 && app.preferences.wireframe_outlines {
-        wireframe_outlines(app, &st, &mut sc, tk.text);
+        wireframe_outlines(app, proj, &st, &mut sc, tk.text);
     }
     let mut fill_budget = 131_072;
     // The open sketch's plane in the model this frame shows.
@@ -10975,6 +10979,46 @@ mod tests {
             app.preferences.wireframe_outlines = true;
             app.ui.visual_style = 0;
             assert_eq!(lines(&app), off, "{command}: shaded");
+        }
+        Ok(())
+    }
+
+    /// Wireframe's outline is the one the view draws with: with the Perspective toggle on, a
+    /// sphere seen from near has the smaller outline a perspective eye sees, though the stored
+    /// camera keeps no field of view (#13347). From distance d, a sphere of radius r has its
+    /// outline at r·sqrt(1 − r²/d²) from the line of sight; an orthographic view's is r.
+    #[test]
+    fn wireframe_outlines_follow_the_perspective_the_view_draws_with() -> Result<(), Box<dyn std::error::Error>> {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.ui.show_grid = false;
+        app.run("solid.sphere", json!({"radius": 20}))?;
+        app.ui.visual_style = 2;
+        app.cam = Camera { target: Vec3::ZERO, yaw: 0.3, pitch: 0.4, distance: 40.0, ..Default::default() };
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        let off_axis = |app: &SolveApp| -> Vec<f64> {
+            let proj = projection(app, rect);
+            let axis = proj.cam.basis().2;
+            let scene = build_sketch_scene(app, &proj).merged();
+            let f = |r: &[u8], at: usize| f64::from(f32::from_le_bytes([r[at], r[at + 1], r[at + 2], r[at + 3]]));
+            scene
+                .lines
+                .as_chunks::<{ crate::gpu::LINE_SIZE }>()
+                .0
+                .iter()
+                .flat_map(|r| [0, 12].map(|o| Vec3::new(f(r, o), f(r, o + 4), f(r, o + 8))))
+                // On the sphere: outline ends, not the origin's axes.
+                .filter(|p| (p.len() - 20.0).abs() < 0.05)
+                .map(|p| (p - axis * p.dot(axis)).len())
+                .collect()
+        };
+        for (perspective, expected) in [(true, 20.0 * 0.75f64.sqrt()), (false, 20.0)] {
+            app.ui.perspective = perspective;
+            assert_eq!(app.cam.fov, 0.0, "the stored camera stays orthographic");
+            let found = off_axis(&app);
+            assert!(found.len() >= 48, "perspective {perspective}: {} outline ends", found.len());
+            for r in found {
+                assert!((r - expected).abs() < 1.0, "perspective {perspective}: an outline end {r} mm off the line of sight, not {expected}");
+            }
         }
         Ok(())
     }

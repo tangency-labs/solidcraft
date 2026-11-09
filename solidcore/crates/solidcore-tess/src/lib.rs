@@ -11,6 +11,8 @@
 //! - [`plan`]: the face planner and its display entry point, at a [`MeshTolerance`];
 //! - [`TessPlan`], [`FacePlan`]: the plan, and [`TessPlan::transformed`] for a placed copy;
 //! - [`Mesh`]: an indexed triangle mesh with its edge polylines and their display flags;
+//! - [`outline`]: the outline of a mesh's smooth surfaces seen from an [`Eye`], from its
+//!   [`Mesh::folds`];
 //! - [`simplify`]: display levels of detail of a large mesh;
 //! - [`preview`]: a bounded coarse mesh of a decoded body.
 //!
@@ -20,6 +22,7 @@
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
 mod mesh;
+mod outline;
 mod par;
 mod plan;
 mod planner;
@@ -31,6 +34,7 @@ mod tolerance;
 mod vec;
 
 pub use mesh::Mesh;
+pub use outline::{Eye, Fold, MAX_FOLD_TRIANGLES, outline};
 pub use par::guarded;
 pub use plan::{FacePlan, TessPlan};
 pub use planner::{
