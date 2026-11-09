@@ -305,6 +305,10 @@ struct SessionObjects<'target> {
     merge_attributes: Option<Vec<AttributeHandle>>,
     /// WR-459: the target's edges and faces before filleting, kept by the clean-up.
     cleanup_kept: Option<(BTreeSet<EdgeId>, BTreeSet<FaceId>)>,
+    /// The target's vertices before filleting: those after it that are not among them are the
+    /// fillet's (on its faces, or where it split the target's edges), placed on their faces'
+    /// corners after the merge (`boolean::merge::p1::place_vertices_on_face_corners`).
+    vertices_before: BTreeSet<VertexId>,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -1530,6 +1534,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                vertices_before: BTreeSet::new(),
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,
