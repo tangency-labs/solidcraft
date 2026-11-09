@@ -106,14 +106,15 @@ fn projected(c: &Curve, interval: [f64; 2], f: &Frame, tol: f64) -> Option<Curve
         Curve::Line { start, end } => {
             let at = |t: f64| [start[0] + t * (end[0] - start[0]), start[1] + t * (end[1] - start[1]), start[2] + t * (end[2] - start[2])];
             let (a, b) = (at(interval[0]), at(interval[1]));
-            (f.off(a) <= tol && f.off(b) <= tol).then(|| Curve2::Spline {
-                knots: vec![interval[0], interval[0], interval[1], interval[1]],
-                points: vec![f.uv(a), f.uv(b)],
-            })
+            (f.off(a) <= tol && f.off(b) <= tol)
+                .then(|| Curve2::Spline { knots: vec![interval[0], interval[0], interval[1], interval[1]], points: vec![f.uv(a), f.uv(b)] })
         }
         Curve::Spline { knots, points } => {
             same(knots, points.len())?;
-            points.iter().all(|&p| f.off(p) <= tol).then(|| Curve2::Spline { knots: knots.clone(), points: points.iter().map(|&p| f.uv(p)).collect() })
+            points
+                .iter()
+                .all(|&p| f.off(p) <= tol)
+                .then(|| Curve2::Spline { knots: knots.clone(), points: points.iter().map(|&p| f.uv(p)).collect() })
         }
         Curve::RationalSpline { knots, homogeneous } => {
             same(knots, homogeneous.len())?;

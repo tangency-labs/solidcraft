@@ -147,8 +147,10 @@ fn faces_of(body: &Body, kind: &str) -> usize {
 /// sections made each wall a B-spline surface ("other"), which Convert to Sheet Metal refuses.
 #[test]
 fn a_loft_through_three_squares_in_line_has_planar_walls() {
-    let secs: Vec<(Plane, Region2)> =
-        [(0.0, 55.0), (60.0, 77.5), (120.0, 100.0)].iter().map(|&(z, h)| (Plane::XY.offset(z), Region2 { outer: square(h), holes: vec![] })).collect();
+    let secs: Vec<(Plane, Region2)> = [(0.0, 55.0), (60.0, 77.5), (120.0, 100.0)]
+        .iter()
+        .map(|&(z, h)| (Plane::XY.offset(z), Region2 { outer: square(h), holes: vec![] }))
+        .collect();
     let body = loft_regions(&secs).unwrap();
     let (a, b) = (110.0f64 * 110.0, 200.0f64 * 200.0);
     check(&body, 120.0 / 3.0 * (a + b + (a * b).sqrt()), 1e-6);
@@ -159,8 +161,10 @@ fn a_loft_through_three_squares_in_line_has_planar_walls() {
 /// the sections, and stay B-spline surfaces.
 #[test]
 fn a_loft_through_three_squares_out_of_line_keeps_curved_walls() {
-    let secs: Vec<(Plane, Region2)> =
-        [(0.0, 55.0), (60.0, 80.0), (120.0, 100.0)].iter().map(|&(z, h)| (Plane::XY.offset(z), Region2 { outer: square(h), holes: vec![] })).collect();
+    let secs: Vec<(Plane, Region2)> = [(0.0, 55.0), (60.0, 80.0), (120.0, 100.0)]
+        .iter()
+        .map(|&(z, h)| (Plane::XY.offset(z), Region2 { outer: square(h), holes: vec![] }))
+        .collect();
     let body = loft_regions(&secs).unwrap();
     assert!(body.validity().is_empty(), "{:?}", body.validity());
     assert_eq!((faces_of(&body, "plane"), faces_of(&body, "other")), (2, 4));

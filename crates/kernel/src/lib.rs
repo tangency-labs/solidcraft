@@ -40,10 +40,10 @@ mod emboss;
 #[cfg(test)]
 mod face_source_tests;
 mod fair;
-mod flat_faces;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+mod flat_faces;
 mod freeform;
 pub mod fuzz;
 mod heal;
