@@ -100,9 +100,9 @@ impl<'a> Confirm<'a> {
                         };
                         ui.painter().circle_filled(disc.center(), diameter / 2.0, fill);
                         if matches!(self.tone, Tone::Danger) {
-                            crate::icons::paint_danger(ui.painter(), disc.shrink(t.space_8), self.icon, 1.0);
+                            crate::ui_kit::icons::paint_danger(ui.painter(), disc.shrink(t.space_8), self.icon, 1.0);
                         } else {
-                            crate::icons::paint_accented(ui.painter(), disc.shrink(t.space_8), self.icon, accent, 1.0);
+                            crate::ui_kit::icons::paint_accented(ui.painter(), disc.shrink(t.space_8), self.icon, accent, 1.0);
                         }
                         solidcraft_ui_registry::publish_rect("confirm:disc", disc);
                         ui.vertical(|ui| {

@@ -152,7 +152,7 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     let hr = ui.interact(home, ui.scope_id().with("axis_view_home"), Sense::click());
     // The home button sits in its own small round chip.
     painter.circle(home.center(), 12.0, t.overlay.gamma_multiply(if hr.hovered() { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
-    crate::icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
+    crate::ui_kit::icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
     // Cursors: a grabbing hand while orbiting, an open hand over the circle, a pointer on the home
     // chip (the axis ends keep their pointing hand).
     if hr.hovered() {

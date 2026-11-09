@@ -216,7 +216,12 @@ fn icon_button(ui: &mut egui::Ui, bar: Rect, at: f32, b: &BarButton, compact: bo
     if b.enabled && (resp.hovered() || resp.has_focus()) {
         ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
-    crate::icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), b.icon, if b.enabled { 1.0 } else { 0.35 });
+    crate::ui_kit::icons::paint_app_bar(
+        ui.painter(),
+        Rect::from_center_size(br.center(), vec2(18.0, 18.0)),
+        b.icon,
+        if b.enabled { 1.0 } else { 0.35 },
+    );
     let clicked = resp.backing_on_hover_text(b.tip).clicked();
     b.enabled && clicked
 }
@@ -255,7 +260,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if idle && (home_response.hovered() || home_response.has_focus()) {
         ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
-    crate::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
+    crate::ui_kit::icons::paint_app_bar(ui.painter(), home.shrink(7.0), data.home.icon, if idle { 1.0 } else { 0.35 });
     if home_response.backing_on_hover_text(data.home.tip).clicked() && idle {
         actions.push(BarAction::Home);
     }
@@ -335,13 +340,13 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         if hot {
             ui.painter().rect_filled(report.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
-        crate::icons::paint_app_bar(ui.painter(), report.shrink(7.0), "bug_report", 1.0);
+        crate::ui_kit::icons::paint_app_bar(ui.painter(), report.shrink(7.0), "bug_report", 1.0);
         data.report.label
     } else {
         ui.painter().rect_filled(report, t.radius_sm, if hot { t.app_bar_hover_button } else { t.app_bar });
         ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
         let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
-        crate::icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
+        crate::ui_kit::icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
         if report_label {
             ui.painter().text(
                 pos2(report.left() + REPORT_TEXT_X, report.center().y),
@@ -362,7 +367,7 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     if gresp.hovered() || gresp.has_focus() {
         ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
     }
-    crate::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
+    crate::ui_kit::icons::paint_app_bar(ui.painter(), gear.shrink(7.0), data.settings.icon, 1.0);
     solidcraft_ui_registry::publish_rect(h.settings, gear);
     let assistant = data.assistant.then(|| Rect::from_center_size(pos2(report.left() - 86.0 - search_shift, r.center().y), vec2(32.0, 32.0)));
     solidcraft_ui_registry::publish_handle(h.settings, gear.center());
@@ -713,7 +718,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         }
         if show_close {
             let opacity = if xresp.hovered() || xresp.has_focus() { 1.0 } else { 0.55 };
-            crate::icons::paint_app_bar(ui.painter(), Rect::from_center_size(xr.center(), vec2(14.0, 14.0)), "close", opacity);
+            crate::ui_kit::icons::paint_app_bar(ui.painter(), Rect::from_center_size(xr.center(), vec2(14.0, 14.0)), "close", opacity);
         }
         if resp.secondary_clicked() {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
@@ -819,7 +824,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     if presp.hovered() {
         ui.painter().rect_filled(pr, t.radius_sm, t.app_bar_hover_button);
     }
-    crate::icons::paint_app_bar(
+    crate::ui_kit::icons::paint_app_bar(
         ui.painter(),
         Rect::from_center_size(pr.center(), vec2(16.0, 16.0)),
         "plus",
@@ -990,7 +995,7 @@ pub fn switcher(ui: &mut egui::Ui, data: &Switcher, ws: Rect) -> bool {
     } else {
         let labels = data.labels;
         let icon = Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0));
-        crate::icons::paint_icon(&painter, icon, data.icon, 1.0);
+        crate::ui_kit::icons::paint_icon(&painter, icon, data.icon, 1.0);
         crate::ribbon::text(ui, pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }), data.name, t.font_button, t.text, true);
         // Long translations share the switcher's width with the arrow and its gap.
         let galley = egui::WidgetText::from(egui::RichText::new(data.caption).size(t.font_small).color(t.text_dim)).into_galley(

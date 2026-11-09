@@ -1,6 +1,6 @@
 //! Shared history chips, dense name rows, drop bars and rollback markers.
-use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons;
 use egui::{Painter, Rect, Stroke, pos2, vec2};
 use solidcraft_theme::{TabAccent, Tokens};
 
@@ -256,7 +256,7 @@ impl HistoryTransport {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
         }
         let glyph = if self == Self::Play && playing { "pause" } else { self.id() };
-        icons::glyphs::transport_glyph(ui.painter(), rect.center(), glyph, t.icon);
+        crate::icons::glyphs::transport_glyph(ui.painter(), rect.center(), glyph, t.icon);
         let label = self.label(playing);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
         response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)

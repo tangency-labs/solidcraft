@@ -286,7 +286,7 @@ impl Table<'_> {
         }
         ui.painter().add(egui::Shape::dashed_line(&outline, stroke, t.space_4, t.space_3));
         let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_16, rect.center().y), vec2(t.space_14, t.space_14));
-        crate::icons::paint_ink(ui.painter(), icon, "plus", t.form_dim);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "plus", t.form_dim);
         super::text::paint_text(
             ui,
             egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_6, rect.top()), rect.max),
@@ -460,9 +460,9 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
     let icon =
         egui::Rect::from_center_size(egui::pos2(text_rect.right() + t.space_4 + t.space_14 * 0.5, rect.center().y), vec2(t.space_14, t.space_14));
     match *sort {
-        Sort::Ascending => crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
-        Sort::Descending => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
-        Sort::Listed if response.hovered() => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
+        Sort::Ascending => crate::ui_kit::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Descending => crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Listed if response.hovered() => crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
         Sort::Listed => {}
     }
     if response.clicked() {
@@ -521,7 +521,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
     let response = super::actions::icon_button_colored(ui, rect, "plus", "Add Column", Some(t.form_dim));
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
-        crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
+        crate::ui_kit::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
         for x in [rect.left() - t.form_gap_y, rect.right() + t.form_gap_y] {
             ui.painter().vline(x, rect.y_range(), egui::Stroke::new(t.space_2, t.form_primary));
         }

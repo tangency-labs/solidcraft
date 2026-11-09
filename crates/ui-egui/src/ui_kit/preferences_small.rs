@@ -66,7 +66,7 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         let rect = ui.max_rect();
         let side = t.space_16 + t.space_2 / 2.0;
         let icon = Rect::from_center_size(pos2(rect.left() + side / 2.0, rect.center().y), vec2(side, side));
-        crate::icons::paint_ink(ui.painter(), icon, "settings_profile", t.form_dim);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "settings_profile", t.form_dim);
         let chevron = Rect::from_center_size(pos2(rect.right() - t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         super::dropdown_indicator(ui.painter(), chevron, t.form_dim);
         let text_left = (icon.right() + t.space_8).min(chevron.left());
@@ -183,7 +183,7 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
         if icon == "lock" {
             crate::icons::glyphs::badge(ui.painter(), at, "lock", ink);
         } else {
-            crate::icons::paint_ink(ui.painter(), at, icon, ink);
+            crate::ui_kit::icons::paint_ink(ui.painter(), at, icon, ink);
         }
     }
     let text_left = (rect.left() + t.space_8 + icon_width).min(rect.right());
