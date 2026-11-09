@@ -298,6 +298,10 @@ struct SessionObjects<'target> {
     corners: Vec<FilletCorner>,
     generators: Vec<FilletSurfaceGenerator>,
     laws: Vec<FilletLaw>,
+    /// The target's faces before filleting: the faces after it that are not among them are
+    /// the fillet's, whose edges and vertices have their stored tolerances grown to their
+    /// measured gaps after the merge.
+    faces_before: BTreeSet<FaceId>,
     attributes: AttributeStore,
     /// (not upstream) The target's and the second base's own attribute stores as the
     /// session took them, put back by `Drop` if handing the session's back fails.
@@ -1526,6 +1530,7 @@ impl<'target> FilletSession<'target> {
                 corners: Vec::new(),
                 generators: Vec::new(),
                 laws: Vec::new(),
+                faces_before: BTreeSet::new(),
                 attributes,
                 attributes_before,
                 merge_attributes: None,
