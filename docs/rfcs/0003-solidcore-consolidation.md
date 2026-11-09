@@ -84,6 +84,7 @@ Every PR uses the gates below, plus the gate named in its row.
 | 0.1 | `cargo xtask app-geometry` and `xtask/app-geometry.txt` (layers §4): a shrink-only list of functions in `doc`, `engine`, `ui-egui`, `io`, `kernel` and `geom` that compute geometry (vector maths on coordinates, solves, mesh queries), seeded from §1. CI posts per-crate counts on each PR | lists the current sites; fails on a new one |
 | 0.2 | `solidcore/docs/jobs.toml` and `cargo xtask jobs`: each job names its one crate and module; the duplicates in §1a are listed with the PR that removes them, and the list only shrinks | fails on a new public entry point outside its job's module |
 | 0.3 | The seam check also fails on a new use of `solidcraft-geom`'s evaluator, tess or mesh queries from a crate that does not already use them | ledger counts unchanged |
+| 0.4 | solidcore stays self-contained: CI exports `solidcore/` alone (`git archive`) into an empty folder and runs `cargo check --workspace --all-targets --locked` there, and `cargo xtask layers` fails on any `Cargo.toml` under `solidcore/` with a path outside `solidcore/` or a `solidcraft-*` dependency | the export builds alone; a planted path dependency into `crates/` fails |
 
 ### Phase 1: jobs both sides have (SolidCraft's code as the base)
 
