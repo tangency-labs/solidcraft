@@ -395,6 +395,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
+        let vertices_before = std::mem::take(&mut self.0.vertices_before);
         // The cleanup's face and edge merges notify through the session's store, so the
         // survivors keep the attributes of the objects merged into them.
         let result = self.with_target_env(k, |k, target, env| {
@@ -403,8 +404,18 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 target,
                 &relations,
                 check_all_edges,
-                Some(env),
-            )
+                Some(&mut *env),
+            )?;
+            // As the boolean's merge places its own after its cleanup (#3090): a vertex the
+            // fillet made on a target edge stands on that edge's curve, which may lie up to the
+            // edge's tolerance off one of its faces, past the B-rep's intersection tolerance that
+            // every vertex/face gap must stay under. The fillet's vertices (those the target did
+            // not have) go to the corner their faces define, under the boolean's guards.
+            let vertices: Vec<_> = p1::vertices(target, None)?
+                .into_iter()
+                .filter(|v| !vertices_before.contains(v))
+                .collect();
+            crate::boolean::merge::p1::place_vertices_on_face_corners(k, target, &vertices, env)
         });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
@@ -773,6 +784,9 @@ impl FilletSession<'_> {
         // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
         // the setback set on it is first read: the Setback where it is one
         self.set_back_marked_corners(k)?;
+        self.objects.vertices_before = p1::vertices(self.objects.target, None)?
+            .into_iter()
+            .collect();
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
             Some((
