@@ -786,7 +786,7 @@
     "ui.fillet_corner_ball": "Sferico",
     "ui.fillet_corner_ball_tip": "Una porzione della sfera rotolante, tangente (G1) a ciascun raccordo.",
     "ui.fillet_corner_curvature_tip": "Curvatura (G2): una superficie continua. L'angolo viene arretrato lungo ogni spigolo dell'Arretramento ({factor} × il raggio, se non ne digiti uno) e riempito con una superficie, così i riflessi la attraversano senza spezzarsi.",
-    "ui.fillet_corner_needs_constant": "Gli angoli a superficie continua (G2) richiedono Raggio costante e Adattamento esatto.",
+    "ui.fillet_corner_needs_constant": "Gli angoli a superficie continua (G2) richiedono Raggio costante e Raggio esatto.",
     "ui.fillet_corner_patch": "Superficie continua",
     "ui.fillet_corner_patch_tip": "Continuità di curvatura (G2): l'angolo viene arretrato lungo ogni spigolo e riempito con una superficie, così i riflessi la attraversano senza spezzarsi.",
     "ui.fillet_corner_tangent_tip": "Tangenza (G1): un angolo a sfera rotolante, una porzione della sfera rotolante tangente a ciascun raccordo.",
