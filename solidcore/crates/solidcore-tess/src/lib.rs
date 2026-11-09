@@ -40,6 +40,12 @@ pub use planner::{
 pub use pole::{AveragedPole, PoleNode, PoleRule};
 pub use tolerance::{DISPLAY_ANGLE, MeshTolerance};
 
+/// The kernel evaluator's curve and surface forms a [`TessPlan`] holds (its `surfaces`), so a
+/// client that builds or reads a plan names them through this crate, not the kernel's.
+pub use solidcore::eval::{EvalCurve, EvalSurface};
+/// The vector conversions between the record and the evaluator that plan surfaces are built with.
+pub use solidcore_convert::{record_vec3, vec3};
+
 /// Why a body could not be planned. The messages are the ones the mesher has always reported.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum TessError {
@@ -74,4 +80,28 @@ pub(crate) fn with_room<T>(n: usize) -> Option<Vec<T>> {
     let mut v = Vec::new();
     v.try_reserve(n).ok()?;
     Some(v)
+}
+
+
+#[cfg(test)]
+mod reexport_tests {
+    use solidcore_record::Vec3;
+
+    /// A plan's surfaces, read through this crate's names alone.
+    fn surfaces(plan: &crate::TessPlan) -> &[crate::EvalSurface] {
+        &plan.surfaces
+    }
+
+    #[test]
+    fn a_plans_surfaces_are_built_and_read_through_this_crate() {
+        let plane = crate::EvalSurface::Plane {
+            origin: crate::vec3(Vec3::new(1.0, 2.0, 3.0)),
+            du: crate::vec3(Vec3::new(1.0, 0.0, 0.0)),
+            dv: crate::vec3(Vec3::new(0.0, 1.0, 0.0)),
+        };
+        let crate::EvalSurface::Plane { origin, .. } = &plane else { panic!("{plane:?}") };
+        assert_eq!(crate::record_vec3(*origin), Vec3::new(1.0, 2.0, 3.0));
+        let plan = crate::TessPlan { surfaces: vec![plane.clone()], ..Default::default() };
+        assert_eq!(surfaces(&plan), [plane]);
+    }
 }
