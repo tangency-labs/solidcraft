@@ -1,10 +1,20 @@
 //! Opt-in, prepaid GPU caustic photon storage and cancellable measured prepasses.
 //! Legacy jobs retain the original six-storage-buffer shader/layout unchanged.
 use super::*;
-use solidcraft_render::job::CausticOptions;
+use solidcraft_render::job::{
+    CausticOptions,
+    photon_sources::{self as power, MAX_PHOTON_SOURCES, PhotonSourceDistribution},
+};
 
 const HEADER_WORDS: u32 = 16;
 const RECORD_WORDS: u32 = 16;
+const GUIDE_WORDS: u32 = 4;
+const BOUNDS_WORDS: u32 = 6;
+const SOURCE_WORDS: u32 = 1 + MAX_PHOTON_SOURCES as u32;
+fn extra_words(options: CausticOptions) -> u32 {
+    (if options.guided_emission || options.power_weighted_sources { GUIDE_WORDS } else { 0 })
+        + if options.power_weighted_sources { SOURCE_WORDS } else { 0 }
+}
 const DISABLED: &str = include_str!("photons_disabled.wgsl");
 const PHOTONS: &str = include_str!("photons.wgsl");
 
@@ -13,13 +23,71 @@ pub(super) fn heads(options: CausticOptions) -> Result<u32> {
     options.photons.checked_mul(2).and_then(u32::checked_next_power_of_two).ok_or_else(|| gpu("caustic hash capacity overflow"))
 }
 pub(super) fn buffer_bytes(options: CausticOptions) -> Result<u64> {
-    let words = u64::from(HEADER_WORDS) + u64::from(heads(options)?) + u64::from(options.photons) * u64::from(RECORD_WORDS);
+    let words = u64::from(HEADER_WORDS + extra_words(options) + BOUNDS_WORDS)
+        + u64::from(heads(options)?)
+        + u64::from(options.photons) * u64::from(RECORD_WORDS);
     words.checked_mul(4).ok_or_else(|| gpu("caustic buffer size overflow"))
 }
 pub(super) fn admission_bytes(options: Option<CausticOptions>) -> Result<u64> {
     options.map_or(Ok(0), |options| {
-        buffer_bytes(options)?.checked_add(u64::from(HEADER_WORDS) * 4).ok_or_else(|| gpu("caustic header estimate overflow"))
+        let upload_words = HEADER_WORDS + extra_words(options) + BOUNDS_WORDS;
+        buffer_bytes(options)?.checked_add(u64::from(upload_words) * 4).ok_or_else(|| gpu("caustic header estimate overflow"))
     })
+}
+
+/// Host-side source order and enable predicates mirror photon_trace exactly.
+/// The bounded CDF is uploaded once and retained across map refreshes.
+pub(super) fn source_distribution(
+    options: JobOptions,
+    request: &ImageRequest,
+    nodes: &[u8],
+    guide: Option<[f32; 4]>,
+    hdr_integral: f64,
+) -> Result<Option<PhotonSourceDistribution>> {
+    let Some(caustics) = options.caustics.filter(|c| c.power_weighted_sources) else { return Ok(None) };
+    let mut bounds = [0.0; 6];
+    for (value, index) in bounds.iter_mut().zip([0usize, 1, 2, 4, 5, 6]) {
+        let bytes = nodes.get(index * 4..index * 4 + 4).and_then(|v| v.try_into().ok()).ok_or_else(|| gpu("photon power bounds missing"))?;
+        *value = f64::from(f32::from_le_bytes(bytes));
+    }
+    let radius = ((bounds[3] - bounds[0]).powi(2) + (bounds[4] - bounds[1]).powi(2) + (bounds[5] - bounds[2]).powi(2)).sqrt() * 0.5;
+    let radius = guide.filter(|g| caustics.guided_emission && g[3] > 0.0 && f64::from(g[3]) < radius).map_or(radius, |g| f64::from(g[3]));
+    let studio = options.lighting.is_some() || request.environment.is_some();
+    let lighting = options.lighting.unwrap_or_default();
+    let mut powers = [0.0; MAX_PHOTON_SOURCES];
+    let mut count = 0;
+    let mut push = |value| -> Result<()> {
+        *powers.get_mut(count).ok_or_else(|| gpu("photon source proposal capacity exceeded"))? = value;
+        count += 1;
+        Ok(())
+    };
+    if studio {
+        for light in lighting.directional_lights.iter() {
+            push(power::disk_power(radius, power::luminance(light.color.map(|c| c * light.intensity))?)?)?;
+        }
+        for light in lighting.punctual_lights.iter() {
+            push(power::punctual_power(light)?)?;
+        }
+    } else {
+        for (intensity, weight) in [3.0, 1.0, 1.5].into_iter().zip(request.studio_weights.unwrap_or([1.0; 3])) {
+            push(power::disk_power(radius, intensity * weight)?)?;
+        }
+    }
+    if caustics.area_lights && caustics.max_depth > 1 {
+        for light in lighting.area_lights.iter() {
+            push(power::rectangle_power(light.area(), light.radiance)?)?;
+        }
+    }
+    let lit_environment =
+        request.environment.as_ref().map_or(lighting.environment.into_iter().any(|c| (c as f32).to_bits() & 0x7fff_ffff != 0), |e| {
+            (e.info().intensity as f32).to_bits() & 0x7fff_ffff != 0
+        });
+    if studio && lit_environment && caustics.environment && caustics.max_depth > 1 {
+        let integral =
+            if request.environment.is_some() { hdr_integral } else { 4.0 * std::f64::consts::PI * power::luminance(lighting.environment)? };
+        push(power::disk_power(radius, integral)?)?;
+    }
+    if count == 0 { Ok(None) } else { PhotonSourceDistribution::new(&powers[..count]).map(Some) }
 }
 
 pub(super) fn validate_scene(scene: &ProductScene, options: JobOptions) -> Result<()> {
@@ -186,12 +254,20 @@ pub(super) struct Resources {
     emit: wgpu::ComputePipeline,
     photons: u32,
     head_count: u32,
+    pass: u32,
     cleared: u32,
     emitted: u32,
     budget: dispatch::Budget,
 }
 impl Resources {
-    pub(super) fn new(context: &Context, options: CausticOptions, nodes: &[u8], source_count: u32) -> Result<Self> {
+    pub(super) fn new(
+        context: &Context,
+        options: CausticOptions,
+        nodes: &[u8],
+        guide: Option<[f32; 4]>,
+        bounds: Option<[f32; 6]>,
+        sources: Option<&PhotonSourceDistribution>,
+    ) -> Result<Self> {
         options.validate()?;
         let head_count = heads(options)?;
         let word = |index: usize| -> Result<u32> {
@@ -223,20 +299,59 @@ impl Resources {
                 ));
             }
         }
-        header[12] = source_count;
+        header[12] = u32::from(options.area_lights);
+        header[13] = u32::from(options.environment);
+        let guide = guide.filter(|_| options.guided_emission);
+        header[14] = u32::from(guide.is_some()) | (u32::from(sources.is_some()) << 1) | (u32::from(bounds.is_some()) << 2);
+        if let Some([_, _, _, radius]) = guide {
+            let diameter_squared = [(6, 9), (7, 10), (8, 11)]
+                .into_iter()
+                .map(|(lo, hi)| (f64::from(f32::from_bits(header[hi])) - f64::from(f32::from_bits(header[lo]))).powi(2))
+                .sum::<f64>();
+            log::info!("gpu-path guided photon emission optical radius {:.3} mm, scene radius {:.3} mm", radius, diameter_squared.sqrt() * 0.5);
+        }
         let mut bytes = [0u8; HEADER_WORDS as usize * 4];
         for (word, output) in header.into_iter().zip(bytes.as_chunks_mut::<4>().0) {
             output.copy_from_slice(&word.to_le_bytes());
         }
         let pipelines = Pipelines::shared(context)?;
+        let size = buffer_bytes(options)?;
         let buffer = checked_creation(&context.device, || {
             let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("caustic photons and spatial hash"),
-                size: buffer_bytes(options)?,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                size,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | if cfg!(test) { wgpu::BufferUsages::COPY_SRC } else { wgpu::BufferUsages::empty() },
                 mapped_at_creation: false,
             });
             context.queue.write_buffer(&buffer, 0, &bytes);
+            if let Some(guide) = guide {
+                let mut bytes = [0u8; GUIDE_WORDS as usize * 4];
+                for (value, output) in guide.into_iter().zip(bytes.as_chunks_mut::<4>().0) {
+                    output.copy_from_slice(&value.to_le_bytes());
+                }
+                context.queue.write_buffer(&buffer, size - u64::from(extra_words(options) + BOUNDS_WORDS) * 4, &bytes);
+            }
+            if let Some(sources) = sources {
+                let mut words = [0u32; SOURCE_WORDS as usize];
+                words[0] = sources.cumulative().len() as u32;
+                for (target, value) in words[1..].iter_mut().zip(sources.cumulative()) {
+                    *target = *value;
+                }
+                let mut packed = [0u8; SOURCE_WORDS as usize * 4];
+                for (value, output) in words.into_iter().zip(packed.as_chunks_mut::<4>().0) {
+                    output.copy_from_slice(&value.to_le_bytes());
+                }
+                context.queue.write_buffer(&buffer, size - u64::from(SOURCE_WORDS + BOUNDS_WORDS) * 4, &packed);
+            }
+            if let Some(bounds) = bounds {
+                let mut bytes = [0u8; BOUNDS_WORDS as usize * 4];
+                for (value, output) in bounds.into_iter().zip(bytes.as_chunks_mut::<4>().0) {
+                    output.copy_from_slice(&value.to_le_bytes());
+                }
+                context.queue.write_buffer(&buffer, size - u64::from(BOUNDS_WORDS) * 4, &bytes);
+            }
             Ok(buffer)
         })?;
         Ok(Self {
@@ -247,6 +362,7 @@ impl Resources {
             emit: pipelines.emit.clone(),
             photons: options.photons,
             head_count,
+            pass: 0,
             cleared: 0,
             emitted: 0,
             budget: Default::default(),
@@ -274,6 +390,23 @@ impl Resources {
     pub(super) fn ready(&self) -> bool {
         self.emitted == self.photons
     }
+    #[cfg(test)]
+    pub(super) fn test_epoch(&self) -> u32 {
+        self.pass
+    }
+    pub(super) fn ensure_pass(&mut self, pass: u32) -> Result<()> {
+        if self.pass == pass {
+            return Ok(());
+        }
+        if !self.ready() || self.pass.checked_add(1) != Some(pass) {
+            return Err(gpu("caustic refresh requires the next complete camera pass"));
+        }
+        self.pass = pass;
+        self.cleared = 0;
+        self.emitted = 0;
+        self.budget = Default::default();
+        Ok(())
+    }
     pub(super) fn count(&self) -> u32 {
         let remaining =
             if self.cleared < self.head_count + self.photons { self.head_count + self.photons - self.cleared } else { self.photons - self.emitted };
@@ -300,6 +433,9 @@ impl Resources {
         let count = self.count();
         let started = Instant::now();
         let scopes = scopes(&context.device);
+        if clearing && offset == 0 && self.pass != 0 {
+            context.queue.write_buffer(&self.buffer, 15 * 4, &self.pass.to_le_bytes());
+        }
         context.queue.write_buffer(&self.buffer, 5 * 4, &offset.to_le_bytes());
         context.queue.write_buffer(uniform, 0, parameters);
         let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("caustic photon quantum") });
@@ -329,6 +465,45 @@ impl Resources {
     pub(super) fn maximum_quanta(&self) -> u32 {
         (self.head_count + 2 * self.photons).div_ceil(dispatch::MIN_PATHS) + 2
     }
+    #[cfg(test)]
+    pub(super) fn test_records(&self, context: &Context) -> Vec<[u32; RECORD_WORDS as usize]> {
+        assert!(self.ready());
+        let offset = u64::from(HEADER_WORDS + self.head_count) * 4;
+        let bytes = u64::from(self.photons) * u64::from(RECORD_WORDS) * 4;
+        let staging = context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("test photon records"),
+            size: bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = context.device.create_command_encoder(&Default::default());
+        encoder.copy_buffer_to_buffer(&self.buffer, offset, &staging, 0, bytes);
+        let submission = context.queue.submit([encoder.finish()]);
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| tx.send(result).unwrap());
+        context.wait(submission, TIMEOUT).unwrap();
+        rx.try_recv().unwrap().unwrap();
+        let mapped = slice.get_mapped_range().unwrap();
+        let records = mapped
+            .as_chunks::<64>()
+            .0
+            .iter()
+            .map(|record| {
+                let mut words = std::array::from_fn(|i| u32::from_le_bytes(record[i * 4..i * 4 + 4].try_into().unwrap()));
+                if words[11] == 0 {
+                    return [0; RECORD_WORDS as usize];
+                }
+                // Atomic linked-list insertion order is independent of the
+                // indexed emitted paths and may vary on the same driver.
+                words[3] = 0;
+                words
+            })
+            .collect();
+        drop(mapped);
+        staging.unmap();
+        records
+    }
 }
 
 #[cfg(test)]
@@ -341,8 +516,11 @@ mod tests {
             let options = CausticOptions { photons, ..Default::default() };
             let head_count = heads(options).unwrap();
             assert!(head_count.is_power_of_two() && head_count >= 2 * photons);
-            assert_eq!(buffer_bytes(options).unwrap(), 64 + u64::from(head_count) * 4 + u64::from(photons) * 64);
-            assert_eq!(admission_bytes(Some(options)).unwrap(), buffer_bytes(options).unwrap() + 64);
+            assert_eq!(buffer_bytes(options).unwrap(), 88 + u64::from(head_count) * 4 + u64::from(photons) * 64);
+            assert_eq!(admission_bytes(Some(options)).unwrap(), buffer_bytes(options).unwrap() + 88);
+            let guided = CausticOptions { guided_emission: true, ..options };
+            assert_eq!(buffer_bytes(guided).unwrap(), buffer_bytes(options).unwrap() + 16);
+            assert_eq!(admission_bytes(Some(guided)).unwrap(), admission_bytes(Some(options)).unwrap() + 32);
         }
         assert!(buffer_bytes(CausticOptions { photons: u32::MAX, ..Default::default() }).is_err());
     }

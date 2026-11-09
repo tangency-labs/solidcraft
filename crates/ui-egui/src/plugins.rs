@@ -380,7 +380,7 @@ mod tests {
                                         .job
                                         .sections
                                         .iter()
-                                        .all(|section| section.format.font_id == crate::fonts::semibold(t.font_button));
+                                        .all(|section| section.format.font_id == crate::ui_kit::type_face::semibold(t.font_button));
                                 }
                                 _ => {}
                             });
@@ -458,7 +458,7 @@ mod tests {
                 crate::scenario::clear_handles();
                 let mut output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     ui.set_width(646.0);
-                    let _search = crate::ui_kit::settings_search::begin(ui, query);
+                    let _search = crate::ui_kit::settings_search::begin(ui, query, "prefs");
                     crate::ui_kit::settings_search::begin_page(ui, crate::prefs::PAGE_PLUGINS, "Extend > Plugins");
                     crate::ui_kit::scope(ui, |ui| page_in_dir(&mut h.app, ui, Some(&dir)));
                     crate::ui_kit::settings_search::store_nav(ui);
@@ -468,7 +468,7 @@ mod tests {
             let (_, _, hits) = crate::ui_kit::settings_search::nav(&ctx);
             assert_eq!(hits.len(), 1, "{query}: one real plugin result");
             assert_eq!(hits[0].page, crate::prefs::PAGE_PLUGINS);
-            crate::ui_kit::settings_search::set_reveal(&ctx, Some(crate::ui_kit::settings_search::reveal_for(hits[0].page, &hits[0].label)));
+            crate::ui_kit::settings_search::set_reveal(&ctx, Some(crate::ui_kit::settings_search::reveal_for(hits[0].page, &hits[0].label, "prefs")));
             page_frame(&mut h.app, &ctx, &dir, vec![]);
             let card = crate::scenario::rect_of("prefs:plugin:public-one:card").unwrap();
             assert!(crate::scenario::handle_at("prefs:revealed").unwrap().distance(card.center()) <= 1.0);
@@ -532,7 +532,7 @@ mod tests {
         other.load_prefs(&app.prefs());
         assert!(!enabled(&other, "ftc-frc-parts"));
         crate::prefs::control(&mut app, &json!({"open": "Plugins", "button": "defaults"})).unwrap();
-        assert_eq!(app.prefs_window.section, crate::prefs::PAGE_PLUGINS);
+        assert_eq!(app.prefs_window.shell.section, crate::prefs::PAGE_PLUGINS);
         assert!(enabled(&app, "ftc-frc-parts"));
         assert!(crate::prefs::control(&mut app, &json!({"open": "NoSuch"})).is_err());
     }

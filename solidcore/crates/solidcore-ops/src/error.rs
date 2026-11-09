@@ -134,6 +134,19 @@ pub enum Error {
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
+    /// A contact test the kernel's certified bracket of the boundary distance does not decide
+    /// (`solidcore::query::contact`): the tolerance lies inside `[lower, upper]` (or the
+    /// boundaries are apart but one body's enclosure of the other is not decided), or a
+    /// distance's bracket is still wider than asked. Never read as either answer. `other` is
+    /// the index of the body tested among the call's others.
+    ContactUndecided {
+        /// The other body's index among the call's (0 for one).
+        other: usize,
+        /// No point of either boundary is nearer the other than this.
+        lower: f64,
+        /// A pair of points, one on each boundary, is this far apart.
+        upper: f64,
+    },
     /// The application cancelled the call.
     Cancelled,
     /// Ops was called from inside a kernel call or from the failure callback.
@@ -325,6 +338,14 @@ impl std::fmt::Display for Error {
             ),
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
+            Error::ContactUndecided {
+                other,
+                lower,
+                upper,
+            } => write!(
+                f,
+                "contact with body {other} is undecided: the boundary distance is in [{lower}, {upper}]"
+            ),
             Error::Cancelled => write!(f, "cancelled"),
             Error::Reentered => write!(
                 f,

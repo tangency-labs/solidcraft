@@ -126,6 +126,17 @@ give the same class, and the net lies on that class's surface derived from the s
 parametrisation's: the net reversed, swapped, split or trimmed is still on S, so those edits
 carry it.
 
+A round of the `Circle` class is certified on its own torus. The class is read within the body's
+tolerance, so supports only that close to it (a plane 1e-13 off square to a cylinder's axis, as a
+record can carry them) have no torus that touches both exactly, and the round the solver builds,
+tangent to the supports as they are, lies on a torus of its own. Its definition is that torus: the
+torus of the net's own form (`own_torus`: a revolution's axis and generating arc, or a torus's
+label), which the form is proved to lie on (`lies_on`), at bound 0; and the distance from it to the
+class's torus derived from the supports, stated (`ExactRound::supports_distance`: the axes' angle
+times the reach, the centres' distance and the radii's differences) and refused past the tolerance
+the class was read within. Supports exactly of the class give a distance at rounding. The supports
+are never moved to fit.
+
 ### 3.4 The blend definition
 
 `ProceduralBlend` holds the net (`net`, a `BSplineSurface`) and the definition
@@ -458,6 +469,9 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    proof: an identity for ε = 0, an enclosure otherwise. No net is stored with an estimated bound.
 2. **S answers final questions.** Intersection points, projections, the model check and continuity
    grading read S, or B only inside a `NetScope` that asks for at least ε.
+   Until the volume enclosure widens a certified face by its ε, the sign of a body's volume (the
+   solid test and the local operation's gate) reads such a face on its net B, so it decides on the
+   body as stored.
 3. **A refusal names the size that fits.** A construction that cannot be certified returns a typed
    error with the cause and, where one exists, the largest size that builds (`FitSize`,
    `ExtendRefusal`'s distance), computed from the cause's geometry, never by building again.

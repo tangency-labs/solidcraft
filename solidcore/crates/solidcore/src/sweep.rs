@@ -12,6 +12,7 @@ pub mod directed;
 pub mod extrude;
 pub mod rotational_sweep_geometry;
 pub mod screw;
+pub mod section_blend;
 pub mod segments;
 pub mod stations;
 pub mod topology_sweep;
