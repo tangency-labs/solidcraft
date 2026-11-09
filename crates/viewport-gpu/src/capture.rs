@@ -692,7 +692,7 @@ mod tests {
     /// picture clears its new resolve texture once, before the resolve, and shows its background.
     #[test]
     fn a_multisampled_picture_clears_its_resolve_texture_before_the_resolve() {
-        let Ok(capturer) = Capturer::headless() else {
+        let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -708,7 +708,7 @@ mod tests {
         capturer.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
         assert_eq!(clears(), 2 * expected, "every picture has a new resolve texture, cleared again");
         // One sample: the picture's own pass clears the texture it draws into.
-        if let Ok(single) = Capturer::headless_single_sample() {
+        if let Ok(single) = Capturer::headless_single_sample(crate::test_env::policy()) {
             single.rgba(&Scene::default(), &Camera::default(), 32, 24).unwrap();
             assert_eq!(single.state.lock().map(|s| s.resolve_clears).ok(), Some(0));
         }
