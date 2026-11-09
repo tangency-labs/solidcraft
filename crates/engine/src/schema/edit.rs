@@ -28,6 +28,15 @@ pub struct PaletteParams {}
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PaletteResult {}
 
+/// `ui.toggle_visibility` takes nothing: it acts on the app's selection.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ToggleVisibilityParams {}
+
+/// Never produced: headless calls are refused, and the app acts on its own selection.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ToggleVisibilityResult {}
+
 /// `edit.repeat` takes no parameters: it starts the last tool with its defaults.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -1531,7 +1540,7 @@ mod tests {
         PaletteParams, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, SetFields, TimelineComputeAllParams, TimelineComputeAllResult,
         TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams, TimelineEditResult,
         TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult, TimelineRollToParams,
-        TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, UndoParams, UndoResult,
+        TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult, ToggleVisibilityParams, UndoParams, UndoResult,
     };
     use super::{
         TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved,
@@ -1547,6 +1556,7 @@ mod tests {
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
         assert_keys(input_schema_for::<AssistantParams>(), &[]);
         assert_keys(input_schema_for::<PaletteParams>(), &[]);
+        assert_keys(input_schema_for::<ToggleVisibilityParams>(), &[]);
         assert_keys(input_schema_for::<UndoParams>(), &[]);
         assert_keys(input_schema_for::<RedoParams>(), &[]);
         assert_keys(input_schema_for::<CheckpointParams>(), &[]);
