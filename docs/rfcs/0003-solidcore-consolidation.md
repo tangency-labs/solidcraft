@@ -60,49 +60,9 @@ Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" cou
 | IGES | `kernel/src/{iges_in,iges_in/assembly,iges_out}.rs` (2.7k) | record (model, parser), ops (build): "every other importer (IGES, STL and so on) follows the same split" (layers §2) | no counterpart | kernel |
 | Mesh-body tools (repair, queries, decimation, mesh booleans, mesh-to-B-rep) | `kernel/src/{meshbody,mesh_convert,polybool}.rs` (1.0k); `geom/src/{mesh,bvh,mesh_distance,compare}.rs` (2.4k); mesh formats in `io` (STL, 3MF, glTF, PLY, OBJ) | a new solidcore crate, `solidcore-mesh`, separate from tess: tess makes display meshes from B-reps, while this works on meshes as bodies (CAM slices meshes). Readers and writers follow the record/ops split. Their uses on B-rep bodies go with the mesh decisions above | none | kernel, engine, io |
 
-The camera and lighting maths in `render` and `gpu` is the app's own drawing, so it stays there and isn't counted.
+Not inventoried here: `crates/sketch` (the 2D constraint solver, 32k) and `crates/dynamics`. Under the placement test (§3), their geometry belongs in solidcore too, and each gets its own inventory after this RFC. The camera and lighting maths in `render` and `gpu` is the app's drawing, so it stays.
 
 **Totals.** About 108k non-test lines in SolidCraft overlap a solidcore job or are geometry outside solidcore: about 56k with a solidcore counterpart (1a), about 52k without (1b), not counting the 147 mesh-decision functions in `doc` and `engine`. The seam allowlist has one line (`crates/smlib -> solidcore`), and no SolidCraft crate calls `solidcore-ops` or `solidcore-tess` yet.
-
-### 1c. Every job against the placement test
-
-For each job I asked whether CAM, simulation or another application on this kernel would use it (§3). Where the answer is yes, it goes to solidcore: kernel compute plus a thin ops entry. Where it's no, the job stays in the app, and the table gives the reason. Counts are whole files in non-test lines (k = thousand). A file that moves still leaves its command in the app as a thin call.
-
-| Job (crates) | k lines | Goes to |
-|---|---|---|
-| Meshing, display edges and isoparms (`kernel/tess`, `geom/tess`, `simplify`, `smooth_edges`, `iso`) | 9.4 | `solidcore-tess` |
-| STEP and IGES read and write (`step`, `kernel/step_in`, `step_out`, `iges_*`) | 13.3 | record + ops |
-| Mesh formats STL, 3MF, glTF, PLY, OBJ (`io`) and point clouds (`io`, `engine/cmd/point_cloud`) | 4.9 | `solidcore-mesh` (CAM slices meshes; inspection uses clouds) |
-| DXF, SVG and 2D profile I/O (`io/{dxf,dxf_out,svg,sketch2d}`, `paper/svg`) | 3.1 | record (2D model) + ops (laser, plasma and router CAM read DXF) |
-| Record↔kernel conversion and the C-API port (`crates/smlib`) | 15.8 | convert + ops |
-| Evaluation, NURBS forms, profile and vector geometry (`geom/brep`, `geom/{profile,vec,unit_vec3,plane,aabb2,grid}`) | 3.8 | kernel; plain data to record |
-| Measure, mass properties, distance (`kernel/{measure,distance,prism_measure}`, `geom/{inertia,ball}`, `engine/cmd/{measure_sel,measure_exact,measure_shape,mass_properties}`) | 4.7 | kernel + ops `measure` |
-| Interference, clearance, contact, compare, motion contact (`engine/cmd/{interference,clearance,contact_sweep,compare*,motion_sweep,motion_analysis}`) | 4.0 | kernel + ops (CAM collision checks, simulation) |
-| Surface analysis: zebra, draft angle, curvature maps; continuity and combs | 2.6 | kernel (per-point values), tess (per-vertex data); the shading stays in the app |
-| Sections, projections, silhouettes, hidden lines (`geom/hlr`, `section`, `doc/project*`, `engine/cmd/{section,sketch_project,view_dxf_projection}`) | 9.4 | kernel + tess + ops |
-| Curve offsets and thin profiles (`sketch/{offset,offset_topology,thin,freeform_offset}`) | 4.0 | kernel (toolpath boundaries are the same call) |
-| 2D curve geometry: intersections, splitting, loops, regions (`sketch/{curves,nurbs,pierce,decompose,link_loops,profiles,wire,shape,periodic,spline_points,ends,loci}`) | 7.9 | kernel + ops (CAM pockets and profiles) |
-| 2D constraint solver (`sketch/{solver,linalg,equation,redundancy,dims,union_find}`) | 5.1 | solidcore, its own crate (`solidcore-sketch`), after Phase 5: any CAD app on the kernel needs one |
-| Text to curves (`sketch/{text,fonts}`) | 1.1 | kernel + ops (engraving); the font files come from the app |
-| Thread forms and thread standards tables (`doc/{eval_thread,thread_forms,thread_catalog,pipe_thread_*}`) | 3.0 | kernel (forms) + ops (standard tables); CAM thread milling uses both |
-| Holes and patterns geometry (`doc/hole_reference`, pattern files) | 0.5 | ops recipes |
-| Sheet metal fold and unfold (`doc/sheet`, `engine/cmd/sheet`) | 11.6 | kernel + ops; the app keeps the settings |
-| Surface construction, planar builds and sewing, local surface commands | 29.6 | kernel + ops (§1b) |
-| Builds and history composition (`kernel/{build,ops,smlib_boolean,draft_corners,numbered,freeform,plane_fit,boolean_record,history,record,assemble}`) | 3.3 | ops recipes; history in the kernel |
-| Checks and healing (`kernel/{validation,validity,heal}`), native binary geometry (`kernel/native`) | 1.4 | kernel; `solidcore-record` (it has `native.rs`) |
-| Provenance, tangent chains, mesh-body tools, offset and shell, sweeps, blends, SSI wrappers | 18.5 | kernel + ops, `solidcore-mesh` (§1a, §1b) |
-| Multibody dynamics and joint motion (`crates/dynamics`, `engine/cmd/{motion,motion_trace,motion_animation}`) | 4.1 | solidcore, its own crate, after Phase 5: a simulation app would use it |
-| **Moves, total** | **about 161** | |
-| `kernel/src/body.rs` `Body` (caches, state) | 1.6 | app: SolidCraft's handle on a body; its mesh decisions go in Phase 3 |
-| Feature evaluation and replay (`doc/{eval,eval_more}`) | 12.2 | app: the timeline is SolidCraft's workflow; its mesh decisions become ops calls (Phase 3) |
-| Persistent naming (`doc/{naming,name_lookup,history_names,lineage}`) | 3.5 | app: names are each app's state, and other apps receive them as opaque strings (RFC 0001); the history they're built from is the kernel's |
-| Joints and assemblies (`doc/joints*`) | 5.0 | app: document state; the geometry lookups go in Phase 3 |
-| Sketch document: model, links to the model, construction, cursor (`sketch/{model,link,construct,cursor,pattern,profiling,lib}`) | 5.3 | app: state and UI |
-| Drawing sheets, title blocks, cells, paper (`geom/{drawing_sheet,drawing_view,title_block,cell,paper}`) | 1.5 | app: document layout; projection maths is in the sections row |
-| Design files, VFS, catalogs, safe write, URDF (`io`) | 10.5 | app: file and document state |
-| Cosmetic threads, plastic rules, point-cloud histograms | 1.2 | app: annotations, settings and UI data |
-| Infrastructure (`kernel/{profile,par,watch,fuzz}`, `geom/{chain,env,stderr}`) | 1.4 | app: timing, threads, cancellation, utilities |
-| **Stays, total** | **about 42** | |
 
 ## 2. Order of work
 
@@ -160,14 +120,7 @@ Each PR adds the kernel primitive it needs (with tests), the ops recipe, and swi
 | 2.12 | new | sheet metal: fold and unfold maths in the kernel; flange, bend and unfold commands in ops; K-factor and gauge passed in from the document | kernel, then main |
 | 2.13 | new | hidden lines, sections, projections: silhouettes, sections and visibility in the kernel, polylines in tess, "make a drawing view" in ops; replaces `geom/src/hlr` and the mesh-based `doc/src/project*.rs` paths. Lands through the `drawings` branch | kernel, then drawings |
 
-| 2.14 | new | 2D geometry: curve offsets, 2D intersections and regions, text to curves, as kernel primitives with ops entries; `crates/sketch` calls them | kernel, then main |
-| 2.15 | new | DXF and SVG 2D I/O: model in record, build in ops | kernel, then main |
-| 2.16 | new | measure, interference, clearance, contact and compare as ops reports over kernel measures (with Phase 3's 3.5) | kernel, then main |
-| 2.17 | new | surface analysis values (draft angle, curvature) from the kernel, per-vertex data from tess | kernel, then main |
-| 2.18 | new | thread forms and standards tables, hole and pattern recipes | kernel, then main |
-| 2.19 | new | checks and healing in the kernel; native binary geometry through `solidcore-record` | kernel, then main |
-
-2.1 to 2.5, 2.8, 2.10 to 2.13 and 2.14 to 2.19 run in parallel. 2.6 and 2.7 need 2.1's lint. 2.9 starts once jyviko answers §4.
+2.1 to 2.5, 2.8 and 2.10 to 2.13 run in parallel. 2.6 and 2.7 need 2.1's lint. 2.9 starts once jyviko answers §4.
 
 ### Phase 3: exact queries in place of mesh decisions
 
@@ -199,7 +152,6 @@ jyviko's commit in SolidCraft's kernel crate: about 100 places that reach into t
 | 6.3 | `examples/`: make a part, fillet it, export STEP, mesh it; each runs in CI | the examples run and check their results | after 1.3, 1.6 |
 | 6.4 | A second consumer in CI (a small example app, or the existing harness) that uses only the public API | builds and passes without SolidCraft | after 6.3 |
 | 6.5 | Later: our own C ABI and Python bindings, and a wasm package. Never OCP, pythonOCC or any GPL/LGPL wrapper, and nobody reads them | binding tests in CI | after Phase 5 |
-| 6.6 | `solidcore-sketch` (the 2D constraint solver) and a dynamics crate for multibody motion, each with its own API and tests | their tests move with them | after Phase 5 |
 
 6.1 and 6.2 can start now. Each later API addition lands with its docs and example.
 
