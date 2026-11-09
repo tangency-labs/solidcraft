@@ -1890,6 +1890,7 @@
   "material.editor.preserved_appearance": "Bevarat utseende",
   "material.editor.public_reference": "Offentlig referens",
   "material.editor.reference": "Referens",
+  "material.editor.remove": "Ta bort",
   "material.editor.save_or_discard": "Spara eller förkasta materialutkastet innan du tilldelar ett material.",
   "material.editor.saved": "Materialet sparades. Kropparnas tilldelningar är oförändrade.",
   "material.editor.scope": "Spara lagrar materialet utan att tilldela det till kroppar. Tomma egenskaper och förhållanden förblir okända. Kortets densitet ändrar inte tilldelad densitet eller massa.",

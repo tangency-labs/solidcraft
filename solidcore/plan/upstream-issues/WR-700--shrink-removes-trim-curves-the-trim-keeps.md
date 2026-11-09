@@ -1,0 +1,13 @@
+#### WR-700. `SmFace::ShrinkGeometry` removes every trim curve, even where the surface's trim keeps its parameterization
+- **Severity:** Wrong result (accuracy: exact trim curves replaced by fits)
+- **Area:** Topology (face shrink)
+- **Location:** `source/SMLib/src/SmFace.cpp`, `SmFace::ShrinkGeometry`: it trims the face's surface to the face's domain (`TrimWithDomain`), then calls `RemoveUVTrimCurves`, so every trim curve is made again later by projecting its edge's curve.
+- **What happens:** a trim that keeps the map still drops every trim curve. A B-spline surface's trim extracts the patch by knot insertion. A surface of revolution's trim keeps the map when its rotation range stays the same and its generator is a line or isn't trimmed. Either way, a curve made on the surface's parameters still lies on it. The projected replacement is a fit to the projection's tolerance. The fork's case is a corner's exact ellipse on a cylinder round, which came back as a cubic 6.1e-6 off.
+- **Trigger:** the fork's capi `SHRINK_CASES` (tangency-labs/smlib@5c13ed7). A face on a sub-domain of a bicubic B-spline hill, bounded by the surface's own iso curves and their UV lines, is shrunk, and so is a quarter cylinder r 2 trimmed along its axis. In both, all 8 trim curves are removed.
+- **How found:** the SolidCraft fork's tangency-labs/smlib@6f811b8 (`SmSurface::TrimKeepsParameterization`). Its companion in @32fd80a, where `SmFilletGeom::MakeFaceBrep` passes `pbOptCrvOnSurf` so the fillet's own trim curves reach the face, isn't part of this record. It's ported with step 4b's exact mitre (#2277). With it on, today's Rust tangent-end rounds (`tests/fork_9bebf34_tangent_end_cases.rs`) keep trims 1.2e-3 to 2.4e-3 off their edges, which `check_brep` rejects. Part of tangency-labs/smlib#79, step 4. Tracking: tangency-labs/solidcore#2273.
+- **Confirmed:** in the Rust port (`crates/solidcore/tests/wr700_shrink_keeps_exact_trims.rs`), which uses the fork's five cases.
+  - Without the flag, every trim curve is removed in every case.
+  - With it, the B-spline patch and the cylinder trimmed along its axis keep all 8 trim curves, as given and on their edges to 1e-12. The cylinder trimmed in its angle, the torus trimmed along its circle generator and the plane still have theirs removed.
+- **Rust port (opt-in):** `Kernel::fixes.face_trim_curves_kept_where_exact` (`UpstreamFixes`, default `false`).
+  - `Surface::trim_keeps_parameterization` and `SurfOfRevolution::trim_keeps_parameterization` decide per kind.
+  - `topology::face::p1::shrink_geometry` asks before the trim and keeps the trim curves where that answers true.

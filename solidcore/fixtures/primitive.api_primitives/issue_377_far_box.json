@@ -1,0 +1,34 @@
+{
+ "cases": [
+  {
+   "name": "box_origin_1e95_size_0p5",
+   "issue": "#377 (fork 0df62c8): SmPrimitiveCreation::CreateBox fails partway on an origin whose ulp exceeds the size; the Rust status must match C++",
+   "inputs": {"op": "box", "args": [1e95, 1e95, 1e95, 0.5, 0.5, 0.5]}
+  },
+  {
+   "name": "box_origin_x_1e95_size_0p5",
+   "issue": "#377: only the x coordinate far out",
+   "inputs": {"op": "box", "args": [1e95, 0.0, 0.0, 0.5, 0.5, 0.5]}
+  },
+  {
+   "name": "box_origin_1e200_size_0p5",
+   "issue": "#377 (fork 35008b1): a box too far out for its size",
+   "inputs": {"op": "box", "args": [1e200, 1e200, 1e200, 0.5, 0.5, 0.5]}
+  },
+  {
+   "name": "box_origin_1e294_size_1em3",
+   "issue": "#377: the fuzz input, origin near 1e294 with a tiny size",
+   "inputs": {"op": "box", "args": [1e294, 1e294, 1e294, 0.001, 0.001, 0.001]}
+  },
+  {
+   "name": "box_origin_x_1e294_size_0p5",
+   "issue": "#377: origin near 1e294 on x only",
+   "inputs": {"op": "box", "args": [1e294, 0.0, 0.0, 0.5, 0.5, 0.5]}
+  },
+  {
+   "name": "box_origin_1e12_size_0p5_control",
+   "issue": "#377 control: far out but resolvable (ulp ~1.2e-4 < size), the box is built on both sides",
+   "inputs": {"op": "box", "args": [1e12, 1e12, 1e12, 0.5, 0.5, 0.5]}
+  }
+ ]
+}

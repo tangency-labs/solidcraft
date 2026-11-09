@@ -154,6 +154,7 @@ mod label_tests {
     /// `Profil`; the row must show `Profile`, not the second translation.
     #[test]
     fn a_label_is_translated_once() {
+        crate::i18n::install();
         let _de = solidcraft_ui_text::scope("de");
         assert_eq!(indented_label("Profiles"), "Profile");
         assert_eq!(indented_label("  Profiles"), "  Profile");

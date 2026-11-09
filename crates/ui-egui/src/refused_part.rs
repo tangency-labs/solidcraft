@@ -131,6 +131,7 @@ mod tests {
     /// status code.
     #[test]
     fn a_refused_part_is_named_with_what_is_wrong_with_it() {
+        crate::i18n::install();
         let _english = solidcraft_ui_text::scope("en");
         let rounded = RefusedPart { body: "VALVE_COVER_01".into(), face: Some(412), surface: Some(SurfaceKind::Torus) };
         assert_eq!(message(&rounded, Some("join")), "Couldn't join to VALVE_COVER_01. One of its rounded faces can't be used for modelling.");

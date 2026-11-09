@@ -1466,6 +1466,7 @@ mod tests {
 
     #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
+        crate::i18n::install();
         let diagnostic = "there is no body to cut or intersect in component 'Mount'; the tool may overlap 'Plate' in component 'Base' — activate that component or pick the body as a target";
         let _language = solidcraft_ui_text::scope("ja");
         let translated = crate::i18n::tr_diagnostic(diagnostic);
@@ -1488,6 +1489,7 @@ mod tests {
     /// them, faces counted, no entity numbers or kernel wording (those stay in the details).
     #[test]
     fn an_import_summary_counts_parts_and_faces_in_plain_words() {
+        crate::i18n::install();
         use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
         let _english = solidcraft_ui_text::scope("en");
         let issue =

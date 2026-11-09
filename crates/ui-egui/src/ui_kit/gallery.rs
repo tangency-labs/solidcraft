@@ -1120,7 +1120,7 @@ const ELEMENTS: &[Element] = &[
         FileView::sample_grid(
             ui,
             "gallery:file:sample",
-            &[SampleCard { title: "Sample Plate", description: "Parametric plate with holes and a bored boss", icon: "new".into(), thumbnail: None }],
+            &[SampleCard { title: "Sample Plate", description: "Parametric plate with holes and a bored boss", icon: "new", thumbnail: None }],
         );
     }),
     element!("file_recovery", |ui, _| {
@@ -1145,6 +1145,7 @@ const ELEMENTS: &[Element] = &[
                 radius: CommandSearch::field_radius(1.0, true),
                 progress: 1.0,
             },
+            Some("S"),
             4096,
         );
         ui.add_space(Tokens::get().space_6);

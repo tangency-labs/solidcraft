@@ -2777,13 +2777,19 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     }
     // Sketch points of the active sketch (of every shown sketch while a command takes points,
     // while idle or projecting, and while 3D drawing snaps to points on other visible sketches).
-    let wants_points = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::POINTS != 0);
-    let external_points =
-        wants_points || other_sketch_points || (app.dialog.is_none() && app.tool.as_ref().is_none_or(|tool| tool.cmd == "sketch.project"));
+    let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map_or(0, |i| i.accept);
+    let wants_points = accept & crate::selection::POINTS != 0;
+    // An input that takes only points of other sketches (Project, #13246) is offered those and
+    // not the active sketch's own, which it can't take.
+    let only_other_points = !wants_points && accept & crate::selection::EXTERNAL_POINTS != 0 && accept & crate::selection::SKETCH_POINTS == 0;
+    let external_points = wants_points
+        || only_other_points
+        || other_sketch_points
+        || (app.dialog.is_none() && app.tool.as_ref().is_none_or(|tool| tool.cmd == "sketch.project"));
     let point_sketches: Vec<u64> = if crate::render_workspace::active(app) {
         Vec::new()
     } else if external_points {
-        sketches.clone()
+        sketches.iter().copied().filter(|sid| !(only_other_points && s.active_sketch == Some(*sid))).collect()
     } else {
         s.active_sketch.into_iter().collect()
     };
@@ -9041,10 +9047,9 @@ mod tests {
         for style in 0..4 {
             app.ui.visual_style = style;
             let scene = build_scene(&app).merged();
-            // Twelve edges per placed box, in the saved mesh's pieces: no side longer than a fifth
-            // of the 30 mm diagonal, so the eight 20 mm edges in four and the four 10 mm ones in
-            // two, 40 segments.
-            let lines = if style == 1 { 0 } else { 2 * 40 * crate::gpu::LINE_SIZE };
+            // Twelve edges per placed box, each one segment (a flat face needs no nodes along its
+            // edges), 24 segments.
+            let lines = if style == 1 { 0 } else { 2 * 12 * crate::gpu::LINE_SIZE };
             assert_eq!(scene.lines.len(), lines, "style {style}: twelve edges per placed box");
             assert_eq!(scene.hidden.len(), if style == 3 { lines } else { 0 });
             assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");

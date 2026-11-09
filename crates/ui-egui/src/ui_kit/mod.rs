@@ -84,7 +84,6 @@ pub(crate) use disclosure::*;
 pub(crate) use drag::*;
 pub(crate) use fields::*;
 pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor};
-pub use file_view::Icon;
 pub(crate) use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
 pub(crate) use framing::*;
 pub(crate) use history::*;

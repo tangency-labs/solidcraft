@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "name": "fuzz_make_deg0_double_ends",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (N_MakeKnotsCompatible reads past R[mr]: degree 0 on a vector whose ends have multiplicity 2, upstream-issues UB-13); found by difftest --fuzz 3000 (fuzz00204, /p = 0)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 0,
+        "q": 3,
+        "r": [0.0, 0.0, 1.0, 1.0],
+        "s": [0.0, 0.0, 0.0, 0.0, 0.0323000000097693, 0.1580195729049453, 0.2001195729147676, 0.5378790260004654, 0.5799790260102878, 0.7841343359098634, 0.8262343359196858, 0.8293664333098115, 0.8714664333196339, 0.990199999999947, 1.0, 1.0, 1.0, 1.0]
+      }
+    },
+    {
+      "name": "fuzz_make_deg0_duplicated_end",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (UB-13: degree-0 S whose last knot was duplicated, so the walk passes S[ms]); found by difftest --fuzz 3000 (fuzz02196, /s element 4 duplicated)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 4,
+        "q": 0,
+        "r": [3.0, 3.0, 3.0, 3.0, 3.0, 6.0, 8.0, 8.0, 8.0, 8.0, 8.0],
+        "s": [3.0, 4.0, 5.0, 6.0, 8.0, 8.0]
+      }
+    },
+    {
+      "name": "fuzz_make_deg0_single_ends_in_bounds",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3665 (degree 0 with single end knots stays in bounds: the UB-13 walk check must accept it; values compared)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 0,
+        "q": 0,
+        "r": [0.0, 0.5, 1.0],
+        "s": [0.0, 0.25, 1.0]
+      }
+    },
+    {
+      "name": "fuzz_make_deg0_reads_last_knots_in_bounds",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (degree 0: the walk reads exactly R[mr] and S[ms] and stops; the UB-13 walk check must accept it; values compared)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 0,
+        "q": 0,
+        "r": [0.0, 0.5, 1.0],
+        "s": [0.0, 1.0]
+      }
+    },
+    {
+      "name": "fuzz_make_unclamped_short_r",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (UB-13: degree-1 R = [0, 0, 1] with a single end knot, so the walk passes R[mr]); found by difftest --fuzz 3000 (fuzz02776, /r truncated to 3, /s element 6 duplicated)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 1,
+        "q": 1,
+        "r": [0.0, 0.0, 1.0],
+        "s": [0, 0, 1, 2, 3, 4, 4, 4]
+      }
+    },
+    {
+      "name": "fuzz_make_clamped_minimal_r_in_bounds",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3681-3735 (the clamped counterpart of fuzz_make_unclamped_short_r: R = [0, 0, 1, 1] is rescaled to S's range and stays in bounds; values compared)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 1,
+        "q": 1,
+        "r": [0.0, 0.0, 1.0, 1.0],
+        "s": [0, 0, 1, 2, 3, 4, 4]
+      }
+    },
+    {
+      "name": "fuzz_make_inner_knot_above_end_s",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3704-3735 (UB-13: an inner knot of S raised to 2147483648, above the end knot, walks j past ms); found by difftest --fuzz 3000 (fuzz00227, /s/4 = 2147483648)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 2,
+        "q": 1,
+        "r": [-47.0, -47.0, -47.0, -46.0, -46.0, -45.0, -45.0, -44.0, -44.0, -43.0, -43.0, -42.0, -42.0, -41.0, -41.0, -40.0, -40.0, -39.0, -39.0, -38.0, -38.0, -37.0, -37.0, -36.0, -36.0, -35.0, -35.0, -34.0, -34.0, -33.0, -33.0, -32.0, -32.0, -31.0, -31.0, -30.0, -30.0, -29.0, -29.0, -28.0, -28.0, -27.0, -27.0, -26.0, -26.0, -25.0, -25.0, -24.0, -24.0, -23.0, -23.0, -22.0, -22.0, -21.0, -21.0, -20.0, -20.0, -19.0, -19.0, -18.0, -18.0, -17.0, -17.0, -16.0, -16.0, -15.0, -15.0, -14.0, -14.0, -13.0, -13.0, -12.0, -12.0, -11.0, -11.0, -10.0, -10.0, -9.0, -9.0, -8.0, -8.0, -7.0, -7.0, -6.0, -6.0, -5.0, -5.0, -4.0, -4.0, -3.0, -3.0, -2.0, -2.0, -1.0, -1.0, 0.0, 0.0, 0.0],
+        "s": [0, 0, 1, 2, 2147483648, 4, 4]
+      }
+    },
+    {
+      "name": "fuzz_make_inner_knot_above_end_r",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3681-3735 (UB-13: an inner knot of R replaced by 1.0, above its end knot 0.0, after R is rescaled; walks i past mr); found by difftest --fuzz 3000 (fuzz01533, /r/5 = 1.0)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 3,
+        "q": 2,
+        "r": [-5.475299932110956, -5.475299932110956, -5.475299932110956, -5.475299932110956, -4.061086369737861, 1.0, 0.0, 0.0, 0.0, 0.0],
+        "s": [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1]
+      }
+    },
+    {
+      "name": "fuzz_make_inner_knot_in_order_in_bounds",
+      "upstream_ref": "source/SMLib/src/NL_BasisBasic.cpp:3681-3735 (the sorted counterpart of fuzz_make_inner_knot_above_end_r: inner knot -1.0 below the end stays in bounds; values compared)",
+      "inputs": {
+        "op": "make_compatible",
+        "p": 3,
+        "q": 2,
+        "r": [-5.475299932110956, -5.475299932110956, -5.475299932110956, -5.475299932110956, -4.061086369737861, -1.0, 0.0, 0.0, 0.0, 0.0],
+        "s": [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1]
+      }
+    }
+  ]
+}

@@ -140,6 +140,7 @@ mod timeline_marks_tests;
 mod status_tests {
     #[test]
     fn the_status_bar_names_commands_by_label() {
+        crate::i18n::install();
         assert_eq!(super::command_label("solid.fillet"), "Fillet");
         assert_eq!(
             super::friendly_error("solid.shell", "invalid parameters for `solid.shell`: offset: must be positive"),
@@ -292,7 +293,6 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
-pub mod start_page;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
