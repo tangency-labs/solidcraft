@@ -21,6 +21,7 @@ profile = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+spade = { version = "2.15", default-features = false, features = ["std"] }
 thiserror.workspace = true
 
 [dev-dependencies]

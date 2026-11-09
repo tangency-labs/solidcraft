@@ -43,6 +43,7 @@ pub mod error;
 pub mod kernel;
 pub mod limits;
 pub mod math;
+pub mod mesh_reconstruction;
 pub mod topology;
 
 pub mod blend;
