@@ -34,8 +34,9 @@
 //! - `N_SrfJoin` of a rational and a non-rational surface loads both nets as they are,
 //!   so its knot removal runs on a net that mixes weights with the non-rational marker
 //!   `NL_NOW`, and only then sets the marker to `1.0` (`WR-773`). [`join`] gives the
-//!   non-rational piece weights `1.0` first ([`make_rat_compatible`]): the net before
-//!   the removal is upstream's, and the removal sees real weights.
+//!   non-rational piece weights `1.0` first ([`make_rat_compatible`]), so the removal
+//!   runs on the net upstream has after that loop (the joint weight `0.5 * w1 + 0.5 * w2`
+//!   equals upstream's `0.5 * (w1 + w2)` while `w1 + w2` is finite).
 //! - `N_MakeSrfsCompatible` ignores the status of `N_SrfReparam` /
 //!   `N_SrfReparamToInterval`; their only Rust error is `InvalidInput` for a knot
 //!   vector shorter than the degree (where upstream writes outside the array), which
@@ -1139,6 +1140,31 @@ mod tests {
             assert_eq!((j.n(), j.m()), (s.n(), s.m()));
             assert!(j.rows().flatten().all(|pw| pw.w == 1.0));
             assert!(max_dist(&s, &j) < 1e-9);
+        }
+        // A rational piece keeps its own weights. With `tol < 0` no knot goes, so the
+        // joined net is `a`'s points, the averaged joint column, then `b`'s with weight 1.0.
+        let (mut a, b) = super::super::p1::split(&s, 0.3, Direction::V).unwrap();
+        for i in 0..=a.n() {
+            let w = 2.0 + 0.25 * f64::from(u32::try_from(i).unwrap());
+            for k in 0..=a.m() {
+                let c = a.cpt_mut(i, k).unwrap();
+                *c = CPoint::new(c.x * w, c.y * w, c.z * w, w);
+            }
+        }
+        let mut b1 = b.clone();
+        b1.non_rat_to_rat();
+        let j = join(&a, &b, Direction::V, -1.0).unwrap();
+        let m1 = a.m();
+        assert_eq!((j.n(), j.m()), (a.n(), m1 + b.m()));
+        for i in 0..=a.n() {
+            for k in 0..m1 {
+                assert_eq!(j.cpt(i, k).unwrap(), a.cpt(i, k).unwrap());
+            }
+            let joint = CPoint::combine2(0.5, a.cpt(i, m1).unwrap(), 0.5, b1.cpt(i, 0).unwrap());
+            assert_eq!(j.cpt(i, m1).unwrap(), joint);
+            for k in 1..=b.m() {
+                assert_eq!(j.cpt(i, m1 + k).unwrap(), b1.cpt(i, k).unwrap());
+            }
         }
     }
 

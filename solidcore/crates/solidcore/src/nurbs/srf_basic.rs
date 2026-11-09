@@ -51,9 +51,10 @@
 //!   upstream allows (e.g. `N_SrfSetSizeIndices` past the arrays) are `InvalidInput`.
 //! - `N_SrfFromCNetAndKnotVectors` takes any net; [`Surface::new`] and
 //!   [`Surface::with_indices`] refuse with `InvalidInput` control points in use that do
-//!   not all share the rationality of `Pw[0][0]`, so no path evaluates the non-rational
-//!   marker [`NOW`] as a weight. [`Surface::counts_are_valid`] still reports a net
-//!   mixed later through the mutable accessors.
+//!   not all share the rationality of `Pw[0][0]`, so no surface they build holds such a
+//!   net. A net mixed later (through [`Surface::cpt_mut`], [`Surface::set_cpts_and_knots`]
+//!   or [`Surface::set_size_indices`] over storage of the other kind) is not refused;
+//!   [`Surface::counts_are_valid`] reports it.
 //! - The NULL surface of `N_SrfInitArrays` (null pointers, degrees `-1`) is `None`
 //!   in an `Option<Surface>`; partly NULL surfaces cannot be expressed. Storage that
 //!   upstream allocates uninitialised (`malloc`) is zero-filled.
@@ -1227,36 +1228,43 @@ mod tests {
 
     #[test]
     fn mixed_rationality_is_refused_where_built() {
-        let refused = |r: Result<Surface>| matches!(r, Err(SolidError::InvalidInput { .. }));
-        let knots = || vec![0.0, 0.0, 1.0, 1.0];
-        let idx = SurfaceIndices {
-            n: 1,
-            m: 1,
-            p: 1,
-            q: 1,
-            r: 3,
-            s: 3,
+        let refused = |r: Result<Surface>| matches!(r, Err(SolidError::InvalidInput { reason, .. }) if reason == MIXED_RATIONALITY);
+        // A biquadratic 3 x 3 net whose weights are all `w`.
+        let net = |w: f64| -> Vec<Vec<CPoint>> {
+            (0..3)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| CPoint::new(f64::from(i), f64::from(j), 0.0, w))
+                        .collect()
+                })
+                .collect()
         };
-        // One weighted point among non-rational ones, then one non-rational point
-        // among weighted ones, at a corner and inside the net.
-        for (i, j, w) in [(0, 0, 1.0), (1, 1, 2.0), (0, 1, NOW), (1, 0, NOW)] {
-            let mut net = bilinear().net.as_ref().clone();
-            if w == NOW {
-                for pw in net.iter_mut().flatten() {
-                    pw.w = 1.0;
-                }
+        let knots = || vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let idx = SurfaceIndices {
+            n: 2,
+            m: 2,
+            p: 2,
+            q: 2,
+            r: 5,
+            s: 5,
+        };
+        // One weighted point among non-rational ones, and one non-rational point among
+        // weighted ones: at the first point, inside the net and on an edge.
+        for (base, odd) in [(NOW, 2.0), (1.0, NOW)] {
+            for (i, j) in [(0, 0), (1, 1), (2, 1)] {
+                let mut pw = net(base);
+                pw[i][j].w = odd;
+                assert!(refused(Surface::new(pw.clone(), 2, 2, knots(), knots())));
+                assert!(refused(Surface::with_indices(pw, knots(), knots(), idx)));
             }
-            net[i][j].w = w;
-            assert!(refused(Surface::new(net.clone(), 1, 1, knots(), knots())));
-            assert!(refused(Surface::with_indices(net, knots(), knots(), idx)));
         }
         // Storage past the indices in use is not part of the surface.
-        let mut net = bilinear().net.as_ref().clone();
-        for row in &mut net {
-            row.push(CPoint::new(0.0, 2.0, 0.0, 1.0));
+        let mut pw = net(NOW);
+        for row in &mut pw {
+            row.push(CPoint::new(0.0, 3.0, 0.0, 1.0));
         }
-        net.push(vec![CPoint::new(2.0, 0.0, 0.0, 1.0); 3]);
-        let s = Surface::with_indices(net, knots(), knots(), idx).unwrap();
+        pw.push(vec![CPoint::new(3.0, 0.0, 0.0, 1.0); 4]);
+        let s = Surface::with_indices(pw, knots(), knots(), idx).unwrap();
         assert!(s.counts_are_valid().is_ok());
     }
 
