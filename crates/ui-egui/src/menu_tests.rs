@@ -1797,6 +1797,45 @@ fn appearance_browser_selection_assigns_and_removes_overrides_together() {
     }
 }
 
+/// Save As Mesh and Send to Slicer on a selected browser row take every selected body; a row
+/// outside the selection takes only itself.
+#[test]
+fn mesh_items_of_a_selected_browser_row_take_the_whole_selection() {
+    for (clicked, expected) in [("One", vec!["One", "Two"]), ("Two", vec!["One", "Two"]), ("Other", vec!["Other"])] {
+        for label in ["Save As Mesh", "Send to Slicer"] {
+            let mut app = appearance_selection_app();
+            app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+            let item = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), label);
+            context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+            let inputs = &app.dialog.as_ref().expect("the mesh window opens").inputs;
+            use crate::selection::SelectionExt as _;
+            assert_eq!(crate::selection::items(inputs, 0).body_names(), expected, "{label} on {clicked}");
+        }
+    }
+}
+
+/// A selected component placement goes with a selected face: the face menu's mesh items take
+/// the placement's bodies too, not only the bodies the selection touches directly.
+#[test]
+fn face_menu_mesh_items_take_the_bodies_of_a_selected_placement() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"body_name": "Loose", "length": 10, "width": 10, "height": 10, "corner": [40, 0, 0]})).unwrap();
+    let occurrence = s.execute("component.create", &json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let part = s.occurrence_bodies(&[occurrence], true).unwrap();
+    assert_eq!(part.len(), 1, "{part:?}");
+    s.selection = vec![
+        solidcraft_engine::Sel::Face { body: "Loose".into(), index: 0, point: Vec3::ZERO },
+        solidcraft_engine::Sel::Occurrence { path: vec![occurrence] },
+    ];
+    let mut app = SolveApp::new(s, Services::default());
+    app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+    let items = context_menu::items(&app, &Target::Viewport);
+    for label in ["Save As Mesh", "Send to Slicer"] {
+        assert_eq!(find(&items, label).params, Some(json!({"bodies": ["Loose", part[0]]})), "{label}");
+    }
+}
+
 #[test]
 fn appearance_browser_selection_reaches_the_editor_without_other_bodies() {
     for (clicked, expected) in [("Two", vec!["One", "Two"]), ("Other", vec!["Other"])] {
