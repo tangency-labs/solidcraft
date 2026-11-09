@@ -1459,9 +1459,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // (not upstream, WR-503) a point far short of the
         // step is another root of the equations, not the next point of this trace
-        if !step.clipped
-            && tsect.crv_pos().distance(next_tsp.crv_pos()) < 0.5 * step_size.abs()
-        {
+        if !step.clipped && tsect.crv_pos().distance(next_tsp.crv_pos()) < 0.5 * step_size.abs() {
             demote_singularity(next_tsp);
             return Ok(out);
         }
