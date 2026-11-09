@@ -420,6 +420,30 @@ fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_the_ball_s_piece() 
     }
 }
 
+/// The twisted disc (2 slots), its side edges rounded 2 mm, then its 12 top edges rounded
+/// below the side rounds' radius, at 1 and at 1.101826756514697 (#13772): a clean manifold
+/// solid. With the side rounds their definitions (#13774), every vertex of the top round
+/// lies on its faces to within 3.6e-7. Before, the side rounds' skinned nets missed the
+/// walls' 2 mm rounds by up to 1.9e-3 between their sections, the top round's rails and
+/// vertices on them took that error, and Level2 reported vertices 2.5e-5 (r = 1) and
+/// 5.6e-5 (r = 1.1018) off their faces, over the 2e-5 limit.
+#[test]
+fn the_twisted_disc_s_top_round_below_its_side_rounds_radius_is_clean() {
+    for r in [1.0, 1.101_826_756_514_697] {
+        let mut k = kernel();
+        let mut b = side_rounded_disc(&mut k, 2);
+        let top = top_edges(&b);
+        assert_eq!(top.len(), 12);
+        fillet_edges(&mut k, &mut b, &top, r, 1, 1, 1.0).unwrap();
+        b.refresh_cached_topology();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r = {r}: {lines:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "r = {r}");
+    }
+}
+
 /// The disc's side rounds, each with the two walls of the edge it rounds.
 struct SideRounds {
     brep: Brep,
