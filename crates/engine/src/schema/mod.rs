@@ -86,6 +86,7 @@ pub mod metadata;
 pub mod motion;
 pub mod motion_analysis;
 pub mod motion_play;
+pub mod motion_trace;
 pub mod new_design;
 pub mod panels;
 pub mod parameter_sweep;

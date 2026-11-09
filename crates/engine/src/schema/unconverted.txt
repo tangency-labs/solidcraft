@@ -9,9 +9,6 @@ doc.recovery_list
 face.delete
 file.insert_step
 motion.export_animation
-motion.trace
-motion.trace.edit
-motion.trace.keep
 render.aging.describe
 render.backends
 render.effects.describe
