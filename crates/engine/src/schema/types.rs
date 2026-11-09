@@ -216,6 +216,12 @@ target_point!(
     "must be a point [x, y, z] to turn to"
 );
 
+target_point!(
+    /// Emboss's `face`: a [`Point3`], with the handler's message.
+    EmbossFacePoint,
+    "must be a finite point [x,y,z]"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -504,6 +510,14 @@ keyword_param!(
     &["in_plane", "plane", "normal"],
     "in_plane or normal",
     "Which way the wall grows from the curves: in_plane (the default; plane is an alias), across the sketch plane, or normal, along the sketch plane's normal. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.emboss`'s `mode`.
+    EmbossModeParam,
+    "mode",
+    &["emboss", "deboss"],
+    "emboss or deboss",
+    "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
     /// `solid.fillet`'s `type`.
