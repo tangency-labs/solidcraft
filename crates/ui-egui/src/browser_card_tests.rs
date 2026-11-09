@@ -132,6 +132,36 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     assert!(h.app.session.world_state().unwrap().body("B").is_some(), "the body keeps its name");
 }
 
+/// Renaming a component to a name another component has takes the next free number; a name
+/// nobody has stays as typed.
+#[test]
+fn a_component_renamed_to_a_taken_name_takes_the_next_number() {
+    let mut h = Harness::new();
+    let id = |v: Value| v["component"].as_u64().unwrap();
+    let a = id(h.app.run("component.create", json!({"name": "Bracket"})).unwrap());
+    h.app.run("component.activate", json!({"component": 0})).unwrap();
+    let b = id(h.app.run("component.create", json!({"name": "Plate"})).unwrap());
+    let name_of = |h: &Harness, c: u64| h.app.session.doc.components.iter().find(|k| k.id == c).map(|k| k.name.clone()).unwrap();
+    let rename = |h: &mut Harness, c: u64, text: &str| {
+        let r = crate::context_menu::Rename {
+            what: crate::context_menu::RenameWhat::Component(c),
+            text: text.into(),
+            at: egui::Pos2::ZERO,
+            focused: false,
+            inline: true,
+            inline_id: None,
+        };
+        crate::context_menu::commit_rename(&mut h.app, &r).unwrap();
+    };
+    rename(&mut h, b, "Bracket");
+    assert_eq!(name_of(&h, b), "Bracket (2)");
+    assert_eq!(name_of(&h, a), "Bracket", "the other keeps its name");
+    rename(&mut h, b, "Bracket (2)");
+    assert_eq!(name_of(&h, b), "Bracket (2)", "its own name is not taken");
+    rename(&mut h, a, "Base");
+    assert_eq!(name_of(&h, a), "Base");
+}
+
 #[test]
 fn folder_visibility_target_clears_when_the_user_moves_on() {
     for action in ["body click", "selection command", "empty click", "escape", "design tab", "model edit", "tool"] {
