@@ -1804,6 +1804,11 @@ mod imp {
     fn loft_through(sections: &[(Plane, Vec<Piece>)], first: usize, curves: &[Vec<Curve>], degree: u32) -> Result<Body> {
         let brep = Brep::loft(curves, degree, true).map_err(|e| failed("loft", e))?;
         let body = body_of(brep, "loft")?;
+        // The skin makes flat walls B-splines too: those are their planes (#13331).
+        let body = match crate::flat_faces::flat_splines_as_planes(body.record()) {
+            Some(flat) => body_from_record(&flat, "loft")?,
+            None => body,
+        };
         let (Some((start, lead)), Some(last)) = (sections.get(first), sections.get(if first == 0 { sections.len().saturating_sub(1) } else { 0 }))
         else {
             return Err(KernelError::Invalid("loft sections".into()));
