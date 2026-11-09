@@ -261,7 +261,11 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
+    /// The frame's input before egui reads it: the release of a press handed to a window move
+    /// or resize, the macOS menu and full-screen fixes, the 3D mouse, then the app's own hook.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // First: the release of a press the last frame handed to a window move or resize (#13334).
+        solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
