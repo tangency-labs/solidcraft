@@ -151,7 +151,6 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
         3,
         "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
     ),
-    ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
@@ -166,6 +165,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
+    ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[
