@@ -69,8 +69,10 @@ pub enum PanelAction {
     RequestNewChat,
     /// New chat, confirmed.
     NewChat,
-    /// Look for installed agents again.
+    /// Look for installed agents again (desktop only, as discovery and agents are).
+    #[cfg(not(target_arch = "wasm32"))]
     Refresh,
+    #[cfg(not(target_arch = "wasm32"))]
     Connect,
     Disconnect,
     /// Talk to another agent (the current one is disconnected).
@@ -99,6 +101,8 @@ pub enum PanelAction {
     AttachDropped(Vec<std::path::PathBuf>),
     /// Choose a file to attach.
     ChooseAttachment,
+    /// Attach the clipboard's picture (desktop only, as the clipboard reader is).
+    #[cfg(not(target_arch = "wasm32"))]
     PastePicture,
     /// Answer the permission request at this index with an option (none: cancel).
     AnswerPermission(usize, Option<String>),
@@ -111,7 +115,8 @@ pub enum PanelAction {
         agent: Option<String>,
         mode: agents::Mode,
     },
-    /// Attach a picture from the clipboard.
+    /// Attach a picture pasted into the text box (desktop only).
+    #[cfg(not(target_arch = "wasm32"))]
     AttachPicture(super::paste::Picture),
     /// The assistant's page in Preferences.
     OpenSettings,
@@ -124,7 +129,9 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
     match action {
         PanelAction::RequestNewChat => request_new_chat(app),
         PanelAction::NewChat => new_chat(app),
+        #[cfg(not(target_arch = "wasm32"))]
         PanelAction::Refresh => refresh(app, ctx),
+        #[cfg(not(target_arch = "wasm32"))]
         PanelAction::Connect => connect(app, ctx),
         PanelAction::Disconnect => disconnect(app),
         PanelAction::SwitchAgent(id) => {
@@ -157,6 +164,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
                 app.agent_chat.notice(e, true);
             }
         }),
+        #[cfg(not(target_arch = "wasm32"))]
         PanelAction::PastePicture => {
             if let Err(e) = paste_picture(app) {
                 app.agent_chat.notice(e, true);
@@ -169,6 +177,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             app.preferences.agent_permissions.insert(id, mode);
         }
         PanelAction::SetPermission { agent: None, mode } => app.preferences.ai_permissions = mode,
+        #[cfg(not(target_arch = "wasm32"))]
         PanelAction::AttachPicture(p) => {
             if let Err(e) = attach_rgba(app, p.width, p.height, &p.rgba) {
                 app.agent_chat.notice(e, true);
