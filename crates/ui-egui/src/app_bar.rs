@@ -1,4 +1,4 @@
-//! The application bar as a component: the app's mark and name, Home, the File button, the file
+//! The application bar as components: the bar ([`show`]) and its document tabs ([`tabs`]). The bar: the app's mark and name, Home, the File button, the file
 //! actions (Save, Undo, Redo…), room for the app's quick-access buttons, and at the right Help,
 //! Settings, Report a bug, the command search's place and the version. The app describes the bar
 //! as plain data ([`AppBar`]); [`show`] draws it inside the title bar's content rect and returns
@@ -385,6 +385,442 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
         }
     }
     BarOut { actions, file, quick, offer, offer_labeled, tabs_start, controls_left, search, assistant }
+}
+
+/// Where the tab strip publishes its parts: each prefix is followed by the tab's place.
+#[derive(Clone, Copy, Debug)]
+pub struct TabHandles<'a> {
+    pub tab: &'a str,
+    pub close: &'a str,
+    /// The » button listing every tab, and the + button.
+    pub more: &'a str,
+    pub new: &'a str,
+    /// The name field while a tab is renamed.
+    pub rename: &'a str,
+    /// A row of a tab's menu, this prefix followed by the row's id; a row of the » list, by place.
+    pub menu_row: &'a str,
+    pub more_row: &'a str,
+}
+
+/// One document tab.
+#[derive(Clone, Copy, Debug)]
+pub struct DocTab<'a> {
+    /// The name the tab shows, and the one the » list shows.
+    pub name: &'a str,
+    pub list_name: &'a str,
+    /// It has unsaved changes (a bullet after its name).
+    pub dirty: bool,
+    /// Its hover text (where it is saved); its full name goes above it when the tab cuts it short.
+    pub place: &'a str,
+}
+
+/// A row of a tab's menu (Close, Close Other Tabs…), with its label and the key shown when the
+/// menu is the selected tab's.
+#[derive(Clone, Copy, Debug)]
+pub struct TabMenuRow<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub key_on_selected: &'a str,
+    /// Offered only while there are other tabs.
+    pub needs_others: bool,
+}
+
+/// The selected tab's name being edited: its text and whether the field has taken the focus.
+pub struct TabRename<'a> {
+    pub text: &'a mut String,
+    pub focused: &'a mut bool,
+    /// The longest name taken, in characters.
+    pub max: usize,
+}
+
+/// The tab strip as the app describes it this frame.
+pub struct TabStrip<'a> {
+    pub tabs: Vec<DocTab<'a>>,
+    /// The selected tab (the strip keeps it in view), and the one drawn selected (None while the
+    /// app shows something else, its start page).
+    pub selected: usize,
+    pub shown_selected: Option<usize>,
+    /// The tabs are part of the window's title bar: dragging the only tab, or one mostly up or
+    /// down, moves the window, and a double click maximizes it (unless it renames).
+    pub title_bar: bool,
+    /// A double click on the selected tab renames it.
+    pub double_click_renames: bool,
+    pub rename: Option<TabRename<'a>>,
+    pub menu: &'a [TabMenuRow<'a>],
+    /// Hover texts and names: the close button's accessible name and tip, the » button's and the
+    /// + button's tips.
+    pub close_name: &'a str,
+    pub close_tip: &'a str,
+    pub more_tip: &'a str,
+    pub new_tip: &'a str,
+    /// Where the strip keeps its drag, menu and list state.
+    pub id: egui::Id,
+    pub handles: TabHandles<'a>,
+}
+
+/// What the user chose on the tab strip this frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TabAction {
+    Select(usize),
+    Close(usize),
+    /// A row of tab `tab`'s menu.
+    Menu {
+        tab: usize,
+        id: String,
+    },
+    /// A tab dragged from one place to another.
+    Reorder {
+        from: usize,
+        to: usize,
+    },
+    /// Rename tab `tab` in place (its rect, where a menu would open).
+    StartRename {
+        tab: usize,
+        rect: Rect,
+    },
+    /// The name typed was kept, or the edit given up.
+    RenameDone,
+    RenameCancelled,
+    Maximize,
+    New,
+}
+
+/// A tab dragged along the strip: the tab and where along it the pointer grabbed it.
+#[derive(Clone, Copy, Debug)]
+struct TabDrag {
+    from: usize,
+    grab: f32,
+}
+
+/// Which tabs the strip shows in `room` points: (first, how many, tab width). Tabs shrink to
+/// `MIN_TAB`; past that a window of tabs around `selected` is shown and the rest go in the »
+/// list.
+pub fn tab_layout(n: usize, selected: usize, room: f32) -> (usize, usize, f32) {
+    const MIN_TAB: f32 = 90.0;
+    let n = n.max(1);
+    let avail = (room - 34.0).max(MIN_TAB);
+    if avail / n as f32 >= MIN_TAB {
+        return (0, n, (avail / n as f32).min(220.0));
+    }
+    // Leave room for the » button.
+    let fit = (((avail - 26.0) / MIN_TAB).floor() as usize).max(1);
+    let first = selected.saturating_sub(fit - 1).min(n - fit);
+    (first, fit, MIN_TAB)
+}
+
+/// The place among the shown tabs (`first..`, `widths` wide in strip order from `x0`) for tab
+/// `from` whose left edge is dragged to `left`: the slot whose place for it is nearest.
+pub fn drop_slot(left: f32, x0: f32, widths: &[f32], first: usize, from: usize) -> usize {
+    let mut best = (0, f32::INFINITY);
+    let mut at = x0;
+    let others = widths.iter().enumerate().filter(|(k, _)| first + k != from).map(|(_, w)| *w);
+    for (k, w) in others.map(Some).chain([None]).enumerate() {
+        if (left - at).abs() < best.1 {
+            best = (k, (left - at).abs());
+        }
+        at += w.unwrap_or(0.0);
+    }
+    first + best.0
+}
+
+/// A tab's hover text: where its design is (`place`), under its full name when the tab `cut` it
+/// short.
+pub fn tab_tip(name: &str, place: &str, cut: bool) -> String {
+    if cut { format!("{name}\n{place}") } else { place.to_string() }
+}
+
+/// Tabs are rounded chips on the bar; the selected one has the stronger fill.
+pub fn tab_shape(painter: &Painter, t: &Tokens, r: Rect, active: bool, hovered: bool) {
+    let fill = if active {
+        t.app_bar_tab_active
+    } else if hovered {
+        t.app_bar_hover
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    painter.rect_filled(r, t.radius_md, fill);
+}
+
+/// The selected tab's name field: Enter or leaving the field keeps the name, Escape gives it up.
+fn rename_field(ui: &mut egui::Ui, rect: Rect, rename: &mut TabRename, handles: &TabHandles) -> Option<TabAction> {
+    let t = Tokens::get();
+    ui.painter().rect_filled(rect, t.radius_sm, t.field);
+    let id = ui.scope_id().with("doc_tab_rename");
+    let response = crate::ui_kit::inline_name(ui, rect.shrink2(vec2(4.0, 0.0)), id, rename.text);
+    if rename.text.chars().count() > rename.max {
+        *rename.text = rename.text.chars().take(rename.max).collect();
+    }
+    solidcraft_ui_registry::publish_target(handles.rename, rect);
+    let was_focused = *rename.focused;
+    if !*rename.focused {
+        // The whole name selected, so typing replaces it.
+        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
+            let end = rename.text.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
+            state.store(ui.ctx(), id);
+        }
+        response.request_focus();
+        *rename.focused = true;
+    }
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        Some(TabAction::RenameCancelled)
+    } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) || (was_focused && response.lost_focus()) {
+        Some(TabAction::RenameDone)
+    } else {
+        None
+    }
+}
+
+/// Draws the document tabs in `r` from `x0` to `x1`: click to select, × to close, drag to
+/// reorder, a right-click for the tab's menu, » for every tab when they don't all fit, + for a
+/// new one.
+pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) -> Vec<TabAction> {
+    let t = Tokens::get();
+    let h = strip.handles;
+    let n = strip.tabs.len();
+    let (first, shown, w) = tab_layout(n, strip.selected, x1 - x0);
+    let mut actions = Vec::new();
+    // Each tab fits its name (up to MAX_FIT) while all of them fit; otherwise they share the room.
+    const MAX_FIT: f32 = 200.0;
+    // The selected tab grows with a name being typed into it.
+    let typed = strip.rename.as_ref().map(|r| r.text.clone());
+    let natural: Vec<f32> = strip
+        .tabs
+        .iter()
+        .enumerate()
+        .map(|(i, tab)| {
+            let shown_name = match &typed {
+                Some(text) if i == strip.selected => text.clone(),
+                _ => tab.name.to_string(),
+            };
+            let label = format!("{shown_name}{}", if tab.dirty { " •" } else { "" });
+            let text = ui.painter().layout_no_wrap(label, crate::ui_kit::type_face::semibold(t.font_button), t.app_bar_text).size().x;
+            (text + 40.0).clamp(72.0, MAX_FIT)
+        })
+        .collect();
+    let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
+    let menu_id = strip.id.with("menu");
+    let mut menu: Option<(usize, Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
+    // The shown tabs' widths, in strip order.
+    let widths: Vec<f32> = (first..first + shown).map(|i| if fit_all { natural.get(i).copied().unwrap_or(w) } else { w }).collect();
+    let width = |i: usize| i.checked_sub(first).and_then(|k| widths.get(k)).copied().unwrap_or(w);
+    let strip_end = x0 + widths.iter().sum::<f32>();
+    // A tab being dragged to a new place follows the pointer and the others make room for it;
+    // Escape puts it back.
+    let drag_id = strip.id.with("drag");
+    let (held_down, released, escape) = ui.input(|i| (i.pointer.primary_down(), i.pointer.primary_released(), i.key_pressed(egui::Key::Escape)));
+    let mut drag =
+        ui.ctx().data(|d| d.get_temp::<TabDrag>(drag_id)).filter(|d| (held_down || released) && !escape && (first..first + shown).contains(&d.from));
+    let pointer = ui.ctx().pointer_latest_pos();
+    let held = drag.zip(pointer).map(|(d, p)| (d.from, (p.x - d.grab).clamp(x0, (strip_end - width(d.from)).max(x0))));
+    let to = held.map(|(from, left)| (from, drop_slot(left, x0, &widths, first, from)));
+    // Where each shown tab sits: in strip order, or with the dragged tab moved to its slot.
+    let mut slots: Vec<usize> = (first..first + shown).filter(|&i| to.is_none_or(|(from, _)| from != i)).collect();
+    if let Some((from, to)) = to {
+        slots.insert(to.saturating_sub(first).min(slots.len()), from);
+    }
+    let mut lefts = vec![x0; shown];
+    let mut at = x0;
+    for &i in &slots {
+        if let Some(l) = i.checked_sub(first).and_then(|k| lefts.get_mut(k)) {
+            *l = at;
+        }
+        at += width(i);
+    }
+    // The dragged tab is drawn last, over the others.
+    let mut order: Vec<usize> = (first..first + shown).filter(|&i| held.is_none_or(|(from, _)| from != i)).collect();
+    order.extend(held.map(|(from, _)| from));
+    let mut dropped: Option<(usize, usize)> = None;
+    let (mut pick, mut shut) = (None, None);
+    for i in order {
+        let Some(tab) = strip.tabs.get(i).copied() else {
+            continue;
+        };
+        let w = width(i);
+        let left = match held {
+            Some((from, left)) if from == i => left,
+            _ => i.checked_sub(first).and_then(|k| lefts.get(k)).copied().unwrap_or(x0),
+        };
+        let tr = Rect::from_min_size(pos2(left, r.top() + 4.0), vec2(w - 2.0, r.height() - 8.0));
+        let active = strip.shown_selected == Some(i);
+        let resp = ui.interact(tr, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
+        solidcraft_ui_registry::publish_target(&format!("{}{i}", h.tab), tr);
+        // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
+        // dragging the only tab, or one mostly up or down, moves the window. A double click
+        // renames the tab (the first click selected it), or maximizes the window as the bar's
+        // empty space does.
+        if resp.drag_started_by(egui::PointerButton::Primary) {
+            let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(tr.center());
+            let moved = pointer.unwrap_or(origin) - origin;
+            if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
+                drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
+            } else if strip.title_bar {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        } else if resp.double_clicked() {
+            if strip.double_click_renames {
+                if active {
+                    actions.push(TabAction::StartRename { tab: i, rect: tr });
+                }
+            } else if strip.title_bar {
+                actions.push(TabAction::Maximize);
+            }
+        }
+        if resp.drag_stopped() && drag.is_some_and(|d| d.from == i) {
+            // Released over the bar (not dropped somewhere down the window): the tab lands there.
+            if let Some((from, to)) = to
+                && pointer.is_some_and(|p| p.y < r.bottom() + r.height())
+            {
+                dropped = Some((from, to));
+            }
+            drag = None;
+        }
+        let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
+        tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
+        let ink = if active || lit { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.7) };
+        let label = format!("{}{}", tab.name, if tab.dirty { " •" } else { "" });
+        let font = if active { crate::ui_kit::type_face::semibold(t.font_button) } else { FontId::proportional(t.font_button) };
+        let g = ui.painter().layout_no_wrap(label, font, ink);
+        let text_w = (tr.width() - 30.0).max(10.0);
+        let tip = tab_tip(tab.name, tab.place, g.size().x > text_w);
+        let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
+        match strip.rename.as_mut().filter(|_| active) {
+            Some(rename) => {
+                let field = Rect::from_min_max(pos2(tr.left() + 6.0, tr.top() + 3.0), pos2(tr.left() + 10.0 + text_w, tr.bottom() - 3.0));
+                actions.extend(rename_field(ui, field, rename, &h));
+            }
+            None => {
+                ui.painter().with_clip_rect(clip).galley(pos2(tr.left() + 10.0, tr.center().y - g.size().y / 2.0), g, ink);
+            }
+        }
+        // ×
+        let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
+        let show_close = active || resp.hovered() || ui.rect_contains_pointer(tr);
+        let xresp = ui.interact(xr, ui.scope_id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
+        solidcraft_ui_registry::publish_target(&format!("{}{i}", h.close), xr);
+        if show_close && (xresp.hovered() || xresp.has_focus()) {
+            ui.painter().rect_filled(xr, t.radius_sm.saturating_sub(1), t.app_bar_hover_strong);
+        }
+        if show_close {
+            let opacity = if xresp.hovered() || xresp.has_focus() { 1.0 } else { 0.55 };
+            crate::icons::paint_app_bar(ui.painter(), Rect::from_center_size(xr.center(), vec2(14.0, 14.0)), "close", opacity);
+        }
+        if resp.secondary_clicked() {
+            menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
+        }
+        // Named apart from a dialog's Close: egui names an unnamed widget after its tooltip.
+        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, strip.close_name));
+        if xresp.backing_on_hover_text(strip.close_tip).clicked() {
+            shut = Some(i);
+        } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
+            pick = Some(i);
+        }
+    }
+    ui.ctx().data_mut(|d| match drag {
+        Some(v) => {
+            d.insert_temp(drag_id, v);
+        }
+        None => d.remove::<TabDrag>(drag_id),
+    });
+    // In the order they happened: a later choice this frame (the list's, the menu's) wins.
+    actions.extend(shut.map(TabAction::Close));
+    actions.extend(pick.map(TabAction::Select));
+    let mut x = strip_end;
+    // More tabs than fit: a chevron lists them all.
+    if shown < n {
+        let mr = Rect::from_center_size(pos2(x + 12.0, r.center().y), vec2(20.0, 22.0));
+        let mresp = ui.interact(mr, ui.scope_id().with("doc_more"), Sense::click());
+        solidcraft_ui_registry::publish_handle(h.more, mr.center());
+        if mresp.hovered() {
+            ui.painter().rect_filled(mr, t.radius_sm, t.app_bar_hover_button);
+        }
+        ui.painter().text(mr.center(), Align2::CENTER_CENTER, format!("»{}", n - shown), FontId::proportional(t.font_body), t.app_bar_text);
+        let id = strip.id.with("more");
+        if mresp.clone().backing_on_hover_text(strip.more_tip).clicked() {
+            ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
+        }
+        if ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
+            let mut listed = None;
+            let resp = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Popup)
+                .area(id.with("area"))
+                .fixed_pos(pos2(mr.left(), r.bottom()))
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    crate::context_menu::menu_frame(ui, |ui| {
+                        for (i, tab) in strip.tabs.iter().enumerate() {
+                            let label = format!("{}{}", tab.list_name, if tab.dirty { " •" } else { "" });
+                            if crate::ui_kit::list_picker(ui, &format!("{}{i}", h.more_row), &label, i == strip.selected).clicked() {
+                                listed = Some(i);
+                            }
+                        }
+                    })
+                });
+            let pressed_outside = ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !mresp.contains_pointer();
+            if listed.is_some() || pressed_outside {
+                ui.ctx().data_mut(|d| d.insert_temp(id, false));
+            }
+            actions.extend(listed.map(TabAction::Select));
+        }
+        x += 26.0;
+    }
+    // The tab's menu.
+    if let Some((i, at)) = menu.filter(|(i, _)| *i < n) {
+        let resp = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Popup)
+            .area(menu_id.with("area"))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                crate::context_menu::menu_frame(ui, |ui| {
+                    let mut chosen = None;
+                    for row in strip.menu {
+                        let mut item = crate::ui_kit::Item::action(row.id, row.label, "");
+                        if i == strip.selected && !row.key_on_selected.is_empty() {
+                            item = item.key(row.key_on_selected);
+                        }
+                        item.enabled = !row.needs_others || n > 1;
+                        let top = ui.cursor().top();
+                        let picked = crate::context_menu::list_row(ui, &item);
+                        let rect = Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.cursor().top()));
+                        solidcraft_ui_registry::publish_handle(&format!("{}{}", h.menu_row, row.id), rect.center());
+                        if picked.is_some() {
+                            chosen = Some(row.id);
+                        }
+                    }
+                    chosen
+                })
+            });
+        if let Some(id) = resp.inner {
+            actions.push(TabAction::Menu { tab: i, id: id.to_string() });
+        }
+        let pressed_outside = ui.ctx().input(|x| x.pointer.any_pressed()) && !resp.response.contains_pointer();
+        menu = if resp.inner.is_some() || pressed_outside || ui.ctx().input(|x| x.key_pressed(egui::Key::Escape)) { None } else { Some((i, at)) };
+    }
+    ui.ctx().data_mut(|d| match menu {
+        Some(m) => {
+            d.insert_temp(menu_id, m);
+        }
+        None => {
+            d.remove::<(usize, Pos2)>(menu_id);
+        }
+    });
+    // A new tab.
+    let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
+    let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
+    if presp.hovered() {
+        ui.painter().rect_filled(pr, t.radius_sm, t.app_bar_hover_button);
+    }
+    crate::icons::paint_app_bar(
+        ui.painter(),
+        Rect::from_center_size(pr.center(), vec2(16.0, 16.0)),
+        "plus",
+        if presp.hovered() { 1.0 } else { 0.55 },
+    );
+    solidcraft_ui_registry::publish_handle(h.new, pr.center());
+    if presp.backing_on_hover_text(strip.new_tip).clicked() {
+        actions.push(TabAction::New);
+    }
+    actions.extend(dropped.map(|(from, to)| TabAction::Reorder { from, to }));
+    actions
 }
 
 #[cfg(test)]

@@ -112,3 +112,98 @@ fn a_compact_bar_keeps_only_what_fits() {
     assert!(rig.out.borrow().as_ref().is_some_and(|out| out.quick.is_none()));
     assert!(solidcraft_ui_registry::handle_at("t:version").is_none(), "no version on a narrow bar");
 }
+
+const TAB_HANDLES: TabHandles<'static> =
+    TabHandles { tab: "t:tab:", close: "t:close:", more: "t:more", new: "t:new", rename: "t:rename", menu_row: "t:menu:", more_row: "t:list:" };
+
+const TAB_MENU: [TabMenuRow<'static>; 2] = [
+    TabMenuRow { id: "close", label: "Close", key_on_selected: "", needs_others: false },
+    TabMenuRow { id: "others", label: "Close Others", key_on_selected: "", needs_others: true },
+];
+
+/// Three document tabs, the first selected, in a strip 600 wide.
+struct TabsRig {
+    ctx: egui::Context,
+    time: std::cell::Cell<f64>,
+}
+
+impl TabsRig {
+    fn new() -> TabsRig {
+        let rig = TabsRig { ctx: crate::fonts::test_context(), time: std::cell::Cell::new(0.0) };
+        rig.frame(Vec::new());
+        rig
+    }
+
+    fn frame(&self, events: Vec<egui::Event>) -> Vec<TabAction> {
+        solidcraft_ui_registry::clear_handles();
+        self.time.set(self.time.get() + 1.0 / 60.0);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 400.0))),
+            time: Some(self.time.get()),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet" };
+        let mut strip = TabStrip {
+            tabs: vec![tab("One"), tab("Two"), tab("Three")],
+            selected: 0,
+            shown_selected: Some(0),
+            title_bar: false,
+            double_click_renames: true,
+            rename: None,
+            menu: &TAB_MENU,
+            close_name: "Close tab",
+            close_tip: "Close",
+            more_tip: "All",
+            new_tip: "New",
+            id: egui::Id::unique("test_tabs"),
+            handles: TAB_HANDLES,
+        };
+        let mut actions = Vec::new();
+        crate::test_support::frame(&self.ctx, input, |ui| {
+            actions = tabs(ui, &mut strip, Rect::from_min_size(Pos2::ZERO, vec2(800.0, HEIGHT)), 100.0, 700.0);
+        });
+        actions
+    }
+
+    fn press(&self, at: Pos2, button: egui::PointerButton) -> Vec<TabAction> {
+        self.time.set(self.time.get() + 1.0);
+        let event = |pressed| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(true)]));
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(at), event(false)]));
+        actions
+    }
+
+    fn at(&self, name: &str) -> Pos2 {
+        solidcraft_ui_registry::rect_of(name)
+            .map(|r| r.center())
+            .or_else(|| solidcraft_ui_registry::handle_at(name))
+            .unwrap_or_else(|| panic!("{name} is drawn"))
+    }
+}
+
+/// A click selects a tab, its × closes it, + asks for a new one, a row of a tab's menu returns its
+/// id, and a tab dragged past another is moved there.
+#[test]
+fn the_tab_strip_returns_what_was_clicked_and_dragged() {
+    let rig = TabsRig::new();
+    assert_eq!(rig.press(rig.at("t:tab:1"), egui::PointerButton::Primary), vec![TabAction::Select(1)]);
+    assert_eq!(rig.press(rig.at("t:close:0"), egui::PointerButton::Primary), vec![TabAction::Close(0)]);
+    assert_eq!(rig.press(rig.at("t:new"), egui::PointerButton::Primary), vec![TabAction::New]);
+    rig.press(rig.at("t:tab:2"), egui::PointerButton::Secondary);
+    rig.frame(Vec::new());
+    assert_eq!(rig.press(rig.at("t:menu:others"), egui::PointerButton::Primary), vec![TabAction::Menu { tab: 2, id: "others".into() }]);
+    // Drag the first tab past the last.
+    let from = rig.at("t:tab:0");
+    let to = solidcraft_ui_registry::rect_of("t:tab:2").map(|r| r.right_center() - vec2(4.0, 0.0)).expect("tab 2 is drawn");
+    let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    let mut actions = rig.frame(vec![egui::Event::PointerMoved(from)]);
+    actions.extend(rig.frame(vec![button(from, true)]));
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(from + vec2(10.0, 0.0))]));
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
+    actions.extend(rig.frame(vec![egui::Event::PointerMoved(to)]));
+    actions.extend(rig.frame(vec![button(to, false)]));
+    assert_eq!(actions, vec![TabAction::Reorder { from: 0, to: 2 }]);
+}
