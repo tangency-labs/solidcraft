@@ -3,6 +3,7 @@
 use crate::geom::Aabb3;
 use crate::render::{FaceAppearance, ProductMesh, ProductScene};
 use crate::{EngineError, Result, Session};
+use solidcraft_geom::MeshGeom;
 
 pub const MAX_PRODUCT_BODIES: usize = solidcraft_render::job::MAX_CPU_BODIES;
 
@@ -58,6 +59,7 @@ mod tests {
     use crate::render::*;
     use serde_json::json;
     use solidcore_record::Vec3;
+    use solidcraft_viewport::{Camera, UpAxis};
     use std::sync::Arc;
 
     #[test]

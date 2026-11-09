@@ -1,11 +1,11 @@
 //! What a picture of the model shows, independent of how it is drawn: meshes in colours, lines,
 //! the background, a section cut and a surface analysis. The GPU draws it with the viewport's
-//! pipelines (`solidcraft_gpu::capture`).
+//! pipelines (`solidcraft_viewport_gpu::capture`).
 
 use std::sync::Arc;
 
 use solidcore_record::Vec3;
-use solidcraft_geom::Mesh;
+use solidcore_tess::Mesh;
 
 use crate::SceneAnalysis;
 use crate::hatch::{HATCH_COLOURS, Hatch};

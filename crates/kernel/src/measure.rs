@@ -1,6 +1,6 @@
 use serde::Serialize;
 use solidcore_record::Vec3;
-use solidcraft_geom::Aabb3;
+use solidcraft_geom::{Aabb3, MeshGeom};
 
 use crate::Result;
 use crate::body::Body;

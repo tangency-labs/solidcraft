@@ -3,8 +3,8 @@
 //! the tokens equal what was drawn before, and that a new colour cannot skip them.
 
 use egui::Color32;
-use solidcraft_engine::render::Rgb;
 use solidcraft_engine::view::colors;
+use solidcraft_viewport::Rgb;
 
 use solidcraft_theme::Tokens;
 
@@ -74,7 +74,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
     use solidcraft_theme::{ColorVision, set_dark, set_vision};
     let ctx = crate::fonts::test_context();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
-    let cam = solidcraft_engine::render::Camera::default();
+    let cam = solidcraft_viewport::Camera::default();
     let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
     let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
@@ -238,7 +238,7 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
 /// zebra and environment map neutrals and direction vectors stay as literals.
 #[test]
 fn analysis_shader_colours_come_from_the_uniform() {
-    let src = include_str!("../../../assets/shaders/viewport.wgsl");
+    let src = include_str!("../../viewport-gpu/shaders/viewport.wgsl");
     let start = src.find("fn analysis(").unwrap_or(0);
     let end = src.find("fn stripe(").unwrap_or(src.len());
     let body = &src[start..end];

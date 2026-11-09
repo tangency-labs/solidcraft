@@ -2139,7 +2139,7 @@ mod tests {
         let mut worst = f32::NEG_INFINITY;
         for n in [Vec3::X, Vec3::Y, Vec3::Z] {
             for dir in crate::viewport::orbit_directions() {
-                let cam = solidcraft_engine::render::Camera::default().looking_from(dir);
+                let cam = solidcraft_viewport::Camera::default().looking_from(dir);
                 let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
                 let h = cam.half_height() * 0.25;
                 let (Some(q), Some(c), Some(side)) =

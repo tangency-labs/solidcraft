@@ -565,7 +565,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
         return;
     }
     let mut cam = app.cam;
-    cam.fit(&bb);
+    cam.fit(&solidcraft_engine::render::view_bounds(&bb));
     app.animate_to(cam);
 }
 

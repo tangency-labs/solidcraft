@@ -904,10 +904,8 @@ fn step_opening(
 /// load ended meanwhile (`stop`).
 #[cfg(not(target_arch = "wasm32"))]
 fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<egui::ColorImage> {
-    use solidcraft_engine::{
-        geom::Aabb3,
-        render::{Camera, Rgb, Scene, SceneMesh, StandardView},
-    };
+    use solidcraft_engine::geom::Aabb3;
+    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
     let mut triangles = 0usize;
@@ -928,7 +926,7 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
     scene.radius = bounds.diagonal();
     if stop() || !preview_work_fits(&scene, &camera) {
         return None;
@@ -939,10 +937,8 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
 #[cfg(not(target_arch = "wasm32"))]
 fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::ColorImage> {
     use solidcore_record::Vec3;
-    use solidcraft_engine::{
-        geom::{Aabb3, Mesh},
-        render::{Camera, Rgb, Scene, SceneMesh, StandardView},
-    };
+    use solidcraft_engine::geom::{Aabb3, Mesh};
+    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
     for cached in preview.meshes {
@@ -975,7 +971,7 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
     scene.radius = bounds.diagonal();
     if !preview_work_fits(&scene, &camera) {
         return None;
@@ -985,7 +981,7 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
 
 /// The preview picture, drawn on the GPU by the renderer the app installs (none: no picture).
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_image(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_engine::render::Camera) -> Option<egui::ColorImage> {
+fn preview_image(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> Option<egui::ColorImage> {
     match solidcraft_engine::capture::rgba(scene, camera, 320, 200) {
         Ok(picture) => Some(egui::ColorImage::from_rgba_unmultiplied([320, 200], &picture.rgba)),
         Err(e) => {
@@ -999,7 +995,7 @@ fn preview_image(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_e
 /// not monopolize the file worker or a software GPU. Counts each triangle's pixel box at twice the
 /// picture's size.
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_work_fits(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_engine::render::Camera) -> bool {
+fn preview_work_fits(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> bool {
     let mut pixels = 0.0;
     let projection = camera.view_proj(640.0 / 400.0, scene.radius.max(1.0));
     for body in &scene.meshes {
@@ -1687,7 +1683,7 @@ mod tests {
             let id = h.app.session.active_sketch.unwrap();
             assert_eq!(h.app.session.model.state().sketch(id).unwrap().plane, solidcore_record::Plane::XY);
             assert_eq!(h.app.session.doc.sketch(id).unwrap().curves.len(), 2);
-            h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+            h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
             h.app.fit_view();
             h.run(&json!([{ "shot": format!("insert-{file}") }])).unwrap();
             h.app.drop_path(&path);

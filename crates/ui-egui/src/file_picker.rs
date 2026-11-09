@@ -584,7 +584,7 @@ mod tests {
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         }
         let path = h.dir.join("image.png");
-        let png = solidcraft_engine::render::png(1, 1, vec![255, 0, 0, 255]).unwrap();
+        let png = solidcraft_viewport::png(1, 1, vec![255, 0, 0, 255]).unwrap();
         std::fs::write(&path, png).unwrap();
         let answer = picker(&mut h.app, false);
         h.app.start(command);

@@ -1,7 +1,6 @@
+use crate::vec::{Bounds, Vec3Ops};
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_geom::Aabb3;
-use solidcraft_geom::prelude::*;
 
 /// Column-major 4×4 matrix.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -296,7 +295,7 @@ impl Camera {
     /// In perspective the orbit distance is not the nearest geometry's depth: a deep assembly
     /// can reach almost to the eye. Cap the usual near plane at half that nearest depth so the
     /// distance-based precision floor cannot clip its front components after a projection change.
-    pub fn clip_bounds(&self, bounds: &Aabb3) -> (f64, f64) {
+    pub fn clip_bounds(&self, bounds: &Bounds) -> (f64, f64) {
         let fallback = self.clip((self.half_height() * 2.0).max(50.0));
         if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
             return fallback;
@@ -341,7 +340,7 @@ impl Camera {
         self.proj(aspect, n, f).mul(&self.view())
     }
     /// View-projection using the current scene bounds to admit nearby components.
-    pub fn view_proj_bounds(&self, aspect: f64, bounds: &Aabb3) -> Mat4 {
+    pub fn view_proj_bounds(&self, aspect: f64, bounds: &Bounds) -> Mat4 {
         let (n, f) = self.clip_bounds(bounds);
         self.proj(aspect, n, f).mul(&self.view())
     }
@@ -496,7 +495,7 @@ impl Camera {
         })
     }
     /// Frame a bounding box.
-    pub fn fit(&mut self, b: &Aabb3) {
+    pub fn fit(&mut self, b: &Bounds) {
         if b.is_empty() {
             return;
         }
@@ -511,7 +510,7 @@ impl Camera {
     /// margin covers). A wide picture, or an aspect that is not a positive number, keeps the
     /// plain fit. Returns false, leaving the camera alone, when there is nothing to fit or the
     /// fitted camera would not be valid (a distance that overflows).
-    pub fn fit_aspect(&mut self, b: &Aabb3, aspect: f64) -> bool {
+    pub fn fit_aspect(&mut self, b: &Bounds, aspect: f64) -> bool {
         if b.is_empty() {
             return false;
         }
@@ -838,7 +837,7 @@ mod tests {
     #[test]
     fn large_scene_projection_toggle_keeps_near_and_far_components_in_clip_range() {
         for scale in [1.0, 100.0] {
-            let bounds = Aabb3 { min: Vec3::new(-0.25, -10_000.0, -0.25) * scale, max: Vec3::new(0.25, 10_000.0, 0.25) * scale };
+            let bounds = Bounds { min: Vec3::new(-0.25, -10_000.0, -0.25) * scale, max: Vec3::new(0.25, 10_000.0, 0.25) * scale };
             let mut cam = Camera { yaw: 0.0, pitch: 0.0, distance: 10_002.0 * scale, ..Default::default() };
             let original = cam.view_proj_bounds(16.0 / 9.0, &bounds);
             for fov in [0.0, 0.6, 0.0, 0.6, 0.0] {
@@ -869,7 +868,7 @@ mod tests {
     #[test]
     fn bounds_clipping_handles_eye_crossing_and_invalid_bounds() {
         let cam = Camera { yaw: 0.0, pitch: 0.0, distance: 10_000.0, fov: 0.6, ..Default::default() };
-        let crossing = Aabb3 { min: Vec3::new(-1.0, -10_001.0, -1.0), max: Vec3::new(1.0, 10_001.0, 1.0) };
+        let crossing = Bounds { min: Vec3::new(-1.0, -10_001.0, -1.0), max: Vec3::new(1.0, 10_001.0, 1.0) };
         let (near, far) = cam.clip_bounds(&crossing);
         assert_eq!(near, 1e-3);
         assert!(far.is_finite() && far > near);
@@ -877,10 +876,10 @@ mod tests {
         assert!(c[3] > 0.0 && (0.0..=c[3]).contains(&c[2]));
         let fallback = cam.clip((cam.half_height() * 2.0).max(50.0));
         for bounds in [
-            Aabb3::EMPTY,
-            Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::ZERO },
-            Aabb3 { min: Vec3::ZERO, max: Vec3::new(f64::INFINITY, 1.0, 1.0) },
-            Aabb3 { min: Vec3::new(-f64::MAX, -1.0, -1.0), max: Vec3::new(f64::MAX, 1.0, 1.0) },
+            Bounds::EMPTY,
+            Bounds { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::ZERO },
+            Bounds { min: Vec3::ZERO, max: Vec3::new(f64::INFINITY, 1.0, 1.0) },
+            Bounds { min: Vec3::new(-f64::MAX, -1.0, -1.0), max: Vec3::new(f64::MAX, 1.0, 1.0) },
         ] {
             assert_eq!(cam.clip_bounds(&bounds), fallback);
             assert!(cam.view_proj_bounds(1.0, &bounds).0.iter().flatten().all(|v| v.is_finite()));
@@ -892,8 +891,8 @@ mod tests {
     #[test]
     fn fit_aspect_refuses_an_overflowing_fit() {
         let before = Camera { distance: 80.0, ..Default::default() };
-        let small = Aabb3 { min: Vec3::ZERO, max: Vec3::new(40.0, 30.0, 20.0) };
-        let huge = Aabb3 { min: Vec3::new(-1e307, -1e307, -1e307), max: Vec3::new(1e307, 1e307, 1e307) };
+        let small = Bounds { min: Vec3::ZERO, max: Vec3::new(40.0, 30.0, 20.0) };
+        let huge = Bounds { min: Vec3::new(-1e307, -1e307, -1e307), max: Vec3::new(1e307, 1e307, 1e307) };
         for (b, aspect) in [(&small, 1e-320), (&huge, 1e-6)] {
             let mut c = before;
             assert!(!c.fit_aspect(b, aspect), "aspect {aspect}");
@@ -904,13 +903,13 @@ mod tests {
     #[test]
     fn fit_and_hostile() {
         let mut c = Camera::default();
-        let b = Aabb3 { min: Vec3::ZERO, max: Vec3::new(40.0, 30.0, 20.0) };
+        let b = Bounds { min: Vec3::ZERO, max: Vec3::new(40.0, 30.0, 20.0) };
         c.fit(&b);
         assert!(c.target.dist(Vec3::new(20.0, 15.0, 10.0)) < 1e-9);
         c.zoom_at(f64::NAN, None);
         c.orbit(1e9, -1e9);
         assert!(c.is_valid());
-        c.fit(&Aabb3::EMPTY);
+        c.fit(&Bounds::EMPTY);
         assert!(c.is_valid());
     }
 

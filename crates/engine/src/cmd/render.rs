@@ -1,5 +1,6 @@
 //! Render capability discovery and persistent intent. No rendering or host probing.
 
+use solidcraft_geom::MeshGeom;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -296,7 +297,7 @@ fn fit_camera(s: &mut Session, params: &Value) -> Result<Value> {
     let scene = crate::product_scene::extract(s)?;
     let mut camera = s.camera.unwrap_or_default();
     // Publish only a valid fitted camera; the previous one stays otherwise.
-    if !camera.fit_aspect(&scene.bounds, aspect) && !scene.bounds.is_empty() {
+    if !camera.fit_aspect(&solidcraft_render::view_bounds(&scene.bounds), aspect) && !scene.bounds.is_empty() {
         return Err(bad("render.camera.fit", "the product cannot be framed at this aspect: the fitted camera is out of range"));
     }
     s.camera = Some(camera);

@@ -1,8 +1,8 @@
 //! CPU rasterizer for headless snapshots: z-buffered, smooth-shaded triangles and depth-tested
 //! lines, rendered at 2× and downsampled for anti-aliasing.
 
+use crate::vec::Vec3Ops;
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 
 use crate::Camera;
 use crate::scene::{Rgb, SECTION_CAP, Scene, png};
@@ -70,7 +70,9 @@ impl Pass {
     }
 }
 
-pub(crate) fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
+/// The CPU rasterizer's shading of colour `base` (linear 0..1) on a surface with normal `n` seen
+/// along `view_dir`: the light every picture without a GPU is lit by.
+pub fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
     let n = if n.dot(view_dir) < 0.0 { -n } else { n };
     let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
     let diff = n.dot(key).max(0.0);
@@ -376,7 +378,7 @@ mod tests {
     use super::*;
     use crate::StandardView;
     use crate::scene::{SceneLine, SceneMesh};
-    use solidcraft_geom::Mesh;
+    use solidcore_tess::Mesh;
     use std::sync::Arc;
 
     /// Lines are cut by the section in 3D: the kept piece ends on the plane.

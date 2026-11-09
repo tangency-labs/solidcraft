@@ -5,7 +5,7 @@
 //! the same from frame to frame and as the plane moves. Spacing and line width are the same for
 //! every hatch; only the angle and the colour change.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::{Vec2Ops, Vec3Ops};
 use std::collections::{HashMap, HashSet};
 
 use solidcore_record::{Vec2, Vec3};

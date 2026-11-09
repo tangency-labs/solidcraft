@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 
 /// The name of the threads jobs run on (in crash reports and debuggers).
 #[cfg(not(target_arch = "wasm32"))]
-const WORKER: &str = "solidcraft pipelines";
+const WORKER: &str = "viewport pipelines";
 
 /// Jobs on `device`, collected before [`scope`] returns.
 pub struct Jobs<'scope, 'env> {
@@ -158,12 +158,12 @@ mod tests {
 
     #[test]
     fn d3d12_never_loads_a_dxcompiler_found_on_path_unless_asked_to() {
-        let beside = || Some(std::path::PathBuf::from(r"C:\Program Files\SolidCraft\dxcompiler.dll"));
+        let beside = || Some(std::path::PathBuf::from(r"C:\Program Files\App\dxcompiler.dll"));
         let is_fxc = |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::Fxc);
         let by_name = |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::DynamicDxc { dxc_path } if dxc_path == "dxcompiler.dll");
         let beside_program =
-            |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::DynamicDxc { dxc_path } if dxc_path.ends_with(r"SolidCraft\dxcompiler.dll"));
-        // Left to SolidCraft (#6756): FXC, or DXC from the program's folder by its full path,
+            |c: &wgpu::Dx12Compiler| matches!(c, wgpu::Dx12Compiler::DynamicDxc { dxc_path } if dxc_path.ends_with(r"App\dxcompiler.dll"));
+        // Left to this crate (#6756): FXC, or DXC from the program's folder by its full path,
         // never a `dxcompiler.dll` Windows would find on PATH. wgpu does not trim the value: " fxc "
         // is a value it does not know.
         for setting in [None, Some("auto"), Some("AUTO"), Some(""), Some("unknown"), Some(" fxc ")] {
@@ -192,8 +192,8 @@ mod tests {
 
     #[test]
     fn jobs_hand_back_what_they_built() {
-        let Ok((_, device, _)) = crate::open_headless() else {
-            solidcraft_geom::note!("skipped: no GPU adapter");
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
+            eprintln!("skipped: no GPU adapter");
             return;
         };
         let runs = AtomicUsize::new(0);
@@ -214,8 +214,8 @@ mod tests {
 
     #[test]
     fn an_error_on_a_job_reaches_the_callers_error_scope() {
-        let Ok((_, device, _)) = crate::open_headless() else {
-            solidcraft_geom::note!("skipped: no GPU adapter");
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
+            eprintln!("skipped: no GPU adapter");
             return;
         };
         let runs = AtomicUsize::new(0);
@@ -237,8 +237,8 @@ mod tests {
 
     #[test]
     fn a_job_dropped_unjoined_whose_thread_panicked_does_not_panic_the_scope() {
-        let Ok((_, device, _)) = crate::open_headless() else {
-            solidcraft_geom::note!("skipped: no GPU adapter");
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
+            eprintln!("skipped: no GPU adapter");
             return;
         };
         let finished = scope(&device, |jobs| {
@@ -254,8 +254,8 @@ mod tests {
 
     #[test]
     fn a_job_whose_thread_panicked_runs_again_on_the_calling_thread() {
-        let Ok((_, device, _)) = crate::open_headless() else {
-            solidcraft_geom::note!("skipped: no GPU adapter");
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
+            eprintln!("skipped: no GPU adapter");
             return;
         };
         let built = scope(&device, |jobs| {

@@ -1,8 +1,8 @@
 //! Bounded opaque metallic/roughness surfaces in linear sRGB.
 //! This numerical contract does not enable a renderer or persist appearances.
 
-use solidcraft_geom::prelude::*;
-use std::f64::consts::PI;
+use crate::vec::Vec3Ops;
+use std::f64::consts::{PI, TAU};
 
 use solidcore_record::Vec3;
 
@@ -70,8 +70,7 @@ impl OpaqueSurface {
     /// The public appearance constructor keeps its historical 0.045 minimum. This
     /// explicit internal route preserves authored values without a clamp, retains
     /// IOR/coat identity and validates every newly supplied component.
-    #[cfg(any(feature = "raytrace-cpu", test))]
-    pub(crate) fn with_authored_finish(mut self, base_color: Vec3, metallic: f64, roughness: f64) -> Result<Self, SurfaceError> {
+    pub fn with_authored_finish(mut self, base_color: Vec3, metallic: f64, roughness: f64) -> Result<Self, SurfaceError> {
         if !base_color.is_finite() || ![base_color.x, base_color.y, base_color.z].into_iter().all(|c| (0.0..=1.0).contains(&c)) {
             return Err(SurfaceError::BaseColor);
         }
@@ -97,12 +96,13 @@ impl OpaqueSurface {
     }
 
     /// Enable the optional reciprocal residual lobe for rough isotropic conductors.
-    pub(crate) fn with_metal_energy_compensation(mut self, enabled: bool) -> Self {
+    pub fn with_metal_energy_compensation(mut self, enabled: bool) -> Self {
         self.metal_energy_compensation = enabled;
         self
     }
 
-    pub(crate) fn metal_energy_compensation(self) -> bool {
+    /// Whether the residual lobe for rough isotropic conductors is on.
+    pub fn metal_energy_compensation(self) -> bool {
         self.metal_energy_compensation
     }
 
@@ -126,7 +126,7 @@ impl OpaqueSurface {
 
     /// Schlick approximation with the exact index-matched dielectric limit.
     /// A conductor retains its own grazing response, including in a metal mix.
-    pub(crate) fn specular_fresnel(self, cosine: f64) -> Vec3 {
+    pub fn specular_fresnel(self, cosine: f64) -> Vec3 {
         let f0 = self.normal_reflectance();
         let grazing = if self.dielectric_ior == 1.0 { self.metallic } else { 1.0 };
         f0 + (Vec3::new(grazing, grazing, grazing) - f0) * (1.0 - cosine.clamp(0.0, 1.0)).powi(5)
@@ -225,6 +225,26 @@ fn metal_multiple_scattering(color: Vec3, metallic: f64, roughness: f64, nv: f64
 pub use solidcraft_color::srgb::decode8 as srgb8_to_linear;
 
 /// Normalize finite directions without overflow or an arbitrary magnitude threshold.
+/// A GGX visible normal (Heitz 2018): the microfacet normal seen from `v` about the normal `n`,
+/// for the squared roughness `alpha`, from two uniform variates `u`. [`SurfaceError::Direction`]
+/// for a degenerate view, normal or result.
+pub fn visible_normal(v: Vec3, n: Vec3, alpha: f64, u: [f64; 2]) -> Result<Vec3, SurfaceError> {
+    let tangent = unit_direction(if n.z.abs() < 0.9 { Vec3::Z.cross(n) } else { Vec3::X.cross(n) })?;
+    let bitangent = n.cross(tangent);
+    let stretched = unit_direction(Vec3::new(alpha * v.dot(tangent), alpha * v.dot(bitangent), v.dot(n)))?;
+    let side = if stretched.x == 0.0 && stretched.y == 0.0 { Vec3::X } else { unit_direction(Vec3::new(-stretched.y, stretched.x, 0.0))? };
+    let vertical = stretched.cross(side);
+    let radius = u[0].sqrt();
+    let (sine, cosine) = (TAU * u[1]).sin_cos();
+    let x = radius * cosine;
+    let mix = 0.5 * (1.0 + stretched.z);
+    let y = (1.0 - mix) * (1.0 - x * x).max(0.0).sqrt() + mix * radius * sine;
+    let height = (1.0 - x * x - y * y).max(0.0).sqrt();
+    let hemisphere = side * x + vertical * y + stretched * height;
+    let local = unit_direction(Vec3::new(alpha * hemisphere.x, alpha * hemisphere.y, hemisphere.z.max(0.0)))?;
+    unit_direction(tangent * local.x + bitangent * local.y + n * local.z)
+}
+
 pub fn unit_direction(v: Vec3) -> Result<Vec3, SurfaceError> {
     if !v.is_finite() {
         return Err(SurfaceError::Direction);
