@@ -1443,9 +1443,15 @@ const MESH_POLYGON_CORNERS: usize = 12;
 /// [`MESH_POLYGON_CORNERS`], all on one circle, is a tessellated circle, an ellipse on a slanted
 /// plane; and the sides of a polygon stay lines, never one fitted spline (#13464). A mesh file
 /// keeps its corners in single precision, so they lie on the circle within about 1e-7 of their
-/// size, not of the circle's.
+/// distance from the origin, not of the circle's size; and never more loosely than 1e-4 of the
+/// outline's own size, so a small outline far from the origin is not taken for a circle it misses.
 fn fit_mesh_outline(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
-    let within = pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6;
+    let (lo, hi) = pts.iter().fold(
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY)),
+        |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+    );
+    let size = lo.dist(hi);
+    let within = (pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6).min(size * 1e-4);
     if pts.len() > MESH_POLYGON_CORNERS + 1
         && let Some(e) = tilted_circle(plane, pts, Some(within))
     {
