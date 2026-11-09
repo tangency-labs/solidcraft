@@ -1,4 +1,4 @@
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
@@ -1308,4 +1308,44 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
         assert_eq!(names(&doc), first, "a second build");
         assert_eq!(names(&Document::from_json(&doc.to_json()).unwrap()), first, "reopened");
     }
+}
+
+/// A construction plane of one component carries its place into the sketch of another (#11734):
+/// the sketch lies where the plane is, not where the plane's numbers fall in the sketch's own,
+/// placed component.
+#[test]
+fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
+    let mut doc = Document::new("planes between components");
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let sketcher = doc.add_component(Some("Sketcher"), 0).unwrap();
+    let placed = rigid(Vec3::new(0.0, 138.0, -3.0), Vec3::ZERO, Vec3::Y, std::f64::consts::PI);
+    doc.occurrences.iter_mut().find(|o| o.component == sketcher).unwrap().transform = placed;
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "60 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Plane3")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    let mut sketch = Sketch::new();
+    let a = sketch.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let b = sketch.add_point(Vec2::new(10.0, 5.0), None).unwrap();
+    sketch.add_line_pts(a, b, None).unwrap();
+    let on_plane = FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane.into() }, sketch };
+    let id = doc.add_feature(on_plane, Some("Sketch3")).unwrap();
+    doc.feature_mut(id).unwrap().component = sketcher;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.is_none(), "{:?}", model.result(id).unwrap().error);
+    let state = model.state();
+    let solved = state.sketch(id).unwrap();
+    // The sketch is kept in its own component's frame; placed, it lies on the plane where the
+    // owner puts it (the owner is not moved): the same origin, axes, normal and line end.
+    use solidcraft_geom::prelude::*;
+    let want = Plane::named("XZ").unwrap().offset(60.0);
+    let m = doc.component_transform(sketcher);
+    let close = |a: Vec3, b: Vec3, what: &str| assert!((a - b).len() < 1e-6, "{what}: {a:?} instead of {b:?}");
+    close(crate::apply_point(&m, solved.plane.origin), want.origin, "origin");
+    close(crate::apply_vector(&m, solved.plane.x), want.x, "x axis");
+    close(crate::apply_vector(&m, solved.plane.y), want.y, "y axis");
+    close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
+    let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
+    close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
 }
