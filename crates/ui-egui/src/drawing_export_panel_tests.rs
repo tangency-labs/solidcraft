@@ -87,12 +87,27 @@ fn file_names_take_the_design_and_sheet_and_lose_what_no_file_system_takes() {
     assert_eq!(two, [(1, PathBuf::from("/out/plate - A-B.png")), (2, PathBuf::from("/out/plate - A-B (2).png"))]);
 }
 
+/// A refused sheet names the views the status lists as failed on it, with their reasons, and
+/// nothing is read from the refusal's text; a status that names none leaves the friendly error.
 #[test]
-fn a_refusals_reason_is_read_to_its_closing_bracket() {
-    let error = "drawing.export: not written: views on the sheet failed: 0123456789abc (not supported yet: shaded (lines)), zyx (other)";
-    assert_eq!(bracketed_after(error, "0123456789abc ("), Some("not supported yet: shaded (lines)"));
-    assert_eq!(bracketed_after(error, "zyx ("), Some("other"));
-    assert_eq!(bracketed_after(error, "nothing ("), None);
+fn a_refused_sheet_names_its_failed_view_from_the_status() {
+    let mut h = Harness::new();
+    let (sheet, front, top) = drawing(&mut h);
+    let d = h.app.session.drawing("test").unwrap().clone();
+    let refusal = json!({"ok": false, "error": "drawing.export: not written"});
+    let views = vec![
+        (front, sheet, "ok".to_owned(), String::new()),
+        (top, sheet, "failed".to_owned(), "not supported yet: shaded".to_owned()),
+        (top, sheet + 1, "failed".to_owned(), "another sheet".to_owned()),
+    ];
+    let lines = outcome_lines(Some(&d), &views, sheet, &refusal);
+    let said: Vec<&str> = lines.iter().map(|(_, l)| l.as_str()).collect();
+    assert_eq!(lines.len(), 1, "{said:?}");
+    assert!(matches!(lines[0].0, StatusTone::Error));
+    assert!(lines[0].1.contains(view_name(&d, top).as_str()) && lines[0].1.contains("not supported yet: shaded"), "{said:?}");
+    let none = outcome_lines(Some(&d), &views[..1], sheet, &refusal);
+    assert_eq!(none.len(), 1);
+    assert!(none[0].1.contains(&crate::friendly_error(ID, "drawing.export: not written")), "{}", none[0].1);
 }
 
 #[test]
@@ -202,8 +217,15 @@ fn the_window_writes_svg_and_png_on_the_chosen_paper() {
 #[test]
 fn a_view_that_cant_be_drawn_is_named_instead_of_refused_silently() {
     let mut h = Harness::new();
-    let (_, _, top) = drawing(&mut h);
+    let (sheet, _, top) = drawing(&mut h);
     h.app.run("drawing.view.edit", json!({"view": ids::encode(top), "set": {"visual_style": "shaded_visible"}})).unwrap();
+    // The sheet page has drawn its views, so the status lists the one that can't be drawn as failed.
+    solidcraft_engine::drawing_scene::extract(&mut h.app.session, sheet).unwrap();
+    for _ in 0..10 {
+        if !solidcraft_engine::drawing_scene::step(&mut h.app.session) {
+            break;
+        }
+    }
     let name = view_name(h.app.session.drawing("test").unwrap(), top);
     assert_eq!(name, crate::i18n::tr("ui.drawing_export.view_top"));
     h.app.start(ID);
