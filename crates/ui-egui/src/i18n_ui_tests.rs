@@ -13,7 +13,7 @@ fn japanese_dialog_keeps_english_scenario_handles() {
     assert!(h.widget("平面").is_some(), "the input label must be translated");
     assert!(h.widget("キャンセル").is_some(), "the close button must be translated");
     assert!(!scenario::handles("dialog:Plane").is_empty(), "scenario handles must retain source labels");
-    assert_eq!(crate::i18n::tr("ui.preferences"), "Preferences", "the render scope must restore English");
+    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences", "the render scope must restore English");
 
     h.app.preferences.language = "en".into();
     h.frames(3);
@@ -31,7 +31,7 @@ fn italian_dialog_keeps_english_scenario_handles() {
     assert!(h.widget("Piano").is_some());
     assert!(h.widget("Annulla").is_some());
     assert!(!scenario::handles("dialog:Plane").is_empty());
-    assert_eq!(crate::i18n::tr("ui.preferences"), "Preferences");
+    assert_eq!(solidcraft_ui_text::tr("ui.preferences"), "Preferences");
 
     h.app.preferences.language = "en".into();
     h.frames(3);
@@ -138,13 +138,13 @@ fn home_page_buttons_fit_their_translated_labels() {
         let out = crate::test_support::frame(&h.ctx, egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| h.app.ui(ui));
         let (mut rects, mut texts) = (Vec::new(), Vec::new());
         out.shapes.iter().for_each(|shape| collect(&shape.shape, &mut rects, &mut texts));
-        let locale = crate::i18n::Locale::for_language(catalog.id);
+        let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
         for id in ["home.new_mm", "home.new_inches", "home.open", "home.import"] {
             let label = locale.text(id);
             let (_, text) = texts.iter().find(|(t, _)| t == label).unwrap_or_else(|| panic!("{}: {label:?} is not painted", catalog.id));
             let button = rects
                 .iter()
-                .filter(|r| (r.height() - crate::theme::Tokens::get().file_tile_height).abs() < 1.0 && r.contains(text.left_center()))
+                .filter(|r| (r.height() - solidcraft_theme::Tokens::get().file_tile_height).abs() < 1.0 && r.contains(text.left_center()))
                 .min_by(|a, b| a.area().total_cmp(&b.area()))
                 .unwrap_or_else(|| panic!("{}: no button around {label:?}", catalog.id));
             assert!(text.right() <= button.right(), "{}: {label:?} ends at {} past its button's edge {}", catalog.id, text.right(), button.right());
@@ -270,7 +270,7 @@ fn finish_exit_label_and_its_button_are_centred() {
     let rows = out.shapes.iter().find_map(|shape| label_rows(&shape.shape)).expect("the Finish Sketch panel label is drawn");
     assert_eq!(rows.len(), 1, "the translated Exit section label fits one row: {rows:?}");
     assert!((rows[0].center().x - label.x).abs() < 1.0, "the label is centred: {rows:?}");
-    let hover = crate::theme::Tokens::get().hover;
+    let hover = solidcraft_theme::Tokens::get().hover;
     let lr = out.shapes.iter().find_map(|shape| hover_rect(&shape.shape, hover, label)).expect("the hovered label is highlighted");
     assert!(rows.iter().all(|row| lr.contains_rect(*row)), "the highlight holds the label: {lr:?} {rows:?}");
     out.textures_delta.clear();
@@ -291,7 +291,7 @@ fn interference_dialog_renders_in_the_active_language() {
     for english in ["INTERFERENCE", "Bodies (all if none)", "Compute"] {
         assert!(h.widget(english).is_none(), "{english:?} is still shown in English");
     }
-    let fr = crate::i18n::Locale::for_language("fr");
+    let fr = solidcraft_ui_text::Locale::for_language("fr");
     assert_eq!(fr.format("dialog.bodies_count", &[("count", "3")]), "3 corps");
     assert_eq!(fr.text("dialog.compute_again"), "Recalculer");
 }
@@ -300,8 +300,9 @@ fn interference_dialog_renders_in_the_active_language() {
 /// different words in some languages, so each has its own message.
 #[test]
 fn continuity_gap_and_sheet_metal_gap_are_separate_messages() {
+    crate::i18n::install();
     for (lang, legend, sheet) in [("fr", "Écart", "Jeu"), ("de", "Lücke", "Spalt")] {
-        let locale = crate::i18n::Locale::for_language(lang);
+        let locale = solidcraft_ui_text::Locale::for_language(lang);
         assert_eq!(locale.text("ui.continuity_gap"), legend, "{lang}");
         assert_eq!(locale.text("ui.sheet_gap"), sheet, "{lang}");
     }

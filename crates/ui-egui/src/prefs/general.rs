@@ -14,21 +14,21 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ui_kit::dropdown_menu(
                             ui,
                             "pref_language",
-                            &if app.preferences.language == crate::i18n::SYSTEM {
+                            &if app.preferences.language == solidcraft_ui_text::SYSTEM {
                                 app.tr("prefs.language_system").to_owned()
                             } else {
-                                crate::i18n::Locale::for_language(&app.preferences.language).display_name().into_owned()
+                                solidcraft_ui_text::Locale::for_language(&app.preferences.language).display_name().into_owned()
                             },
                             |ui| {
                                 if ui_kit::list_picker(
                                     ui,
-                                    crate::i18n::SYSTEM,
+                                    solidcraft_ui_text::SYSTEM,
                                     app.tr("prefs.language_system"),
-                                    app.preferences.language == crate::i18n::SYSTEM,
+                                    app.preferences.language == solidcraft_ui_text::SYSTEM,
                                 )
                                 .clicked()
                                 {
-                                    app.preferences.language = crate::i18n::SYSTEM.into();
+                                    app.preferences.language = solidcraft_ui_text::SYSTEM.into();
                                 }
                                 for locale in crate::i18n::LOCALES {
                                     if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
@@ -53,7 +53,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             ui_kit::settings_form(ui, labels, |ui| {
-                let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), crate::i18n::tr_label("0 turns it off"), |ui| {
+                let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), solidcraft_ui_text::tr_label("0 turns it off"), |ui| {
                     let number = ui_kit::settings_number(ui, &mut app.autosave_minutes, 0.0..=120.0, 0.5);
                     number.widget_info(|| {
                         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), app.autosave_minutes);
@@ -139,7 +139,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "crash_reports", app.tr("prefs.general.crash_reports"), |ui| {
             ui.horizontal(|ui| {
                 let count = app.crashes.saved_count();
-                let label = crate::i18n::format("prefs.reports_saved", &[("n", &count.to_string())]);
+                let label = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &count.to_string())]);
                 let tone = if count == 0 { ui_kit::SettingsBadgeTone::Neutral } else { ui_kit::SettingsBadgeTone::Warning };
                 let badge = ui_kit::settings_state_badge(ui, &label, tone);
                 crate::scenario::publish_rect("prefs:crash_count", badge.rect);
@@ -171,7 +171,7 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
     let mut help = app.tr("prefs.max_file_size_note").to_string();
     if let Some(bytes) = limits::override_bytes() {
         help.push('\n');
-        help.push_str(&crate::i18n::format("prefs.max_file_size_flag", &[("size", &limits::describe(bytes))]));
+        help.push_str(&solidcraft_ui_text::format("prefs.max_file_size_flag", &[("size", &limits::describe(bytes))]));
     }
     let t = Tokens::get();
     let rows = [
@@ -183,7 +183,7 @@ fn file_size_rows(app: &mut SolveApp, ui: &mut egui::Ui, labels: f32) {
             ui.spacing_mut().item_spacing.x = t.space_16 + t.space_4;
             for (label, caption, handle, default, value) in rows {
                 let size = limits::describe(value.saturating_mul(limits::MB));
-                let unit = crate::i18n::tr("prefs.megabytes");
+                let unit = solidcraft_ui_text::tr("prefs.megabytes");
                 let note = if *value >= 1024 { format!("{unit} ({size})") } else { unit.to_owned() };
                 let number_width = t.space_24 * 3.0;
                 let width = (number_width + t.space_4 + ui_kit::ContentWidth::label(ui, &note))

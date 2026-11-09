@@ -1,32 +1,9 @@
 //! Transient shell geometry shared by automation, drawing and viewport occlusion.
-use crate::ui_kit::{Container, Surface};
-use egui::{Rect, pos2, vec2};
-use serde::{Deserialize, Serialize};
+use crate::ui_kit::{Container, LayoutMode, SHELL_GAP, Surface, within};
+use egui::{Rect, pos2};
 
-use crate::{SolveApp, theme::Tokens, toolbar};
-
-/// Saved workspace layout; automation may override it for a session.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum LayoutMode {
-    #[default]
-    Floating,
-    #[serde(rename = "compact", alias = "docked")]
-    Docked,
-}
-
-impl LayoutMode {
-    pub(crate) fn publish(self, ctx: &egui::Context) {
-        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_container_layout"), self));
-    }
-
-    pub(crate) fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|data| data.get_temp(egui::Id::unique("sc_container_layout"))).unwrap_or_default()
-    }
-}
-
-/// The gap from the viewport edge to the floating cards and between the cards.
-pub(crate) const SHELL_GAP: f32 = 7.0;
+use crate::SolveApp;
+use solidcraft_theme::Tokens;
 
 /// The viewport's top corners are rounded concentrically with the cards: the card margin plus the
 /// card radius.
@@ -59,32 +36,6 @@ pub(crate) fn paint_top_corners(painter: &egui::Painter, viewport: Rect, color: 
             mesh.add_triangle(0, i + 1, i + 2);
         }
         painter.add(egui::Shape::mesh(mesh));
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Cards {
-    pub workspace: Rect,
-    pub ribbon: Rect,
-    pub bottom: f32,
-}
-
-impl Cards {
-    pub fn new(available: Rect, mode: LayoutMode, ribbon_height: f32) -> Self {
-        let margin = Container::for_layout(mode, Surface::Chrome).gap();
-        let gap = margin;
-        let left = available.left() + margin;
-        let top = available.top() + margin;
-        let right = (available.right() - margin).max(left);
-        let workspace = Rect::from_min_size(
-            pos2(left, top),
-            vec2(
-                toolbar::WORKSPACE_WIDTH.min((right - left).max(0.0)),
-                ribbon_height - if !Container::for_layout(mode, Surface::Chrome).floating() { 1.0 } else { 0.0 },
-            ),
-        );
-        let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + ribbon_height));
-        Self { workspace, ribbon, bottom: ribbon.bottom() + margin }
     }
 }
 
@@ -253,12 +204,6 @@ pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
     // its max. The viewport stands in for it.
     let content = app.shell.content.unwrap_or(viewport).intersect(viewport);
     if content.is_positive() { content } else { viewport }
-}
-
-/// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
-/// `lo > hi`, which a rect squeezed to nothing between cards gives.
-pub(crate) fn within(v: f32, lo: f32, hi: f32) -> f32 {
-    if lo <= hi { v.clamp(lo, hi) } else { lo }
 }
 
 /// Free anchor space shared by both layouts. Compact edge hosts have already consumed

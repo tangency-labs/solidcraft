@@ -21,7 +21,7 @@ fn bounded_dielectrics<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::R
     impl<'de> serde::de::Visitor<'de> for Inputs {
         type Value = Vec<Override>;
         fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("at most 32 disjoint dielectric body overrides")
+            f.write_str("at most 128 dielectric body overrides")
         }
         fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
             let mut result = Vec::new();
@@ -74,7 +74,7 @@ impl TryFrom<String> for Boundary {
 }
 pub(super) fn apply(scene: &mut ProductScene, overrides: &[Override], command: &str) -> Result<()> {
     if overrides.len() > solidcraft_render::job::MAX_GPU_DIELECTRICS {
-        return Err(bad(command, "at most 32 runtime dielectric overrides are supported"));
+        return Err(bad(command, "at most 128 runtime dielectric overrides are supported"));
     }
     let mut ordinals = std::collections::BTreeSet::new();
     for input in overrides {
