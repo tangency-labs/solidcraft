@@ -31,6 +31,11 @@
 //!   does the same for NLib errors (keeping the surface upstream leaves behind) but
 //!   returns non-NLib errors, which mark inputs where upstream indexes outside its
 //!   arrays.
+//! - `N_SrfJoin` of a rational and a non-rational surface loads both nets as they
+//!   are, so its knot removal runs on a net that mixes weights with the non-rational
+//!   marker `NL_NOW`, and only then sets the marker to `1.0`. [`join`] gives the
+//!   non-rational piece weights `1.0` first ([`make_rat_compatible`]): the net before
+//!   the removal is upstream's, and the removal sees real weights.
 //! - `N_MakeSrfsCompatible` ignores the status of `N_SrfReparam` /
 //!   `N_SrfReparamToInterval`; their only Rust error is `InvalidInput` for a knot
 //!   vector shorter than the degree (where upstream writes outside the array), which
@@ -49,7 +54,7 @@ use crate::math::max2;
 use crate::nurbs::basis_basic::{compatible_knot_array, find_all_span_maxima};
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::knots::KnotVector;
-use crate::nurbs::math::{CPoint, BIGD, NOW};
+use crate::nurbs::math::{CPoint, BIGD};
 use crate::nurbs::srf_basic::{make_rat_compatible, Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 
 use super::p1::{
@@ -937,15 +942,14 @@ fn merge_knots(sur: &mut [Surface], d: Direction) -> Result<Vec<Vec<f64>>> {
 /// Joins `sur1` and `sur2` along `dir` (`N_SrfJoin`): the end of `sur1` in `dir`
 /// meets the start of `sur2` (whose knots are shifted to continue `sur1`'s); the
 /// boundary rows are averaged into one, the lower degree is elevated first, and the
-/// joint knot is then removed as often as `tol` allows. Any `dir` other than
-/// [`Direction::U`] joins in v.
+/// joint knot is then removed as often as `tol` allows. A rational and a non-rational
+/// surface join as a rational one (weights `1.0` on the non-rational one). Any `dir`
+/// other than [`Direction::U`] joins in v.
 ///
 /// Errors: [`NurbsFailure::Input`] when the net sizes or degrees across `dir` differ;
 /// errors of the degree elevation; `InvalidInput` for invalid surfaces.
 pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p3::join";
-    let rat1 = sur1.is_rational();
-    let rat2 = sur2.is_rational();
 
     // Work in the v direction; the u direction transposes the inputs and the result.
     let tr = |s: &Surface| {
@@ -977,6 +981,12 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
             (a, e)
         }
     };
+    // A rational and a non-rational piece join as rational: the non-rational one gets
+    // weights 1.0 before its points are loaded, so the joined net, and the knot removal
+    // on it, never takes the non-rational marker `NOW` as a weight.
+    let mut pieces = [a, b];
+    make_rat_compatible(&mut pieces);
+    let [a, b] = pieces;
     let Local {
         n: n1,
         m: m1,
@@ -1020,13 +1030,7 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
         }
         let a1 = at2(&pw1, ii, m1, OP)?;
         let b0 = at2(&pw2, ii, 0, OP)?;
-        let mut c = CPoint::combine2(0.5, a1, 0.5, b0);
-        if rat1 != rat2 {
-            let w1 = if a1.w == NOW { 1.0 } else { a1.w };
-            let w2 = if b0.w == NOW { 1.0 } else { b0.w };
-            c.w = 0.5 * (w1 + w2);
-        }
-        put2(&mut pwj, ii, m1, c, OP)?;
+        put2(&mut pwj, ii, m1, CPoint::combine2(0.5, a1, 0.5, b0), OP)?;
         for (kk, jj) in ((m1 + 1)..).zip(1..=m2) {
             put2(&mut pwj, ii, kk, at2(&pw2, ii, jj, OP)?, OP)?;
         }
@@ -1041,18 +1045,6 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
         Err(e) => return Err(e),
     }
 
-    // Make sure weights/rationality is consistently set.
-    if rat1 != rat2 {
-        for i in 0..=surj.n() {
-            for j in 0..=surj.m() {
-                let c = surj.cpt_mut(i, j)?;
-                if c.w == NOW {
-                    c.w = 1.0;
-                }
-            }
-        }
-    }
-
     if dir == Direction::U {
         surj.swap_uv();
     }
@@ -1063,6 +1055,7 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
 mod tests {
     use super::*;
     use crate::nurbs::knots::Side;
+    use crate::nurbs::math::NOW;
 
     fn sample() -> Surface {
         let net: Vec<Vec<CPoint>> = (0..5)
