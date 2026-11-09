@@ -419,9 +419,11 @@ agents can read the same structured settings and retained Continuity records wit
 `view.status_details` engine command. Its `current` flag guards geometry targets, and its
 per-record limits prevent mixed measurements from being mistaken for one global tolerance.
 
-The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only, for JSON lines,
-so agents can drive the app without a launch flag. Every connection still needs this launch's
-token (below); nothing else on the machine, and nothing off it, can send a command.
+The control channel is **off by default**: Preferences > Assistant > Agents through MCP > "Let AI
+agents connect" turns it on, and `--control PORT` opens it for one run. Once on, SolidCraft listens on
+`127.0.0.1` only, for JSON lines, so agents can drive the app without a launch flag. Every connection
+still needs this launch's token (below); nothing else on the machine, and nothing off it, can send a
+command.
 
 Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
 session-only panel blur. Radius is finite physical pixels in 0..60; the optional

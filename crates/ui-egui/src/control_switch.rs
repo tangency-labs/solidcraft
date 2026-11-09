@@ -198,13 +198,14 @@ mod tests {
         std::mem::take(&mut *log.lock().unwrap())
     }
 
-    /// Off by default for the port (the app's default), on as it always was; turning it off
-    /// closes the channel once the change settles, turning it on opens it again, a new port
-    /// moves it, and nothing restarts.
+    /// Turned on, the channel opens on the app's default port; turning it off closes the channel
+    /// once the change settles, turning it on opens it again, a new port moves it, and nothing
+    /// restarts.
     #[test]
     fn the_setting_starts_and_stops_the_channel_without_a_restart() {
         let mut app = SolveApp::new(Default::default(), Default::default());
-        assert!(app.preferences.agent_control, "the default is unchanged: on");
+        assert!(!app.preferences.agent_control, "off until the user turns it on");
+        app.preferences.agent_control = true;
         assert_eq!(app.preferences.agent_control_port, solidcraft_engine::control_auth::APP.default_port);
         let log = Log::default();
         launch(&mut app, starter(&log, &[]), None);
@@ -260,6 +261,7 @@ mod tests {
     #[test]
     fn a_taken_port_is_reported() {
         let mut app = SolveApp::new(Default::default(), Default::default());
+        app.preferences.agent_control = true;
         app.preferences.agent_control_port = 7000;
         let log = Log::default();
         launch(&mut app, starter(&log, &[7000]), None);

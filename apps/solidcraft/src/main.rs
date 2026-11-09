@@ -1210,7 +1210,7 @@ fn main() -> eframe::Result {
                 ));
             }
             mark("viewport pipelines");
-            // `--control`/the environment name a port for this run; otherwise the preference (on
+            // `--control`/the environment name a port for this run; otherwise the preference (off
             // by default) opens its port, and turning it off or on later takes effect at once
             // (docs/control-protocol.md).
             let ctx = cc.egui_ctx.clone();
