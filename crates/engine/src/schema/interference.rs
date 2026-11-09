@@ -81,8 +81,9 @@ pub struct InterferenceResult {
     pub count: usize,
     /// How many solid bodies were checked.
     pub checked: usize,
-    /// The pairs that couldn't be checked, with the reason (a boolean that failed, or the time
-    /// budget ran out), and each mesh body (`b` is then `null`).
+    /// The pairs that couldn't be checked, with the reason (a boolean that failed or came back
+    /// with a shared part reaching outside both bodies, or the time budget ran out), and each
+    /// mesh body (`b` is then `null`).
     pub unchecked: Vec<Unchecked>,
     /// Whether more than 20000 pairs had overlapping boxes, so `skipped_pairs` were left out.
     pub truncated: bool,

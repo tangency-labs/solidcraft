@@ -8,7 +8,9 @@
 //! exactly and measured, in parallel on desktop (one after another in the browser), the slowest
 //! first, under a time budget: pairs not finished when it runs out are listed as not checked
 //! rather than holding the call. The shared part is measured as `solidcraft_kernel::measure`
-//! measures it (its mass properties alone).
+//! measures it (its mass properties alone). A shared part that reaches outside where the two
+//! bodies' exact boxes meet can't be theirs: the boolean went wrong, and the pair is listed as not
+//! verified rather than reported as an overlap (#14009).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -38,6 +40,9 @@ const MESH_MARGIN: f64 = 4.0;
 pub(super) const MESH_NOT_CHECKED: &str = "mesh body: not checked";
 /// Most pairs listed under `slowest`.
 const SLOWEST: usize = 8;
+/// How far, as a share of the diagonal of where two bodies' exact boxes meet, their shared part
+/// may reach outside it before it is taken for a wrong boolean.
+const REGION_SLACK: f64 = 0.01;
 
 /// One pair to intersect exactly: the bodies (cheap clones sharing the solids) and their names.
 struct Job {
@@ -290,7 +295,7 @@ fn check(job: &Job) -> Done {
     Done { outcome, ms: started.elapsed().as_secs_f64() * 1000.0, kernel }
 }
 
-fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
+fn check_pair(a: &Body, b: &Body, names: &(String, String)) -> Outcome {
     let threshold = 1e-9 * a.size().max(1.0).powi(3);
     // A pair whose shared part can't be worked out is reported, not passed as clear.
     let shared = match solidcraft_kernel::boolean(a, b, solidcraft_kernel::BoolOp::Intersect) {
@@ -298,21 +303,45 @@ fn check_pair(a: &Body, b: &Body, (na, nb): &(String, String)) -> Outcome {
         Ok(None) => return Outcome::Clear,
         Err(e) => return Outcome::Unchecked(e.to_string()),
     };
-    let m = match solidcraft_kernel::measure_mass(&shared) {
-        Ok(m) => m,
-        Err(e) => return Outcome::Unchecked(e.to_string()),
+    // Where both bodies are: their shared part lies in it (no box to judge by: not judged).
+    let region = match (a.exact_bounds(), b.exact_bounds()) {
+        (Ok(x), Ok(y)) => x.intersection(&y),
+        _ => Aabb3::EMPTY,
     };
-    if m.volume > threshold {
-        return Outcome::Hit(Overlap {
-            a: na.clone(),
-            b: nb.clone(),
-            volume_mm3: m.volume,
-            area_mm2: m.area,
-            bbox: OverlapBounds { min: m.bbox.min.into(), max: m.bbox.max.into() },
-            center: m.centroid.into(),
-        });
+    match solidcraft_kernel::measure_mass(&shared) {
+        Ok(m) => judge(&m, threshold, names, &region),
+        Err(e) => Outcome::Unchecked(e.to_string()),
     }
-    Outcome::Clear
+}
+
+/// What a pair's measured shared part comes to: an overlap above `threshold` (mm³), clear below
+/// it, and not verified when it reaches outside `region`, where both bodies are. A boolean can
+/// come back with a piece that belongs to neither body (a rim of a moulded shell, beside a plate
+/// that sits within it, #14009): reported, it read as a real collision.
+fn judge(m: &solidcraft_kernel::MassMeasure, threshold: f64, (na, nb): &(String, String), region: &Aabb3) -> Outcome {
+    if m.volume.is_nan() || m.volume <= threshold {
+        return Outcome::Clear;
+    }
+    if !region.is_empty() && !m.bbox.is_empty() {
+        let room = region.inflated(REGION_SLACK * region.diagonal());
+        if !(room.contains(m.bbox.min) && room.contains(m.bbox.max)) {
+            let (lo, hi, rlo, rhi) = (m.bbox.min, m.bbox.max, region.min, region.max);
+            return Outcome::Unchecked(format!(
+                "not verified: the exact intersection came back with {:.3} mm³ reaching outside both bodies (its box \
+                 [{:.3}, {:.3}, {:.3}]..[{:.3}, {:.3}, {:.3}], where the bodies can meet [{:.3}, {:.3}, {:.3}]..[{:.3}, {:.3}, {:.3}]), \
+                 so the boolean went wrong here; no overlap is claimed",
+                m.volume, lo.x, lo.y, lo.z, hi.x, hi.y, hi.z, rlo.x, rlo.y, rlo.z, rhi.x, rhi.y, rhi.z
+            ));
+        }
+    }
+    Outcome::Hit(Overlap {
+        a: na.clone(),
+        b: nb.clone(),
+        volume_mm3: m.volume,
+        area_mm2: m.area,
+        bbox: OverlapBounds { min: m.bbox.min.into(), max: m.bbox.max.into() },
+        center: m.centroid.into(),
+    })
 }
 
 /// Each job's answer (in pair order, with the pair's names; `None`: not finished within

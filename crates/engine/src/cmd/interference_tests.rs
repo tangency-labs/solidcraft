@@ -177,3 +177,50 @@ fn a_body_name_that_is_no_body_is_refused() {
         "nothing is near `Typo`"
     );
 }
+
+/// #14009: a 1.6 mm plate inside a moulded shell, and an exact intersection that came back with
+/// a rim of the shell (1912 mm³, its box above the plate) as their shared part. That piece
+/// belongs to neither body's shared room, so it is not verified, not an overlap; a shared part
+/// inside the room is still one, and a volume that is no number is none.
+#[test]
+fn a_shared_part_outside_both_bodies_is_not_verified_not_an_overlap() {
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+
+    use super::{Outcome, judge};
+
+    let names = ("Shell".to_string(), "Plate".to_string());
+    // The plate (100 x 60 x 1.6) inside the shell's box: where the two can meet is the plate's
+    // box.
+    let plate = Aabb3 { min: Vec3::new(0.0, 0.0, 0.0), max: Vec3::new(100.0, 60.0, 1.6) };
+    let shell = Aabb3 { min: Vec3::new(-20.0, -20.0, -10.0), max: Vec3::new(120.0, 80.0, 30.0) };
+    let region = plate.intersection(&shell);
+    let shared = |volume: f64, min: [f64; 3], max: [f64; 3]| solidcraft_kernel::MassMeasure {
+        volume,
+        area: 1.0,
+        centroid: (Vec3::new(min[0], min[1], min[2]) + Vec3::new(max[0], max[1], max[2])) * 0.5,
+        bbox: Aabb3 { min: Vec3::new(min[0], min[1], min[2]), max: Vec3::new(max[0], max[1], max[2]) },
+        measured_by: "smlib",
+        notes: Vec::new(),
+    };
+    // The rim, 8.4 mm to 12 mm above the plate's top.
+    let rim = shared(1912.0, [-15.0, -15.0, 10.0], [115.0, 75.0, 13.6]);
+    match judge(&rim, 1e-3, &names, &region) {
+        Outcome::Unchecked(reason) => assert!(reason.starts_with("not verified") && reason.contains("1912.000 mm³"), "{reason}"),
+        Outcome::Hit(o) => panic!("reported as an overlap of {} mm³", o.volume_mm3),
+        Outcome::Clear => panic!("passed as clear"),
+    }
+    // Reaching just past the plate's edge (4.2 mm beyond it, 3 mm beyond the room's slack of 1.17 mm).
+    let past = shared(50.0, [90.0, 10.0, 0.0], [104.2, 20.0, 1.6]);
+    assert!(matches!(judge(&past, 1e-3, &names, &region), Outcome::Unchecked(_)));
+    // A real overlap: a 10 x 10 corner of the plate.
+    let corner = shared(160.0, [0.0, 0.0, 0.0], [10.0, 10.0, 1.6]);
+    match judge(&corner, 1e-3, &names, &region) {
+        Outcome::Hit(o) => assert!((o.volume_mm3 - 160.0).abs() < 1e-9 && (o.a.as_str(), o.b.as_str()) == ("Shell", "Plate")),
+        _ => panic!("a shared part within both bodies is an overlap"),
+    }
+    // Below the threshold, or no number: clear (as before); with no room to judge by: an overlap.
+    assert!(matches!(judge(&shared(1e-4, [0.0; 3], [0.1; 3]), 1e-3, &names, &region), Outcome::Clear));
+    assert!(matches!(judge(&shared(f64::NAN, [0.0; 3], [0.1; 3]), 1e-3, &names, &region), Outcome::Clear));
+    assert!(matches!(judge(&rim, 1e-3, &names, &Aabb3::EMPTY), Outcome::Hit(_)));
+}
