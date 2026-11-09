@@ -74,7 +74,21 @@ macro_rules! profile_count {
     ($k:expr, $counter:ident, $n:expr) => {};
 }
 
+/// Records a diagnostic note only when explicitly captured by the profiler.
+#[cfg(feature = "profile")]
+macro_rules! profile_note {
+    ($k:expr, $($arg:tt)*) => {
+        $k.profiler.note(|| format!($($arg)*));
+    };
+}
+
+#[cfg(not(feature = "profile"))]
+macro_rules! profile_note {
+    ($k:expr, $($arg:tt)*) => {};
+}
+
 pub(crate) use profile_count;
+pub(crate) use profile_note;
 pub(crate) use profile_scope;
 
 #[cfg(feature = "profile")]
@@ -176,6 +190,7 @@ mod enabled {
         nodes: Vec<Node>,
         roots: Vec<u32>,
         stack: Vec<Frame>,
+        notes: Option<Vec<String>>,
     }
 
     impl State {
@@ -321,6 +336,30 @@ mod enabled {
     }
 
     impl Profiler {
+        /// Starts a fresh diagnostic capture. Normal profiles keep no per-call notes.
+        /// At most 1,000,000 notes are retained, independently of the call-path profile.
+        /// A final `diagnostic capture overflow` note makes truncation explicit.
+        pub fn capture_notes(&self) {
+            self.shared.lock().notes = Some(Vec::new());
+        }
+
+        /// Ends diagnostic capture and returns its notes in execution order.
+        #[must_use]
+        pub fn take_notes(&self) -> Vec<String> {
+            self.shared.lock().notes.take().unwrap_or_default()
+        }
+
+        /// Adds a note, formatting it only during an explicit diagnostic capture.
+        pub(crate) fn note(&self, make: impl FnOnce() -> String) {
+            if let Some(notes) = self.shared.lock().notes.as_mut() {
+                if notes.len() < 1_000_000 {
+                    notes.push(make());
+                } else if notes.len() == 1_000_000 {
+                    notes.push("diagnostic capture overflow".to_owned());
+                }
+            }
+        }
+
         /// Opens a scope named `name` under the innermost open one; it closes when the
         /// returned guard drops. Prefer [`profile_scope!`](crate::profile), which keeps the
         /// guard to the end of the block.
@@ -588,6 +627,34 @@ mod enabled {
             let _ = inner(k, false);
             let _ = inner(k, true);
             profile_count!(k, Evaluations, 1);
+        }
+
+        #[test]
+        fn diagnostic_notes_are_opt_in_ordered_and_reset() {
+            let k = Kernel::default();
+            k.profiler.note(|| panic!("uncaptured notes must not be formatted"));
+            assert!(k.profiler.take_notes().is_empty());
+            k.profiler.capture_notes();
+            k.profiler.note(|| "first".to_owned());
+            k.profiler.clone().note(|| "second".to_owned());
+            assert_eq!(k.profiler.take_notes(), ["first", "second"]);
+            assert!(k.profiler.take_notes().is_empty());
+            k.profiler.capture_notes();
+            k.profiler.note(|| "discarded".to_owned());
+            k.profiler.capture_notes();
+            assert!(k.profiler.take_notes().is_empty());
+        }
+
+        #[test]
+        fn diagnostic_overflow_is_explicit_and_bounded() {
+            let p = super::Profiler::default();
+            p.capture_notes();
+            p.shared.lock().notes = Some(vec![String::new(); 1_000_000]);
+            p.note(|| panic!("overflow must not format a note"));
+            p.note(|| panic!("overflow must stay bounded"));
+            let notes = p.take_notes();
+            assert_eq!(notes.len(), 1_000_001);
+            assert_eq!(notes.last().unwrap(), "diagnostic capture overflow");
         }
 
         #[test]
