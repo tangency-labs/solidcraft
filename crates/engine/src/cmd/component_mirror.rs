@@ -81,8 +81,8 @@ pub(crate) fn mirror(s: &mut Session, p: &Value, cmd: &str, frame: u64) -> Resul
     for source in sources {
         let Some(src) = s.doc.occurrences.iter().find(|o| o.id == source).cloned() else { continue };
         let part = s.doc.components.iter().find(|c| c.id == src.component).map(|c| c.name.clone()).unwrap_or_default();
-        let mesh = occurrence_mirror::component_mesh(&s.doc, &st, src.component);
-        if mesh.triangles.is_empty() {
+        let shape = occurrence_mirror::component_shape(&s.doc, &st, src.component);
+        if shape.is_empty() {
             return Err(bad(cmd, format!("{} has nothing to mirror", src.name)));
         }
         // The part's own axes, the one most square to the mirror plane first.
@@ -97,7 +97,7 @@ pub(crate) fn mirror(s: &mut Session, p: &Value, cmd: &str, frame: u64) -> Resul
             (None, MirrorAs::OppositeHand) => order.first().copied().unwrap_or(0),
             (None, MirrorAs::Instance) => order
                 .into_iter()
-                .find(|k| occurrence_mirror::mid_plane(&mesh, *k).is_some_and(|pl| occurrence_mirror::symmetric_about(&mesh, &pl)))
+                .find(|k| occurrence_mirror::mid_plane(&shape, *k).is_some_and(|pl| occurrence_mirror::symmetric_about(&shape, &pl)))
                 .ok_or_else(|| {
                     bad(
                         cmd,
@@ -108,7 +108,7 @@ pub(crate) fn mirror(s: &mut Session, p: &Value, cmd: &str, frame: u64) -> Resul
                     )
                 })?,
         };
-        let mid = occurrence_mirror::mid_plane(&mesh, axis).ok_or_else(|| bad(cmd, format!("{} has nothing to mirror", src.name)))?;
+        let mid = occurrence_mirror::mid_plane(&shape, axis).ok_or_else(|| bad(cmd, format!("{} has nothing to mirror", src.name)))?;
         let local = occurrence_mirror::reflection(&mid);
         let (component, feature) = match kind {
             MirrorAs::Instance => (src.component, None),
