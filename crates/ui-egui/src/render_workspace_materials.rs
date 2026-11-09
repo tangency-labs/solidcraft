@@ -18,9 +18,9 @@ use solidcraft_engine::{
     },
 };
 
-#[cfg(test)]
-use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
+#[cfg(test)]
+use solidcraft_theme::Tokens;
 
 const MAX_BINDINGS: usize = 128;
 

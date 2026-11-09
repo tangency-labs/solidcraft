@@ -1,10 +1,8 @@
 //! Shared history chips, dense name rows, drop bars and rollback markers.
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{
-    icons,
-    theme::{TabAccent, Tokens},
-};
 use egui::{Painter, Rect, Stroke, pos2, vec2};
+use solidcraft_theme::{TabAccent, Tokens};
 
 /// Browser and named history rows use the same density.
 pub(crate) const TREE_ROW_HEIGHT: f32 = 26.0;
@@ -15,7 +13,7 @@ pub(crate) struct StripHeading(std::sync::Arc<egui::Galley>);
 impl StripHeading {
     pub fn new(painter: &Painter, title: &str) -> Self {
         let t = Tokens::get();
-        Self(painter.layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_heading), t.text))
+        Self(painter.layout_no_wrap(title.to_owned(), crate::ui_kit::type_face::semibold(t.font_heading), t.text))
     }
 
     pub fn width(&self) -> f32 {
@@ -75,7 +73,7 @@ pub(crate) struct HistoryChip<'a> {
 
 /// Share the feature classification across chips and name rows. Surface aliases also
 /// cover Patch/Stitch/Thicken and other surface features without a Surface-prefixed kind.
-fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
+pub(crate) fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     let tab = if kind.starts_with("Sketch") {
         "SKETCH"
     } else if kind.starts_with("Surface") || icon.starts_with("surface_") || icon == "continuity" {
@@ -87,12 +85,19 @@ fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     } else {
         "MODEL"
     };
-    crate::theme::icon_accent_for_tab(tab)
+    solidcraft_theme::icon_accent_for_tab(tab)
 }
 
 impl HistoryChip<'_> {
-    /// All strip variants use this painter; no connections are drawn between features.
+    /// All strip variants use this painter; no connections are drawn between features. The
+    /// icon takes the accent of the feature's kind ([`feature_icon_accent`]).
     pub fn paint(&self, painter: &Painter, rect: Rect, style: HistoryStyle) {
+        self.paint_with_accent(painter, rect, style, feature_icon_accent(self.kind, self.icon));
+    }
+
+    /// [`HistoryChip::paint`] with the icon's accent given (an icon palette name; `None`: its
+    /// artwork's own colours).
+    pub fn paint_with_accent(&self, painter: &Painter, rect: Rect, style: HistoryStyle, icon_accent: Option<&str>) {
         let t = Tokens::get();
         let mut p = painter.clone();
         if self.dim || self.suppressed {
@@ -141,7 +146,7 @@ impl HistoryChip<'_> {
             Rect::from_center_size(if names { pos2(rect.left() + t.space_8 + side / 2.0, rect.center().y) } else { rect.center() }, vec2(side, side));
         match self.ink {
             Some(ink) => icons::paint_ink(&p, icon, self.icon, ink),
-            None => icons::paint_accented(&p, icon, self.icon, feature_icon_accent(self.kind, self.icon), 1.0),
+            None => icons::paint_accented(&p, icon, self.icon, icon_accent, 1.0),
         }
         if names {
             let ink = if self.selected {
@@ -151,7 +156,7 @@ impl HistoryChip<'_> {
             } else {
                 t.text
             };
-            let font = if self.selected { crate::fonts::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
+            let font = if self.selected { crate::ui_kit::type_face::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
             let text_rect = Rect::from_min_max(
                 pos2(icon.right() + t.space_6 + 1.0, rect.top()),
                 pos2(rect.right() - if self.error || self.warning { t.space_16 } else { t.space_8 }, rect.bottom()),
@@ -235,11 +240,18 @@ impl HistoryTransport {
         })
     }
 
-    /// `playing` turns the Play button into Stop; the other controls ignore it.
+    /// `playing` turns the Play button into Stop; the other controls ignore it. Published as
+    /// `history:` and its [`HistoryTransport::id`].
     pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
+        self.show_as(ui, rect, playing, "history:")
+    }
+
+    /// [`HistoryTransport::show`], published in the widget registry as `prefix` followed by its
+    /// [`HistoryTransport::id`].
+    pub fn show_as(self, ui: &mut egui::Ui, rect: Rect, playing: bool, prefix: &str) -> egui::Response {
         let t = Tokens::get();
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
-        solidcraft_ui_registry::publish_target(&format!("history:{}", self.id()), rect);
+        solidcraft_ui_registry::publish_target(&format!("{prefix}{}", self.id()), rect);
         if response.hovered() {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
         }
@@ -395,7 +407,7 @@ pub(crate) fn history_seam(ui: &mut egui::Ui, card: Rect, names: bool) -> Histor
         tip.popup = tip.popup.anchor(seam.pill).align(egui::RectAlign::RIGHT_START).frame(frame);
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             let t = Tokens::get();
-            ui.label(egui::RichText::new(label).font(crate::fonts::semibold(t.font_body)).color(t.text));
+            ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::semibold(t.font_body)).color(t.text));
             ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.history_edge_hint")).size(t.font_small).color(t.text_dim));
         });
     }
@@ -418,9 +430,9 @@ mod tests {
 
     #[test]
     fn seam_geometry_and_paint_states_follow_tokens_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for names in [false, true] {
                 let card = Rect::from_min_size(pos2(20.0, 30.0), vec2(history_width(names), 280.0));
                 let seam = HistorySeam::new(card);
@@ -464,7 +476,7 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     struct SeamHarness {
@@ -577,9 +589,9 @@ mod tests {
 
     #[test]
     fn chip_selection_error_and_rollback_use_tokens_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             let accent = TabAccent::for_tab(&t, "SURFACE");
             for style in [HistoryStyle::Icons, HistoryStyle::Names] {
@@ -632,14 +644,14 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
     fn chips_have_no_connector_shapes_in_either_theme_or_width() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             for style in [HistoryStyle::Bottom, HistoryStyle::Icons, HistoryStyle::Names] {
                 let ctx = crate::fonts::test_context();
@@ -678,7 +690,7 @@ mod tests {
                 assert_eq!(connections, 0, "dark={dark}");
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
@@ -699,9 +711,9 @@ mod tests {
             assert_eq!(lines[0].1, Stroke::new(t.space_2, accent.color));
             assert_eq!(lines[0].0, if vertical { [rect.left_center(), rect.right_center()] } else { [rect.center_top(), rect.center_bottom()] });
         }
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             let accent = TabAccent::for_tab(&t, "SURFACE");
             // Both vertical widths retain the 12 pt marker row; the bottom strip rotates it.
@@ -749,6 +761,6 @@ mod tests {
                 assert!(!out.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Path(_))), "no arrowheads");
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 }

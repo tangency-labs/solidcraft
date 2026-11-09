@@ -1,8 +1,9 @@
 //! Actions elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::metrics::*;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, theme::Tokens};
+use crate::ui_kit::type_face::RichTextExt as _;
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum Action {
@@ -84,11 +85,11 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
         }
         if matches!(tone, ButtonTone::Ghost) && (hovered || pressed || focused) {
             ink = if pressed { t.form_primary.lerp_to_gamma(t.form_ink, 0.24) } else { t.form_primary };
-        } else if crate::theme::contrast_ratio(ink, fill) < 4.5 {
+        } else if solidcraft_theme::contrast_ratio(ink, fill) < 4.5 {
             // Custom themes can use a light accent with light on-accent text. Select a readable
             // foreground from that same theme for each interaction shade.
             ink = [t.form_ink, t.on_accent, t.tab_on_fill_dark].into_iter().fold(ink, |best, candidate| {
-                if crate::theme::contrast_ratio(candidate, fill) > crate::theme::contrast_ratio(best, fill) { candidate } else { best }
+                if solidcraft_theme::contrast_ratio(candidate, fill) > solidcraft_theme::contrast_ratio(best, fill) { candidate } else { best }
             });
         }
     }
@@ -403,7 +404,8 @@ impl<'a> HeaderActions<'a> {
             if label.is_empty() {
                 continue;
             }
-            let text = ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(label).to_owned(), crate::fonts::bold(t.font_label), t.form_ink);
+            let text =
+                ui.painter().layout_no_wrap(solidcraft_ui_text::tr_label(label).to_owned(), crate::ui_kit::type_face::bold(t.font_label), t.form_ink);
             let width = (text.size().x.ceil() + t.space_8 * 2.0).min((x - band.left()).max(0.0));
             let rect = egui::Rect::from_min_max(
                 egui::pos2(x - width, band.center().y - t.form_button_height / 2.0),
@@ -714,7 +716,7 @@ pub(crate) fn icon_action(ui: &mut Ui, label: &str, icon: &str, enabled: bool, d
 /// Compact stage actions share the icon-label button's frame, typography and hit target.
 pub(crate) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary: bool) -> f32 {
     let t = Tokens::get();
-    let font = if primary { crate::fonts::semibold(t.font_button) } else { egui::FontId::proportional(t.font_label) };
+    let font = if primary { crate::ui_kit::type_face::semibold(t.font_button) } else { egui::FontId::proportional(t.font_label) };
     ui.painter().layout_no_wrap(label.into(), font, t.form_ink).size().x.ceil()
         + 2.0
             * if primary {
@@ -738,11 +740,11 @@ pub(crate) fn compact_icon_label_button(ui: &mut Ui, label: &str, icon: &str, en
 /// A name chip and quiet actions in a selection card. Feature code supplies command data only.
 pub(crate) fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>]) -> Option<usize> {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     ui.spacing_mut().interact_size.y = t.control_height - t.space_2;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = t.space_2;
-        let font = crate::fonts::semibold(t.font_small);
+        let font = crate::ui_kit::type_face::semibold(t.font_small);
         let width = ui.painter().layout_no_wrap(name.into(), font.clone(), accent.ink).size().x.min(t.form_label_width) + t.space_12;
         let (rect, name_response) = ui.allocate_exact_size(vec2(width, t.control_height - t.space_2), egui::Sense::click());
         name_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
@@ -816,7 +818,7 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
             ui,
             egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max),
             label,
-            if primary { crate::fonts::semibold(t.font_button) } else { egui::FontId::proportional(t.font_label) },
+            if primary { crate::ui_kit::type_face::semibold(t.font_button) } else { egui::FontId::proportional(t.font_label) },
             ink,
             false,
         );

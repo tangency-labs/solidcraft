@@ -149,8 +149,8 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{BrowserEntry, Document, FeatureKind};
 
 use crate::context_menu::Target;
-use crate::theme::Tokens;
 use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
 
@@ -1416,7 +1416,8 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     if response.backing_on_hover_text(solidcraft_ui_text::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
-    let galley = ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
+    let galley =
+        ui.painter().layout_no_wrap(solidcraft_ui_text::tr("ui.browser_title").to_owned(), crate::ui_kit::type_face::semibold(t.font_body), t.text);
     let title = Rect::from_min_max(rect.min + vec2(0.0, title_top), rect.max);
     ui.painter().add(
         egui::epaint::TextShape::new(title.center() - galley.size() / 2.0, galley, t.text)
@@ -1513,7 +1514,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let title = solidcraft_ui_text::tr("ui.browser_title").to_string();
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
-    let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
+    let galley = ui.painter().layout_no_wrap(title, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
     let mut left = rect.left() + t.space_6;
     if grip {
         // Two columns of three dots: the band drags.

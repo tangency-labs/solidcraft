@@ -1,0 +1,718 @@
+//! `SmBrep::AssertValid`: the whole-body topology check, its walk over every region,
+//! shell, face, loop, edge and vertex, and the `check_brep` report SolidCraft reads.
+//!
+//! Upstream: `source/SMLib/src/SmBrep.cpp`, `SmSAGObject.cpp`, `SmOwningTopology.cpp`,
+//! `SmTopology.cpp`, `SmRegion.cpp`, `SmShell.cpp`, `SmFace.cpp`, `SmFaceuse.cpp`,
+//! `SmLoop.cpp`, `SmLoopuse.cpp`, `SmEdge.cpp`, `SmEdgeuse.cpp`, `SmVertex.cpp`,
+//! `SmVertexuse.cpp`, `SmTopologyTraverser.cpp`, `SmCurve.cpp` (the virtual
+//! `AssertValid`), `source/SMLib/inc/SmAssertArray.h` (the report macros).
+//!
+//! | Rust | Upstream |
+//! |------|----------|
+//! | [`assert_valid`] | `SmBrep::AssertValid` |
+//! | [`check_brep`], [`check_brep_with_keys`], [`BrepCheck`] | the capi `smlib_brep_check` sequence (`ValidatePointers`, then `AssertValid`) |
+//! | [`CheckLevel`] | `SmAssertTestLevel` (`SM_LEVEL_0`..`SM_LEVEL_2`) |
+//! | `brep::sub_topology` (private) | `SmBrep::AssertSubTopology`, the `SmBrep` branch of `SmTopologyTraverser::GetSubTopology` |
+//! | `brep::tolerances` (private) | `SmBrep::ValidateAndUpdateTolerances(TRUE, ...)` |
+//! | [`validate_and_update_tolerances`], [`ToleranceGaps`] | `SmBrep::ValidateAndUpdateTolerances` |
+//! | `brep::collect_regions`, `brep::adjacent_regions` (private) | `SmTopologyTraverser::CollectRegions`, `SmRegion::GetAdjacentRegions` |
+//! | `base::topology`, `base::owning` (private) | `SmTopology::AssertValid`, `SmOwningTopology::AssertValid`, `SmSAGObject::AssertValid` |
+//! | `shell::region`, `shell::shell` (private) | `SmRegion::AssertValid`, `SmShell::AssertValid`, `sm_GetShellVertices`, `sm_GetShellFaceuses`, `SmEdgeuse::GetConnectedEdgeuses` |
+//! | `face::face`, `face::faceuse` (private) | `SmFace::AssertValid` (level 0 and the level-2 tests whose callees exist), `SmFaceuse::AssertValid`, `sm_AssertTestFace39` |
+//! | `loops::loop_`, `loops::loopuse` (private) | `SmLoop::AssertValid`, `SmLoopuse::AssertValid` |
+//! | `edge::edge`, `edge::edgeuse`, `edge::curve` (private) | `SmEdge::AssertValid`, `sm_AssertTestEdge14`, `SmEdgeuse::AssertValid`, the virtual `SmCurve::AssertValid` |
+//! | `vertex::vertex`, `vertex::vertexuse` (private) | `SmVertex::AssertValid`, `SmVertexuse::AssertValid` |
+//! | [`curve_assert_valid`] | the virtual `SmCurve::AssertValid` of a free-standing curve |
+//! | `curves` (private) | `SmOffsetCurve`, `SmProjectedCurve`, `SmHermiteCurve`, `SmCrvOnSurf`, `SmCrvInVolume::AssertValid` |
+//! | `seams` (private) | the callees other packages port (see that module) |
+//!
+//! Deviations: object pointers are arena identities; the report helpers implement the
+//! release `SM_ASSERT_*_REPORT` macros (a test runs when the level is at least its
+//! own, its predicate and value are evaluated lazily, and a passed test clears
+//! `GetLastAdd`). `SM_LEVEL_GIVEN` (4) runs every test and skips the base classes, as
+//! upstream; release builds ignore `pTestRequests`. Context identity, mark bounds and
+//! the doubly linked list rings are intrinsic to the arenas, so those tests always pass
+//! (they still run, in native order); list membership and owner back links are checked
+//! against indices built once per call. The walks are bounded loops (no recursion);
+//! the radial edge-use walks stop with [`SolidError::InvalidInput`] after visiting more
+//! uses than the edge has (upstream loops forever). Calls into checks not yet ported go
+//! through `seams` and return [`SolidError::Unported`]. Warning text (`WARN`,
+//! `SE_MSG`, `smos_WriteBuffer`) and debug drawing are omitted. `CalculateBoundingBox`
+//! in the validate-only tolerance pass is not called (its size is used only when
+//! fixing). Statuses upstream ignores are ignored here too. [`BrepCheck`]'s summary
+//! (failures, lines, count, validity) leaves out the warnings `AssertValid` reports
+//! without failing ([`AssertReport::is_warning`], `SmBrep` test 21), as the capi does,
+//! and omits the owner tag of a report without owner type; the report lists keep
+//! them. [`check_brep`] refuses a B-rep of [`NamingScheme::Unknown`] (#2013).
+
+mod base;
+mod brep;
+mod curves;
+mod edge;
+mod face;
+mod loops;
+mod seams;
+mod shell;
+mod vertex;
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
+use super::{object_info, validate_pointers, Object, SUCCESS};
+use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::assert_array::{
+    obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,
+};
+use crate::geom::object::ObjectRef;
+use crate::kernel::Kernel;
+use crate::math::UNDEF_DOUBLE;
+use crate::topology::{Brep, BrepId, NamingScheme};
+
+/// The existing virtual curve check for owned geometry outside an edge or UV trim.
+/// A curve-bounded surface uses it for its contained 3D and UV boundary curves.
+pub(crate) fn standalone_curve_assert_valid(
+    k: &Kernel,
+    curve: &mut crate::curve::curve::Curve,
+    list: Option<&mut AssertArray>,
+    level: u8,
+    key: ObjectKey,
+    polar_key: ObjectKey,
+) -> Result<bool> {
+    edge::curve(k, curve, list, level, key, polar_key, None, None)
+}
+
+/// `SM_LEVEL_GIVEN`: every test, no base classes.
+const LEVEL_GIVEN: u8 = 4;
+
+/// The test level of a check (`SmAssertTestLevel`): `Level0` runs the fewest tests,
+/// `Level2` all of them. SolidCraft's "Basic" check is `Level0`, "Full" is `Level2`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CheckLevel {
+    /// `SM_LEVEL_0`.
+    Level0 = 0,
+    /// `SM_LEVEL_1`: adds the geometry checks.
+    Level1 = 1,
+    /// `SM_LEVEL_2`: every test.
+    Level2 = 2,
+}
+
+impl CheckLevel {
+    /// The upstream enumerator value (0, 1 or 2).
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
+}
+
+/// The result of [`check_brep`]: the pointer check, then (when it found nothing) the
+/// whole-body `AssertValid`, as the capi `smlib_brep_check` runs them.
+///
+/// The report lists are upstream's, warnings included; the summary
+/// ([`BrepCheck::failures`], [`BrepCheck::lines`], [`BrepCheck::failure_count`],
+/// [`BrepCheck::is_valid`]) leaves the warnings out ([`AssertReport::is_warning`]:
+/// `SmBrep` test 21, which `AssertValid` reports without failing), as the capi does;
+/// [`BrepCheck::warnings`] lists them.
+#[derive(Debug, Clone)]
+pub struct BrepCheck {
+    /// `ValidatePointers`' native status (1000 success, 1001 a required pointer
+    /// failed, 0 an early boolean return).
+    pub pointers_status: i32,
+    /// The pointer check's reports, in native order.
+    pub pointer_reports: AssertArray,
+    /// `AssertValid`'s return; `None` when it was skipped because the pointer check
+    /// reported failures.
+    pub assert_valid: Option<bool>,
+    /// `AssertValid`'s reports, in native order.
+    pub reports: AssertArray,
+}
+
+impl BrepCheck {
+    /// The failed reports (`!m_bOK`) that are not warnings
+    /// ([`AssertReport::is_warning`]): pointer reports first, then `AssertValid`'s.
+    pub fn failures(&self) -> impl Iterator<Item = &AssertReport> {
+        self.pointer_reports
+            .reports()
+            .iter()
+            .chain(self.reports.reports())
+            .filter(|r| is_failure(r))
+    }
+
+    /// The warnings ([`AssertReport::is_warning`]: reported, `!m_bOK`, without failing
+    /// the check), in the order of [`BrepCheck::failures`].
+    pub fn warnings(&self) -> impl Iterator<Item = &AssertReport> {
+        self.pointer_reports
+            .reports()
+            .iter()
+            .chain(self.reports.reports())
+            .filter(|r| !r.ok && r.is_warning())
+    }
+
+    /// The number of report lines ([`BrepCheck::lines`]), including the synthetic
+    /// lines for a failed status without a report; warnings do not count.
+    #[must_use]
+    pub fn failure_count(&self) -> usize {
+        self.lines().len()
+    }
+
+    /// `true` when the check produced no failure line: a body whose only reports are
+    /// warnings ([`BrepCheck::warnings`]) is valid.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        self.failure_count() == 0
+    }
+
+    /// One line per failure (warnings left out), as the capi formats them:
+    /// `<reporting type>::Test #<n> <name>: <message> [owner <owner type>]` (without the
+    /// owner tag when the report names no owner type), plus
+    /// `SmBrep::ValidatePointers failed with status N` when the pointer check failed
+    /// without a report, `AssertValid skipped: ValidatePointers failed` when it was
+    /// skipped, and `SmBrep::AssertValid failed without a report` when `AssertValid`
+    /// returned `false` without reporting a failure.
+    #[must_use]
+    pub fn lines(&self) -> Vec<String> {
+        self.classified()
+            .into_iter()
+            .map(|(class, report)| match (class, report) {
+                (_, Some(r)) => report_line(r),
+                (FailureClass::PointersStatus(status), None) => {
+                    format!("SmBrep::ValidatePointers failed with status {status}")
+                }
+                (FailureClass::AssertValidSkipped, None) => {
+                    "AssertValid skipped: ValidatePointers failed".to_string()
+                }
+                (FailureClass::AssertValidWithoutReport | FailureClass::Report { .. }, None) => {
+                    "SmBrep::AssertValid failed without a report".to_string()
+                }
+            })
+            .collect()
+    }
+
+    /// How many failure lines ([`BrepCheck::lines`]) of each [`FailureClass`] the check
+    /// has.
+    #[must_use]
+    pub fn failure_classes(&self) -> BTreeMap<FailureClass, usize> {
+        let mut out = BTreeMap::new();
+        for (class, _) in self.classified() {
+            let n: &mut usize = out.entry(class).or_default();
+            *n = n.saturating_add(1);
+        }
+        out
+    }
+
+    /// The failure classes `self` has more lines of than `before` has, each with how many
+    /// more, in [`FailureClass`] order: what a body has failing that `before` (the body it
+    /// was made from) did not. A class `before` has as many lines of, or more, is not
+    /// listed.
+    #[must_use]
+    pub fn failures_beyond(&self, before: &BrepCheck) -> Vec<(FailureClass, usize)> {
+        let had = before.failure_classes();
+        self.failure_classes()
+            .into_iter()
+            .filter_map(|(class, n)| {
+                let more = n.saturating_sub(had.get(&class).copied().unwrap_or(0));
+                (more > 0).then_some((class, more))
+            })
+            .collect()
+    }
+
+    /// The failure lines in [`BrepCheck::lines`] order, each with its class and its report
+    /// (`None` for a synthetic line).
+    fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
+        let mut out = Vec::new();
+        let pointer_failures = self.pointer_reports.reports().iter().any(|r| !r.ok);
+        if self.pointers_status != SUCCESS && self.pointer_reports.is_empty() {
+            out.push((FailureClass::PointersStatus(self.pointers_status), None));
+        }
+        out.extend(
+            self.pointer_reports
+                .reports()
+                .iter()
+                .filter(|r| is_failure(r))
+                .map(|r| (FailureClass::of(r), Some(r))),
+        );
+        if pointer_failures {
+            out.push((FailureClass::AssertValidSkipped, None));
+            return out;
+        }
+        if self.assert_valid == Some(false) && !self.reports.reports().iter().any(is_failure) {
+            out.push((FailureClass::AssertValidWithoutReport, None));
+        }
+        out.extend(
+            self.reports
+                .reports()
+                .iter()
+                .filter(|r| is_failure(r))
+                .map(|r| (FailureClass::of(r), Some(r))),
+        );
+        out
+    }
+}
+
+/// What one failure line of a [`BrepCheck`] is, leaving out where: the test that failed
+/// and the type of the object it is about, not which object (an operation that rebuilds a
+/// body's entities gives them new identities, so a failure is compared with its input's
+/// by class: [`BrepCheck::failures_beyond`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FailureClass {
+    /// A failed report: its reporting type, label table, test and owner type.
+    Report {
+        /// [`AssertReport::reporting_type`].
+        reporting_type: i64,
+        /// [`AssertReport::list_index`].
+        list_index: u64,
+        /// [`AssertReport::test_index`].
+        test_index: u64,
+        /// [`AssertReport::owner_type`].
+        owner_type: i64,
+    },
+    /// `ValidatePointers` failed with this status and no report.
+    PointersStatus(i32),
+    /// `AssertValid` was skipped: `ValidatePointers` reported a failure.
+    AssertValidSkipped,
+    /// `AssertValid` failed without a report.
+    AssertValidWithoutReport,
+}
+
+impl FailureClass {
+    fn of(r: &AssertReport) -> Self {
+        Self::Report {
+            reporting_type: r.reporting_type,
+            list_index: r.list_index,
+            test_index: r.test_index,
+            owner_type: r.owner_type,
+        }
+    }
+}
+
+/// A report the summary counts: failed (`!m_bOK`) and not a warning.
+fn is_failure(r: &AssertReport) -> bool {
+    !r.ok && !r.is_warning()
+}
+
+/// The capi line of one report; the owner tag only when the report names an owner type.
+fn report_line(r: &AssertReport) -> String {
+    let head = format!(
+        "{}::Test #{} {}: {}",
+        obj_type_string(r.reporting_type),
+        r.test_index,
+        r.name,
+        r.format_log_message(),
+    );
+    match r.owner_type_string {
+        Some(owner) => format!("{head} [owner {owner}]"),
+        None => head,
+    }
+}
+
+/// [`check_brep_with_keys`] with the geometry-owner identities of `b`'s naming scheme
+/// ([`Brep::owner_identity`]): the Euler operators' notification identities for a
+/// [`NamingScheme::Notify`](crate::topology::NamingScheme::Notify) B-rep; for a
+/// [`NamingScheme::Caller`](crate::topology::NamingScheme::Caller) B-rep the caller
+/// key recorded where the entity was built or its geometry bound (an imported body,
+/// [`crate::topology::brep::p3::api_brep_copy`], an operation on either), else the
+/// arena identities ([`crate::topology::brep_cache::arena_identity`]), which the
+/// binders name an entity with no recorded key by too.
+///
+/// A B-rep of [`NamingScheme::Unknown`] (a bare [`Brep::new`] or
+/// [`Brep::new_with_infinite_region`] built on without recording a scheme) is refused:
+/// its builders left geometry unowned or named it by the caller's own identities, not
+/// by the arena identities a check would fall back to, so the check reported false
+/// failures with no sign of the cause (every edge's curve owner,
+/// `SmBrep::ValidatePointers` test 61).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a [`NamingScheme::Unknown`] B-rep (record its
+/// scheme with [`Brep::set_naming`] or [`Brep::use_arena_naming`], or pass the
+/// builder's identities to [`check_brep_with_keys`]); those of
+/// [`check_brep_with_keys`].
+pub fn check_brep(k: &mut Kernel, b: &mut Brep, level: CheckLevel) -> Result<BrepCheck> {
+    let naming = b.naming();
+    if naming == NamingScheme::Unknown {
+        return Err(SolidError::invalid_input(
+            "topology::brep::validation::check_brep",
+            "the B-rep records no naming scheme, so its geometry owners cannot be checked; \
+             set one (Brep::set_naming, Brep::use_arena_naming) or use check_brep_with_keys",
+        ));
+    }
+    let recorded = b.geometry_owner_keys().clone();
+    let keys =
+        |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+    check_brep_with_keys(k, b, level, &keys)
+}
+
+/// The capi `smlib_brep_check(brep, level)`: [`validate_pointers`] at `level` (its
+/// default `SM_NO_WALK`) into its own report list; when it reports no failure, [`assert_valid`] at `level` with the
+/// walk. `keys` gives the identities the geometry owners use (as for
+/// [`validate_pointers`]).
+///
+/// # Errors
+///
+/// Those of [`validate_pointers`] and [`assert_valid`], including
+/// [`crate::SolidError::Unported`] from a check not yet ported.
+pub fn check_brep_with_keys(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<BrepCheck> {
+    let mut pointer_reports = AssertArray::new();
+    let pointers_status =
+        validate_pointers(k, b, Some(&mut pointer_reports), level.code(), false, keys)?;
+    let mut reports = AssertArray::new();
+    let assert_valid = if pointer_reports.reports().iter().any(|r| !r.ok) {
+        None
+    } else {
+        Some(assert_valid(
+            k,
+            b,
+            Some(&mut reports),
+            level.code(),
+            true,
+            keys,
+        )?)
+    };
+    Ok(BrepCheck {
+        pointers_status,
+        pointer_reports,
+        assert_valid,
+        reports,
+    })
+}
+
+/// `SmBrep::AssertValid(pAList, eTestLevel, eWalkTree)`: the B-rep checks (base
+/// classes, `ValidatePointers` at level 0, the validate-only tolerance pass, Brep
+/// tests 0-21, `ContainsCoincidentTopology`) and, with `walk`, `AssertValid` of every
+/// region, shell, face, loop, edge and vertex. Failed checks are appended to `reports`
+/// in native order. `level` is `SM_LEVEL_0`..`SM_LEVEL_GIVEN` (0..4). `keys` gives the
+/// geometry owners' identities (as for [`validate_pointers`]). Returns `false` when a
+/// check failed (at once when `ValidatePointers` does not succeed).
+///
+/// # Errors
+///
+/// [`crate::SolidError::InvalidInput`] for a level above 4 or broken topology links
+/// upstream would dereference; [`crate::SolidError::Unported`] from a check not yet
+/// ported; those of the geometric callees.
+pub fn assert_valid(
+    k: &mut Kernel,
+    b: &mut Brep,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    walk: bool,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<bool> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let index = base::Index::new(b);
+    let mut cx = Cx {
+        rep: Rep {
+            array: reports,
+            level,
+        },
+        keys,
+        index,
+        edge_sets: edge::EdgeSets::default(),
+    };
+    brep::brep(k, b, &mut cx, walk)
+}
+
+pub use brep::ToleranceGaps;
+
+/// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, rbTolerancesViolatedOrUpdated,
+/// .., pAList, eTestLevel)`: for every face's upward-faceuse edge use (an edge use and
+/// its mate once) the vertex/edge and vertex/face gaps at both ends and the edge/face
+/// gap. Unless `validate_only`, a vertex with a gap over its tolerance (over half of
+/// it with [`crate::kernel::UpstreamFixes::validate_tolerances_fixes_reported_gaps`],
+/// WR-679) is grown to twice its larger gap, and an edge with an edge/face gap over its
+/// tolerance is grown (with its vertices) to twice the gap when the gap is under the
+/// B-rep's box diagonal / 800; tolerances only grow. The gaps still over half the vertex
+/// tolerance (tests 0-3) or over the edge tolerance (test 4) are then reported into
+/// `reports` (list 2 of `SmBrep`, about the edge use) at `level` (0..4), in native
+/// order. Returns whether a gap was over its tolerance and the largest vertex gaps.
+///
+/// # Errors
+///
+/// [`SolidError::Upstream`] (`SM_ERR`) for an edge use end without vertex (upstream's
+/// `NER`, after the reports and updates of the earlier edge uses);
+/// [`SolidError::InvalidInput`] for a level above 4 or broken topology links upstream
+/// would dereference; those of the gap and bounding box computations.
+pub fn validate_and_update_tolerances(
+    k: &mut Kernel,
+    b: &mut Brep,
+    validate_only: bool,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+) -> Result<ToleranceGaps> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut rep = Rep {
+        array: reports,
+        level,
+    };
+    let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
+    if status != SUCCESS {
+        return Err(SolidError::sm_err(
+            "topology::brep::validation::validate_and_update_tolerances",
+        ));
+    }
+    Ok(gaps)
+}
+
+/// The virtual `AssertValid(pAList, eTestLevel, SM_NO_WALK)` of a curve outside any
+/// B-rep (as the edge and edge-use checks run it on their curves): the checks of
+/// `curve`'s class and, unless `level` is `SM_LEVEL_GIVEN` (4), of its base classes,
+/// with the contained objects of a compound curve checked as upstream. The curve
+/// reports as `key`; an ellipse's polar converter and contained objects report under
+/// `key ^ (n << 48)` (`n = 1, 2, ..` in walk order), so keep bits 48.. of `key`
+/// clear. Failed checks are appended to `reports` in native order. Returns `true`
+/// when every check passed.
+///
+/// # Errors
+///
+/// [`crate::SolidError::InvalidInput`] for a level above 4 or where upstream's
+/// behaviour is undefined (an offset curve without a base curve; a report past the
+/// end of its label table); [`crate::SolidError::Unported`] from a check not yet
+/// ported; those of the geometric callees.
+pub fn curve_assert_valid(
+    k: &Kernel,
+    curve: &mut crate::curve::curve::Curve,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+    key: ObjectKey,
+) -> Result<bool> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut walk = curves::Walk::new(key);
+    let polar_key = walk.next_key()?;
+    edge::curve_in_walk(
+        k, curve, reports, level, key, polar_key, None, None, &mut walk,
+    )
+}
+
+/// The state of one `AssertValid` run: the reports, the requested level, the geometry
+/// owner identities and the list membership index.
+struct Cx<'a> {
+    rep: Rep<'a>,
+    keys: &'a dyn Fn(EntityRef) -> ObjectRef,
+    index: base::Index,
+    edge_sets: edge::EdgeSets,
+}
+
+impl Cx<'_> {
+    /// Whether the base-class checks run (`eTestLevel != SM_LEVEL_GIVEN`).
+    const fn bases(&self) -> bool {
+        self.rep.level != LEVEL_GIVEN
+    }
+}
+
+/// The reports of a run and its level (`pAList`, `eTestLevel`).
+struct Rep<'a> {
+    array: Option<&'a mut AssertArray>,
+    level: u8,
+}
+
+/// The key of a curve or surface object (see the `seams` key note): the shim's
+/// identity space and index.
+fn geometry_key(space: u64, index: u32) -> ObjectKey {
+    ObjectKey((space << 32) | u64::from(index))
+}
+
+/// One report of the release macros: who runs it, about which object, and its
+/// tolerance, value and optional message.
+struct Test<'m> {
+    class: i64,
+    list: u64,
+    index: u64,
+    reporter: Object,
+    owner: Object,
+    owner_type: i64,
+    tol: f64,
+    message: Option<Cow<'m, str>>,
+}
+
+impl Rep<'_> {
+    /// `SM_ASSERT_TEST_NEED`: the test of level `test_level` runs
+    /// (`!(eTestLevel < TestLevel)`).
+    const fn need(&self, test_level: u8) -> bool {
+        self.level >= test_level
+    }
+
+    /// `SM_ASSERT_TEST_NEED(.., test_level)` (no test requests): the level is
+    /// `SM_LEVEL_0`..`SM_LEVEL_2` and at least `test_level`.
+    const fn test_need(&self, test_level: u8) -> bool {
+        self.level <= 2 && self.level >= test_level
+    }
+
+    /// `SM_ASSERT_BOOLEAN_REPORT(index, ..)` in a method of class `class` run by
+    /// `this`: `ok` is the already level-gated predicate.
+    fn this_bool(
+        &mut self,
+        b: &Brep,
+        class: i64,
+        this: impl Into<Object>,
+        index: u64,
+        ok: bool,
+    ) -> Result<bool> {
+        let this = this.into();
+        self.add(
+            b,
+            ok,
+            Test {
+                class,
+                list: 0,
+                index,
+                reporter: this,
+                owner: this,
+                owner_type: class,
+                tol: UNDEF_DOUBLE,
+                message: None,
+            },
+            || UNDEF_DOUBLE,
+        )
+    }
+
+    /// `SM_ASSERT_VALUE_REPORT(index, .., tol, value, ..)` in a method of class
+    /// `class` run by `this`; `value` is evaluated only when the test fails.
+    fn this_value(
+        &mut self,
+        b: &Brep,
+        class: i64,
+        this: impl Into<Object>,
+        index: u64,
+        ok: bool,
+        tol: f64,
+        value: impl FnOnce() -> f64,
+    ) -> Result<bool> {
+        let this = this.into();
+        self.add(
+            b,
+            ok,
+            Test {
+                class,
+                list: 0,
+                index,
+                reporter: this,
+                owner: this,
+                owner_type: class,
+                tol,
+                message: None,
+            },
+            value,
+        )
+    }
+
+    /// The release `SM_ASSERT_OBJ_*_REPORT` body: on a pass clears `GetLastAdd`, on a
+    /// failure adds the report (when there is a list) and returns `false`.
+    fn add(
+        &mut self,
+        b: &Brep,
+        ok: bool,
+        test: Test<'_>,
+        value: impl FnOnce() -> f64,
+    ) -> Result<bool> {
+        let Some(array) = self.array.as_deref_mut() else {
+            return Ok(ok);
+        };
+        if ok {
+            array.set_last_add(false);
+            return Ok(true);
+        }
+        let (reporter, _, _) = object_info(b, test.reporter)?;
+        let (owner, _, owner_name) = object_info(b, test.owner)?;
+        array.add_unique_delete_duplicate(AssertReport::new(ReportSpec {
+            reporter: Some(reporter),
+            test_index: test.index,
+            test_class: test.class,
+            owner: Some(owner),
+            owner_type: test.owner_type,
+            owner_type_string: Some(owner_name),
+            other: None,
+            other_type: 0,
+            other_type_string: Some("NULL"),
+            tol3d: crate::geom::tol::tol3d(test.tol),
+            value: value(),
+            list_index: test.list,
+            message: test.message.map(|m| Cow::Owned(m.into_owned())),
+        })?);
+        Ok(false)
+    }
+}
+
+/// The B-rep object (`this` of `SmBrep::AssertValid`).
+const fn brep_object() -> Object {
+    Object::Topology(EntityRef::Brep(BrepId::from_index(0)))
+}
+
+/// The class codes of the methods running the tests (`GetClassType()`).
+mod class {
+    pub(super) use crate::geom::assert_array::labels::{
+        BREP_TYPE as BREP, EDGEUSE_TYPE as EDGEUSE, EDGE_TYPE as EDGE, FACEUSE_TYPE as FACEUSE,
+        FACE_TYPE as FACE, LOOPUSE_TYPE as LOOPUSE, LOOP_TYPE as LOOP,
+        OWNING_TOPOLOGY_TYPE as OWNING_TOPOLOGY, SHELL_TYPE as SHELL, TOPOLOGY_TYPE as TOPOLOGY,
+        VERTEXUSE_TYPE as VERTEXUSE, VERTEX_TYPE as VERTEX,
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::assert_array::labels::BREP_TYPE;
+
+    /// A `SmBrep::AssertValid` check (`assert_valid`) whose list holds the failed report
+    /// of `SmBrep` test `index` (list 0) with owner type `owner`.
+    fn check(assert_valid: bool, index: u64, owner: Option<&'static str>) -> BrepCheck {
+        let mut reports = AssertArray::new();
+        reports.add_unique_delete_duplicate(
+            AssertReport::new(ReportSpec {
+                test_index: index,
+                test_class: BREP_TYPE,
+                owner_type_string: owner,
+                ..ReportSpec::default()
+            })
+            .unwrap(),
+        );
+        BrepCheck {
+            pointers_status: SUCCESS,
+            pointer_reports: AssertArray::new(),
+            assert_valid: Some(assert_valid),
+            reports,
+        }
+    }
+
+    /// A report naming no owner type has no owner tag (#2013).
+    #[test]
+    fn line_omits_an_absent_owner_type() {
+        let line = "SmBrep::Test #19 Region Connectivity: Regions found by topology \
+                    traversal should be the same as the Brep's region list";
+        assert_eq!(check(false, 19, None).lines(), [line]);
+        let tagged = format!("{line} [owner SmBrep]");
+        assert_eq!(check(false, 19, Some("SmBrep")).lines(), [tagged]);
+    }
+
+    /// The warning (test 21) stays listed and reachable but is not a failure line.
+    #[test]
+    fn warning_is_not_a_failure() {
+        let c = check(true, 21, Some("SmBrep"));
+        assert!(c.is_valid());
+        assert_eq!(c.failure_count(), 0);
+        assert_eq!(c.failures().count(), 0);
+        let warnings: Vec<u64> = c.warnings().map(|r| r.test_index).collect();
+        assert_eq!(warnings, [21]);
+        assert_eq!(c.reports.len(), 1);
+    }
+
+    /// `AssertValid` returning `false` with only a warning listed still gives a line, so
+    /// `is_valid` never contradicts it; a failure gives its own line instead.
+    #[test]
+    fn failed_assert_valid_with_only_a_warning_is_invalid() {
+        let c = check(false, 21, Some("SmBrep"));
+        assert_eq!(c.lines(), ["SmBrep::AssertValid failed without a report"]);
+        assert!(!c.is_valid());
+        let lines = check(false, 22, Some("SmBrep")).lines();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with("SmBrep::Test #22 "), "{lines:?}");
+    }
+}

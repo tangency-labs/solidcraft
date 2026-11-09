@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 /// The repository releases come from.
 pub const REPO: &str = "tangency-labs/solidcraft";
@@ -1419,7 +1419,7 @@ fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
                 let indent = 6.0 + 12.0 * depth.min(4) as f32;
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent);
-                    ui.label(RichText::new("•").size(crate::theme::Tokens::get().font_label));
+                    ui.label(RichText::new("•").size(solidcraft_theme::Tokens::get().font_label));
                     ui.add(egui::Label::new(job(&spans, t.font_label, false, width - indent - 14.0)).wrap());
                 });
                 links(ui, &spans, indent + 14.0);

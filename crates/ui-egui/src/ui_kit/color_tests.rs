@@ -307,9 +307,9 @@ fn pixel(primitives: &[egui::ClippedPrimitive], at: egui::Pos2) -> [f32; 4] {
 
 #[test]
 fn rendered_square_hue_and_current_strip_leave_rounded_corner_pixels_clear() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for ppp in [1.0, 2.0] {
             let ctx = crate::fonts::test_context();
             ctx.set_pixels_per_point(ppp);
@@ -336,7 +336,7 @@ fn rendered_square_hue_and_current_strip_leave_rounded_corner_pixels_clear() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// A taller frame than the shared one: the popover's recent row sits below 400 points.

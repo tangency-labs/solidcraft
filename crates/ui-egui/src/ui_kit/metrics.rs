@@ -1,7 +1,7 @@
 //! Metrics elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::layout::FORM;
-use crate::theme::Tokens;
 use egui::Ui;
+use solidcraft_theme::Tokens;
 
 /// Row height for controls. Tokens: `control_height`.
 pub(crate) fn row_height() -> f32 {
@@ -53,7 +53,7 @@ impl ContentWidth {
     /// Width of a strong configuration name, using the same font as its table cell.
     pub(crate) fn name(ui: &Ui, text: &str) -> f32 {
         let t = Tokens::get();
-        ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_label), t.form_ink).size().x.ceil()
+        ui.painter().layout_no_wrap(text.to_owned(), crate::ui_kit::type_face::semibold(t.font_label), t.form_ink).size().x.ceil()
     }
 
     pub(crate) fn button(ui: &Ui, label: &str) -> f32 {

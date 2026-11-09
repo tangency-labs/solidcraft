@@ -1509,6 +1509,7 @@
   "cmd.timeline_stop": "Stop History",
   "cmd.timeline_suppress": "Suppress Feature",
   "cmd.ui.assistant": "Toggle Assistant",
+  "cmd.ui.palette": "Search Commands",
   "cmd.view.navigator": "Custom View Navigator",
   "cmd.view.render_browser": "Render Browser",
   "cmd.view.render_dock": "Move Render Dock",

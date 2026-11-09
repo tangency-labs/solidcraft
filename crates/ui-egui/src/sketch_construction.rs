@@ -61,7 +61,7 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
     }
     let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
     let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let has_length = typed_length(t).is_some();
     let reason = solidcraft_ui_text::tr("ui.construction.normal_needs_length");
     let refused = [Some(reason), Some(reason)];
@@ -228,7 +228,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid)) else { return };
     let Ok(lines) = construction_line_solutions(&ss.sketch, &p, mode) else { return };
     let chosen = construction_line_choice(&lines, &p).ok();
-    let tokens = crate::theme::Tokens::get();
+    let tokens = solidcraft_theme::Tokens::get();
     let center = ss.plane.to_local(app.cam.target);
     let extent = app.cam.half_height().max(1.0) * 20.0;
     let length = p.get("length").and_then(Value::as_f64);

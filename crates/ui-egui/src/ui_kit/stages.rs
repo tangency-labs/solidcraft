@@ -1,8 +1,8 @@
 //! Numbered stage navigation in a two-row workspace card. The caller owns commands and state.
 use super::{Container, LayoutMode, Surface};
-use crate::theme::{TabAccent, Tokens};
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, Ui, pos2, vec2};
+use solidcraft_theme::{TabAccent, Tokens};
 
 /// The workspace switcher card, the ribbon card beside it and the bottom of the pair, laid out
 /// in the space above the viewport.
@@ -75,10 +75,10 @@ impl StageBar {
             ui,
             Rect::from_center_size(
                 center + vec2(0.0, t.space_8),
-                vec2(ui.painter().layout_no_wrap(label.into(), crate::fonts::semibold(t.font_button), accent.ink).size().x, t.space_16),
+                vec2(ui.painter().layout_no_wrap(label.into(), crate::ui_kit::type_face::semibold(t.font_button), accent.ink).size().x, t.space_16),
             ),
             label,
-            crate::fonts::semibold(t.font_button),
+            crate::ui_kit::type_face::semibold(t.font_button),
             accent.ink,
             false,
         );
@@ -111,7 +111,7 @@ impl StageBar {
     pub(crate) fn caption(ui: &mut Ui, label: &str) {
         let t = Tokens::get();
         let label = label.to_uppercase();
-        let font = crate::fonts::semibold(t.font_small);
+        let font = crate::ui_kit::type_face::semibold(t.font_small);
         let width = ui.painter().layout_no_wrap(label.clone(), font.clone(), t.text_dim).size().x
             + t.font_small * t.font_section_tracking * label.chars().count() as f32
             + t.space_8;
@@ -190,7 +190,7 @@ impl StageBar {
                 t.secondary_hline(ui.painter(), line.x_range(), line.center().y, t.control_border);
             }
             let font = egui::FontId::proportional(t.font_button);
-            let width = ui.painter().layout_no_wrap((*label).into(), crate::fonts::semibold(t.font_button), t.text).size().x.ceil()
+            let width = ui.painter().layout_no_wrap((*label).into(), crate::ui_kit::type_face::semibold(t.font_button), t.text).size().x.ceil()
                 + t.space_8
                 + t.space_14
                 + t.space_6
@@ -214,11 +214,11 @@ impl StageBar {
                 ui,
                 {
                     let number = (index + 1).to_string();
-                    let width = ui.painter().layout_no_wrap(number, crate::fonts::semibold(t.font_small), t.text).size().x;
+                    let width = ui.painter().layout_no_wrap(number, crate::ui_kit::type_face::semibold(t.font_small), t.text).size().x;
                     Rect::from_center_size(badge.center(), vec2(width, badge.height()))
                 },
                 &(index + 1).to_string(),
-                crate::fonts::semibold(t.font_small),
+                crate::ui_kit::type_face::semibold(t.font_small),
                 if on { t.on_accent } else { t.text_dim },
                 false,
             );
@@ -227,7 +227,7 @@ impl StageBar {
                 ui,
                 text,
                 label,
-                if on { crate::fonts::semibold(t.font_button) } else { font },
+                if on { crate::ui_kit::type_face::semibold(t.font_button) } else { font },
                 if on { accent.ink } else { t.text },
                 false,
             );
@@ -237,7 +237,7 @@ impl StageBar {
                 result.stage = Some(index);
             }
         }
-        let search_width = super::CommandSearch::closed_width(ui.ctx()).max(188.0);
+        let search_width = super::CommandSearch::closed_width(ui.ctx(), Some("S")).max(188.0);
         let action_width = actions.iter().map(|a| super::actions::icon_label_width(ui, a.label, a.icon, a.primary)).sum::<f32>();
         ui.add_space((ui.available_width() - search_width - action_width - t.space_4 * (actions.len() + 2) as f32).max(t.space_8));
         for (index, item) in actions.iter().enumerate() {

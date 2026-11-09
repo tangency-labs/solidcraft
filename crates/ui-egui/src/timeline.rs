@@ -1,8 +1,7 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Edge, Status, Surface};
-use egui::{Rect, Sense, UiBuilder, pos2, vec2};
+use egui::{Rect, UiBuilder, pos2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
     FeatureKind, FeatureResult, PlaneRef, SketchId,
@@ -13,8 +12,9 @@ use solidcraft_engine::doc::{
 use solidcraft_engine::schema::edit::PlaybackAction;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use crate::history_bar;
 use crate::ui_kit::Item;
+use solidcraft_theme::Tokens;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -54,13 +54,31 @@ pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::His
 
 /// A click runs a History control; a right-click offers to show or hide the Play button.
 pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
-    if response.clicked() {
-        run_transport(app, control);
+    for action in history_bar::transport_actions(control, response) {
+        run_control_action(app, action);
     }
-    if response.secondary_clicked() {
-        let at = response.interact_pointer_pos().unwrap_or(response.rect.left_bottom());
-        crate::context_menu::open_for(app, at, crate::context_menu::Target::HistoryControls);
-    }
+}
+
+/// Runs what a History control asked for (the bar's other actions are its strip's).
+fn run_control_action(app: &mut SolveApp, action: history_bar::Action) {
+    use crate::ui_kit::HistoryTransport;
+    let control = match action {
+        history_bar::Action::Seek(history_bar::Seek::First) => HistoryTransport::First,
+        history_bar::Action::Seek(history_bar::Seek::Back) => HistoryTransport::Back,
+        history_bar::Action::Play => HistoryTransport::Play,
+        history_bar::Action::Seek(history_bar::Seek::Forward) => HistoryTransport::Forward,
+        history_bar::Action::Seek(history_bar::Seek::Last) => HistoryTransport::Last,
+        history_bar::Action::ControlsMenu { at } => {
+            crate::context_menu::open_for(app, at, crate::context_menu::Target::HistoryControls);
+            return;
+        }
+        history_bar::Action::Seek(history_bar::Seek::Slot { .. })
+        | history_bar::Action::Select { .. }
+        | history_bar::Action::Edit(_)
+        | history_bar::Action::Menu { .. }
+        | history_bar::Action::Reorder { .. } => return,
+    };
+    run_transport(app, control);
 }
 
 /// The History controls' menu: shows or hides the Play button, and — when the design marks any
@@ -269,12 +287,6 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Drag {
-    Marker,
-    Feature(u64),
-}
-
 /// Scrolls the History bar to `rect` when it `holds` the feature to reveal. The request is done
 /// only once the rect is presented in the viewport (an offscreen or hidden bar asks again on the
 /// next frame); then it returns true and the caller clears `timeline_reveal`.
@@ -284,18 +296,6 @@ fn reveal_once(ui: &egui::Ui, reveal: &mut Option<usize>, holds: bool, rect: Rec
         return true;
     }
     false
-}
-
-/// Slot index (0..=n) nearest to screen x, given the left edges of the feature buttons.
-fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
-    let mut best = (0usize, f32::INFINITY);
-    for (i, sx) in xs.iter().chain(std::iter::once(&end)).enumerate() {
-        let d = (sx - 2.0 - x).abs();
-        if d < best.1 {
-            best = (i, d);
-        }
-    }
-    best.0
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -906,35 +906,37 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
     }
 }
 
-fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
+/// Where the bottom History bar publishes its grip, marker and feature chips.
+const BAR_HANDLES: history_bar::Handles<'static> =
+    history_bar::Handles { grip: "history:grip", marker: "history:marker", step: "timeline:", controls: "history:" };
+
+/// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
+type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
+
+/// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
+fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
-    let r = ui.max_rect();
-    let p = ui.painter().clone();
-    // Playback controls.
-    let mut x = r.left() + t.space_10;
-    let grip_rect = Rect::from_center_size(pos2(x + t.space_10 / 2.0, r.center().y), vec2(t.space_10, t.space_16 + t.space_2));
-    let mut grip_ui = ui.new_child(UiBuilder::new().max_rect(grip_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let grip = crate::ui_kit::panel_grip(&mut grip_ui).rect;
-    x += t.space_10 + t.space_8;
-    let mut drag_rect = grip;
-    let heading = crate::ui_kit::StripHeading::new(&p, solidcraft_ui_text::tr("ui.history_title"));
-    if x + heading.width() + crate::ui_kit::history_transport_width() <= r.right() {
-        let title_rect = heading.paint(&p, Rect::from_min_max(pos2(x, r.top()), r.right_bottom()));
-        drag_rect = drag_rect.union(title_rect);
-        x += heading.width();
+    history_bar::Bar {
+        title: solidcraft_ui_text::tr("ui.history_title"),
+        marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
+        play: app.preferences.history_play_button,
+        playing: app.timeline_playback.is_some(),
+        accent: solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab),
+        drag_accent: solidcraft_theme::TabAccent::for_tab(&t, "SKETCH"),
+        marker: 0,
+        steps: 0,
+        floating,
+        handles: BAR_HANDLES,
     }
-    let response = ui.interact(drag_rect, egui::Id::unique("sc_history_dock_grip"), Sense::drag());
-    crate::scenario::publish_handle("history:grip", drag_rect.center());
-    crate::timeline_left::dock_drag(app, ui, &response);
-    let controls = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button);
-    for &control in controls {
-        let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, r.center().y), vec2(t.space_24, t.space_24));
-        let response = control.show(ui, br, app.timeline_playback.is_some());
-        transport_response(app, control, &response);
-        x += t.space_24 + t.space_2;
+}
+
+fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
+    let head = history_bar::header(ui, &bar(app, floating), ui.max_rect());
+    crate::timeline_left::dock_drag(app, ui, &head.grip);
+    for action in head.actions {
+        run_control_action(app, action);
     }
-    x += 14.0;
-    timeline_strip(app, ui, floating, x);
+    timeline_strip(app, ui, floating, head.x);
 }
 
 /// The shared host already supplies the title and declared playback controls.
@@ -945,11 +947,12 @@ pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
     let n = app.session.doc.features.len();
     let marker = app.session.doc.marker.unwrap_or(n);
+    let mut bar = bar(app, floating);
     // The feature that made what is under the cursor or picked in the viewport.
     let from_view = [hovered_feature(app), picked_feature(app)];
     // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the
@@ -961,335 +964,210 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     // folded chip holding it, its component's own chip, or the feature itself. Read before the
     // path, whose click asks for it in what the next frame shows.
     let reveal_at = app.tree.timeline_reveal.and_then(|id| app.session.doc.features.iter().position(|f| f.id == id));
-    let mut reveal = reveal_at.and_then(|i| history.view.find(i));
+    let reveal = reveal_at.and_then(|i| history.view.find(i));
     let x = crate::timeline_scope::header(app, ui, &p, x, r).min(r.right() - t.space_24);
     // Below, slots and features count those the bar shows; the marker's slot among them.
     let shown = history.view.len();
     let marker_view = history.view.slot(marker);
+    bar.marker = marker_view;
+    bar.steps = shown;
     // The features scroll horizontally in the space right of the playback controls.
     let strip_rect = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
-    ui.scope_builder(UiBuilder::new().max_rect(strip_rect), |ui| {
-        // A plain mouse wheel scrolls the strip sideways too (#3356).
-        ui.style_mut().always_scroll_the_only_direction = true;
-        let scroll = egui::ScrollArea::horizontal().id_salt(("history_strip", history.within)).auto_shrink([false, false]);
-        scroll.show(ui, |ui| {
-            let p = ui.painter().clone();
-            let mut x = ui.max_rect().left();
-            let origin = x;
-            let feats: Vec<_> = app
-                .session
-                .doc
-                .features
-                .iter()
-                .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
-                .collect();
-            // The bar's features in the order it draws them, folded ones included: a Shift+click
-            // range runs over these.
-            let order: Vec<u64> = history.view.indices(0, shown).iter().filter_map(|i| feats.get(*i).map(|f| f.0)).collect();
-            let drag_id = ui.scope_id().with("tl_drag");
-            let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
-            let pointer = ui.input(|i| i.pointer.hover_pos());
-            let mut xs: Vec<f32> = Vec::new();
-            let mut hovered: Option<u64> = None;
-            let mut edit: Option<u64> = None;
-            let mut marker_rect: Option<Rect> = None;
-            // Each sketch's solve state, read once for the strip (#7245).
-            let sketch_states = crate::sketch_state::SketchStates::of(app);
-            // Each feature's result, found once for the strip: a search per chip made a long
-            // timeline cost the square of its length every frame.
-            let results = result_index(&app.session.model.results);
-            // The features picked in the design or in the open dialog, collected once for the
-            // strip: the dialog built its item list again for every chip.
-            let feature_of = |selection: &solidcraft_engine::Sel| match selection {
-                solidcraft_engine::Sel::Feature { id } => Some(*id),
-                _ => None,
+    let feats: Vec<BarFeature> = app
+        .session
+        .doc
+        .features
+        .iter()
+        .map(|f| (f.id, f.name.clone(), icon_of(&f.kind), f.suppressed, f.kind.type_name(), TimelineKind::of(&f.kind)))
+        .collect();
+    // The bar's features in the order it draws them, folded ones included: a Shift+click
+    // range runs over these.
+    let order: Vec<u64> = history.view.indices(0, shown).iter().filter_map(|i| feats.get(*i).map(|f| f.0)).collect();
+    let out = {
+        let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, feats: &feats, reveal, marker, marker_view };
+        history_bar::strip(ui, &bar, r, strip_rect, ("history_strip", history.within), &mut steps)
+    };
+    app.viewport.hover_feature = out.hovered;
+    // The design's position of a slot; at the marker's, on the side of the marker the pointer is
+    // on (features not shown may sit between it and the next one shown).
+    let position = |slot: usize, before: bool| {
+        let at = history.view.index(slot);
+        match (slot == marker_view, before) {
+            (true, true) => at.min(marker),
+            (true, false) => at.max(marker),
+            (false, _) => at,
+        }
+    };
+    for action in out.actions {
+        match action {
+            history_bar::Action::Select { step, modifiers } => click_feature(app, &order, step, modifiers),
+            history_bar::Action::Edit(id) => app.edit_feature(id),
+            // The same menu as the browser's, so the control channel reports it (#10745).
+            history_bar::Action::Menu { step, at } => crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: step }),
+            history_bar::Action::Seek(history_bar::Seek::Slot { slot, before }) => {
+                let slot = position(slot, before);
+                let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
+            }
+            // Crossing the marker rolls the feature back or forward, in the same step.
+            history_bar::Action::Reorder { step, slot, before } => {
+                crate::timeline_folders::drop_feature(app, &history.folders, step, position(slot, before), before, marker.min(n));
+            }
+            control => run_control_action(app, control),
+        }
+    }
+}
+
+/// A click on a feature chip: into the open dialog's input when it takes features, else a
+/// selection by the modifiers held.
+fn click_feature(app: &mut SolveApp, order: &[u64], id: u64, modifiers: egui::Modifiers) {
+    if pick_feature_into_dialog(app, id, modifiers) {
+        return;
+    }
+    if modifiers.shift {
+        select_range(app, order, id, modifiers.command || modifiers.ctrl);
+    } else if modifiers.command || modifiers.ctrl {
+        toggle_feature(app, id);
+    } else if !modifiers.any() && crate::browser::pick_sketch_into_dialog(app, id) {
+        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
+    } else {
+        select_one(app, id);
+    }
+}
+
+/// SolidCraft's entries of the bar: its features, and its folded runs, folders, joints and trays.
+struct BarSteps<'a> {
+    app: &'a mut SolveApp,
+    history: &'a crate::timeline_fold::History,
+    strip: &'a crate::timeline_fold::Strip,
+    feats: &'a [BarFeature],
+    /// The slot to scroll into view, until it is.
+    reveal: Option<usize>,
+    /// The marker's design position, and its slot among the features shown.
+    marker: usize,
+    marker_view: usize,
+}
+
+impl history_bar::Contents for BarSteps<'_> {
+    fn entries(&mut self, s: &mut history_bar::Strip<'_, '_>) {
+        let t = Tokens::get();
+        let app = &mut *self.app;
+        let (history, strip) = (self.history, self.strip);
+        // Each sketch's solve state, read once for the strip (#7245).
+        let sketch_states = crate::sketch_state::SketchStates::of(app);
+        // Each feature's result, found once for the strip: a search per chip made a long
+        // timeline cost the square of its length every frame.
+        let results = result_index(&app.session.model.results);
+        // The features picked in the design or in the open dialog, collected once for the
+        // strip: the dialog built its item list again for every chip.
+        let feature_of = |selection: &solidcraft_engine::Sel| match selection {
+            solidcraft_engine::Sel::Feature { id } => Some(*id),
+            _ => None,
+        };
+        let picked: std::collections::HashSet<u64> = app
+            .session
+            .selection
+            .iter()
+            .filter_map(feature_of)
+            .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
+            .collect();
+        let editing = crate::timeline_scope::focus(app).unwrap_or(0);
+        for entry in history.entries.iter().copied() {
+            let i = match entry {
+                crate::timeline_fold::Entry::Feature(i) => i,
+                crate::timeline_fold::Entry::Group(group) => {
+                    let rect = s.chip(group.start, group.end, group.open, group.depth, |ui, p, at| {
+                        crate::timeline_fold::group_chip(app, ui, p, at, &group, history, strip)
+                    });
+                    let holds = self.reveal.is_some_and(|k| group.start <= k && k < group.end && (!group.open || group.component == editing));
+                    if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Min) {
+                        app.tree.timeline_reveal = None;
+                    }
+                    continue;
+                }
+                crate::timeline_fold::Entry::Folder(folder) => {
+                    let rect = s.chip(folder.start, folder.end, folder.open, folder.depth, |ui, p, at| {
+                        crate::timeline_folders::folder_chip(app, ui, p, at, &folder, history, strip)
+                    });
+                    let holds = self.reveal.is_some_and(|k| folder.start <= k && k < folder.end && !folder.open);
+                    if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Min) {
+                        app.tree.timeline_reveal = None;
+                    }
+                    continue;
+                }
+                crate::timeline_fold::Entry::Joints(folder) => {
+                    let joints = history.folders.joints.get(&folder).cloned().unwrap_or_default();
+                    let run = crate::dialogs_assembly::JointRun::Folder { id: folder, name: history.folders.name(folder) };
+                    s.inline(|ui, p, x, r| crate::dialogs_assembly::joint_chips(app, ui, p, x, r, &joints, run));
+                    continue;
+                }
+                crate::timeline_fold::Entry::End(_) => {
+                    s.end_tray();
+                    continue;
+                }
             };
-            let picked: std::collections::HashSet<u64> = app
-                .session
-                .selection
-                .iter()
-                .filter_map(feature_of)
-                .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
-                .collect();
-            // Each open run or folder's tray: where it starts, its place under the chips, its depth.
-            let mut trays: Vec<(f32, egui::layers::ShapeIdx, usize)> = Vec::new();
-            let pad = crate::ui_kit::HISTORY_TRAY_PAD;
-            let marker_at = |x: f32| Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0));
-            let editing = crate::timeline_scope::focus(app).unwrap_or(0);
-            for entry in history.entries.iter().copied() {
-                let i = match entry {
-                    crate::timeline_fold::Entry::Feature(i) => i,
-                    crate::timeline_fold::Entry::Group(group) => {
-                        if group.start == marker_view && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
-                        }
-                        if group.open {
-                            trays.push((x, p.add(egui::Shape::Noop), group.depth));
-                            x += pad;
-                        }
-                        let at = pos2(x, r.top() + 6.0);
-                        let width = crate::timeline_fold::group_chip(app, ui, &p, at, &group, &history, &strip);
-                        let holds = reveal.is_some_and(|k| group.start <= k && k < group.end && (!group.open || group.component == editing));
-                        if reveal_once(ui, &mut reveal, holds, Rect::from_min_size(at, vec2(width, 28.0)), egui::Align::Min) {
-                            app.tree.timeline_reveal = None;
-                        }
-                        if !group.open {
-                            // Dropping on a folded run puts the feature before it.
-                            xs.extend(std::iter::repeat_n(x, group.end - group.start));
-                        }
-                        x += width + 4.0;
-                        if !group.open && group.start < marker_view && marker_view < group.end && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
-                        }
-                        continue;
-                    }
-                    crate::timeline_fold::Entry::Folder(folder) => {
-                        let holds = folder.start < folder.end;
-                        if holds && folder.start == marker_view && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
-                        }
-                        if folder.open {
-                            trays.push((x, p.add(egui::Shape::Noop), folder.depth));
-                            x += pad;
-                        }
-                        let at = pos2(x, r.top() + 6.0);
-                        let width = crate::timeline_folders::folder_chip(app, ui, &p, at, &folder, &history, &strip);
-                        let holds = reveal.is_some_and(|k| folder.start <= k && k < folder.end && !folder.open);
-                        if reveal_once(ui, &mut reveal, holds, Rect::from_min_size(at, vec2(width, 28.0)), egui::Align::Min) {
-                            app.tree.timeline_reveal = None;
-                        }
-                        if !folder.open {
-                            // Dropping on a folded folder puts the feature before it.
-                            xs.extend(std::iter::repeat_n(x, folder.end - folder.start));
-                        }
-                        x += width + 4.0;
-                        if !folder.open && folder.start < marker_view && marker_view < folder.end && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
-                        }
-                        continue;
-                    }
-                    crate::timeline_fold::Entry::Joints(folder) => {
-                        let joints = history.folders.joints.get(&folder).cloned().unwrap_or_default();
-                        let run = crate::dialogs_assembly::JointRun::Folder { id: folder, name: history.folders.name(folder) };
-                        x = crate::dialogs_assembly::joint_chips(app, ui, &p, x, r, &joints, run);
-                        continue;
-                    }
-                    crate::timeline_fold::Entry::End(_) => {
-                        if let Some((left, tray, depth)) = trays.pop() {
-                            let right = x - 4.0 + pad;
-                            p.set(tray, crate::ui_kit::history_tray(left, right, r.top() + 6.0, depth, accent));
-                            x = right + 4.0;
-                        }
-                        continue;
-                    }
-                };
-                // The feature's index in the design.
-                let at = history.view.index(i);
-                let Some((id, name, icon, suppressed, ty, kind)) = feats.get(at) else {
-                    continue;
-                };
-                let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
-                if i == marker_view && marker_rect.is_none() {
-                    marker_rect = Some(marker_at(x));
-                    x += t.space_16;
-                }
-                xs.push(x);
-                let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-                let holds = reveal == Some(i);
-                if reveal_once(ui, &mut reveal, holds, br, egui::Align::Center) {
-                    app.tree.timeline_reveal = None;
-                }
-                crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
-                // A chip scrolled out of the strip is neither drawn nor interactive: a long
-                // history drew every chip each frame. Its slot above still places the marker and drops.
-                // One being dragged or focused, or under an open menu, stays alive until that ends.
-                let chip_id = ui.scope_id().with(("feat", *id));
-                if !ui.clip_rect().intersects(br)
-                    && drag != Some(Drag::Feature(*id))
-                    && !ui.memory(|m| m.has_focus(chip_id))
-                    && !egui::Popup::is_any_open(ui.ctx())
-                {
-                    x += 32.0;
-                    continue;
-                }
-                let resp = ui.interact(br, chip_id, Sense::click_and_drag());
-                // A feature without a result has none; an index that no longer holds this id (a
-                // command run from an earlier chip evaluated again) is searched for.
-                let res =
-                    results.get(id).and_then(|k| app.session.model.results.get(*k).filter(|r| r.id == *id).or_else(|| app.session.model.result(*id)));
-                let err = res.and_then(|r| r.error.clone());
-                let warn = res.and_then(warning_text);
-                let rolled = i >= marker_view;
-                let sel = picked.contains(id);
-                if resp.hovered() {
-                    hovered = Some(*id);
-                }
-                crate::ui_kit::HistoryChip {
-                    icon,
-                    name,
-                    kind: ty,
-                    selected: sel,
-                    hovered: resp.hovered() || from_view.contains(&Some(*id)),
-                    dim: rolled,
-                    suppressed: *suppressed,
-                    error: err.is_some(),
-                    warning: warn.is_some(),
-                    reference: false,
-                    ink: sketch_state.and_then(|state| state.ink(&t)),
-                    // A dragged feature takes the colour of its drop bar.
-                    accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
-                }
-                .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
-                if floating && at + 1 == marker {
-                    p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
-                }
-                let ms = res.map(|r| r.ms);
-                if resp.drag_started() {
-                    drag = Some(Drag::Feature(*id));
-                }
-                // The tip is written only while it shows (as `on_hover_text` would lay it out).
-                let resp = resp.backing_on_hover_ui(|ui| {
-                    let mut tip = feature_status_text(name, ty, res);
-                    // Greyed out says only "not shown": say why (#8100).
-                    if rolled {
-                        tip.push('\n');
-                        tip.push_str(solidcraft_ui_text::tr("timeline.feature_rolled_back"));
-                    }
-                    if let Some(state) = sketch_state {
-                        tip.push('\n');
-                        tip.push_str(&state.text());
-                    }
-                    if let Some(ms) = ms {
-                        tip += &format!("\n{ms:.1} ms");
-                    }
+            // The feature's index in the design.
+            let at = history.view.index(i);
+            let Some((id, name, icon, suppressed, ty, kind)) = self.feats.get(at) else {
+                continue;
+            };
+            let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
+            // A feature without a result has none; an index that no longer holds this id is
+            // searched for.
+            let res =
+                results.get(id).and_then(|k| app.session.model.results.get(*k).filter(|r| r.id == *id).or_else(|| app.session.model.result(*id)));
+            let rolled = i >= self.marker_view;
+            let tip = || {
+                let mut tip = feature_status_text(name, ty, res);
+                // Greyed out says only "not shown": say why (#8100).
+                if rolled {
                     tip.push('\n');
-                    tip.push_str(solidcraft_ui_text::tr("timeline.feature_hint"));
-                    ui.set_max_width(ui.spacing().tooltip_width);
-                    ui.add(egui::Label::new(tip));
-                });
-                if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
-                    let modifiers = ui.input(|i| i.modifiers);
-                    if modifiers.shift {
-                        select_range(app, &order, *id, modifiers.command || modifiers.ctrl);
-                    } else if modifiers.command || modifiers.ctrl {
-                        toggle_feature(app, *id);
-                    } else if !modifiers.any() && crate::browser::pick_sketch_into_dialog(app, *id) {
-                        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
-                    } else {
-                        select_one(app, *id);
-                    }
+                    tip.push_str(solidcraft_ui_text::tr("timeline.feature_rolled_back"));
                 }
-                if resp.double_clicked() {
-                    edit = Some(*id);
+                if let Some(state) = sketch_state {
+                    tip.push('\n');
+                    tip.push_str(&state.text());
                 }
-                // The same menu as the browser's, so the control channel reports it (#10745).
-                if resp.secondary_clicked() {
-                    let at = resp.interact_pointer_pos().unwrap_or(br.center());
-                    crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: *id });
+                if let Some(ms) = res.map(|r| r.ms) {
+                    tip += &format!("\n{ms:.1} ms");
                 }
-                x += 32.0;
-            }
-            let end = x;
-            if marker_view >= shown && marker_rect.is_none() {
-                marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
-            }
-            // The history marker: drag it to roll the model back or forward.
-            if let Some(mr) = marker_rect {
-                crate::scenario::publish_rect("history:marker", mr);
-                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.scope_id().with("tl_marker"), Sense::drag());
-                if resp.drag_started() {
-                    drag = Some(Drag::Marker);
-                }
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                }
-                crate::ui_kit::history_marker(&p, mr, false, accent);
-                resp.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"));
-            }
-            // The joints at the end belong to the whole design: a bar with its groups that shows one
-            // component leaves them out. Without the groups they stay, as they always have.
-            let content_end = if history.within.is_none() || !app.preferences.history_bar_groups {
-                crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r, &history.folders.held)
-            } else {
-                end
+                tip.push('\n');
+                tip.push_str(solidcraft_ui_text::tr("timeline.feature_hint"));
+                tip
             };
-            // The scroll range follows the drawn content (the buttons don't take layout space themselves).
-            ui.allocate_exact_size(vec2((content_end - origin).max(0.0), r.height()), Sense::hover());
-            // Drag feedback, and the drop.
-            if drag.is_some() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            }
-            // At the marker's slot, which side of the marker the pointer is on: before it, a
-            // dropped feature stays in the model; after it, the feature is rolled back.
-            let before_marker = |slot: usize, x: f32| slot < marker_view || (slot == marker_view && marker_rect.is_none_or(|mr| x < mr.center().x));
-            // The design's position of a slot; at the marker's, on the side of the marker the
-            // pointer is on (features not shown may sit between it and the next one shown).
-            let position = |slot: usize, before: bool| {
-                let at = history.view.index(slot);
-                match (slot == marker_view, before) {
-                    (true, true) => at.min(marker),
-                    (true, false) => at.max(marker),
-                    (false, _) => at,
-                }
-            };
-            // The marker dropped where it already is needs no bar: the marker shows the spot.
-            if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer)
-                && let local = slot_at(&xs, end, pp.x)
-                && !(matches!(dg, Drag::Marker) && local == marker_view)
-            {
-                // Centred in the gap between two chips, or beside the marker at its slot.
-                let sx = match marker_rect {
-                    Some(mr) if local == marker_view => {
-                        if before_marker(local, pp.x) {
-                            mr.left() - 2.0
-                        } else {
-                            mr.right() + 2.0
-                        }
-                    }
-                    _ => xs.get(local).copied().unwrap_or(end) - 2.0,
-                };
-                // Kept inside the strip so the slot before the first feature stays visible.
-                let sx = sx.max(origin + t.space_2);
-                crate::ui_kit::history_drop_bar(
-                    &p,
-                    Rect::from_min_max(pos2(sx, r.top() + 3.0), pos2(sx, r.bottom() - 3.0)),
-                    false,
-                    if matches!(dg, Drag::Marker) { accent.color } else { t.sketch_accent },
-                );
-            }
-            let released = ui.input(|i| i.pointer.any_released());
-            // (Taking the drag ends it even when the pointer has left the window.)
-            if released
-                && let Some(dg) = drag.take()
-                && let Some(pp) = pointer
-            {
-                let local = slot_at(&xs, end, pp.x);
-                let before = before_marker(local, pp.x);
-                let slot = position(local, before);
-                match dg {
-                    Drag::Marker => {
-                        let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
-                    }
-                    // Crossing the marker rolls the feature back or forward, in the same step.
-                    Drag::Feature(id) => crate::timeline_folders::drop_feature(app, &history.folders, id, slot, before, marker.min(n)),
-                }
-            }
-            ui.data_mut(|d| match drag {
-                Some(dg) => {
-                    d.insert_temp(drag_id, dg.clone());
-                }
-                None => d.remove::<Drag>(drag_id),
+            let rect = s.step(&history_bar::Step {
+                id: *id,
+                slot: i,
+                label: name,
+                icon,
+                icon_accent: crate::ui_kit::feature_icon_accent(ty, icon),
+                state: history_bar::StepState {
+                    selected: picked.contains(id),
+                    highlighted: strip.from_view.contains(&Some(*id)),
+                    rolled_back: rolled,
+                    suppressed: *suppressed,
+                    last_done: at + 1 == self.marker,
+                },
+                error: res.is_some_and(|r| r.error.is_some()),
+                warning: res.and_then(warning_text).is_some(),
+                ink: sketch_state.and_then(|state| state.ink(&t)),
+                tip: &tip,
             });
-            app.viewport.hover_feature = hovered;
-            if let Some(id) = edit {
-                app.edit_feature(id);
+            let holds = self.reveal == Some(i);
+            if reveal_once(s.ui(), &mut self.reveal, holds, rect, egui::Align::Center) {
+                app.tree.timeline_reveal = None;
             }
-        });
-    });
+        }
+    }
+
+    /// The joints at the end belong to the whole design: a bar with its groups that shows one
+    /// component leaves them out. Without the groups they stay, as they always have.
+    fn trailing(&mut self, ui: &mut egui::Ui, p: &egui::Painter, end: f32, r: Rect) -> f32 {
+        if self.history.within.is_none() || !self.app.preferences.history_bar_groups {
+            crate::dialogs_assembly::timeline_joints(self.app, ui, p, end + 10.0, r, &self.history.folders.held)
+        } else {
+            end
+        }
+    }
 }
 
 /// Select what a feature made, so the browser shows it. While the browser's rows start closed
@@ -2819,8 +2697,8 @@ mod tests {
     fn floating_strip_has_only_history_text_and_accents_the_last_done_chip_and_marker() {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
-        let t = crate::theme::Tokens::get();
-        let accent = crate::theme::TabAccent::for_tab(&t, "SURFACE");
+        let t = solidcraft_theme::Tokens::get();
+        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);

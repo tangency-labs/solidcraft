@@ -16,8 +16,9 @@ use solidcraft_engine::render::{
     ScratchLayout,
 };
 
+use crate::SolveApp;
 use crate::gpu::{Frame, GpuScene, SceneSlot, ViewportCallback};
-use crate::{SolveApp, theme::Tokens};
+use solidcraft_theme::Tokens;
 
 // Vertex payload only, not an OS/GPU peak-memory promise. Native viewport
 // uploads are already chunked by the installed device's buffer limit.
@@ -1435,7 +1436,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
     let label = app.tr(current.label()).to_string();
     let bounded =
         celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some();
-    let width = ui.available_width().min(crate::theme::Tokens::get().form_card_width);
+    let width = ui.available_width().min(solidcraft_theme::Tokens::get().form_card_width);
     let choices = |ui: &mut egui::Ui| {
         for (method, handle) in [
             (ImageMethod::Raster, "render:method-raster"),
@@ -3061,7 +3062,7 @@ pub fn preview_size(executor: Option<&ExecutorDescriptor>, full: (u64, u64)) -> 
 fn preview_background(app: &SolveApp) -> Tokens {
     let view = &app.render_workspace.view;
     let tokens = Tokens::get();
-    if crate::theme::tab_surfaces_enabled()
+    if solidcraft_theme::tab_surfaces_enabled()
         && !app.session.doc.render.setups.contains_key(&view.name)
         && view.clean_setup.as_ref().is_some_and(|clean| clean.background == view.draft.background)
         && !view.transparent

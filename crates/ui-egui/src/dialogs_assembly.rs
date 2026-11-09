@@ -7,8 +7,8 @@
 
 use std::collections::HashSet;
 
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
 use serde_json::{Value, json};
@@ -26,7 +26,7 @@ use crate::preview::{Built, Colors};
 use crate::selection::{
     BODIES, EDGES, FACES, ORIGIN, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid,
 };
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 use crate::viewport::Proj;
 
@@ -1015,7 +1015,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.vertical(|ui| {
                     ui.label(
                         RichText::new(format!("{} … {}{}", fmt(lo), fmt(hi), if limited { "  (limits)" } else { "  (no limits)" }))
-                            .size(crate::theme::Tokens::get().font_small)
+                            .size(solidcraft_theme::Tokens::get().font_small)
                             .color(if limited { t.text } else { t.text_dim }),
                     );
                 });
@@ -1403,7 +1403,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     // Pairs closer than the clearance, nearest first.
     if !near.is_empty() {
         form_row(ui, "Too close", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(crate::theme::Tokens::get().text));
+            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for h in &near {
@@ -1415,7 +1415,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let nearest = r["nearest"].as_object().cloned().unwrap_or_default();
     if !nearest.is_empty() {
         form_row(ui, "Nearest", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(crate::theme::Tokens::get().text));
+            ui.label(RichText::new(solidcraft_ui_text::tr("ui.distance")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for (body, list) in &nearest {
@@ -1429,7 +1429,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     }
     if !hits.is_empty() {
         form_row(ui, "Interferes", |ui| {
-            ui.label(RichText::new(solidcraft_ui_text::tr_label("Volume")).semibold().color(crate::theme::Tokens::get().text));
+            ui.label(RichText::new(solidcraft_ui_text::tr_label("Volume")).semibold().color(solidcraft_theme::Tokens::get().text));
         });
     }
     for h in hits {
@@ -1957,7 +1957,7 @@ fn joint_group_button(
     at: egui::Pos2,
     count: usize,
     open: bool,
-    accent: crate::theme::TabAccent,
+    accent: solidcraft_theme::TabAccent,
     run: JointRun,
 ) -> (f32, bool) {
     let chip = crate::ui_kit::HistoryGroupChip {
@@ -2008,7 +2008,7 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
     }
     if grouped(app, joints.len()) {
         let open = joints_open(app, joints.len(), set);
-        let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
         let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
         if clicked {
             toggle_joints(app, set);
@@ -2083,7 +2083,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
                     let (rect, _) = ui.allocate_exact_size(vec2(t.form_section_icon_size, t.form_section_icon_size), egui::Sense::hover());
                     let fold = crate::ui_kit::disclosure_button_at(ui, rect, shown, &header);
                     let response = ui.add(
-                        egui::Label::new(egui::RichText::new(&header).size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim))
+                        egui::Label::new(egui::RichText::new(&header).size(solidcraft_theme::Tokens::get().font_micro).semibold().color(t.text_dim))
                             .sense(egui::Sense::click()),
                     );
                     crate::scenario::publish_handle("timeline:joints", response.rect.center());
@@ -2097,7 +2097,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
                 return;
             }
         } else {
-            ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+            ui.label(egui::RichText::new("JOINTS").size(solidcraft_theme::Tokens::get().font_micro).semibold().color(t.text_dim));
         }
     }
     let mut open = None;
@@ -2124,7 +2124,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
             egui::pos2(icon.right() + 7.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
             &name,
-            egui::FontId::proportional(crate::theme::Tokens::get().font_body),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             if suppressed { t.text_dim } else { t.text },
         );
         let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));

@@ -10,9 +10,9 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::browser::panel_pos;
-use crate::theme::Tokens;
 use crate::ui_kit;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut m) = app.tree.canvas_panel.clone() else { return };

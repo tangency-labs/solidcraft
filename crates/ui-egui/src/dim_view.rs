@@ -28,8 +28,8 @@ use solidcraft_engine::sketch::{
 };
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 pub(crate) mod window;
 
@@ -833,7 +833,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let tk = Tokens::get();
     let is_sel = |id: &str| app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { id: x } if x == id));
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(hit);
-    let font = FontId::monospace(crate::theme::Tokens::get().font_body);
+    let font = FontId::monospace(solidcraft_theme::Tokens::get().font_body);
     let centres = chain_centres(sk);
     let draft_sketch = draft.as_ref().and_then(|(_, d)| d.preview.sketch(d.sketch));
     let draft_centres = draft_sketch.map(|solved| chain_centres(&solved.sketch));
@@ -1189,7 +1189,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                     // or pinned the value, which began before the box sat there.
                     let settled = e.shown == Some(anchor);
                     e.owned |= settled && r.hovered() && ui.input(|i| i.pointer.any_pressed());
-                    crate::theme::TabAccent::number_focus(ui, &r);
+                    solidcraft_theme::TabAccent::number_focus(ui, &r);
                     if r.has_focus() {
                         e.selection = egui::TextEdit::load_state(ctx, id).and_then(|s| s.cursor.char_range());
                     }

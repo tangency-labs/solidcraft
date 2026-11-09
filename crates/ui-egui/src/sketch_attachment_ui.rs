@@ -10,8 +10,8 @@ use solidcraft_engine::doc::{EmbossFace, FaceAttachmentStatus, FeatureKind, Plan
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub struct Draft {

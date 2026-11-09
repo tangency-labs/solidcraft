@@ -1,0 +1,6 @@
+{
+  "unit": "nurbs.b_spline_surface_p2",
+  "cases": [
+    {"name": "fuzz00007_bad_index_count_4294967296", "origin": "fuzz-out/n2000/nurbs.b_spline_surface_p2/fuzz00007.json (crash: rust: killed by signal 6 (memory allocation of 34359738368 bytes failed))", "cpp": "harness: invalid argument: bad index/count 4294967296", "rust": "ok", "inputs": {"form": 2, "kt": 4, "op": "set_canon", "pts": [[4.0, 3.0, 0.411]], "this": {"srf": {"net": [[[0.177, -0.0538, 0.847, 1.48], [-0.269, 1.59, -0.612, 1.76]], [[1.28, 0.134, -0.203, 1.16], [1.77, 1.8, -0.143, 1.51]], [[1.14, -0.0618, -0.38, 0.535], [2.12, 0.864, 0.702, 1.02]], [[3.17, -0.016, 0.501, 1.08], [2.65, 0.692, -0.0286, 0.85]]], "p": 2, "q": 1, "u": [1.25, 1.25, 1.25, 1.68, 2.65, 2.65, 2.65], "v": [0.0, 0.0, 1.0, 1.0]}}, "ud": 3, "uk": [0.0, 0.29, 1.0], "um": [4, 0, 4], "vd": 3, "vk": [2.54], "vm": [4294967296]}}
+  ]
+}

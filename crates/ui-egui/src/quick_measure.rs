@@ -223,7 +223,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
     if rows.is_empty() || !view.is_finite() || !view.is_positive() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let font = egui::FontId::proportional(t.font_label);
     let pad = egui::vec2(t.space_8, t.space_4);

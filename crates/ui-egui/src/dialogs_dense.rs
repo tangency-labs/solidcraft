@@ -1160,7 +1160,7 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         } else {
             let text = crate::prefs::show_mm(app, d, 1);
             form_row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| {
-                let size = crate::theme::Tokens::get().form_close_size;
+                let size = solidcraft_theme::Tokens::get().form_close_size;
                 // The value keeps the room left of the button, so the button stays inside the row.
                 ui.scope(|ui| {
                     ui.set_max_width((ui.available_width() - size).max(0.0));

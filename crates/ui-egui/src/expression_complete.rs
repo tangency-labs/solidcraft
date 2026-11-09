@@ -4,7 +4,7 @@ use crate::ui_kit;
 use egui::Key;
 
 use crate::params_dialog::{every_parameter, exact_token, suggestions_for, unit_token, word_before};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone)]
 struct Popup {

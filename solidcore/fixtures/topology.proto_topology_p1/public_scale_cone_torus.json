@@ -1,0 +1,262 @@
+{
+  "cases": [
+    {
+      "name": "public_scale_cylinder_identity",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_cylinder": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2,
+            "height": 3
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_cylinder_nonuniform",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_cylinder": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2,
+            "height": 3
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_cylinder_reflection",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_cylinder": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radius": 2,
+            "height": 3
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_cone_identity",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_cone": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radii": [
+              2,
+              1
+            ],
+            "height": 3
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_cone_nonuniform",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_cone": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radii": [
+              2,
+              1
+            ],
+            "height": 3
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_cone_reflection",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_cone": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radii": [
+              2,
+              1
+            ],
+            "height": 3
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_torus_identity",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_torus": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radii": [
+              3,
+              1
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_torus_nonuniform",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_torus": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radii": [
+              3,
+              1
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              2,
+              3,
+              0.5
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "public_scale_torus_reflection",
+      "upstream_ref": "source/SM_API/src/SmApiPrimitives.cpp;source/SMLib/src/SmBrep.cpp:Transform;TurnToNURBS",
+      "inputs": {
+        "script": "scale_probe",
+        "obj": {
+          "primitive_torus": {
+            "origin": [
+              2,
+              3,
+              5
+            ],
+            "radii": [
+              3,
+              1
+            ]
+          }
+        },
+        "op": {
+          "scale": {
+            "s": [
+              -1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

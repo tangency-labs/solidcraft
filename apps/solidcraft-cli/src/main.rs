@@ -916,7 +916,7 @@ fn serve_mcp(
 /// The port of the running desktop app: the one its discovery file names, if something listens
 /// there (a file left by an app that crashed names a closed port).
 fn discover_app() -> Option<u16> {
-    let port = solidcraft_engine::control_auth::read_current_port()?;
+    let port = solidcraft_engine::control_auth::APP.read_current_port()?;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).ok().map(|_| port)
 }

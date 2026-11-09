@@ -1,6 +1,6 @@
 //! Shared image-comparison divider and corner chips. Geometry and ink use kit tokens.
-use crate::theme::Tokens;
 use egui::{Rect, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn comparison_position(position: f32) -> f32 {
     if position.is_finite() { position.clamp(0.05, 0.95) } else { 0.5 }
@@ -29,7 +29,7 @@ pub(crate) fn comparison_divider_chrome(ui: &Ui, canvas: Rect, position: f32) {
     let t = Tokens::get();
     let x = canvas.left() + canvas.width() * comparison_position(position);
     let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
-    let accent = crate::theme::TabAccent::current(ui.ctx());
+    let accent = solidcraft_theme::TabAccent::current(ui.ctx());
     painter.vline(x, canvas.y_range(), egui::Stroke::new(t.space_2, accent.ink));
     let handle = Rect::from_center_size(pos2(x, canvas.center().y), vec2(t.space_16, t.space_24 + t.space_8));
     painter.rect_filled(handle, t.control_radius, t.panel);

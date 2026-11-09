@@ -2,9 +2,9 @@
 //! never additional application viewports; every colour and control metric comes from tokens.
 pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
-use crate::theme::{ColorVision, Tokens};
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::{ColorVision, Tokens};
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
@@ -461,11 +461,15 @@ pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &
         let (rect, response) =
             ui.allocate_exact_size(vec2(dimension(ui.available_width()), if page { t.space_24 } else { t.space_16 + t.space_3 }), Sense::hover());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
-        paint_text(ui, rect, title, crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
+        paint_text(ui, rect, title, crate::ui_kit::type_face::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
         if let Some(tag) = tag {
             let width = ui
                 .painter()
-                .layout_no_wrap(title.to_owned(), crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink)
+                .layout_no_wrap(
+                    title.to_owned(),
+                    crate::ui_kit::type_face::semibold(if page { t.font_page_heading } else { t.font_intro }),
+                    t.form_ink,
+                )
                 .size()
                 .x;
             let start = (rect.left() + width + t.space_8).min(rect.right());
@@ -616,9 +620,9 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
         return;
     }
     let ink =
-        if warning { if crate::theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
+        if warning { if solidcraft_theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
     let fill = if warning { t.warning.gamma_multiply(0.1) } else { t.form_success_fill };
-    let galley = ui.painter().layout_no_wrap(text.to_owned(), crate::fonts::semibold(t.font_small), ink);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), ink);
     let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_16, t.space_24), Sense::hover());
     ui.painter().rect_filled(r, t.radius_xl, fill);
     ui.painter().galley(r.center() - galley.size() / 2.0, galley, ink);
@@ -704,7 +708,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         ui.painter(),
         label_rect,
         label,
-        if selected { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) },
+        if selected { crate::ui_kit::type_face::semibold(t.font_label) } else { FontId::proportional(t.font_label) },
         ink,
         if matches!(figure, PreferenceFigure::ContactShading(_)) { 2 } else { 1 },
     );
@@ -878,7 +882,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
         &p,
         button,
         solidcraft_ui_text::tr_label("OK"),
-        crate::fonts::semibold(t.font_label * scale),
+        crate::ui_kit::type_face::semibold(t.font_label * scale),
         if t.borders.bevel.is_some() { t.form_ink } else { t.on_accent },
     );
     let feature = Rect::from_min_size(origin + vec2(0.0, line_h + t.space_8 * scale), vec2(r.width() - t.space_10 * 2.0, line_h));
@@ -889,7 +893,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
         pos2(icon.right() + t.space_6 * scale, feature.center().y),
         egui::Align2::LEFT_CENTER,
         "Extrude1",
-        crate::fonts::semibold(t.font_label * scale),
+        crate::ui_kit::type_face::semibold(t.font_label * scale),
         t.selected_ink,
     );
     p.text(feature.right_center() - vec2(t.space_8, 0.0), egui::Align2::RIGHT_CENTER, "12.5 mm", font, t.selected_ink);
@@ -976,7 +980,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
         return;
     }
     let t = Tokens::get();
-    let colours = Tokens::themed(crate::theme::is_dark(), mode);
+    let colours = Tokens::themed(solidcraft_theme::is_dark(), mode);
     ui.horizontal_wrapped(|ui| {
         for (label, icon, fill) in [
             ("prefs.status_selected", "finish", colours.form_primary),
@@ -984,9 +988,9 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             ("prefs.status_error", "close", colours.error),
             ("prefs.status_done", "finish", colours.form_success),
         ] {
-            let ink = if crate::theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
+            let ink = if solidcraft_theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
             let label = solidcraft_ui_text::tr(label);
-            let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::fonts::semibold(t.font_small), ink);
+            let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), ink);
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
             solidcraft_ui_registry::publish_rect(&format!("prefs:status_sample:{label}"), r);
             ui.painter().rect_filled(r, t.radius_xl, fill);

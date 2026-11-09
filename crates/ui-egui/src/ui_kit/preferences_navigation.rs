@@ -2,9 +2,9 @@
 pub(crate) use super::preferences_figure_data::{paint_orbit_centre, paint_orbit_cursor, paint_orbit_origin};
 pub(crate) use super::preferences_figure_ops::{NavigatorAxis, paint_navigation_axes, paint_navigation_cube, paint_navigation_custom};
 use super::{metrics::dimension, text::paint_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// One mouse silhouette beside the actual mapping selector and binding legend.
 /// The figure is descriptive content, not an icon asset or an application viewport.
@@ -68,12 +68,12 @@ pub(crate) fn settings_axis_header(ui: &mut Ui) {
         let half = rect.width() * 0.5;
         for (index, label) in ["prefs.axis", "prefs.live_input"].into_iter().enumerate() {
             let cell = Rect::from_min_size(rect.min + vec2(half * index as f32, 0.0), vec2(half, rect.height()));
-            paint_text(ui, cell, &solidcraft_ui_text::tr(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, false);
+            paint_text(ui, cell, &solidcraft_ui_text::tr(label).to_uppercase(), crate::ui_kit::type_face::semibold(t.font_small), t.form_dim, false);
         }
         return;
     }
     for (column, label) in axis_columns(rect).into_iter().zip(["prefs.axis", "prefs.live_input", "", "prefs.speed", "prefs.source"]) {
-        paint_text(ui, column, &solidcraft_ui_text::tr(label).to_uppercase(), crate::fonts::semibold(t.font_small), t.form_dim, false);
+        paint_text(ui, column, &solidcraft_ui_text::tr(label).to_uppercase(), crate::ui_kit::type_face::semibold(t.font_small), t.form_dim, false);
     }
 }
 

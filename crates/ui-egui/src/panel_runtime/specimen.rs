@@ -373,7 +373,7 @@ impl PanelController for VisibleSpecimen {
         }
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         let rows = if self.editor { 7.0 } else { 5.0 };
         Ok(Arc::new(SpecimenMetrics {
             // The actual body below uses fixed-height truncated labels and a
@@ -400,7 +400,7 @@ impl PanelController for VisibleSpecimen {
                 let mut focus_result = Ok(());
                 egui::ScrollArea::vertical().id_salt(("specimen-body", &self.key.instance.0)).show(ui, |ui| {
                     result = self.probe.edit(&self.key, |state| {
-                        let t = crate::theme::Tokens::get();
+                        let t = solidcraft_theme::Tokens::get();
                         ui.spacing_mut().item_spacing.y = t.space_4;
                         ui.spacing_mut().interact_size.y = t.control_height;
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);

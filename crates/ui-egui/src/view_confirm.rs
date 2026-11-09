@@ -10,8 +10,8 @@ use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{Action, Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// Each target's side: large enough to hit without aiming.
 const TARGET: f32 = 40.0;

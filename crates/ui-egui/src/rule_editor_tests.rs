@@ -1,6 +1,7 @@
 //! Freeze rule-manager commands, reload policy and published row/control identities.
-use crate::{SolveApp, dialogs::Kind, dialogs_plastic::Pl, dialogs_sheet::Sm, scenario, theme::Tokens};
+use crate::{SolveApp, dialogs::Kind, dialogs_plastic::Pl, dialogs_sheet::Sm, scenario};
 use serde_json::{Value, json};
+use solidcraft_theme::Tokens;
 
 const SHEET_ROWS: &[&str] = &[
     "Rule",

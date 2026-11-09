@@ -1,0 +1,521 @@
+{
+ "cases": [
+  {
+   "name": "read_ascii_empty",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "0 SmCompositeCurve Segment Count\n1 SmCompositeCurve Closed Flag\n"
+   }
+  },
+  {
+   "name": "read_ascii_no_curve",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n2 t\n1 s\n0 g\n0 g\n0 has\nHas No Copy\n"
+   }
+  },
+  {
+   "name": "read_ascii_bad_type",
+   "inputs": {
+    "op": "read_db",
+    "dim": 3,
+    "binary": false,
+    "version": 42,
+    "text": "1 count\n0 closed\n2 t\n1 s\n0 g\n0 g\n1 has\n conv\nObject Type 99999\nCurve Dim 3\n"
+   }
+  },
+  {
+   "name": "read_binary_empty",
+   "inputs": {
+    "op": "read_db",
+    "dim": 2,
+    "binary": true,
+    "version": 42,
+    "bytes": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "check_bow_no_origs",
+   "inputs": {
+    "op": "check_bow",
+    "offs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "dist": 0.5,
+    "tol": 0.001,
+    "origs": []
+   }
+  },
+  {
+   "name": "check_bow_no_offs",
+   "inputs": {
+    "op": "check_bow",
+    "offs": [],
+    "dist": 0.5,
+    "tol": 0.001,
+    "origs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "check_bow_closed",
+   "inputs": {
+    "op": "check_bow",
+    "offs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     }
+    ],
+    "dist": 0.5,
+    "tol": 0.001,
+    "origs": [
+     {
+      "segment": {
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      }
+     },
+     {
+      "segment": {
+       "a": [
+        1,
+        1,
+        0
+       ],
+       "b": [
+        0,
+        0,
+        0
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "fix_bow_no_points",
+   "inputs": {
+    "op": "fix_bow",
+    "curve": {
+     "segment": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "points": [],
+    "dist": 0.5,
+    "breaks": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "fix_bow_circle_hits",
+   "inputs": {
+    "op": "fix_bow",
+    "curve": {
+     "segment": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "points": [
+     [
+      0.5,
+      0.3,
+      0
+     ]
+    ],
+    "dist": 0.5,
+    "breaks": [
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "offsets_bad_direction",
+   "inputs": {
+    "op": "offsets",
+    "comps": [
+     {
+      "dim": 3,
+      "closed": true,
+      "curves": [
+       {
+        "segment": {
+         "a": [
+          -5,
+          -3,
+          0
+         ],
+         "b": [
+          5,
+          -3,
+          0
+         ]
+        }
+       },
+       {
+        "segment": {
+         "a": [
+          5,
+          -3,
+          0
+         ],
+         "b": [
+          5,
+          3,
+          0
+         ]
+        }
+       },
+       {
+        "segment": {
+         "a": [
+          5,
+          3,
+          0
+         ],
+         "b": [
+          -5,
+          3,
+          0
+         ]
+        }
+       },
+       {
+        "segment": {
+         "a": [
+          -5,
+          3,
+          0
+         ],
+         "b": [
+          -5,
+          -3,
+          0
+         ]
+        }
+       }
+      ]
+     }
+    ],
+    "dirs": [
+     0
+    ],
+    "params": {
+     "xtol": 0.001,
+     "atol": 0.001,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "corner": 0,
+     "trim": true,
+     "dist": 0.5
+    }
+   }
+  },
+  {
+   "name": "offsets_empty_composite",
+   "inputs": {
+    "op": "offsets",
+    "comps": [
+     {
+      "dim": 3,
+      "closed": false,
+      "curves": []
+     }
+    ],
+    "dirs": [
+     1
+    ],
+    "params": {
+     "xtol": 0.001,
+     "atol": 0.001,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "corner": 0,
+     "trim": true,
+     "dist": 0.5
+    }
+   }
+  },
+  {
+   "name": "nurb_disconnected",
+   "inputs": {
+    "op": "nurb",
+    "comp": {
+     "dim": 3,
+     "closed": false,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         0,
+         0,
+         0
+        ],
+        "b": [
+         1,
+         0,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         2,
+         0,
+         0
+        ],
+        "b": [
+         3,
+         0,
+         0
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "nurb_reversed_sense",
+   "inputs": {
+    "op": "nurb",
+    "comp": {
+     "dim": 3,
+     "closed": false,
+     "curves": [
+      {
+       "segment": {
+        "a": [
+         0,
+         0,
+         0
+        ],
+        "b": [
+         1,
+         0,
+         0
+        ]
+       }
+      },
+      {
+       "segment": {
+        "a": [
+         2,
+         0,
+         0
+        ],
+        "b": [
+         1,
+         0,
+         0
+        ]
+       }
+      }
+     ],
+     "senses": [
+      true,
+      false
+     ]
+    }
+   }
+  },
+  {
+   "name": "trimmed_circle_degenerate_inward",
+   "inputs": {
+    "op": "trimmed",
+    "comp": {
+     "dim": 3,
+     "closed": true,
+     "curves": [
+      {
+       "circle": {
+        "center": [
+         0,
+         0,
+         0
+        ],
+        "x": [
+         1,
+         0,
+         0
+        ],
+        "y": [
+         0,
+         1,
+         0
+        ],
+        "radius": 1.0,
+        "a0": 0.0,
+        "a1": 360.0
+       }
+      }
+     ]
+    },
+    "direction": 1,
+    "params": {
+     "xtol": 0.001,
+     "atol": 0.001,
+     "normal": [
+      0,
+      0,
+      1
+     ],
+     "corner": 1,
+     "trim": true,
+     "dist": 1.0
+    }
+   }
+  },
+  {
+   "name": "misc_attribute_and_segment",
+   "inputs": {
+    "op": "misc",
+    "id": 102,
+    "corner": true,
+    "left": true,
+    "comp": 3,
+    "curve": 4,
+    "other": 5,
+    "err": 0.125,
+    "seg": {
+     "segment": {
+      "a": [
+       0,
+       0,
+       0
+      ],
+      "b": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "sense": false,
+    "g0": 0.5,
+    "g1": 0.75
+   }
+  }
+ ]
+}

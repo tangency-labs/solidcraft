@@ -3,9 +3,9 @@
 //! every colour comes from `Tokens`. A card sizes to the width its container gives it and its
 //! figure keeps the figure's aspect ratio.
 use super::{metrics::dimension, preferences::centred_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// How a card or tile looks in a state. Kept separate from painting so the state rules can be tested.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -155,7 +155,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
         CardInk::Accent => t.selected_ink,
         CardInk::Text => t.form_ink,
     };
-    let font = if look.bold { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
+    let font = if look.bold { crate::ui_kit::type_face::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_2, figure.bottom() + gap(&t)), vec2((rect.width() - 2.0 * t.space_2).max(0.0), t.space_16));
     centred_text(p, label_rect, card.label, font, dim(ink));
@@ -360,7 +360,7 @@ pub(crate) fn preset_card(
     icon(p, Rect::from_center_size(box_rect.center(), box_rect.size() * 0.55), dim(box_ink));
     let text_left = box_rect.right() + t.space_12;
     let text_width = (rect.right() - t.space_14 - t.space_24 - text_left).max(0.0);
-    let name_font = crate::fonts::semibold(t.font_heading.min(t.font_subtitle));
+    let name_font = crate::ui_kit::type_face::semibold(t.font_heading.min(t.font_subtitle));
     let name_ink = if selected { t.selected_ink } else { t.form_ink };
     let name_rect = Rect::from_min_size(pos2(text_left, rect.center().y - t.space_16), vec2(text_width, t.space_16));
     super::text::paint_text(ui, name_rect, name, name_font, dim(name_ink), false);
@@ -425,7 +425,7 @@ pub(crate) fn settings_plugin_card(
         let version_galley = ui.painter().layout_no_wrap(version.into(), FontId::proportional(t.font_small), t.form_dim);
         let title = ui.painter().layout(
             name.into(),
-            crate::fonts::semibold(t.font_button),
+            crate::ui_kit::type_face::semibold(t.font_button),
             t.form_ink,
             (text_width - version_galley.size().x - t.space_8).max(1.0),
         );

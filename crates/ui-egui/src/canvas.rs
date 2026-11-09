@@ -16,8 +16,8 @@ use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
-use crate::theme::Tokens;
 use crate::viewport::{Proj, projected_polygon};
+use solidcraft_theme::Tokens;
 
 /// Where the dialog's geometry is: a base point and, for values that can be dragged, the
 /// direction a growing value points.
@@ -955,7 +955,9 @@ fn value_box_full(
         let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
         Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                ui.label(
+                    egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption),
+                );
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
@@ -966,7 +968,7 @@ fn value_box_full(
                     st.store(ui.ctx(), id);
                 }
                 if let Some(note) = note {
-                    ui.label(egui::RichText::new(note).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                    ui.label(egui::RichText::new(note).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                 }
                 field = Some(r.rect);
             });
@@ -1502,7 +1504,8 @@ fn measure_line(
         painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
     }
     let mid = sa + (sb - sa) * 0.5;
-    let galley = painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
+    let galley =
+        painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label), t.text);
     let own = egui::Rect::from_min_size(mid + vec2(10.0, -14.0), galley.size() + vec2(10.0, 6.0));
     let rect = moved_label(proj, own, labels.offset(0));
     pick_numbers(painter, sa, sb, rect);
@@ -1601,7 +1604,7 @@ fn measure_components(
             (total.center(), vec2(20.0, 20.0))
         };
         let text = format!("{}: {}", axis.to_uppercase(), crate::prefs::show_mm(app, distance, 1));
-        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label), t.text);
         let size = galley.size() + vec2(10.0, 6.0);
         let bounds = proj.rect.shrink(4.0);
         let clamp = |rect: egui::Rect| {

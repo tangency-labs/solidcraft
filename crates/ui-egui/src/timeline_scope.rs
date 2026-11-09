@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use egui::{Painter, Rect, Sense, pos2, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// A step's name is cut at this width (its tooltip has it whole).
 const STEP_MAX: f32 = 120.0;
@@ -256,7 +256,7 @@ fn step_button(app: &mut SolveApp, ui: &mut egui::Ui, p: &Painter, x: f32, r: Re
         Step::More(_) => false,
     };
     let name = step_name(app, step);
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
     let galley = p.layout_no_wrap(name.clone(), egui::FontId::proportional(t.font_small), t.text_dim);
     let size = vec2(galley.size().x.min(STEP_MAX) + 2.0 * t.space_4, t.space_24);
     let rect = Rect::from_min_size(pos2(x, r.center().y - t.space_24 / 2.0), size);

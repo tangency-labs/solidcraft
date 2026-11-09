@@ -1384,7 +1384,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ReloadCloud => "import",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
-        .cards(((cover.width() - 16.0) / crate::theme::Tokens::get().form_card_width).clamp(0.5, 1.3))
+        .cards(((cover.width() - 16.0) / solidcraft_theme::Tokens::get().form_card_width).clamp(0.5, 1.3))
         .placed(egui::Align2::CENTER_TOP, top)
         .actions("", solidcraft_ui_text::tr("ui.cancel"), None)
         .show(ctx, true, |ui| {
