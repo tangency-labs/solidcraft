@@ -1052,7 +1052,7 @@ fn export_to(
             &name,
             &s.doc.metadata,
             quality,
-            export_thumbnail(s, format).as_deref(),
+            export_thumbnail(s, format, bodies).as_deref(),
         )?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -1062,8 +1062,8 @@ fn export_to(
 }
 
 /// A picture of the part, drawn only for a format that has a place for it.
-fn export_thumbnail(s: &Session, format: Format) -> Option<Vec<u8>> {
-    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s)).flatten()
+fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
+    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
 }
 
 /// [`export_to`] for a mesh file a slicer is sent (STL or 3MF): each body laid on its print face.
@@ -1079,7 +1079,7 @@ fn export_laid_to(
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
-    let thumbnail = export_thumbnail(s, format);
+    let thumbnail = export_thumbnail(s, format, bodies);
     let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply = SaveMeshResult {

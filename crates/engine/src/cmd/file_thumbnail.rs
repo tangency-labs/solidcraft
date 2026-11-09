@@ -4,7 +4,7 @@ use solidcraft_geom::Aabb3;
 use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
-    let (scene, camera) = scene(s, HOME_ZOOM)?;
+    let (scene, camera) = scene(s, HOME_ZOOM, None)?;
     let [width, height] = solidcraft_io::THUMBNAIL_SIZE;
     // Drawn by the renderer the host installed (the GPU); none installed, no thumbnail.
     let renderer = crate::capture::installed()?;
@@ -17,14 +17,11 @@ const HOME_ZOOM: f64 = 0.7;
 /// The side of a mesh export's square thumbnail, as slicers write theirs.
 const EXPORT_SIZE: u32 = 512;
 
-/// A mesh export's thumbnail: the same scene, fitted whole into a square, on a transparent background.
-pub(super) fn exported(s: &Session) -> Option<Vec<u8>> {
-    // A headless export has drawn nothing yet, so warm the display meshes the scene reads; the export tessellates anyway.
-    for body in s.world_state().ok()?.bodies.iter().filter(|b| s.body_visible(&b.name)) {
-        body.mesh();
-    }
-    let (mut scene, camera) = scene(s, 1.0)?;
+/// A mesh export's thumbnail of the exported `bodies` (none named, every shown body), fitted whole
+/// into a square, on a transparent background.
+pub(super) fn exported(s: &Session, bodies: &[String]) -> Option<Vec<u8>> {
     let renderer = crate::capture::installed()?;
+    let (mut scene, camera) = scene(s, 1.0, Some(bodies))?;
     let rgba = transparent(&*renderer, &mut scene, &camera, EXPORT_SIZE)?;
     solidcraft_render::png(EXPORT_SIZE as usize, EXPORT_SIZE as usize, rgba)
 }
@@ -41,9 +38,10 @@ fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &
     Some(over_white)
 }
 
-/// What the thumbnail shows: the shown bodies' warm display meshes in their colours, iso, fitted
-/// with the distance scaled by `zoom`.
-fn scene(s: &Session, zoom: f64) -> Option<(Scene, Camera)> {
+/// What the thumbnail shows, in the bodies' colours, iso, fitted with the distance scaled by `zoom`.
+/// Saved (`exported` is None): the shown bodies' warm display meshes only. Exported: the exported
+/// bodies (none named, every shown body), meshed here when cold, as a headless export has drawn nothing.
+fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, Camera)> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
@@ -55,8 +53,12 @@ fn scene(s: &Session, zoom: f64) -> Option<(Scene, Camera)> {
     let mut bounds = Aabb3::EMPTY;
     let mut triangles = 0usize;
     let mut points = 0usize;
-    for body in world.bodies.iter().filter(|b| s.body_visible(&b.name)) {
-        let mesh = body.cached_mesh()?;
+    let pictured = |name: &String| match exported {
+        Some(bodies) if !bodies.is_empty() => bodies.contains(name),
+        _ => s.body_visible(name),
+    };
+    for body in world.bodies.iter().filter(|b| pictured(&b.name)) {
+        let mesh = if exported.is_some() { body.mesh() } else { body.cached_mesh()? };
         triangles = triangles.saturating_add(mesh.triangles.len());
         points = points.saturating_add(mesh.positions.len());
         if triangles > 100_000 || points > 100_000 {
@@ -97,7 +99,7 @@ mod tests {
         for body in &world.bodies {
             body.mesh();
         }
-        assert_eq!(scene(&session, HOME_ZOOM).unwrap().0.meshes.len(), 1, "the hidden body is not in the picture");
+        assert_eq!(scene(&session, HOME_ZOOM, None).unwrap().0.meshes.len(), 1, "the hidden body is not in the picture");
         let expected = saved(&session).unwrap();
         let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         let doc = solidcraft_io::read_design(&bytes).unwrap();
@@ -140,7 +142,7 @@ mod tests {
         for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
-        let (scene, camera) = scene(&session, HOME_ZOOM).unwrap();
+        let (scene, camera) = scene(&session, HOME_ZOOM, None).unwrap();
         assert!(crate::capture::png_with(None, &scene, &camera, 240, 150).is_err());
     }
 
@@ -152,7 +154,7 @@ mod tests {
         for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
-        let (mut scene, camera) = scene(&session, 1.0).unwrap();
+        let (mut scene, camera) = scene(&session, 1.0, Some(&[])).unwrap();
         // The backdrop everywhere but the first pixel, which is the part in mid grey.
         let renderer = |scene: &Scene, _: &Camera, w: u32, h: u32| {
             let (Rgb(r, g, b), _) = scene.background.unwrap();
@@ -164,5 +166,16 @@ mod tests {
         assert_eq!(rgba.len(), 4 * 4 * 4);
         assert_eq!(rgba[..4], [128, 128, 128, 255], "the part stays opaque");
         assert!(rgba[4..].chunks(4).all(|pixel| pixel[3] == 0), "the background is transparent");
+    }
+
+    /// #9449: a selected-body export pictures only those bodies, meshing them even when cold.
+    #[test]
+    fn an_export_thumbnail_shows_only_the_exported_bodies() {
+        let mut session = Session::default();
+        session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30,"body_name":"Exported"})).unwrap();
+        session.execute("solid.box", &serde_json::json!({"length":100,"width":100,"height":100,"body_name":"Omitted"})).unwrap();
+        let exported = ["Exported".to_string()];
+        assert_eq!(scene(&session, 1.0, Some(&exported)).unwrap().0.meshes.len(), 1, "the omitted body is not in the picture");
+        assert_eq!(scene(&session, 1.0, Some(&[])).unwrap().0.meshes.len(), 2, "no selection exports every shown body");
     }
 }
