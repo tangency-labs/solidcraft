@@ -119,7 +119,8 @@ falls back to the edge's own value, then the feature's.
   and end relief. Where the two stretches bend to opposite sides the blank is cut along their
   junction, from the inner bend line out to the nearer stretch's far edge, in the flat pattern and
   the DXF: a blank joined there cannot fold, one stretch up and the next down. Stretches at
-  different angles have different setbacks, so their bend lines are offset; the cut starts at the
+  different angles can have different setbacks, depending on the rule's position (`inside` sets
+  the bend line back, `outside` does not), so their bend lines can be offset; the cut starts at the
   inner of the two and so covers the strip between them, over which the folded part separates, and
   its outer end is the nearer far edge, past which only the longer stretch's material remains.
   Where a cut-out took that
@@ -130,7 +131,9 @@ falls back to the edge's own value, then the feature's.
   line out to the junction's own tip belongs to that junction: past the tip the line runs on through
   material the bend never reaches (another arm of a C-shaped blank, for one), and that material keeps
   no cut. A junction with no material left outward of
-  the bend line has nothing to part and is left alone. Same-side stretches stay
+  the bend line has nothing to part and is left alone. The slit is zero-width, so the DXF carries
+  two coincident outline lines there: a cutter may follow both, so check the toolpath before
+  cutting and tell the shop. Same-side stretches stay
   one piece. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
   stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
   (its angle and height do not build), so the bends still tile the edge with nothing left uncovered,

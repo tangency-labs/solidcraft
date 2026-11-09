@@ -688,7 +688,7 @@ pub(super) fn sheet_eval(
                     if j == 0 && seg.from > sheet::SEGMENT_JOIN_EPS {
                         return Err(DocError::Invalid(format!("edges[{k}].segments[0].from must be 0: the segments cover the whole edge")));
                     }
-                    if j > 0 && seg.from - prev_to > sheet::SEGMENT_JOIN_EPS {
+                    if j > 0 && (seg.from - prev_to).abs() > sheet::SEGMENT_JOIN_EPS {
                         return Err(DocError::Invalid(format!(
                             "edges[{k}].segments[{j}].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)"
                         )));

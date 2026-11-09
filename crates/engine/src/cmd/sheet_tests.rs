@@ -7480,12 +7480,17 @@ fn flange_segments_a_sliver_only_edge_builds_the_whole_edge() {
 /// #5928). A list of slivers only is still the fallback below: it builds the edge whole.
 #[test]
 fn flange_segments_stored_bounds_outside_the_partition_are_refused() {
-    let cases: [(&str, [(f64, f64); 2], &str); 4] = [
+    let cases: [(&str, [(f64, f64); 2], &str); 5] = [
         ("from past the edge", [(0.0, 0.5), (2.0, 1.0)], "edges[0].segments[1].from must be a fraction from 0 to 1"),
         ("to past the edge", [(0.0, 0.5), (0.5, 1.5)], "edges[0].segments[1].to must be a fraction from 0 to 1"),
         (
             "a gap wider than the junction tolerance",
             [(0.0, 0.4), (0.5, 1.0)],
+            "edges[0].segments[1].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)",
+        ),
+        (
+            "an overlap wider than the junction tolerance",
+            [(0.0, 0.6), (0.5, 1.0)],
             "edges[0].segments[1].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)",
         ),
         ("short of the edge's end", [(0.0, 0.5), (0.5, 0.9)], "edges[0].segments[1].to must be 1: the segments cover the whole edge"),

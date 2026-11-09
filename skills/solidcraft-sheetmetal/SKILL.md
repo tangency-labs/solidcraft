@@ -27,7 +27,7 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 
 ## Verify
 - `sheet.flat_pattern` and `sheet.export_bend_table {"format":"json"}` give the flat size, outline, each bend's centre line, length and allowance: check where a segment landed.
-- `measure` must match the flat area times thickness; a bend that leaves the volume unchanged has not built.
+- `measure` must match the flat area times thickness; a bend that leaves the volume unchanged has not built, unless it turns the other way.
 - `inspect.interference`/`inspect.clearance` against mating bodies; `screenshot {"source":"model","view":"iso"}`.
 
 ## The AI workflow (FR-17 to FR-20)
