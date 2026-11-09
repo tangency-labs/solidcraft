@@ -122,6 +122,7 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
     h.frames(30);
     h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    h.frames(30);
     assert!(h.app.menu.rename.as_ref().is_some_and(|r| r.inline), "B's row is being renamed");
     h.step(&json!({"text":"A"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
@@ -305,6 +306,7 @@ fn browser_name_rows_rename_on_a_delayed_second_click() {
     assert!(h.app.menu.rename.is_none(), "the first click only selects the body");
     h.frames(30);
     h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    h.frames(30);
     assert!(matches!(
         h.app.menu.rename.as_ref(),
         Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Body(name), inline: true, .. }) if name == "One"
@@ -317,6 +319,7 @@ fn browser_name_rows_rename_on_a_delayed_second_click() {
     assert!(h.app.menu.rename.is_none(), "the first click only selects the feature");
     h.frames(30);
     h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    h.frames(30);
     assert!(matches!(
         h.app.menu.rename.as_ref(),
         Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(id), inline: true, .. }) if *id == feature
@@ -343,6 +346,7 @@ fn a_construction_row_renames_on_a_delayed_second_click() {
     assert!(h.app.menu.rename.is_none(), "the first click only selects the plane");
     h.frames(30);
     h.step(&json!({"click":{"handle":row}})).unwrap();
+    h.frames(30);
     assert!(
         matches!(h.app.menu.rename.as_ref(), Some(crate::context_menu::Rename { inline: true, .. })),
         "{:?}",
@@ -362,6 +366,7 @@ fn browser_sketch_rename_stays_inline() {
     assert!(h.app.menu.rename.is_none(), "the first click only selects the sketch");
     h.frames(30);
     h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    h.frames(30);
     assert!(matches!(
         h.app.menu.rename.as_ref(),
         Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(_), inline: true, .. })
@@ -2305,4 +2310,31 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     assert_eq!(h.app.tree.timeline_reveal, Some(feature), "the request returns to A before ordinary target pruning");
     semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
     assert_no_pending_reveals(&h);
+}
+
+/// #7533: the first click of a double-click that comes a little after a click on the same name
+/// does not rename it; the double-click edits the feature, and a rename waits out the
+/// double-click delay.
+#[test]
+fn a_double_click_after_a_slow_click_edits_instead_of_renaming() {
+    let mut h = Harness::new();
+    let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+    let row = json!({"handle": format!("row:browser-feature:c0:{feature}")});
+    h.step(&json!({"click": row})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click": row})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the rename waits out the double-click delay");
+    h.step(&json!({"click": row, "double": true})).unwrap();
+    h.frames(30);
+    assert!(h.app.menu.rename.is_none(), "a double-click drops the held rename");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the double-click edits the feature");
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(40);
+    // A double-click a while after an earlier double-click edits again.
+    h.step(&json!({"click": row, "double": true})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+    assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == feature)), "the second double-click edits too");
 }

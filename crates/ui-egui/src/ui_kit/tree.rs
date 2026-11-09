@@ -37,6 +37,9 @@ pub(crate) struct Row<'a> {
     /// The label is a name someone gave (a body, sketch, component, …): it is shown as typed,
     /// not translated when it happens to match a UI label.
     pub(crate) name: bool,
+    /// A slower second click on the label renames the row (the caller handles
+    /// [`RowResp::slow_rename`]); the click is held back for the double-click delay.
+    pub(crate) rename: bool,
     pub(crate) selected: bool,
     pub(crate) dim: bool,
     /// What Cut has marked, until Paste moves it: the row has a dashed outline.

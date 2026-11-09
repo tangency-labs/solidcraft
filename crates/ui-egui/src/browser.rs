@@ -771,7 +771,15 @@ fn compact_tree(ui: &egui::Ui) -> bool {
 
 /// Where tree rows put their eye this frame (Preferences › Interface, #8718).
 pub(crate) fn publish_row_prefs(app: &SolveApp, ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left));
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left);
+        d.insert_temp(egui::Id::unique("sc_tree_dialog_open"), app.dialog.is_some());
+    });
+}
+
+/// With a dialog open a second click on a row picks again, so it never waits to rename.
+fn dialog_open(ui: &egui::Ui) -> bool {
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_dialog_open"))).unwrap_or(false)
 }
 
 fn eye_left(ui: &egui::Ui) -> bool {
@@ -790,34 +798,64 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowRes
     let clicked = out.resp.as_ref().is_some_and(|resp| resp.clicked());
     // Only a plain click: Ctrl and Shift keep adding to and extending the selection.
     let plain = !ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
-    out.slow_rename = slow_rename_click(ui, id, clicked, row.name && out.clicked && plain);
+    let name_click = row.rename && out.clicked && !out.double && plain && !dialog_open(ui);
+    out.slow_rename = slow_rename_click(ui, id, clicked, name_click, &mut out);
     out
 }
 
 /// A second click on the same name later than this is a new gesture, not a rename.
 const SLOW_RENAME_WINDOW: f64 = 3.0;
 
-fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, is_name: bool) -> bool {
+/// A slower second click on a row's name renames it, once the double-click delay has passed
+/// with no further click: the click is held back until then, so the first click of a
+/// double-click never starts a rename and the double-click keeps editing or opening the row.
+/// The held click comes back as `clicked` with `slow_rename` set. A double-click, or a press
+/// anywhere else, drops it.
+fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, name_click: bool, out: &mut RowResp) -> bool {
+    let last_key = egui::Id::unique("sc_browser_last_name_click");
+    let pending_key = egui::Id::unique("sc_browser_pending_rename");
+    let now = ui.input(|i| i.time);
+    if !now.is_finite() {
+        return false;
+    }
+    let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
+    let pressed = ui.input(|i| i.pointer.any_pressed());
+    // (row, due, made)
+    if let Some((pending_row, due, made)) = ui.ctx().data(|data| data.get_temp::<(egui::Id, f64, f64)>(pending_key)) {
+        let stale = !(due.is_finite() && made.is_finite()) || now > due + SLOW_RENAME_WINDOW;
+        if stale || (pressed && now > made) || (pending_row == row && out.double) {
+            ui.ctx().data_mut(|data| data.remove::<(egui::Id, f64, f64)>(pending_key));
+        } else if pending_row == row {
+            if now >= due {
+                ui.ctx().data_mut(|data| data.remove::<(egui::Id, f64, f64)>(pending_key));
+                out.clicked = true;
+                return true;
+            }
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).clamp(0.0, SLOW_RENAME_WINDOW)));
+        }
+    }
     if !clicked {
         return false;
     }
-    let key = egui::Id::unique("sc_browser_last_name_click");
-    let now = ui.input(|i| i.time);
-    let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
     let previous = ui.ctx().data_mut(|data| {
-        let previous = data.get_persisted::<(egui::Id, f64, bool)>(key);
-        data.insert_persisted(key, (row, now, is_name));
+        let previous = data.get_persisted::<(egui::Id, f64, bool)>(last_key);
+        data.insert_persisted(last_key, (row, now, name_click));
         previous
     });
-    is_name
-        && now.is_finite()
+    let slow = name_click
         && previous.is_some_and(|(previous_row, previous_time, previous_was_name)| {
             previous_row == row
                 && previous_was_name
                 && previous_time.is_finite()
                 && now - previous_time > delay
                 && now - previous_time <= SLOW_RENAME_WINDOW
-        })
+        });
+    if slow {
+        ui.ctx().data_mut(|data| data.insert_temp(pending_key, (row, now + delay, now)));
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(delay.clamp(0.0, SLOW_RENAME_WINDOW)));
+        out.clicked = false;
+    }
+    false
 }
 
 /// A Ctrl/Shift-aware click on a selectable row.
@@ -1807,6 +1845,7 @@ fn component_rows_inner(
         icon: "component",
         label: name,
         name: true,
+        rename: true,
         selected: app.tree.picked_components.contains(&id),
         dim: faded,
         radio: Some(active),
@@ -1981,6 +2020,7 @@ fn occurrence_rows_inner(
             secondary: &appearance.name,
             count: &appearance.count,
             name: true,
+            rename: true,
             selected,
             dim: faded || !visible,
             cut,
@@ -2304,7 +2344,7 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         let r = draw_row(
             ui,
             ui.scope_id().with(("view", &name)),
-            &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, ..Default::default() },
+            &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, rename: true, ..Default::default() },
         );
         if r.slow_rename {
             start_inline_rename(app, crate::context_menu::RenameWhat::View(name.clone()), &r);
@@ -2488,6 +2528,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 icon: "canvas",
                 label: &name,
                 name: true,
+                rename: true,
                 selected,
                 dim: !visible || !shown,
                 badges,
@@ -3090,6 +3131,7 @@ fn folder_level(
                 icon: if render { "" } else { "folder" },
                 label,
                 name: true,
+                rename: true,
                 dim: group_faded || (render && !gopen),
                 count: &count,
                 mark: if acts.lit.any() { acts.lit.branch(app, group.entries()) } else { Mark::None },
@@ -3289,6 +3331,7 @@ fn entry_row(
             kind_tip: e.tip,
             label: &e.label,
             name: true,
+            rename: true,
             selected,
             dim: !visible || parent_hidden,
             cut,

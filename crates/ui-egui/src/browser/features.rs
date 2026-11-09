@@ -330,6 +330,7 @@ fn feature_row(
             icon,
             label: &label,
             name: true,
+            rename: true,
             selected,
             dim: dim || (!is_sketch && eye == Some(false)),
             cut,
