@@ -406,7 +406,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
     work_plane.extend_from_slice(b"261");
     work_plane.extend_from_slice(&55u32.to_le_bytes());
     bytes.extend_from_slice(&work_plane);
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &scope,
@@ -444,7 +444,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &extended_scope,
@@ -482,7 +482,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &direct_scope,
@@ -517,7 +517,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &extended_direct_scope,
@@ -555,12 +555,13 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, inferred_axes) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &large_direct_scope,
     )
     .expect("large direct WorkPlane frame");
+    assert_eq!(inferred_axes, [0x4d, 0x90]);
     assert_eq!(decoded.transform, transform.try_into().unwrap());
     assert_eq!(
         decoded.transform_offset,
@@ -608,7 +609,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
     let mut alt_class = bytes.clone();
     alt_class[direct_at + 4..direct_at + 7].copy_from_slice(b"316");
     alt_class[direct_at + 352 + 4..direct_at + 352 + 7].copy_from_slice(b"260");
-    let decoded_alt = exact_work_plane_frame(
+    let (decoded_alt, _) = exact_work_plane_frame(
         &alt_class,
         &crate::design::test_support::indexed_record_offsets_for_test(&alt_class),
         &direct_scope,
@@ -618,17 +619,19 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
     assert_eq!(decoded_alt.transform_offset, u64_from_index(direct_at + 66));
     assert_eq!(decoded_alt.reference, None);
 
-    let mut corrupt_class = bytes.clone();
-    corrupt_class[direct_at + 4..direct_at + 7].copy_from_slice(b"999");
-    assert_eq!(
-        exact_work_plane_frame(
-            &corrupt_class,
-            &crate::design::test_support::indexed_record_offsets_for_test(&corrupt_class),
+    for (primary, paired) in [(b"297", b"260"), (b"999", b"261")] {
+        let mut segment_local = bytes.clone();
+        segment_local[direct_at + 4..direct_at + 7].copy_from_slice(primary);
+        segment_local[direct_at + 352 + 4..direct_at + 352 + 7].copy_from_slice(paired);
+        let (decoded, _) = exact_work_plane_frame(
+            &segment_local,
+            &crate::design::test_support::indexed_record_offsets_for_test(&segment_local),
             &direct_scope,
-        ),
-        None,
-        "unadmitted class tag should refuse direct WorkPlane frame"
-    );
+        )
+        .expect("direct WorkPlane frame whatever its segment-local class tags");
+        assert_eq!(decoded.transform, transform.try_into().unwrap());
+        assert_eq!(decoded.transform_offset, u64_from_index(direct_at + 66));
+    }
 
     let mut axis_bytes = vec![0; 232];
     axis_bytes[0..4].copy_from_slice(&3u32.to_le_bytes());
@@ -756,7 +759,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_scope,
@@ -789,7 +792,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_431_scope,
@@ -826,12 +829,13 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, inferred_axes) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_364_scope,
     )
     .expect("class-364 marked compact direct WorkPlane frame");
+    assert_eq!(inferred_axes, [0, 1]);
     assert_eq!(decoded.transform, transform.try_into().unwrap());
     assert_eq!(
         decoded.transform_offset,
@@ -863,12 +867,13 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, inferred_axes) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_364_variant_scope,
     )
     .expect("class-364 compact direct WorkPlane frame variant");
+    assert_eq!(inferred_axes, [0xcc, 0xcd]);
     assert_eq!(decoded.transform, transform.try_into().unwrap());
     assert_eq!(
         decoded.transform_offset,
@@ -899,7 +904,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_450_scope,
@@ -935,7 +940,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &class_279_scope,
@@ -962,7 +967,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_409_short_scope,
@@ -998,7 +1003,7 @@ fn fixed_kind_frames() -> (Vec<u8>, DesignParameterScope, [[f64; 4]; 4]) {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &compact_409_scope,

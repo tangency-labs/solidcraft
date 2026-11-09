@@ -16,7 +16,7 @@ use crate::loss::F3dLossCode;
 use cadmpeg_ir::report::loss::LossNote;
 
 mod archive;
-mod merge;
+pub(crate) mod merge;
 pub(crate) mod observer;
 mod session;
 
@@ -81,6 +81,7 @@ fn compose(
             source_fidelity: mut fidelity,
         },
         operation_poses,
+        mut scene_sources,
     ) = session.take_member(ctx, &model_root, members)?;
     let source = ir
         .source
@@ -111,7 +112,7 @@ fn compose(
         ctx,
         session,
         members,
-        operation_poses,
+        (operation_poses, &mut scene_sources),
         &mut ir,
         &mut report,
         &mut fidelity,
@@ -126,6 +127,7 @@ fn compose(
         "merged {merged} external occurrence(s) from the f3z archive"
     ));
     merge::make_sibling_ordinals_unique(&mut ir.model.occurrences)?;
+    crate::scene::bind(ctx, &mut ir, &scene_sources, &mut report.losses)?;
     report.losses.append(&mut outer_losses);
     finalize_result(ctx, ir, source, report, fidelity)
 }

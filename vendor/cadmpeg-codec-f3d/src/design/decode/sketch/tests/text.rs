@@ -446,8 +446,9 @@ fn sketch_records_use_the_primary_index_live_copy() {
 
     let (bytes, mut meta, live_point_at, live_curve_at, live_text_at, nested_at) =
         indexed_sketch_fixture();
-    let points = decode_sketch_points_from_stream(&bytes, &meta, "Design/BulkStream.dat")
-        .expect("indexed sketch points");
+    let points =
+        decode_sketch_points_from_stream(&bytes, &meta, "Design/BulkStream.dat", &mut Vec::new())
+            .expect("indexed sketch points");
     assert_eq!(points.len(), 1);
     assert_eq!(points[0].byte_offset, u64_from_index(live_point_at));
     assert_eq!(points[0].coordinates(), Point2::new(70.0, -30.0));
@@ -455,11 +456,14 @@ fn sketch_records_use_the_primary_index_live_copy() {
         .to_owned()
         .try_into()
         .expect("type GUID");
-    assert!(
-        decode_sketch_points_from_stream(&bytes, &meta, "Design/BulkStream.dat",)
-            .expect("structurally point-shaped foreign type")
-            .is_empty()
-    );
+    assert!(decode_sketch_points_from_stream(
+        &bytes,
+        &meta,
+        "Design/BulkStream.dat",
+        &mut Vec::new()
+    )
+    .expect("structurally point-shaped foreign type")
+    .is_empty());
     meta.types[1].type_guid = crate::design::decode::sketch::CURRENT_SKETCH_POINT_TYPE
         .0
         .to_owned()
@@ -468,12 +472,22 @@ fn sketch_records_use_the_primary_index_live_copy() {
     let mut malformed_point = bytes.clone();
     malformed_point[live_point_at + 70] = 0;
     assert!(matches!(
-        decode_sketch_points_from_stream(&malformed_point, &meta, "Design/BulkStream.dat",),
+        decode_sketch_points_from_stream(
+            &malformed_point,
+            &meta,
+            "Design/BulkStream.dat",
+            &mut Vec::new()
+        ),
         Err(cadmpeg_core::CodecError::Malformed(_))
     ));
 
-    let curves = decode_sketch_curve_identities_from_stream(&bytes, &meta, "Design/BulkStream.dat")
-        .expect("indexed sketch curves");
+    let curves = decode_sketch_curve_identities_from_stream(
+        &bytes,
+        &meta,
+        "Design/BulkStream.dat",
+        &mut Vec::new(),
+    )
+    .expect("indexed sketch curves");
     assert_eq!(curves.len(), 1);
     assert_eq!(curves[0].byte_offset, u64_from_index(live_curve_at));
     assert!(matches!(
@@ -491,14 +505,24 @@ fn sketch_records_use_the_primary_index_live_copy() {
     mismatched_primary[live_point_at + 7..live_point_at + 11]
         .copy_from_slice(&999u32.to_le_bytes());
     assert!(matches!(
-        decode_sketch_points_from_stream(&mismatched_primary, &meta, "Design/BulkStream.dat",),
+        decode_sketch_points_from_stream(
+            &mismatched_primary,
+            &meta,
+            "Design/BulkStream.dat",
+            &mut Vec::new()
+        ),
         Err(cadmpeg_core::CodecError::Malformed(_))
     ));
 
     let mut mismatched_secondary = bytes;
     mismatched_secondary[nested_at + 7..nested_at + 11].copy_from_slice(&999u32.to_le_bytes());
     assert!(matches!(
-        decode_sketch_points_from_stream(&mismatched_secondary, &meta, "Design/BulkStream.dat",),
+        decode_sketch_points_from_stream(
+            &mismatched_secondary,
+            &meta,
+            "Design/BulkStream.dat",
+            &mut Vec::new()
+        ),
         Err(cadmpeg_core::CodecError::Malformed(_))
     ));
 }

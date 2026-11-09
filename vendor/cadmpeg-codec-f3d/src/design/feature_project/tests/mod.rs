@@ -6,7 +6,7 @@
     clippy::uninlined_format_args
 )]
 
-mod body_selection;
+pub(super) mod body_selection;
 mod coil;
 mod direct_face;
 mod dispatcher;
@@ -22,10 +22,12 @@ mod mirror;
 mod native_scope_definition;
 mod parameter_cycles;
 mod parameters;
+mod path_pattern;
 mod pattern;
 mod pipe;
 mod primitives;
 mod replace_face;
+mod reverse_normal;
 mod revolve;
 mod revolve_axis_candidates;
 mod revolve_targets;

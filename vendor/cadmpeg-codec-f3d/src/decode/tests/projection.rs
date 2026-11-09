@@ -94,6 +94,66 @@ fn active_face_substitutions_have_a_distinct_loss_note() {
 }
 
 #[test]
+fn sketch_geometry_flag_is_retained_with_a_loss_note() {
+    let ir = cadmpeg_ir::document::CadIr::empty();
+    let mut native = F3dNative::default();
+    native.design_sketch_placements.push(
+        serde_json::from_value(serde_json::json!({
+            "id": "f3d:native:sketch-placement#0",
+            "entity_id": "0_35",
+            "byte_offset": 100,
+            "class_tag": "305",
+            "record_index": 5,
+            "frame_length": 201,
+            "transform": [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0]
+            ],
+            "paired_class_tag": "306",
+            "paired_byte_offset": 301,
+            "visibility": {
+                "stream_ordinal": 1,
+                "stream_ordinal_offset": 330,
+                "visible_offset": 335,
+                "visible": true,
+                "sketch_flag": true
+            }
+        }))
+        .expect("flagged sketch placement"),
+    );
+    assert!(native.design_sketch_placements[0]
+        .visibility
+        .is_some_and(|visibility| visibility.sketch_flag));
+    let mut report = cadmpeg_ir::codec::DecodeBody {
+        transfer: cadmpeg_ir::report::decode::DecodeTransfer::full(true),
+        coverage: cadmpeg_ir::report::decode::Coverage::default(),
+        losses: Vec::new(),
+        notes: Vec::new(),
+        transfer_ledger: Default::default(),
+    };
+
+    report_design_projection_gaps(
+        &mut report,
+        &cadmpeg_test_support::service_decode_context(),
+        &ir,
+        &native,
+    )
+    .unwrap();
+
+    let loss = report
+        .losses
+        .iter()
+        .find(|loss| loss.code == F3dLossCode::SketchGeometryFlagUnprojected.kind())
+        .expect("sketch geometry flag loss");
+    assert_eq!(
+        loss.message,
+        "1 sketch Geometry member(s) set the byte-34 flag; the native sketch visibility keeps it as sketch_flag."
+    );
+}
+
+#[test]
 fn history_past_its_binding_bound_reports_a_loss() {
     let ir = cadmpeg_ir::document::CadIr::empty();
     let mut native = F3dNative::default();
@@ -1563,6 +1623,7 @@ fn move_transform_refusal_reports_exact_loss_for_transform_or_selection() {
                 transform_record_index: 71,
                 form: DesignMoveForm::Form1,
                 form_offset: 443,
+                transform_reference_offset: None,
             });
         }
         let mut report = cadmpeg_ir::codec::DecodeBody {

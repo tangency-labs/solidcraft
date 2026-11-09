@@ -4,6 +4,26 @@ use crate::records::feature::scope::DesignScopePayload;
 use crate::test_support::pipe::{Config, Fixture, Layout};
 
 #[test]
+fn pipe_source_binds_group_with_three_byte_flag_block() {
+    let ctx = cadmpeg_test_support::service_decode_context();
+    let native = Fixture::new(Config {
+        group_flags: &[1, 0, 0],
+        ..Default::default()
+    })
+    .decode(&ctx)
+    .unwrap();
+    let group = &native.design_construction_operand_groups[0];
+    assert_eq!(
+        group.paired_byte_offset - group.frame.opaque_index_offset(),
+        53
+    );
+    assert!(matches!(
+        native.design_parameter_scopes[0].payload(),
+        DesignScopePayload::Pipe(Some(_))
+    ));
+}
+
+#[test]
 fn pipe_source_uses_structural_prefixes_and_canonical_owners() {
     let ctx = cadmpeg_test_support::service_decode_context();
     for legacy in [false, true] {

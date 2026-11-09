@@ -839,6 +839,7 @@ fn history_state_identity_orders_cross_family_feature_dependencies() {
                 kind_offset: byte_offset + 100,
                 feature_ordinal: std::num::NonZeroU32::MIN,
                 feature_ordinal_offset: 0,
+                label: None,
                 history_state_id: current,
 
                 previous_history_state_id: previous,
@@ -857,6 +858,7 @@ fn history_state_identity_orders_cross_family_feature_dependencies() {
                 .try_into()
                 .unwrap(),
                 unclosed_construction_operand_groups: Vec::new(),
+                deleted_members: None,
                 paired_class_tag: crate::records::references::DesignClassTag::try_from(
                     "261".to_owned(),
                 )
@@ -1037,6 +1039,7 @@ fn owned_base_feature_takes_its_timeline_object_position() {
                     bodies: Vec::new(),
                     owner_record,
                     owner_reference_offset: 0,
+                    copy_sources: Vec::new(),
                 },
             );
         }
@@ -1070,9 +1073,24 @@ fn owned_base_feature_takes_its_timeline_object_position() {
     assert_eq!(ordinals.get(&(stream, 288)), Some(&1));
     assert_eq!(ordinals.get(&(stream, 400)), None);
 
-    let scopes = vec![scope(100, None), scope(287, None), scope(288, Some(287))];
-    let ordinals =
-        crate::design::feature_project::authored_scope_ordinals(&scopes, &[timeline]).unwrap();
-    assert_eq!(ordinals.get(&(stream, 287)), Some(&1));
-    assert_eq!(ordinals.get(&(stream, 288)), None);
+    let owner = |kind: crate::records::feature::scope::DesignFeatureKind| {
+        DesignParameterScope::empty(&format!("{stream}:design-parameter-scope#287"), kind, 287)
+    };
+    for owner_scope in [
+        owner(
+            crate::records::feature::scope::DesignFeatureKind::try_from(
+                "CopierCollerCorps".to_owned(),
+            )
+            .unwrap(),
+        ),
+        owner(crate::records::feature::scope::DesignFeatureKind::CopyPasteBodies),
+    ] {
+        let scopes = vec![scope(100, None), owner_scope, scope(288, Some(287))];
+        let ordinals =
+            crate::design::feature_project::authored_scope_ordinals(&scopes, &[timeline.clone()])
+                .unwrap();
+        assert_eq!(ordinals.get(&(stream, 100)), Some(&0));
+        assert_eq!(ordinals.get(&(stream, 287)), None);
+        assert_eq!(ordinals.get(&(stream, 288)), Some(&1));
+    }
 }

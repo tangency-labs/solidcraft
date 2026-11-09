@@ -42,16 +42,22 @@ fn owner(bytes: &[u8], paired: usize, index: u32) -> Option<u64> {
     Some(value)
 }
 
+/// Read an occurrence relation. A `CopyPaste` relation can also take the
+/// 58-byte form, which stores byte `1` after the carrier reference.
 fn relation(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     index: u32,
+    admit_marked_gap: bool,
 ) -> Option<(usize, u32, u32, u64)> {
     let at = records.first_at_or_after(0, index)?;
     let mut view = View::over_retained(bytes);
     view.seek(at + 11)?;
     zeros(&mut view, 10)?;
     let occurrence = reference(&mut view)?;
+    if admit_marked_gap && bytes.get(view.position()) == Some(&1) {
+        view.take(1)?;
+    }
     zeros(&mut view, 2)?;
     reference(&mut view)?;
     zeros(&mut view, 1)?;
@@ -112,6 +118,70 @@ fn component_owner(
     found
 }
 
+/// The placements, relation, and reference table of a compact `CopyPaste`
+/// prefix.
+pub(super) struct CompactCopyPastePrefix {
+    relation_record_index: u32,
+    source_at: usize,
+    source_transform: SketchPlacementMatrix,
+    target_at: usize,
+    target_transform: SketchPlacementMatrix,
+    pub(super) table_at: usize,
+}
+
+/// Read the compact `CopyPaste` prefix, or its form with four more prologue
+/// zero bytes, through its one-member reference table.
+pub(super) fn compact_copy_paste_prefix(
+    bytes: &[u8],
+    start: usize,
+) -> Option<CompactCopyPastePrefix> {
+    [0, 4]
+        .into_iter()
+        .find_map(|shift| compact_copy_paste_prefix_with_shift(bytes, start, shift))
+}
+
+fn compact_copy_paste_prefix_with_shift(
+    bytes: &[u8],
+    start: usize,
+    shift: usize,
+) -> Option<CompactCopyPastePrefix> {
+    let mut view = View::over_retained(bytes);
+    view.seek(start.checked_add(11)?)?;
+    zeros(&mut view, 11 + shift)?;
+    reference(&mut view)?;
+    zeros(&mut view, 1)?;
+    let source_at = view.position();
+    let source_transform = rigid_transform_at(bytes, source_at)?;
+    view.take(128)?;
+    reference(&mut view)?;
+    zeros(&mut view, 4)?;
+    let relation_record_index = reference(&mut view)?;
+    if view.u8()? != 1 || view.u8()? != 0 {
+        return None;
+    }
+    let target_at = view.position();
+    let target_transform = rigid_transform_at(bytes, target_at)?;
+    view.take(128)?;
+    let (key, after_key) = lp_utf16_bounded(bytes, view.position(), 36..=36)?;
+    if key != "00000000-0000-0000-0000-000000000000" {
+        return None;
+    }
+    view.seek(after_key)?;
+    zeros(&mut view, 3)?;
+    let table_at = view.position();
+    if view.u32_le()? != 1 || reference(&mut view)? != relation_record_index {
+        return None;
+    }
+    Some(CompactCopyPastePrefix {
+        relation_record_index,
+        source_at,
+        source_transform,
+        target_at,
+        target_transform,
+        table_at,
+    })
+}
+
 pub(super) fn exact_occurrence_transfer(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
@@ -123,13 +193,12 @@ pub(super) fn exact_occurrence_transfer(
         ("CutPaste", 277) => (0, true, true),
         ("CutPaste", 405) => (0, true, false),
         ("CutPaste", 409) => (4, true, false),
-        ("CopyPaste", 525) => (0, false, false),
-        ("CopyPaste", 529) => (4, false, false),
+        ("CopyPaste", _) => (0, false, false),
         _ => return None,
     };
     let relation_index = *scope.reference_members().values().next()?;
     let (relation_at, occurrence_index, scope_index, target_owner) =
-        relation(bytes, records, relation_index)?;
+        relation(bytes, records, relation_index, !is_cut)?;
     if scope_index != scope.record_index || relation_at >= start {
         return None;
     }
@@ -210,7 +279,7 @@ pub(super) fn exact_occurrence_transfer(
         let paired = records.first_at_or_after(removal + 11, removal_index)?;
         let source_owner = owner(bytes, paired, removal_index)?;
         let (source_at, source_occurrence, _, source_relation_owner) =
-            relation(bytes, records, source_relation)?;
+            relation(bytes, records, source_relation, false)?;
         if source_at >= relation_at
             || source_occurrence != occurrence_index
             || source_relation_owner != source_owner
@@ -230,32 +299,18 @@ pub(super) fn exact_occurrence_transfer(
             },
         )
     } else {
-        zeros(&mut view, 11 + shift)?;
-        reference(&mut view)?;
-        zeros(&mut view, 1)?;
-        let source_at = view.position();
-        let source_transform = rigid_transform_at(bytes, source_at)?;
-        view.take(128)?;
-        reference(&mut view)?;
-        zeros(&mut view, 4)?;
-        if reference(&mut view)? != relation_index || view.u8()? != 1 || view.u8()? != 0 {
+        let paired_at = usize::try_from(scope.paired_byte_offset()).ok()?;
+        let prefix = compact_copy_paste_prefix(bytes.get(..paired_at)?, start)?;
+        if prefix.relation_record_index != relation_index {
             return None;
         }
-        let target_at = view.position();
-        let target_transform = rigid_transform_at(bytes, target_at)?;
-        view.take(128)?;
-        let (key, after_key) = lp_utf16_bounded(bytes, view.position(), 36..=36)?;
-        if key != "00000000-0000-0000-0000-000000000000" {
-            return None;
-        }
-        view.seek(after_key)?;
-        zeros(&mut view, 3)?;
+        view.seek(prefix.table_at)?;
         (
-            target_transform,
-            Some(u64::try_from(target_at).ok()?),
+            prefix.target_transform,
+            Some(u64::try_from(prefix.target_at).ok()?),
             DesignOccurrenceTransferSource::Copy {
-                source_transform,
-                source_transform_offset: u64::try_from(source_at).ok()?,
+                source_transform: prefix.source_transform,
+                source_transform_offset: u64::try_from(prefix.source_at).ok()?,
             },
         )
     };

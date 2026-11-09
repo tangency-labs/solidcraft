@@ -22,7 +22,11 @@ fn solved_frame(
                 .any(|record_index| u64::from(*record_index) == placement.record_index)
     });
     let placement = matches.next()?;
-    if matches.next().is_some() || placement.type_version != 9 {
+    if matches.next().is_some()
+        || placement.type_version != 9
+        || placement.fields.inferred_x_axis.value != 0
+        || placement.fields.inferred_z_axis.value != 0
+    {
         return None;
     }
     super::checked_solved_frame(placement)

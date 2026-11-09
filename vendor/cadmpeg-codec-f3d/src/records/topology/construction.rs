@@ -80,6 +80,7 @@ pub(crate) struct DesignConstructionOperandGroup {
     pub(crate) class_tag: DesignClassTag,
     /// Ordered operand-record references.
     members: Vec<Located<u32>>,
+    pub(crate) sketch_profile: Option<super::sketch_profile::DesignSketchProfileOperand>,
     /// Ordered unresolved-edge records whose run terminates at this group's identity.
     pub(crate) lost_edge_references: Vec<String>,
     /// Exact framing of the operand-member run and its auxiliary fields.
@@ -109,6 +110,7 @@ impl Clone for DesignConstructionOperandGroup {
             byte_offset: self.byte_offset,
             class_tag: self.class_tag.clone(),
             members: self.members.clone(),
+            sketch_profile: self.sketch_profile.clone(),
             lost_edge_references: self.lost_edge_references.clone(),
             frame: self.frame.clone(),
             operand_role: self.operand_role,
@@ -129,6 +131,8 @@ impl Serialize for DesignConstructionOperandGroup {
             byte_offset: u64,
             class_tag: &'a str,
             members: SliceColumn<'a, Located<u32>, u32>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            sketch_profile: Option<&'a super::sketch_profile::DesignSketchProfileOperand>,
             #[serde(skip_serializing_if = "Vec::is_empty")]
             lost_edge_references: &'a Vec<String>,
             member_offsets: SliceColumn<'a, Located<u32>, u64>,
@@ -162,6 +166,7 @@ impl Serialize for DesignConstructionOperandGroup {
             byte_offset: self.byte_offset,
             class_tag: self.class_tag.as_str(),
             members: SliceColumn::new(&self.members, |member| member.value),
+            sketch_profile: self.sketch_profile.as_ref(),
             lost_edge_references: &self.lost_edge_references,
             member_offsets: SliceColumn::new(&self.members, |member| member.offset),
             frame: &self.frame,
@@ -208,6 +213,7 @@ impl TryFrom<DesignConstructionOperandGroupDraft> for DesignConstructionOperandG
             byte_offset: draft.byte_offset,
             class_tag: draft.class_tag,
             members: draft.members,
+            sketch_profile: None,
             lost_edge_references: draft.lost_edge_references,
             frame: draft.frame,
             operand_role: draft.operand_role,
@@ -275,6 +281,12 @@ struct DesignConstructionOperandGroupSerde {
     byte_offset: u64,
     class_tag: String,
     members: Vec<u32>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_sketch_profile"
+    )]
+    sketch_profile: Option<super::sketch_profile::DesignSketchProfileOperand>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     lost_edge_references: Vec<String>,
     member_offsets: Vec<u64>,
@@ -327,7 +339,7 @@ impl TryFrom<DesignConstructionOperandGroupSerde> for DesignConstructionOperandG
             (role, None, None) => DesignConstructionOperandRole::Other(role),
             _ => return Err("role, extrude_role, and extrude_face_role disagree".into()),
         };
-        Self::try_from(DesignConstructionOperandGroupDraft {
+        let mut group = Self::try_from(DesignConstructionOperandGroupDraft {
             id: wire.id,
             scope_record_index: wire.scope_record_index,
             scope_reference_ordinal: wire.scope_reference_ordinal,
@@ -346,7 +358,9 @@ impl TryFrom<DesignConstructionOperandGroupSerde> for DesignConstructionOperandG
             role_offset: wire.role_offset,
             paired_class_tag: wire.paired_class_tag.try_into()?,
             paired_byte_offset: wire.paired_byte_offset,
-        })
+        })?;
+        group.sketch_profile = wire.sketch_profile;
+        Ok(group)
     }
 }
 
@@ -379,6 +393,7 @@ impl From<DesignConstructionOperandGroup> for DesignConstructionOperandGroupSerd
             byte_offset: group.byte_offset,
             class_tag: group.class_tag.into(),
             members,
+            sketch_profile: group.sketch_profile,
             lost_edge_references: group.lost_edge_references,
             member_offsets,
             frame: group.frame,
@@ -416,8 +431,8 @@ pub(crate) struct DesignConstructionOperandGroupFrame {
     trailing_dual_transforms: Vec<DesignConstructionOperandDualTransform>,
     /// Exact compact flag records selected from the trailing-reference run.
     trailing_flags: Vec<DesignConstructionOperandFlag>,
-    /// Opaque ordinal: nonzero and below 256, repeated after `opaque_scalar` in
-    /// every container generation but one.
+    /// Opaque ordinal: nonzero, repeated after `opaque_scalar` in every
+    /// container generation but one.
     pub(crate) opaque_index: NonZeroU32,
     /// Byte offset of the first `opaque_index` copy.
     opaque_index_offset: u64,
@@ -2342,6 +2357,12 @@ cadmpeg_core::named_optional_field!(
     deserialize_second_related_identity_offset,
     u64,
     "second_related_identity_offset"
+);
+
+cadmpeg_core::named_optional_field!(
+    deserialize_sketch_profile,
+    super::sketch_profile::DesignSketchProfileOperand,
+    "sketch_profile"
 );
 
 #[cfg(test)]

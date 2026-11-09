@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::layout::canvas_geometry_expanded_prefix as expanded;
 use crate::layout::canvas_geometry_extra12_prefix as extra12;
 use crate::layout::canvas_geometry_legacy_prefix as legacy;
+use crate::layout::canvas_geometry_planeless_prefix as planeless;
 use crate::layout::canvas_geometry_prefix as modern;
 use crate::layout::canvas_geometry_transitional_prefix as transitional;
 use crate::layout::canvas_geometry_typed_legacy_prefix as typed_legacy;
@@ -15,6 +17,8 @@ pub(crate) enum DesignCanvasGeometryLayout {
     Extra12,
     TypedLegacy,
     TypedTransitional,
+    Expanded,
+    ExpandedPlaneless,
 }
 
 #[derive(Clone, Copy)]
@@ -31,13 +35,15 @@ pub(crate) struct CanvasOffsets {
     pub(crate) prefix: usize,
 }
 impl DesignCanvasGeometryLayout {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 8] = [
         Self::Modern,
         Self::Legacy,
         Self::Transitional,
         Self::Extra12,
         Self::TypedLegacy,
         Self::TypedTransitional,
+        Self::Expanded,
+        Self::ExpandedPlaneless,
     ];
     pub(crate) fn offsets(self) -> CanvasOffsets {
         match self {
@@ -48,7 +54,7 @@ impl DesignCanvasGeometryLayout {
                 scope: modern::SCOPE_REFERENCE,
                 component: modern::COMPONENT_REFERENCE,
                 asset: modern::ASSET_REFERENCE,
-                state: modern::SECOND_BOUNDARY_PRESENT,
+                state: modern::SECOND_BOUNDARY_FLAG,
                 second_boundary: modern::SECOND_BOUNDARY,
                 label: modern::LABEL_CODE_UNIT_COUNT,
                 prefix: modern::LEN,
@@ -60,7 +66,7 @@ impl DesignCanvasGeometryLayout {
                 scope: legacy::SCOPE_REFERENCE,
                 component: legacy::COMPONENT_REFERENCE,
                 asset: legacy::ASSET_REFERENCE,
-                state: legacy::SECOND_BOUNDARY_PRESENT,
+                state: legacy::SECOND_BOUNDARY_FLAG,
                 second_boundary: legacy::SECOND_BOUNDARY,
                 label: legacy::LABEL_CODE_UNIT_COUNT,
                 prefix: legacy::LEN,
@@ -72,7 +78,7 @@ impl DesignCanvasGeometryLayout {
                 scope: transitional::SCOPE_REFERENCE,
                 component: transitional::COMPONENT_REFERENCE,
                 asset: transitional::ASSET_REFERENCE,
-                state: transitional::SECOND_BOUNDARY_PRESENT,
+                state: transitional::SECOND_BOUNDARY_FLAG,
                 second_boundary: transitional::SECOND_BOUNDARY,
                 label: transitional::LABEL_CODE_UNIT_COUNT,
                 prefix: transitional::LEN,
@@ -84,7 +90,7 @@ impl DesignCanvasGeometryLayout {
                 scope: extra12::SCOPE_REFERENCE,
                 component: extra12::COMPONENT_REFERENCE,
                 asset: extra12::ASSET_REFERENCE,
-                state: extra12::SECOND_BOUNDARY_PRESENT,
+                state: extra12::SECOND_BOUNDARY_FLAG,
                 second_boundary: extra12::SECOND_BOUNDARY,
                 label: extra12::LABEL_CODE_UNIT_COUNT,
                 prefix: extra12::LEN,
@@ -96,7 +102,7 @@ impl DesignCanvasGeometryLayout {
                 scope: typed_legacy::SCOPE_REFERENCE,
                 component: typed_legacy::COMPONENT_REFERENCE,
                 asset: typed_legacy::ASSET_REFERENCE,
-                state: typed_legacy::SECOND_BOUNDARY_PRESENT,
+                state: typed_legacy::SECOND_BOUNDARY_FLAG,
                 second_boundary: typed_legacy::SECOND_BOUNDARY,
                 label: typed_legacy::LABEL_CODE_UNIT_COUNT,
                 prefix: typed_legacy::LEN,
@@ -108,12 +114,39 @@ impl DesignCanvasGeometryLayout {
                 scope: typed_transitional::SCOPE_REFERENCE,
                 component: typed_transitional::COMPONENT_REFERENCE,
                 asset: typed_transitional::ASSET_REFERENCE,
-                state: typed_transitional::SECOND_BOUNDARY_PRESENT,
+                state: typed_transitional::SECOND_BOUNDARY_FLAG,
                 second_boundary: typed_transitional::SECOND_BOUNDARY,
                 label: typed_transitional::LABEL_CODE_UNIT_COUNT,
                 prefix: typed_transitional::LEN,
             },
+            Self::Expanded => CanvasOffsets {
+                first_boundary: expanded::FIRST_BOUNDARY,
+                plane: expanded::PLANE_REFERENCE,
+                payload: expanded::GEOMETRY_PAYLOAD,
+                scope: expanded::SCOPE_REFERENCE,
+                component: expanded::COMPONENT_REFERENCE,
+                asset: expanded::ASSET_REFERENCE,
+                state: expanded::SECOND_BOUNDARY_FLAG,
+                second_boundary: expanded::SECOND_BOUNDARY,
+                label: expanded::LABEL_CODE_UNIT_COUNT,
+                prefix: expanded::LEN,
+            },
+            Self::ExpandedPlaneless => CanvasOffsets {
+                first_boundary: planeless::FIRST_BOUNDARY,
+                plane: planeless::PLANE_REFERENCE,
+                payload: planeless::GEOMETRY_PAYLOAD,
+                scope: planeless::SCOPE_REFERENCE,
+                component: planeless::COMPONENT_REFERENCE,
+                asset: planeless::ASSET_REFERENCE,
+                state: planeless::SECOND_BOUNDARY_FLAG,
+                second_boundary: planeless::SECOND_BOUNDARY,
+                label: planeless::LABEL_CODE_UNIT_COUNT,
+                prefix: planeless::LEN,
+            },
         }
+    }
+    pub(crate) fn expanded(self) -> bool {
+        matches!(self, Self::Expanded | Self::ExpandedPlaneless)
     }
     pub(crate) fn typed(self) -> bool {
         matches!(self, Self::TypedLegacy | Self::TypedTransitional)

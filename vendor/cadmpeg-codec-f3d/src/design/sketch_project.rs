@@ -607,10 +607,10 @@ pub(crate) fn project_sketch_design(
         );
     }
     entities.sort_by(|a, b| a.id().cmp(b.id()));
-    let mut losses = Vec::new();
+    let mut unprofiled = Vec::new();
     for sketch in &mut sketches {
         let closed = closed_sketch_profiles(ctx, &sketch.id, &entities, linear_tolerance)?;
-        losses.extend(closed.losses);
+        unprofiled.extend(closed.unprofiled);
         let Ok(profiles) = cadmpeg_ir::sketches::SketchProfiles::try_from(closed.profiles) else {
             continue;
         };
@@ -619,7 +619,7 @@ pub(crate) fn project_sketch_design(
     Ok(SketchDesign {
         sketches,
         entities,
-        losses,
+        unprofiled,
     })
 }
 
@@ -627,8 +627,11 @@ pub(crate) fn project_sketch_design(
 pub(crate) struct SketchDesign {
     pub(crate) sketches: Vec<cadmpeg_ir::sketches::Sketch>,
     pub(crate) entities: Vec<cadmpeg_ir::sketches::SketchEntity>,
-    /// Losses of the projection, such as unprofiled curves.
-    pub(crate) losses: Vec<cadmpeg_ir::report::loss::LossNote>,
+    /// Curves in no closed profile loop, each with its loss note.
+    pub(crate) unprofiled: Vec<(
+        cadmpeg_ir::sketches::SketchEntityId,
+        cadmpeg_ir::report::loss::LossNote,
+    )>,
 }
 
 #[cfg(test)]

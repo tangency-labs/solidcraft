@@ -135,6 +135,7 @@ impl Serialize for DesignParameterScope {
 
         emit!("feature_ordinal", self.feature_ordinal.get());
         emit!("feature_ordinal_offset", self.feature_ordinal_offset);
+        emit_opt!("label", self.label.as_ref());
         emit_opt!("history_state_id", self.history_state_id);
         emit!("history_state_id_offset", self.history_state_id_offset());
         emit_opt!("previous_history_state_id", self.previous_history_state_id);
@@ -165,11 +166,10 @@ impl Serialize for DesignParameterScope {
             DesignScopePayload::CylinderPrimitive(Some(value)) => {
                 emit!("solid_primitive", SolidPrimitiveRef::Cylinder(value));
             }
-            DesignScopePayload::OffsetFaces(Some(value))
-            | DesignScopePayload::DecalerLesFaces(Some(value)) => {
+            DesignScopePayload::OffsetFaces(Some(value)) => {
                 emit!("direct_face_operation", DirectFaceRef::OffsetFaces(value));
             }
-            DesignScopePayload::Shell(Some(value)) | DesignScopePayload::Schale(Some(value)) => {
+            DesignScopePayload::Shell(Some(value)) => {
                 emit!("direct_face_operation", DirectFaceRef::Shell(value));
             }
             DesignScopePayload::Thicken(Some(value)) => {
@@ -181,6 +181,8 @@ impl Serialize for DesignParameterScope {
         emit_opt!("align_envelope", self.align_envelope());
         emit_opt!("move_operation", self.move_operation());
         emit_opt!("scale_operation", self.scale_operation());
+        emit_opt!("reverse_normal_operation", self.reverse_normal_operation());
+        emit_opt!("path_pattern_settings", self.path_pattern_settings());
         emit_opt!("surface_stitch_operation", self.surface_stitch_operation());
         emit_opt!("surface_extend_operation", self.surface_extend_operation());
         emit_opt!("surface_offset_operation", self.surface_offset_operation());
@@ -240,9 +242,7 @@ impl Serialize for DesignParameterScope {
         emit_opt!("emboss_construction", self.emboss_construction());
         emit_opt!("draft_operation", self.draft_operation());
         match &self.payload {
-            DesignScopePayload::CPattern(value)
-            | DesignScopePayload::CircularPattern(value)
-            | DesignScopePayload::ReseauC(value) => {
+            DesignScopePayload::CPattern(value) | DesignScopePayload::CircularPattern(value) => {
                 emit_opt!("circular_pattern_construction", value.as_ref());
             }
             DesignScopePayload::RPattern(value) | DesignScopePayload::RectangularPattern(value) => {
@@ -311,6 +311,9 @@ impl Serialize for DesignParameterScope {
                 "unclosed_construction_operand_groups",
                 &self.unclosed_construction_operand_groups
             );
+        }
+        if let Some(deleted_members) = &self.deleted_members {
+            emit!("deleted_members", deleted_members);
         }
         emit_opt!("hole_construction", self.hole_construction());
         emit_opt!("hole_extent", self.hole_extent());

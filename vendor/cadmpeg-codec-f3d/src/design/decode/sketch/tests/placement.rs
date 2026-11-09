@@ -247,6 +247,7 @@ fn entity_genesis_placement_origin_scales_to_neutral_units() {
         id: "f3d:native:sketch-point#0".into(),
         record_index: 20,
         owner_reference: Some(100),
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("256".to_owned()).unwrap(),
         byte_offset: 0,
         coordinate_offset: 141,
@@ -864,6 +865,7 @@ fn legacy_sketch_nurbs_decodes_its_counted_arrays() {
         &bytes,
         &meta,
         "Design/BulkStream.dat",
+        &mut Vec::new(),
     )
     .expect("primary NURBS frame with a nested subtype header");
     let [curve] = curves.as_slice() else {
@@ -940,6 +942,7 @@ fn sketch_graph_point(record_index: u32) -> SketchPoint {
         id: format!("f3d:native:sketch-point#{record_index}"),
         record_index,
         owner_reference: None,
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("256".to_owned()).unwrap(),
         byte_offset: u64::from(record_index),
         coordinate_offset: 141,
@@ -959,6 +962,36 @@ fn sketch_graph_point(record_index: u32) -> SketchPoint {
 }
 
 #[test]
+fn sketch_member_run_counts_base_point_and_stops_at_count() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    bytes.extend_from_slice(b"282");
+    bytes.extend_from_slice(&100u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 41]);
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    for value in [1130u32, 1131, 1179] {
+        bytes.push(1);
+        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes.extend_from_slice(&[0; 6]);
+    }
+    bytes.extend_from_slice(&[0; 4]);
+    bytes.extend_from_slice(&[1, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let values = |bytes: &[u8]| {
+        tested_parse_sketch_member_run(bytes, 0, 100)
+            .into_iter()
+            .map(|member| member.value)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(values(&bytes), vec![1130, 1131, 1179]);
+    bytes[52..56].copy_from_slice(&2u32.to_le_bytes());
+    bytes.truncate(78);
+    bytes.extend_from_slice(&[1, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(values(&bytes), vec![1130, 1131]);
+    bytes[52..56].copy_from_slice(&0u32.to_le_bytes());
+    assert_eq!(values(&bytes), Vec::<u32>::new());
+}
+
+#[test]
 fn sketch_member_run_backfills_relation_free_owners() {
     let mut bytes = vec![0u8; 40];
     let paired_at = bytes.len();
@@ -966,7 +999,7 @@ fn sketch_member_run_backfills_relation_free_owners() {
     bytes.extend_from_slice(b"282");
     bytes.extend_from_slice(&100u32.to_le_bytes());
     bytes.extend_from_slice(&[0; 41]);
-    bytes.extend_from_slice(&2u32.to_le_bytes());
+    bytes.extend_from_slice(&3u32.to_le_bytes());
     let mut member_offsets = Vec::new();
     member_offsets.push(u64_from_index(bytes.len() + 1));
     bytes.push(1);
@@ -1215,6 +1248,7 @@ fn member_run_test_scope(
             kind_offset: byte_offset + 110,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: None,
             previous_history_state_id: None,
             previous_history_state_id_offset: None,
@@ -1225,15 +1259,17 @@ fn member_run_test_scope(
                 "reference_members",
             )
             .unwrap(),
-            payload: DesignFeatureKind::Skizze.try_into().unwrap(),
+            payload: DesignFeatureKind::Sketch.try_into().unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: DesignClassTag::try_from("261".to_owned()).unwrap(),
             paired_byte_offset: byte_offset + 200,
         }
         .with_fixture_layout(),
     )
     .unwrap();
-    if let (Some(entity_id), DesignScopePayloadMut::Skizze(slot)) =
+    scope.source_kind = Some("Skizze".to_owned());
+    if let (Some(entity_id), DesignScopePayloadMut::Sketch(slot)) =
         (bound_entity, scope.payload_mut())
     {
         *slot = Some(DesignSketchEntityBinding {

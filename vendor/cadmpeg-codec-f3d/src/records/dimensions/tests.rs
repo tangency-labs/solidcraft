@@ -102,6 +102,7 @@ fn draft(base: u64) -> Draft {
             })
             .collect(),
         entity_genesis: Some(0),
+        metadata_absent: false,
         annotation_bytes: vec![7, 8],
         annotation_byte_offset: base + 141,
         governing_owner_record_index: 4,
@@ -313,6 +314,63 @@ fn dimension_locus_pair_native_retained_limit_refuses_before_record_clone() {
         || super::DIMENSION_LOCUS_PAIR_CLONE_COUNT.with(|count| count.set(0)),
         || super::DIMENSION_LOCUS_PAIR_CLONE_COUNT.with(std::cell::Cell::get),
     );
+}
+
+#[test]
+fn annotation_frame_absent_metadata_validates_wire_offsets() {
+    let mut input = draft(100);
+    input.operands.pop();
+    input.entity_genesis = None;
+    input.metadata_absent = true;
+    input.annotation_byte_offset = 170;
+    input.governing_owner_reference_offset = 173;
+    input.return_members.remove(1);
+    for (ordinal, member) in input.return_members.iter_mut().enumerate() {
+        member.offset = 188 + u64_from_index(ordinal) * 11;
+    }
+    let frame = Frame::try_new(input.clone()).unwrap();
+    assert_eq!(frame.annotation_byte_offset(), 170);
+    assert_eq!(frame.clone().into_draft(), input);
+    let wire = serde_json::to_value(&frame).unwrap();
+    assert_eq!(wire["metadata_absent"], serde_json::json!(true));
+    assert_eq!(
+        serde_json::from_value::<Frame>(wire.clone()).unwrap(),
+        frame
+    );
+    let mut present = wire;
+    present["metadata_absent"] = serde_json::json!(false);
+    assert!(serde_json::from_value::<Frame>(present).is_err());
+    let mut genesis = input;
+    genesis.entity_genesis = Some(0);
+    assert!(Frame::try_new(genesis).is_err());
+}
+
+#[test]
+fn annotation_frame_absent_metadata_admits_any_nonempty_operand_shape() {
+    let mut input = draft(100);
+    input.entity_genesis = None;
+    input.metadata_absent = true;
+    input.annotation_byte_offset = 185;
+    input.governing_owner_reference_offset = 188;
+    for (ordinal, member) in input.return_members.iter_mut().enumerate() {
+        member.offset = 203 + u64_from_index(ordinal) * 11;
+    }
+    assert_eq!(input.operands.len(), 4);
+    assert!(input
+        .operands
+        .iter()
+        .skip(1)
+        .all(|operand| operand.geometry_record_index.is_some()));
+    let frame = Frame::try_new(input.clone()).unwrap();
+    assert_eq!(frame.into_draft(), input);
+    let mut empty = input;
+    empty.metadata_absent = false;
+    empty.annotation_byte_offset += 4;
+    empty.governing_owner_reference_offset += 4;
+    for member in &mut empty.return_members {
+        member.offset += 4;
+    }
+    assert!(Frame::try_new(empty).is_err());
 }
 
 #[test]

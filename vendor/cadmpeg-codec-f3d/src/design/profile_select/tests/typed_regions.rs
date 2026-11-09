@@ -25,17 +25,19 @@ fn selection(
         sketch_scope_offset: 300,
         identity_record_offset,
         identity_end_offset: 629,
-        loop_lists: [
-            vec![vec![DesignProfileCurveLoop {
-                outer,
-                entries: vec![DesignProfileCurveEntry {
-                    primary_id: primary,
-                    primary_id_offset: 588,
-                    secondary_id: 0,
-                    entry_fields: [1, 1, 1],
+        groups: vec![
+            crate::records::topology::entity_selection::DesignProfileRegionGroup {
+                region: vec![DesignProfileCurveLoop {
+                    outer,
+                    entries: vec![DesignProfileCurveEntry {
+                        primary_id: primary,
+                        primary_id_offset: 588,
+                        secondary_id: 0,
+                        entry_fields: [1, 1, 1],
+                    }],
                 }],
-            }]],
-            vec![],
+                further: vec![],
+            },
         ],
     };
     selection.identity_end_offset = selection.lists_end().unwrap_or(0);
@@ -92,10 +94,10 @@ fn typed_profile_regions_preserve_holes_and_refuse_ambiguous_loops() {
         native_ref: None,
     }];
     let mut first = selection(10, 0, 11, true);
-    let mut hole = selection(10, 0, 12, true).loop_lists[0][0][0].clone();
+    let mut hole = selection(10, 0, 12, true).groups[0].region[0].clone();
     hole.outer = false;
-    first.loop_lists[0][0].push(hole);
-    first.loop_lists[0][0][1].entries[0].primary_id_offset = 633;
+    first.groups[0].region.push(hole);
+    first.groups[0].region[1].entries[0].primary_id_offset = 633;
     first.identity_end_offset = first.lists_end().unwrap();
     let second = selection(11, 1, 13, true);
     let mut selections = [first, second];
@@ -123,7 +125,7 @@ fn typed_profile_regions_preserve_holes_and_refuse_ambiguous_loops() {
     path_resolution.profile_curves = &selections;
     assert!(super::super::resolve_profile_curve_path(&group, "stream", &path_resolution).is_none());
     let mut repeated = selections.clone();
-    repeated[1].loop_lists = repeated[0].loop_lists.clone();
+    repeated[1].groups = repeated[0].groups.clone();
     repeated[1].identity_end_offset = repeated[0].identity_end_offset;
     assert_eq!(
         resolve(&sketches, &repeated),
@@ -135,9 +137,9 @@ fn typed_profile_regions_preserve_holes_and_refuse_ambiguous_loops() {
             .unwrap()
         ))
     );
-    selections[0].loop_lists[0][0][1].entries[0].primary_id = 11;
+    selections[0].groups[0].region[1].entries[0].primary_id = 11;
     assert!(resolve(&sketches, &selections).is_none());
-    selections[0].loop_lists[0][0][1].entries[0].primary_id = 12;
+    selections[0].groups[0].region[1].entries[0].primary_id = 12;
     let mut profiles = sketches[0].profiles.iter().cloned().collect::<Vec<_>>();
     profiles.push(profiles[0].clone());
     sketches[0].profiles = cadmpeg_ir::sketches::SketchProfiles::try_from(profiles).unwrap();

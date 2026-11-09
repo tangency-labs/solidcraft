@@ -184,7 +184,7 @@ fn archive_session_formatted_space_diagnostic_reexecutes_after_relocation() {
         .push(crate::F3dLossCode::XrefTableUndecoded.note("stored slice escapes parent space 7"));
     ctx.register_slice(view, range).unwrap();
     let mut results = std::collections::BTreeMap::from([("leaf.f3d".to_owned(), member)]);
-    let (decoded, _) = session.take_member(&ctx, "leaf.f3d", &mut results).unwrap();
+    let (decoded, _, _) = session.take_member(&ctx, "leaf.f3d", &mut results).unwrap();
     assert_eq!(session.composition_reexecutions(), 1);
     assert!(!decoded
         .body

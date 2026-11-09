@@ -3,6 +3,7 @@
 use cadmpeg_core::decode::u64_from_index;
 
 use crate::design::decode::scopes::parameter_scope::parse_parameter_scope;
+use crate::design::decode::scopes::parameter_scope::parse_parameter_scope_with_type_guid;
 use crate::design::decode::scopes::thread::ThreadPrefix;
 use crate::design::decode::scopes::thread::{exact_thread_construction, parse_thread_payload};
 use crate::records::decal::DesignRecordHeader;
@@ -554,19 +555,21 @@ fn localized_sketch_scope_retains_its_generic_reference_table() {
         byte_offset: 0,
     };
 
-    let scope = parse_parameter_scope(
+    let scope = parse_parameter_scope_with_type_guid(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         header.record_index,
         &header.class_tag,
         header.byte_offset,
+        Some("8DA771B7-52ED-42FC-94E2-2353FE141373"),
     )
     .unwrap()
     .expect("localized Sketch scope");
     assert_eq!(
         scope.kind(),
-        crate::records::feature::scope::DesignFeatureKind::Esquisse
+        crate::records::feature::scope::DesignFeatureKind::Sketch
     );
+    assert_eq!(scope.source_kind.as_deref(), Some("Esquisse"));
     assert_eq!(
         scope
             .reference_members()

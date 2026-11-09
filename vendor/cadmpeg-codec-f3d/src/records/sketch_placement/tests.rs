@@ -64,3 +64,23 @@ fn sketch_visibility_collection_wire_requires_omission_or_a_positive_identity() 
         assert!(serde_json::from_value::<super::DesignSketchVisibility>(invalid_wire).is_err());
     }
 }
+
+#[test]
+fn sketch_visibility_sketch_flag_wire_reads_back() {
+    let mut visibility =
+        super::DesignSketchVisibility::new(std::num::NonZeroU32::new(2).unwrap(), 30, false)
+            .unwrap();
+    let cleared = serde_json::to_value(visibility).unwrap();
+    assert!(cleared.get("sketch_flag").is_none());
+    assert!(
+        !serde_json::from_value::<super::DesignSketchVisibility>(cleared)
+            .unwrap()
+            .sketch_flag
+    );
+    visibility.sketch_flag = true;
+    let wire = serde_json::to_value(visibility).unwrap();
+    assert_eq!(wire["sketch_flag"], serde_json::json!(true));
+    let read = serde_json::from_value::<super::DesignSketchVisibility>(wire).unwrap();
+    assert!(read.sketch_flag);
+    assert_eq!(read, visibility);
+}

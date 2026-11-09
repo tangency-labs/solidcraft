@@ -91,12 +91,39 @@ fn revolve_projects_with_native_profile() {
         &[],
         &[],
         (&[], &[]),
+        &[],
     )
     else {
         panic!("expected a revolve");
     };
     assert_eq!(
         construction.profile(),
+        Some(&cadmpeg_ir::features::PlanarProfileRef::Native(
+            groups[0].id.clone()
+        ))
+    );
+    let mut unresolved_axis = axis.clone();
+    unresolved_axis.resolved_axis = None;
+    let Some(cadmpeg_ir::features::FeatureDefinition::Operation(
+        cadmpeg_ir::features::FeatureOperation::Revolve {
+            construction: unresolved,
+            ..
+        },
+    )) = super::super::project_fixed_revolve_with_entities(
+        &scope,
+        &groups,
+        &[unresolved_axis],
+        &[],
+        &[],
+        (&[], &[]),
+        &[],
+    )
+    else {
+        panic!("expected a revolve with an unresolved axis");
+    };
+    assert_eq!(unresolved.axis(), None);
+    assert_eq!(
+        unresolved.profile(),
         Some(&cadmpeg_ir::features::PlanarProfileRef::Native(
             groups[0].id.clone()
         ))
@@ -117,8 +144,11 @@ fn revolve_projects_design_geometry_origin_axis_selections() {
     use crate::records::topology::entity_selection::DesignEntitySelectionOperand;
     use crate::records::topology::extrude_selection::DesignOperandRole;
 
-    let mut scope =
-        DesignParameterScope::empty("f3d:test:scope#12", DesignFeatureKind::Revolve, 12);
+    let mut scope = DesignParameterScope::empty(
+        "f3d:Design/BulkStream.dat:scope#12",
+        DesignFeatureKind::Revolve,
+        12,
+    );
     scope
         .try_edit(|draft| {
             draft.payload = DesignPathFeatureConstruction::Revolve(DesignRevolveConstruction {
@@ -139,7 +169,7 @@ fn revolve_projects_design_geometry_origin_axis_selections() {
         .unwrap();
     let group = |record_index, ordinal, member, role: DesignOperandRole| {
         serde_json::from_value::<DesignConstructionOperandGroup>(serde_json::json!({
-            "id": format!("f3d:test:group#{record_index}"),
+            "id": format!("f3d:Design/BulkStream.dat:group#{record_index}"),
             "scope_record_index": 12,
             "scope_reference_ordinal": ordinal,
             "record_index": record_index,
@@ -168,7 +198,7 @@ fn revolve_projects_design_geometry_origin_axis_selections() {
     ];
     let selection = |primary_identity: u64| {
         serde_json::from_value::<DesignEntitySelectionOperand>(serde_json::json!({
-            "id": "f3d:test:entity-selection#201", "scope_record_index": 12,
+            "id": "f3d:Design/BulkStream.dat:entity-selection#201", "scope_record_index": 12,
             "group_record_index": 101, "group_member_ordinal": 0,
             "record_index": 201, "byte_offset": 100, "class_tag": "307",
             "asset_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "asset_id_offset": 130,
@@ -187,6 +217,10 @@ fn revolve_projects_design_geometry_origin_axis_selections() {
             std::slice::from_ref(selection),
             &[],
             (&[], &[]),
+            &crate::test_support::origin_types::origin_design_types(
+                "f3d:Design/MetaStream.dat",
+                39,
+            ),
         )
     };
     for (primary_identity, direction) in [
@@ -274,6 +308,10 @@ fn revolve_projects_design_geometry_origin_axis_selections() {
             std::slice::from_ref(&selection(41)),
             &[],
             (&[], &[]),
+            &crate::test_support::origin_types::origin_design_types(
+                "f3d:Design/MetaStream.dat",
+                39,
+            ),
         )
         else {
             panic!("expected a resolved revolve");
@@ -319,7 +357,7 @@ fn oriented_direction_for_angle(
     };
 
     let mut scope = crate::records::feature::scope::DesignParameterScope::empty(
-        "f3d:test:scope#12",
+        "f3d:Design/BulkStream.dat:scope#12",
         crate::records::feature::scope::DesignFeatureKind::Revolve,
         12,
     );

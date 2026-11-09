@@ -143,6 +143,7 @@ pub(super) fn encode_design_bulkstream(
                 edge_identity_operands: &native.design_edge_identity_operands,
                 edge_treatment_vertex_operands: &native.design_edge_treatment_vertex_operands,
                 entity_selection_operands: &native.design_entity_selection_operands,
+                design_types: &native.design_types,
                 curve_identities: &native.sketch_curve_identities,
                 face_operands: &native.design_face_operands,
                 body_recipe_operands: &native.design_body_recipe_operands,

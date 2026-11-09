@@ -257,3 +257,51 @@ fn coil_join_projects_boolean_result() {
         })
     ));
 }
+
+#[test]
+fn ten_reference_coil_join_targets_its_role_four_group() {
+    let (mut scope, parameters) = long_coil_fixture();
+    scope
+        .try_edit(|draft| {
+            draft.reference_members =
+                crate::records::identity::ReferenceRun::unlocated((61..71).collect());
+            draft.reference_count_offset = 126;
+            draft.layout_fixture_references();
+            draft.paired_byte_offset = draft.kind_offset + 22 + 78;
+            draft.frame_length = draft.paired_byte_offset;
+            draft.feature_ordinal_offset = draft.kind_offset + 22;
+        })
+        .unwrap();
+    if let crate::records::feature::scope::DesignScopePayloadMut::SpirePrimitive(slot)
+    | crate::records::feature::scope::DesignScopePayloadMut::CoilPrimitive(slot) =
+        scope.payload_mut()
+    {
+        slot.as_mut().unwrap().operation = Some(crate::records::identity::RecordedValue {
+            value: DesignExtrudeOperation::Join,
+            offset: 20,
+        });
+    }
+    let owned = owned_parameters(&parameters);
+    let target = |role| {
+        let mut group = coil_body_group();
+        group.operand_role =
+            crate::records::topology::construction::DesignConstructionOperandRole::Other(role);
+        match project_coil(&scope, &owned, std::slice::from_ref(&group)).unwrap() {
+            Some(FeatureDefinition::Operation(FeatureOperation::Coil {
+                result: CoilResult::Boolean { targets, .. },
+                ..
+            })) => Some(targets),
+            _ => None,
+        }
+    };
+    assert_eq!(
+        target(crate::records::topology::extrude_selection::DesignOperandRole::BODIES_A),
+        Some(cadmpeg_ir::features::BodySelection::Native(
+            "f3d:Design/BulkStream.dat:group#60".into()
+        ))
+    );
+    assert_eq!(
+        target(crate::records::topology::extrude_selection::DesignOperandRole::BODIES_B),
+        None
+    );
+}

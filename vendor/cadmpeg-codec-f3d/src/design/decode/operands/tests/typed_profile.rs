@@ -123,6 +123,40 @@ fn chain(inner_loop: bool) -> Vec<u8> {
     bytes
 }
 
+/// The `chain` records with an identity record of the given body: `chain`
+/// builds its identity body at offset `identity_body(&chain(false))`.
+fn chain_with_groups(body: &[u8]) -> Vec<u8> {
+    let plain = chain(false);
+    let start = identity_body(&plain);
+    let end = plain
+        .windows(7)
+        .rposition(|window| window == [3, 0, 0, 0, b'2', b'7', b'5'])
+        .unwrap();
+    let mut bytes = plain[..start].to_vec();
+    bytes.extend_from_slice(body);
+    bytes.extend_from_slice(&plain[end..]);
+    bytes
+}
+
+/// Offset of the region groups in `chain`'s identity record.
+fn identity_body(bytes: &[u8]) -> usize {
+    bytes
+        .windows(7)
+        .position(|window| window == [3, 0, 0, 0, b'2', b'9', b'7'])
+        .unwrap()
+        + crate::layout::typed_reference_profile_identity_record::REGION_GROUP_COUNT
+}
+
+/// One region of one exterior loop.
+fn region(out: &mut Vec<u8>, ids: &[u64]) {
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&u32::try_from(ids.len()).unwrap().to_le_bytes());
+    for id in ids {
+        entry(out, *id);
+    }
+    out.push(1);
+}
+
 fn parse(
     bytes: &[u8],
 ) -> Option<crate::records::topology::entity_selection::DesignProfileCurveSelection> {
@@ -151,33 +185,29 @@ fn typed_profile_selection_reads_owner_scope_and_curve_loops() {
     let selection = parse(&chain(true)).expect("typed profile selection");
     assert_eq!(selection.owner_text, "75");
     assert_eq!(selection.sketch_scope_record_index, 77);
-    let lists: Vec<Vec<Vec<u64>>> = selection
-        .loop_lists
-        .iter()
-        .map(|loops| {
-            loops
-                .iter()
-                .map(|region| {
-                    region
-                        .iter()
-                        .flat_map(|loop_| &loop_.entries)
-                        .map(|entry| entry.primary_id)
-                        .collect()
-                })
-                .collect()
-        })
-        .collect();
+    let ids = |region: &Vec<crate::records::topology::entity_selection::DesignProfileCurveLoop>| {
+        region
+            .iter()
+            .flat_map(|loop_| &loop_.entries)
+            .map(|entry| entry.primary_id)
+            .collect::<Vec<_>>()
+    };
+    let [group] = selection.groups.as_slice() else {
+        panic!("one region group");
+    };
+    let lists = [
+        vec![ids(&group.region)],
+        group.further.iter().map(ids).collect::<Vec<_>>(),
+    ];
     assert_eq!(lists, [vec![vec![11, 12, 13]], vec![vec![14]]]);
     assert!(selection
-        .loop_lists
-        .iter()
-        .flatten()
+        .regions()
         .flatten()
         .flat_map(|loop_| &loop_.entries)
         .all(|entry| entry.secondary_id == 0 && entry.entry_fields == [0, 1, 1]));
     let outer = parse(&chain(false)).expect("single-loop selection");
-    assert_eq!(outer.loop_lists[0].len(), 1);
-    assert!(outer.loop_lists[1].is_empty());
+    assert_eq!(outer.groups.len(), 1);
+    assert!(outer.groups[0].further.is_empty());
     assert_eq!(u64_from_index(0), outer.byte_offset);
 }
 
@@ -225,7 +255,7 @@ fn region_chain() -> Vec<u8> {
     lists.push(1);
     lists.extend_from_slice(&0u32.to_le_bytes());
     bytes.splice(
-        identity + crate::layout::typed_reference_profile_identity_record::FIRST_REGION_COUNT
+        identity + crate::layout::typed_reference_profile_identity_record::REGION_GROUP_COUNT
             ..paired,
         lists,
     );
@@ -236,7 +266,7 @@ fn region_chain() -> Vec<u8> {
 fn typed_profile_selection_reads_region_holes_before_exterior() {
     let selection = parse(&region_chain()).unwrap();
     assert!(selection.valid_layout());
-    let region = &selection.loop_lists[0][0];
+    let region = &selection.groups[0].region;
     assert_eq!(region.len(), 2);
     assert!(!region[0].outer);
     assert!(region[1].outer);
@@ -262,8 +292,55 @@ fn typed_profile_selection_refuses_missing_exterior_and_invalid_counts() {
     assert!(parse(&bytes).is_none());
     let mut bytes = region_chain();
     let count = usize::try_from(parsed.identity_record_offset).unwrap()
-        + crate::layout::typed_reference_profile_identity_record::FIRST_REGION_COUNT
+        + crate::layout::typed_reference_profile_identity_record::REGION_GROUP_COUNT
         + 8;
     bytes[count..count + 4].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(parse(&bytes).is_none());
+}
+
+fn region_ids(
+    region: &[crate::records::topology::entity_selection::DesignProfileCurveLoop],
+) -> Vec<u64> {
+    region
+        .iter()
+        .flat_map(|loop_| &loop_.entries)
+        .map(|entry| entry.primary_id)
+        .collect()
+}
+
+#[test]
+fn typed_profile_selection_reads_several_region_groups_in_stored_order() {
+    let mut body = 2u32.to_le_bytes().to_vec();
+    region(&mut body, &[11, 12]);
+    body.extend_from_slice(&1u32.to_le_bytes());
+    region(&mut body, &[13]);
+    region(&mut body, &[14, 15]);
+    body.extend_from_slice(&0u32.to_le_bytes());
+    let selection = parse(&chain_with_groups(&body)).expect("two region groups");
+    assert!(selection.valid_layout());
+    assert_eq!(selection.groups.len(), 2);
+    assert_eq!(selection.groups[0].further.len(), 1);
+    assert!(selection.groups[1].further.is_empty());
+    let regions: Vec<Vec<u64>> = selection.regions().map(|r| region_ids(r)).collect();
+    assert_eq!(regions, [vec![11, 12], vec![13], vec![14, 15]]);
+}
+
+#[test]
+fn typed_profile_selection_refuses_region_groups_that_miss_the_record_end() {
+    let group = |count: u32, trailing: &[u8]| {
+        let mut body = count.to_le_bytes().to_vec();
+        region(&mut body, &[11]);
+        body.extend_from_slice(&0u32.to_le_bytes());
+        region(&mut body, &[12]);
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(trailing);
+        parse(&chain_with_groups(&body))
+    };
+    assert!(group(2, &[]).is_some());
+    // One group leaves the second behind; three run past the record.
+    assert!(group(1, &[]).is_none());
+    assert!(group(3, &[]).is_none());
+    assert!(group(2, &[0]).is_none());
+    // No group at all.
+    assert!(parse(&chain_with_groups(&0u32.to_le_bytes())).is_none());
 }

@@ -20,7 +20,7 @@ cadmpeg_core::named_optional_field!(
 );
 
 pub(crate) fn supported_version(version: u32) -> bool {
-    matches!(version, 4 | 5 | 6 | 8 | 9 | 12 | 14 | 15 | 16)
+    matches!(version, 4..=10 | 12 | 14 | 15 | 16)
 }
 
 const ALIGN_UP_SQUARED_NORM_TOLERANCE: f64 = 1e-10;

@@ -125,8 +125,9 @@ fn native_arenas_have_pinned_shape_and_typed_round_trip() {
         .iter()
         .map(|row| row.arena)
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(crate::native::F3D_FAMILIES.len(), 85);
+    assert_eq!(crate::native::F3D_FAMILIES.len(), 87);
     assert!(catalogue_names.contains("asm_face_boundaries"));
+    assert!(catalogue_names.contains("display_poses"));
     assert!(catalogue_names.contains("design_intent_failures"));
     assert!(catalogue_names.contains("design_body_reference_tails"));
     assert!(catalogue_names.contains("design_placement_constructions"));

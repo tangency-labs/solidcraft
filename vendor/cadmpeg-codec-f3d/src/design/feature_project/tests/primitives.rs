@@ -193,10 +193,11 @@ fn esfera_primitiva_projects_like_sphere() {
     use cadmpeg_ir::features::{FeatureDefinition, FeatureOperation};
     let mut scope = DesignParameterScope::empty(
         "f3d:Design/BulkStream.dat:design-parameter-scope#80",
-        DesignFeatureKind::EsferaPrimitiva,
+        DesignFeatureKind::SpherePrimitive,
         80,
     );
-    if let DesignScopePayloadMut::EsferaPrimitiva(slot) = scope.payload_mut() {
+    scope.source_kind = Some("EsferaPrimitiva".to_owned());
+    if let DesignScopePayloadMut::SpherePrimitive(slot) = scope.payload_mut() {
         *slot = Some(
             serde_json::from_value(serde_json::json!({
                 "transform": [

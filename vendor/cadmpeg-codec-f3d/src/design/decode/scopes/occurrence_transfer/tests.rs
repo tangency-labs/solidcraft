@@ -20,10 +20,13 @@ fn matrix(out: &mut Vec<u8>, translation: f64) {
         out.extend_from_slice(&value.to_le_bytes());
     }
 }
-fn relation(out: &mut Vec<u8>, index: u32, scope: u32, owner: u32) {
+fn relation(out: &mut Vec<u8>, index: u32, scope: u32, owner: u32, marked_gap: bool) {
     header(out, index);
     out.extend_from_slice(&[0; 10]);
     reference(out, 10);
+    if marked_gap {
+        out.push(1);
+    }
     out.extend_from_slice(&[0; 2]);
     reference(out, 99);
     out.push(0);
@@ -56,7 +59,35 @@ fn context(out: &mut Vec<u8>, component: u32, context: u32, collection: u32) {
     reference(out, component);
     header(out, collection);
 }
+/// Type GUID that `CopyPaste` and `CutPaste` scopes share.
+const PASTE_TYPE: &str = "D57B1A22-9D5A-4D7D-A909-E08C579612CA";
+
 fn fixture(cut: bool, identity: bool, shift: usize) -> (Vec<u8>, DesignParameterScope) {
+    fixture_with(cut, identity, shift, false)
+}
+/// A paste scope with a localized kind, an 88-byte tail, and for a copy the
+/// 58-byte relation, typed through the shared paste GUID.
+fn localized_fixture(cut: bool, shift: usize) -> (Vec<u8>, DesignParameterScope) {
+    fixture_with(cut, false, shift, true)
+}
+fn parse(bytes: &[u8], start: u64, localized: bool) -> Option<DesignParameterScope> {
+    let records = IndexedRecordOffsets::build(bytes);
+    crate::design::decode::scopes::parameter_scope::parse_parameter_scope_with_type_guid(
+        bytes,
+        &records,
+        21,
+        &"333".to_owned().try_into().unwrap(),
+        start,
+        localized.then_some(PASTE_TYPE),
+    )
+    .unwrap()
+}
+fn fixture_with(
+    cut: bool,
+    identity: bool,
+    shift: usize,
+    localized: bool,
+) -> (Vec<u8>, DesignParameterScope) {
     let key = "11111111-2222-3333-4444-555555555555";
     let mut bytes = Vec::new();
     context(&mut bytes, 2, 5, 7);
@@ -67,8 +98,8 @@ fn fixture(cut: bool, identity: bool, shift: usize) -> (Vec<u8>, DesignParameter
     bytes.extend_from_slice(&1u32.to_le_bytes());
     reference(&mut bytes, 11);
     header(&mut bytes, 11);
-    relation(&mut bytes, 12, 20, 7);
-    relation(&mut bytes, 14, 21, 8);
+    relation(&mut bytes, 12, 20, 7, false);
+    relation(&mut bytes, 14, 21, 8, localized && !cut);
     header(&mut bytes, 13);
     if cut {
         bytes.extend_from_slice(&[0; 22]);
@@ -120,22 +151,19 @@ fn fixture(cut: bool, identity: bool, shift: usize) -> (Vec<u8>, DesignParameter
     bytes.extend_from_slice(&1u32.to_le_bytes());
     reference(&mut bytes, 14);
     bytes.extend_from_slice(&u32::MAX.to_le_bytes());
-    lp_utf16(&mut bytes, if cut { "CutPaste" } else { "CopyPaste" });
+    let kind = match (cut, localized) {
+        (true, false) => "CutPaste",
+        (false, false) => "CopyPaste",
+        (true, true) => "CouperColler",
+        (false, true) => "CopierColler",
+    };
+    lp_utf16(&mut bytes, kind);
     let ordinal_at = bytes.len();
-    bytes.extend_from_slice(&[0; 87]);
+    bytes.resize(ordinal_at + if localized { 88 } else { 87 }, 0);
     bytes[ordinal_at..ordinal_at + 4].copy_from_slice(&1u32.to_le_bytes());
     let paired = bytes.len();
     header(&mut bytes, 21);
-    let records = IndexedRecordOffsets::build(&bytes);
-    let scope = crate::design::decode::scopes::parameter_scope::parse_parameter_scope(
-        &bytes,
-        &records,
-        21,
-        &"333".to_owned().try_into().unwrap(),
-        u64::try_from(start).unwrap(),
-    )
-    .unwrap()
-    .unwrap();
+    let scope = parse(&bytes, u64::try_from(start).unwrap(), localized).unwrap();
     assert_eq!(scope.paired_byte_offset(), u64::try_from(paired).unwrap());
     assert_eq!(
         scope.reference_count_offset(),
@@ -230,4 +258,63 @@ fn occurrence_transfer_rejects_other_types_with_an_occurrence_prefix() {
     let mut wrong_type = types();
     wrong_type.insert(10, (COMPONENT_TYPE, 0));
     assert!(exact_occurrence_transfer(&bytes, &records, &scope, &wrong_type).is_none());
+}
+
+#[test]
+fn a_localized_compact_copy_prefix_selects_copy_paste_and_decodes_its_transfer() {
+    for shift in [0, 4] {
+        let (bytes, scope) = localized_fixture(false, shift);
+        assert_eq!(
+            scope.kind(),
+            crate::records::feature::scope::DesignFeatureKind::CopyPaste
+        );
+        assert_eq!(scope.source_kind_name(), "CopierColler");
+        let records = IndexedRecordOffsets::build(&bytes);
+        let value = exact_occurrence_transfer(&bytes, &records, &scope, &types()).unwrap();
+        assert_eq!(value.occurrence_record_index, 10);
+        assert_eq!(value.target_owner.collection, 8);
+        let DesignOccurrenceTransferSource::Copy {
+            source_transform, ..
+        } = value.source
+        else {
+            panic!("copy source");
+        };
+        assert_eq!(source_transform[0][3], 2.0);
+        assert_eq!(value.target_transform[0][3], 3.0);
+    }
+}
+
+#[test]
+fn the_shared_paste_type_keeps_a_cut_or_changed_copy_prefix_native() {
+    let native = |kind: &str| {
+        crate::records::feature::scope::DesignFeatureKind::try_from(kind.to_owned()).unwrap()
+    };
+    let (bytes, scope) = localized_fixture(true, 0);
+    assert_eq!(scope.kind(), native("CouperColler"));
+    let records = IndexedRecordOffsets::build(&bytes);
+    assert!(exact_occurrence_transfer(&bytes, &records, &scope, &types()).is_none());
+
+    for marker in [20, 21] {
+        let (mut bytes, scope) = localized_fixture(false, 0);
+        bytes[usize::try_from(scope.byte_offset()).unwrap() + marker] = 1;
+        let changed = parse(&bytes, scope.byte_offset(), true).unwrap();
+        assert_eq!(changed.kind(), native("CopierColler"));
+    }
+}
+
+#[test]
+fn the_58_byte_relation_is_admitted_for_a_copy_and_refused_for_a_cut() {
+    for cut in [false, true] {
+        let (mut bytes, scope) = fixture(cut, false, 0);
+        let relation_at = IndexedRecordOffsets::build(&bytes)
+            .first_at_or_after(0, 14)
+            .unwrap();
+        bytes.insert(relation_at + 32, 1);
+        let scope = parse(&bytes, scope.byte_offset() + 1, false).unwrap();
+        let records = IndexedRecordOffsets::build(&bytes);
+        assert_eq!(
+            exact_occurrence_transfer(&bytes, &records, &scope, &types()).is_some(),
+            !cut
+        );
+    }
 }

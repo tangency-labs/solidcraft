@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Exact legacy thicken and shell scope frames.
+//! Exact thicken and shell scope frames.
 
 use cadmpeg_core::decode::u64_from_index;
 
@@ -7,87 +7,121 @@ use super::shared_frames::exact_fixed_scalar;
 use super::shared_frames::marked_record_reference;
 use crate::design::decode::sketch::IndexedRecordOffsets;
 use crate::design::decode::text::{fixed_guid_end, fixed_utf16_ascii_eq};
+use crate::design::design_feature_family;
+use crate::design::DesignFeatureFamily;
 use crate::layout::shell_class_369_261_scope_frame as shell_369_261;
 use crate::layout::shell_wall_slot_scope_prefix as shell_slots;
-use crate::layout::thicken_class_347_scope_frame as thicken_347;
+use crate::layout::thicken_scope_prologue as thicken;
 use crate::records::feature::direct_face;
 use crate::records::feature::direct_face::DesignDirectFaceOperation;
+use crate::records::feature::direct_face::DesignThickenOperation;
 use crate::records::feature::scope::DesignParameterScope;
 use cadmpeg_core::decode::View;
+use cadmpeg_ir::report::loss::LossNote;
 
 const WALL_SLOT_LEN: usize = 11;
+const MARKED_REFERENCE_LEN: usize = 11;
+const U32_LEN: usize = 4;
+const THICKEN_FORM: u32 = 4;
+const GUID_ZERO_RUN: usize = 8;
+const TABLE_ZERO_RUN: usize = 3;
 const WALL_SLOTS_ZERO_RUN: usize = 12;
 
-/// Decode class-347/258 Thicken, whose group precedes its scalar. The class
-/// pair and 291-byte frame are part of admission for this distinct grammar.
-pub(super) fn exact_legacy_thicken_class_347(
+pub(super) fn exact_thicken_operation(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     scope: &DesignParameterScope,
-) -> Option<DesignDirectFaceOperation> {
-    if scope.class_tag.as_str() != "347"
-        || scope.paired_class_tag.as_str() != "258"
-        || scope.frame_length() != u64::try_from(thicken_347::LEN).ok()?
-        || scope.reference_members().len() != 3
-    {
+    losses: &mut Vec<LossNote>,
+) -> Option<DesignThickenOperation> {
+    if design_feature_family(&scope.kind()) != Some(DesignFeatureFamily::Thicken) {
         return None;
     }
     let start = usize::try_from(scope.byte_offset()).ok()?;
-    if bytes.get(start + thicken_347::ZERO_RUN_10..start + thicken_347::FEATURE_FORM)
-        != Some(&[0; 10])
-        || View::u32_le_at(bytes, start + thicken_347::FEATURE_FORM)? != 4
-        || View::u32_le_at(bytes, start + thicken_347::GROUP_FORM)? != 1
-        || marked_record_reference(bytes, start + thicken_347::GROUP_REFERENCE)?
-            != scope.reference_members().values().next().copied()?
-        || bytes.get(start + thicken_347::SCALAR_PREFIX..start + thicken_347::SCALAR_REFERENCE)
-            != Some(&[1, 1])
-        || View::u32_le_at(bytes, start + thicken_347::AUXILIARY_COUNT)? != 1
-        || marked_record_reference(bytes, start + thicken_347::AUXILIARY_REFERENCE).is_none()
-        || bytes.get(start + thicken_347::ZERO_RUN_8..start + thicken_347::GUID_CODE_UNIT_COUNT)
-            != Some(&[0; 8])
-        || View::u32_le_at(bytes, start + thicken_347::GUID_CODE_UNIT_COUNT)? != 36
-        || bytes.get(start + thicken_347::ZERO_RUN_3..start + thicken_347::REFERENCE_COUNT)
-            != Some(&[0; 3])
-        || View::u32_le_at(bytes, start + thicken_347::REFERENCE_COUNT)? != 3
-        || View::u32_le_at(bytes, start + thicken_347::KIND_CODE_UNIT_COUNT)? != 7
-    {
+    if bytes.get(start + thicken::ZERO_RUN_9..start + thicken::PROLOGUE_MARKER)? != [0; 9] {
         return None;
     }
-    let guid_end = fixed_guid_end(bytes, start + thicken_347::GUID_CODE_UNIT_COUNT)?;
-    if guid_end != start + thicken_347::ZERO_RUN_3 {
-        return None;
-    }
-    let kind_end =
-        fixed_utf16_ascii_eq(bytes, start + thicken_347::KIND_CODE_UNIT_COUNT, "Thicken")?;
-    if kind_end != start + thicken_347::FEATURE_ORDINAL {
-        return None;
-    }
-    let reference_entries = [
-        thicken_347::GROUP_REFERENCE_ENTRY,
-        thicken_347::MEMBER_REFERENCE_ENTRY,
-        thicken_347::SCALAR_REFERENCE_ENTRY,
-    ];
-    for (offset, expected) in reference_entries
-        .into_iter()
-        .zip(scope.reference_members().values().copied())
-    {
-        if marked_record_reference(bytes, start + offset) != Some(expected) {
-            return None;
+    let (mut cursor, prologue_flag) = match bytes.get(start + thicken::PROLOGUE_MARKER)? {
+        0 => (start + thicken::LEN, None),
+        1 if View::u32_le_at(bytes, start + thicken::LEN)? == 0 => {
+            let short_end = start + thicken::LEN + U32_LEN;
+            match bytes.get(short_end)? {
+                _ if View::u32_le_at(bytes, short_end)? == THICKEN_FORM => (short_end, None),
+                flag @ (0 | 1) => (short_end + 1, Some((short_end, *flag))),
+                _ => return None,
+            }
         }
+        _ => return None,
+    };
+    if View::u32_le_at(bytes, cursor)? != THICKEN_FORM {
+        return None;
     }
-    let thickness_record_index =
-        marked_record_reference(bytes, start + thicken_347::SCALAR_REFERENCE)?;
-    if scope.reference_members().values().next_back().copied()? != thickness_record_index {
+    let group_count = View::u32_le_at(bytes, cursor + U32_LEN)?;
+    cursor += 2 * U32_LEN;
+    let table = scope
+        .reference_members()
+        .values()
+        .copied()
+        .collect::<Vec<_>>();
+    let mut groups = Vec::new();
+    for _ in 0..group_count {
+        groups.push(marked_record_reference(bytes, cursor)?);
+        cursor += MARKED_REFERENCE_LEN;
+    }
+    let flags_at = cursor;
+    let flags = bytes.get(flags_at..flags_at + 2)?;
+    if flags.iter().any(|flag| *flag > 1) {
+        return None;
+    }
+    cursor += 2;
+    let thickness_record_index = marked_record_reference(bytes, cursor)?;
+    cursor += MARKED_REFERENCE_LEN;
+    let operands = if table.first() == Some(&thickness_record_index) {
+        table.get(1..)?
+    } else if table.last() == Some(&thickness_record_index) {
+        table.get(..table.len() - 1)?
+    } else {
+        return None;
+    };
+    if groups.first() != operands.first() || groups.is_empty() {
+        return None;
+    }
+    let mut remaining = operands.iter();
+    for group in &groups {
+        remaining.by_ref().find(|operand| *operand == group)?;
+    }
+    if View::u32_le_at(bytes, cursor)? == 0 {
+        cursor += U32_LEN;
+    }
+    if View::u32_le_at(bytes, cursor)? != 1 {
+        return None;
+    }
+    marked_record_reference(bytes, cursor + U32_LEN)?;
+    cursor += U32_LEN + MARKED_REFERENCE_LEN;
+    if bytes.get(cursor..cursor + GUID_ZERO_RUN)? != [0; GUID_ZERO_RUN] {
+        return None;
+    }
+    let guid_end = fixed_guid_end(bytes, cursor + GUID_ZERO_RUN)?;
+    if bytes.get(guid_end..guid_end + TABLE_ZERO_RUN)? != [0; TABLE_ZERO_RUN]
+        || u64::try_from(guid_end + TABLE_ZERO_RUN).ok()? != scope.reference_count_offset()
+    {
         return None;
     }
     let scalar = exact_fixed_scalar(bytes, records, thickness_record_index)?;
-    (scalar.value.get() != 0.0).then_some(DesignDirectFaceOperation::Thicken(
-        direct_face::DesignThickenOperation {
-            signed_thickness: scalar.value,
-            thickness_record_index,
-            thickness_offset: scalar.value_offset,
-        },
-    ))
+    if scalar.value.get() == 0.0 {
+        return None;
+    }
+    let prologue = prologue_flag.map_or_else(String::new, |(at, flag)| {
+        format!(" and prologue flag byte {flag:02x} at byte {at}")
+    });
+    losses.push(crate::loss::F3dLossCode::FeatureThickenFlagsAssumed.note(format!(
+        "Thicken scope {} stores flag bytes {:02x} {:02x} at byte {flags_at}{prologue}; the Thicken settings these flags select are unresolved (DR-313), and a Thicken projected from the scope takes its side from the sign of the thickness.",
+        scope.id, flags[0], flags[1]
+    )));
+    Some(DesignThickenOperation {
+        signed_thickness: scalar.value,
+        thickness_record_index,
+        thickness_offset: scalar.value_offset,
+    })
 }
 
 /// Decode the `Shell` scope that stores its walls in optional slots.

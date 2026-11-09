@@ -7,6 +7,7 @@ use crate::bytes::{local_reference_target, lp_ascii_filtered_view};
 use crate::design::decode::sketch::IndexedRecordOffsets;
 use crate::ids::native_stream;
 use crate::layout::assembly_version_five_scope as five;
+use crate::layout::assembly_version_four_prologue as four;
 use crate::layout::assembly_version_three_prefix as prefix;
 use crate::records::feature::assembly::{
     DesignAssemblyAlignment, DesignAssemblyAlignmentForm, DesignAssemblyOperandFrame,
@@ -19,6 +20,8 @@ use cadmpeg_core::decode::{u64_from_index, View};
 use cadmpeg_core::CodecError;
 
 pub(crate) const TYPE_GUID: &str = "8DFDD543-F823-43AA-BDAF-C638E023F0A0";
+/// UTF-16 code units of the English family name that the span formula counts.
+const ASSEMBLE_NAME_UNITS: usize = 8;
 /// Type GUID of the referenced joint record.
 const JOINT_TYPE_GUID: &str = "7F5A0426-1D2A-4DC4-9F06-58631F69D2F5";
 
@@ -27,7 +30,7 @@ pub(crate) fn registered(scope: &DesignParameterScope, types: &StreamTypes<'_>) 
         && types
             .get(&u64::from(scope.record_index))
             .is_some_and(|(guid, version)| {
-                matches!(version, 3 | 5) && guid.eq_ignore_ascii_case(TYPE_GUID)
+                matches!(version, 3..=5) && guid.eq_ignore_ascii_case(TYPE_GUID)
             })
 }
 
@@ -66,6 +69,7 @@ struct VersionLayout {
     frame_guid: bool,
     angle_zeros: usize,
     tail_reference: bool,
+    tail_marker: bool,
     tail_zeros: usize,
 }
 
@@ -82,6 +86,17 @@ impl VersionLayout {
                 frame_guid: false,
                 angle_zeros: 0,
                 tail_reference: false,
+                tail_marker: false,
+                tail_zeros: 0,
+            },
+            4 => Self {
+                joint_versions: &[5],
+                prologue_zeros: four::PROLOGUE_ZEROS_VALUE.len(),
+                frame_zeros: five::FIRST_FRAME_ZEROS_VALUE.len(),
+                frame_guid: true,
+                angle_zeros: 0,
+                tail_reference: true,
+                tail_marker: true,
                 tail_zeros: 0,
             },
             5 => Self {
@@ -91,6 +106,7 @@ impl VersionLayout {
                 frame_guid: true,
                 angle_zeros: five::ANGLE_ZEROS_VALUE.len(),
                 tail_reference: true,
+                tail_marker: false,
                 tail_zeros: five::TAIL_SEPARATOR_VALUE.len(),
             },
             _ => return None,
@@ -102,6 +118,7 @@ impl VersionLayout {
             + 2 * (self.frame_zeros + usize::from(self.frame_guid) * 76)
             + self.angle_zeros
             + usize::from(self.tail_reference) * stride
+            + usize::from(self.tail_marker)
             + self.tail_zeros
     }
 }
@@ -319,9 +336,14 @@ pub(crate) fn parse(
         }
     }
     fields.view.u32_le()?;
-    let kind = b"\x08\x00\x00\x00A\x00s\x00s\x00e\x00m\x00b\x00l\x00e\x00";
-    if fields.view.take(kind.len())? != kind {
+    let name = scope.source_kind_name().encode_utf16().collect::<Vec<_>>();
+    if fields.view.u32_le()? != u32::try_from(name.len()).ok()? {
         return None;
+    }
+    for unit in &name {
+        if fields.view.u16_le()? != *unit {
+            return None;
+        }
     }
     if u64_from_index(fields.view.position()) != scope.feature_ordinal_offset()
         || fields.view.u32_le()? != scope.feature_ordinal.get()
@@ -347,6 +369,9 @@ pub(crate) fn parse(
             }
             fields.view.u32_le()?;
             fields.reference()?;
+            if layout.tail_marker && fields.view.u8()? != 1 {
+                return None;
+            }
             let state = [fields.view.u8()?, fields.view.u8()?];
             if state.iter().any(|value| *value > 1) {
                 return None;
@@ -366,7 +391,9 @@ pub(crate) fn parse(
                 .checked_add(128 * matrices)?
                 .checked_add(4 * usize::from(expanded))?
                 .checked_add(separator)?
-                .checked_add(layout.extra_span(stride))?;
+                .checked_add(layout.extra_span(stride))?
+                .checked_add(2 * name.len())?
+                .checked_sub(2 * ASSEMBLE_NAME_UNITS)?;
             (fields.view.position() == end && span == end.checked_sub(start)?).then_some(state)
         })();
         if let Some(state) = candidate {
@@ -550,7 +577,9 @@ pub(crate) fn alignment_layout(
         )?
         .checked_add(128 * matrices)?
         .checked_add(4 * expanded)?
-        .checked_add(layout.extra_span(stride))?;
+        .checked_add(layout.extra_span(stride))?
+        .checked_add(2 * scope.source_kind_name().encode_utf16().count())?
+        .checked_sub(2 * ASSEMBLE_NAME_UNITS)?;
     if !(span..=span.checked_add(usize::from(!layout.tail_reference))?)
         .contains(&usize::try_from(scope.frame_length()).ok()?)
     {

@@ -24,6 +24,7 @@ fn reference() -> DesignRecipeReference {
         candidate_edges: Vec::new(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     }
 }
 

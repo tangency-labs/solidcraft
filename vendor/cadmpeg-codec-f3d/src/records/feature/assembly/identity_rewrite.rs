@@ -32,7 +32,7 @@ rewrite_native_record!(DesignAssemblyLegacySelection, []; {record_index, byte_of
 rewrite_native_scalar!(DesignAssemblyLimitKind);
 rewrite_native_record!(DesignAssemblyLimits, []; {kind, minimum, maximum, owner_record_indices, value_offsets});
 rewrite_native_record!(DesignAssemblyOperandFrame, []; {reference_record_index, reference_offset, transform, transform_offset});
-rewrite_native_record!(DesignAssemblyOperandPath, []; {link, record_index, class_tag, byte_offset, occurrence_guids, identity_guids, paired_occurrence_keys});
+rewrite_native_record!(DesignAssemblyOperandPath, []; {link, record_index, class_tag, byte_offset, occurrence_guids, identity_guids, occurrence_lists});
 rewrite_native_record!(DesignAssemblyOperandPathLink, []; {locator_reference_offset, locator_record_index, locator_class_tag, locator_byte_offset, locator_scope_reference_offset, wrapper_record_index, wrapper_reference_offset, wrapper_class_tag, wrapper_byte_offset, path_reference_offset});
 rewrite_native_enum!(DesignAssemblyOperandQualifier, []; {
     OccurrencePath {path},

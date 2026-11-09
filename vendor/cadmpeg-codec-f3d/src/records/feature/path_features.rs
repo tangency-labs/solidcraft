@@ -27,6 +27,7 @@ cadmpeg_core::named_optional_field!(deserialize_solid, bool, "solid");
 cadmpeg_core::named_optional_field!(deserialize_angle, f64, "angle");
 cadmpeg_core::named_optional_field!(deserialize_targets, DesignRevolveTargets, "targets");
 cadmpeg_core::named_optional_field!(deserialize_side_two, Located<u32>, "side_two");
+cadmpeg_core::named_optional_field!(deserialize_reference_target, u64, "reference_target");
 /// Exact construction carried by a Revolve, Loft, Sweep, or Pipe scope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -270,6 +271,13 @@ pub(crate) struct DesignLoftConstruction {
     pub(crate) operation: DesignExtrudeOperation,
     /// Byte offset of the operation u32.
     pub(crate) operation_offset: u64,
+    /// Target of the non-null marked reference at standard-prefix offset 33.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_reference_target"
+    )]
+    pub(crate) reference_target: Option<u64>,
 }
 
 /// Fixed construction of a `Sweep` scope.

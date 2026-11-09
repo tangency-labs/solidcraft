@@ -2,9 +2,8 @@
 
 use cadmpeg_core::decode::u64_from_index;
 
-use crate::design::feature_project::{
-    project_delete_face, project_split, project_split_face, selected_work_planes,
-};
+use crate::design::feature_project::delete_face::project_delete_face;
+use crate::design::feature_project::{project_split, project_split_face, selected_work_planes};
 use crate::ids::feature_input_topology_id;
 use crate::records::feature::scope::DesignParameterScope;
 use crate::records::topology::construction::DesignConstructionOperandGroup;
@@ -245,10 +244,7 @@ fn delete_face_falls_back_to_group_id() {
         );
     }
 
-    // The legacy frame is four bytes shorter in front of the kind and in all.
-    // Its class pair, here one from the system76 Launch files, does not
-    // select it; one byte longer is not that frame.
-    for (frame_length, admitted) in [(254, true), (255, false)] {
+    for (frame_length, admitted) in [(254, true), (255, true)] {
         let mut legacy = scope.clone();
         legacy.class_tag =
             crate::records::references::DesignClassTag::try_from("399".to_owned()).unwrap();
@@ -271,6 +267,150 @@ fn delete_face_falls_back_to_group_id() {
             admitted
         );
     }
+    let mut extended = scope.clone();
+    extended
+        .try_edit(|draft| {
+            draft.reference_count_offset = draft.byte_offset + 131;
+            draft.frame_length = 262;
+            draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+            draft.layout_fixture_references();
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    assert!(
+        project_delete_face(&extended, std::slice::from_ref(&selected), &[])
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn delete_face_with_typed_references_projects() {
+    let scope = |count_offset: u64| {
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:scope#77",
+            crate::records::feature::scope::DesignFeatureKind::DeleteFace,
+            77,
+        );
+        scope
+            .try_edit(|draft| {
+                let start = draft.byte_offset;
+                let kind = count_offset + 12 + 2 * 51;
+                draft.kind_offset = start + kind;
+                draft.frame_length = kind + 20 + 196;
+                draft.feature_ordinal_offset = start + kind + 20;
+                draft.paired_byte_offset = start + draft.frame_length;
+                draft.reference_count_offset = start + count_offset;
+                draft.reference_members = crate::records::identity::ReferenceRun::from_columns(
+                    vec![100, 200],
+                    vec![start + count_offset + 5, start + count_offset + 56],
+                    "reference_members",
+                )
+                .unwrap();
+            })
+            .unwrap();
+        scope
+    };
+    let selected = group(77, 0, 100, vec![200], DesignOperandRole::ROLE_0X10);
+    for (count_offset, admitted) in [(163, true), (167, true), (159, false)] {
+        let projected =
+            project_delete_face(&scope(count_offset), std::slice::from_ref(&selected), &[])
+                .unwrap();
+        assert_eq!(
+            matches!(
+                projected,
+                Some(FeatureDefinition::Operation(FeatureOperation::DeleteFace {
+                    heal: true,
+                    ..
+                }))
+            ),
+            admitted,
+            "count offset {count_offset}"
+        );
+    }
+}
+
+#[test]
+fn surface_delete_face_layouts_project_with_other_class_tags() {
+    let selected = group(77, 0, 100, vec![200], DesignOperandRole::ROLE_0X10);
+    for (base_frame_length, base_kind_offset) in
+        [(246, 135), (247, 135), (250, 139), (257, 146), (258, 146)]
+    {
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:scope#77",
+            crate::records::feature::scope::DesignFeatureKind::SurfaceDeleteFace,
+            77,
+        );
+        scope.class_tag = "332".to_owned().try_into().unwrap();
+        scope.paired_class_tag = "258".to_owned().try_into().unwrap();
+        scope
+            .try_edit(|draft| {
+                draft.frame_length = base_frame_length + 22;
+                draft.kind_offset = draft.byte_offset + base_kind_offset + 22;
+                draft.reference_members =
+                    crate::records::identity::ReferenceRun::unlocated(vec![100, 200]);
+                draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+                draft.reference_count_offset = draft.kind_offset - 34;
+                draft.layout_fixture_references();
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        let definition = project_delete_face(&scope, std::slice::from_ref(&selected), &[])
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            definition,
+            FeatureDefinition::Operation(FeatureOperation::DeleteFace {
+                faces: FaceSelection::Native(ref native), heal: false, ..
+            }) if native == &selected.id
+        ));
+    }
+}
+
+#[test]
+fn surface_delete_face_checks_count_position_kind_position_and_tail() {
+    let selected = group(77, 0, 100, vec![200], DesignOperandRole::ROLE_0X10);
+    for (count_offset, tail_length, admitted) in [
+        (123, 77, true),
+        (127, 77, true),
+        (131, 77, true),
+        (134, 77, true),
+        (138, 77, true),
+        (142, 77, true),
+        (123, 76, false),
+        (128, 77, false),
+    ] {
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:scope#77",
+            crate::records::feature::scope::DesignFeatureKind::SurfaceDeleteFace,
+            77,
+        );
+        scope
+            .try_edit(|draft| {
+                draft.reference_count_offset = draft.byte_offset + count_offset;
+                draft.reference_members =
+                    crate::records::identity::ReferenceRun::unlocated(vec![100, 200]);
+                draft.frame_length = count_offset + 12 + 22 + 34 + tail_length;
+                draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+                draft.layout_fixture_references();
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        assert_eq!(
+            project_delete_face(&scope, std::slice::from_ref(&selected), &[])
+                .unwrap()
+                .is_some(),
+            admitted
+        );
+        if count_offset == 123 && tail_length == 77 {
+            scope.set_fixture_kind_offset(scope.kind_offset() + 9);
+            assert!(
+                project_delete_face(&scope, std::slice::from_ref(&selected), &[])
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
 }
 
 fn compact_split_face_fixture() -> (DesignParameterScope, [DesignConstructionOperandGroup; 2]) {
@@ -287,6 +427,7 @@ fn compact_split_face_fixture() -> (DesignParameterScope, [DesignConstructionOpe
     scope
         .try_edit(|draft| {
             draft.frame_length = 407;
+            draft.reference_count_offset = draft.byte_offset + 168;
             draft.reference_members =
                 crate::records::identity::ReferenceRun::unlocated((100..112).collect());
             draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
@@ -347,6 +488,69 @@ fn class_277_258_compact_split_face_frame_projects() {
     assert!(
         project_split_face(&scope, &[scope.clone()], &groups, &[], &[], &[])
             .expect("project the split face feature")
+            .is_some()
+    );
+
+    scope.class_tag = "439".to_owned().try_into().unwrap();
+    scope.paired_class_tag = "261".to_owned().try_into().unwrap();
+    assert!(matches!(
+        project_split_face(&scope, &[scope.clone()], &groups, &[], &[], &[])
+            .unwrap()
+            .unwrap(),
+        FeatureDefinition::Operation(FeatureOperation::SplitFace {
+            targets: FaceSelection::Native(targets),
+            tool: cadmpeg_ir::features::SplitFaceTool::Path(
+                cadmpeg_ir::features::PathRef::Native(tool)
+            ),
+        }) if targets.ends_with("group#102") && tool.ends_with("group#100")
+    ));
+}
+
+#[test]
+fn split_face_checks_count_position_and_tail() {
+    let (scope, groups) = compact_split_face_fixture();
+    for (count_offset, tail_length, admitted) in
+        [(176, 77, true), (172, 87, true), (172, 88, false)]
+    {
+        let mut frame = scope.clone();
+        frame
+            .try_edit(|draft| {
+                draft.reference_count_offset = draft.byte_offset + count_offset;
+                draft.frame_length = count_offset + 12 + 11 * 12 + 18 + tail_length;
+                draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+                draft.layout_fixture_references();
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        assert_eq!(
+            project_split_face(&frame, &[frame.clone()], &groups, &[], &[], &[])
+                .unwrap()
+                .is_some(),
+            admitted
+        );
+    }
+}
+
+#[test]
+fn split_face_rejects_reference_count_offset_outside_the_frame_set() {
+    let (scope, groups) = compact_split_face_fixture();
+    let encoded = serde_json::to_value(&scope).unwrap();
+    let decoded: DesignParameterScope = serde_json::from_value(encoded).unwrap();
+    assert!(
+        project_split_face(&decoded, &[decoded.clone()], &groups, &[], &[], &[])
+            .unwrap()
+            .is_some()
+    );
+    let mut invalid = scope.clone();
+    invalid
+        .try_edit(|draft| {
+            draft.reference_count_offset = draft.byte_offset + 169;
+            draft.layout_fixture_references();
+        })
+        .unwrap();
+    assert!(
+        project_split_face(&invalid, &[invalid.clone()], &groups, &[], &[], &[])
+            .unwrap()
             .is_none()
     );
 }
@@ -394,6 +598,8 @@ fn compact_plane_selection(
                 .try_into()
                 .unwrap(),
             context_id_offset: 0,
+            serialization_form:
+                crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
             identity_record_index: record_index + 3,
             identity_record_offset: 0,
             primary_identity,
@@ -557,6 +763,7 @@ fn direct_single_identity_split_face_member_projects_historical_edge_path() {
     scope
         .try_edit(|draft| {
             draft.frame_length = 407;
+            draft.reference_count_offset = draft.byte_offset + 168;
             draft.previous_history_state_id = Some(7);
             draft.reference_members =
                 crate::records::identity::ReferenceRun::unlocated((100..112).collect());
@@ -603,6 +810,8 @@ fn direct_single_identity_split_face_member_projects_historical_edge_path() {
                 )
                 .unwrap(),
                 context_id_offset: 0,
+                serialization_form:
+                    crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
                 identity_record_index: 104,
                 identity_record_offset: 0,
                 primary_identity: 225,

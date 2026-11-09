@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use super::{blend_spines, edge_geometry, BlendSpine, EdgeGeometry};
+use super::{
+    blend_spines, cylinder_axes, edge_geometry, edge_points, plane_rows, BlendSpine, EdgeGeometry,
+};
 use crate::history_records::{
     AsmHistoricalCurveAxis, AsmHistoricalCylinder, AsmHistoricalEdgeSample,
-    AsmHistoricalOptionalCarrierBinding, AsmHistoricalSurfaceAxis, AsmHistoricalSurfaceRadius,
-    AsmHistoricalTopology,
+    AsmHistoricalOptionalCarrierBinding, AsmHistoricalPlane, AsmHistoricalSurfaceAxis,
+    AsmHistoricalSurfaceRadius, AsmHistoricalTopology,
 };
 use cadmpeg_ir::math::{Point3, Vector3};
 
@@ -191,6 +193,32 @@ fn a_surface_with_two_rows_states_no_spine() {
 }
 
 #[test]
+fn an_edge_with_an_unusable_axis_or_tangent_is_not_classified() {
+    let origin = point(0.0, 0.0, 0.0);
+    let z = vector(0.0, 0.0, 1.0);
+    assert!(edge(origin, z, z).is_classified());
+    assert!(!edge(origin, vector(0.0, 0.0, 0.0), z).is_classified());
+    assert!(!edge(origin, z, vector(0.0, 0.0, 0.0)).is_classified());
+    assert!(!edge(origin, vector(f64::NAN, 0.0, 1.0), z).is_classified());
+    assert!(!edge(origin, z, vector(0.0, f64::INFINITY, 0.0)).is_classified());
+    assert!(!edge(point(f64::NAN, 0.0, 0.0), z, z).is_classified());
+    assert!(!EdgeGeometry::default().is_classified());
+}
+
+#[test]
+fn a_torus_axis_with_a_non_finite_origin_states_no_spine() {
+    let mut unusable = axis(11);
+    unusable.origin = point(f64::NAN, 2.0, 0.0);
+    let result = AsmHistoricalTopology {
+        surfaces: vec![11],
+        surface_axes: vec![unusable],
+        surface_radii: vec![radius(11)],
+        ..AsmHistoricalTopology::default()
+    };
+    assert_eq!(blend_spines(&result).get(&11), None);
+}
+
+#[test]
 fn a_zero_axis_states_no_spine() {
     let mut zero_cylinder = cylinder(10);
     zero_cylinder.axis = vector(0.0, 0.0, 0.0);
@@ -238,4 +266,141 @@ fn an_edge_reads_the_axis_row_of_its_curve_and_its_midpoint_tangent() {
         assert_eq!(geometry[&edge].axis, None, "edge {edge}");
         assert_eq!(geometry[&edge].tangent, Some(vector(0.0, 0.0, 1.0)));
     }
+}
+
+#[test]
+fn a_cylinder_axis_needs_one_row_with_a_finite_origin_and_direction() {
+    let row = |surface, origin, axis| AsmHistoricalCylinder {
+        surface,
+        origin,
+        axis,
+        radius: 2.0,
+    };
+    let z = vector(0.0, 0.0, 2.0);
+    let result = AsmHistoricalTopology {
+        surface_cylinders: vec![
+            row(10, point(1.0, 2.0, 0.0), z),
+            row(11, point(f64::NAN, 2.0, 0.0), z),
+            row(12, point(1.0, 2.0, 0.0), vector(0.0, 0.0, 0.0)),
+            row(13, point(1.0, 2.0, 0.0), z),
+            row(13, point(1.0, 2.0, 0.0), z),
+        ],
+        ..AsmHistoricalTopology::default()
+    };
+    let axes = cylinder_axes(&result);
+    assert_eq!(axes.keys().copied().collect::<Vec<_>>(), [10]);
+    let axis = axes[&10];
+    assert!((axis.position(point(5.0, 5.0, 3.0)) - 3.0).abs() < 1.0e-12);
+    assert!(!axis.clears(2.0, point(3.0, 2.0, 7.0)), "on the cylinder");
+    assert!(axis.clears(2.0, point(3.1, 2.0, 7.0)));
+    assert!(axis.meets(2.0, point(3.0, 2.0, 7.0)));
+    assert!(!axis.meets(2.0, point(3.1, 2.0, 7.0)));
+    assert!(!axis.meets(2.0, point(2.9, 2.0, 7.0)));
+    assert!(axis.has_radius(2.0 + 1.0e-7));
+    assert!(!axis.has_radius(2.0 + 1.0e-5));
+}
+
+#[test]
+fn a_plane_touches_a_cylinder_at_its_radius_with_a_normal_across_its_axis() {
+    let result = AsmHistoricalTopology {
+        surface_cylinders: vec![cylinder(10)],
+        ..AsmHistoricalTopology::default()
+    };
+    let axis = cylinder_axes(&result)[&10];
+    let x = vector(-3.0, 0.0, 0.0);
+    assert_eq!(axis.touches(2.0, (point(3.0, 9.0, 9.0), x)), Some(true));
+    assert_eq!(axis.touches(2.0, (point(-1.0, 0.0, 0.0), x)), Some(true));
+    assert_eq!(axis.touches(2.0, (point(3.5, 0.0, 0.0), x)), Some(false));
+    assert_eq!(
+        axis.touches(
+            2.0,
+            (
+                point(1.0 + 2.0_f64.sqrt(), 2.0, 2.0_f64.sqrt()),
+                vector(1.0, 0.0, 1.0)
+            )
+        ),
+        Some(false),
+        "a tilted plane at the radius from the axis origin"
+    );
+    assert_eq!(
+        axis.touches(2.0, (point(3.0, 0.0, 0.0), vector(0.0, 0.0, 0.0))),
+        None
+    );
+    assert_eq!(axis.touches(2.0, (point(f64::NAN, 0.0, 0.0), x)), None);
+}
+
+#[test]
+fn a_tangent_across_the_spine_rules_an_edge_out() {
+    let origin = point(0.0, 0.0, 0.0);
+    let z = vector(0.0, 0.0, 1.0);
+    let x = vector(1.0, 0.0, 0.0);
+    assert!(along_z().rules_out(edge(origin, z, x)));
+    assert!(
+        !along_z().rules_out(edge(origin, x, z)),
+        "the tangent runs along"
+    );
+    assert!(!along_z().rules_out(EdgeGeometry::default()));
+    assert!(!along_z().rules_out(edge(origin, z, vector(0.0, 0.0, 0.0))));
+    assert!(around_z().rules_out(edge(origin, z, z)));
+    assert!(!around_z().rules_out(edge(origin, z, x)));
+}
+
+#[test]
+fn a_duplicated_or_non_finite_row_states_no_point_or_plane() {
+    let sample = |edge, interior| AsmHistoricalEdgeSample {
+        edge,
+        interior,
+        tangent: None,
+    };
+    let plane = |surface| AsmHistoricalPlane {
+        surface,
+        origin: point(0.0, 0.0, 0.0),
+        normal: vector(0.0, 0.0, 1.0),
+    };
+    let topology = AsmHistoricalTopology {
+        edge_samples: vec![
+            sample(1, point(1.0, 2.0, 3.0)),
+            sample(2, point(f64::INFINITY, 2.0, 3.0)),
+            sample(3, point(1.0, 2.0, 3.0)),
+            sample(3, point(1.0, 2.0, 3.0)),
+        ],
+        surface_planes: vec![plane(10), plane(11), plane(11)],
+        ..AsmHistoricalTopology::default()
+    };
+    let points = edge_points(&topology);
+    assert_eq!(points[&1], Some(point(1.0, 2.0, 3.0)));
+    assert_eq!(points[&2], None);
+    assert_eq!(points[&3], None);
+    let planes = plane_rows(&topology);
+    assert!(planes[&10].is_some());
+    assert_eq!(planes[&11], None);
+    assert!(!planes.contains_key(&12));
+}
+
+#[test]
+fn a_plane_carrier_with_a_cylinder_axis_or_radius_row_states_no_plane() {
+    let plane = |surface| AsmHistoricalPlane {
+        surface,
+        origin: point(0.0, 0.0, 0.0),
+        normal: vector(0.0, 0.0, 1.0),
+    };
+    let topology = AsmHistoricalTopology {
+        surface_planes: vec![plane(10), plane(11), plane(12), plane(13)],
+        surface_cylinders: vec![cylinder(11)],
+        surface_axes: vec![AsmHistoricalSurfaceAxis {
+            surface: 12,
+            origin: point(0.0, 0.0, 0.0),
+            direction: vector(0.0, 0.0, 1.0),
+        }],
+        surface_radii: vec![AsmHistoricalSurfaceRadius {
+            surface: 13,
+            radius: 2.0,
+        }],
+        ..AsmHistoricalTopology::default()
+    };
+    let planes = plane_rows(&topology);
+    assert!(planes[&10].is_some());
+    assert_eq!(planes[&11], None);
+    assert_eq!(planes[&12], None);
+    assert_eq!(planes[&13], None);
 }

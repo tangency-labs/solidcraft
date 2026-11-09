@@ -26,6 +26,7 @@ fn face_transition_requires_one_changed_surface_geometry() {
         candidate_edges: Vec::new(),
         alternate_selector_faces,
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     };
     let mut operand: DesignFaceOperand = serde_json::from_value(serde_json::json!({
         "id": "f3d:test:face-operand#1",

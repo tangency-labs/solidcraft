@@ -163,7 +163,7 @@ pub(super) fn exact_component_insert_construction(
         }
         let (transform, transform_at, occurrence_identity) =
             match (scope.frame_length(), scope.paired_class_tag.as_str()) {
-                (399, "259")
+                (399, _)
                     if bytes.get(start + 11..start + 20)? == [0; 9]
                         && bytes.get(start + 20..start + 25)? == [1, 0, 0, 0, 0]
                         && bytes.get(start + 33..start + 37)? == [0; 4]
@@ -178,7 +178,7 @@ pub(super) fn exact_component_insert_construction(
                         View::u64_le_at(bytes, start + 25)?,
                     )
                 }
-                (381, "261")
+                (381, _)
                     if bytes.get(start + 11..start + 20)? == [0; 9]
                         && bytes.get(start + 20..start + 25)? == [1, 0, 0, 0, 0]
                         && bytes.get(start + 33..start + 37)? == [0; 4]
@@ -193,7 +193,7 @@ pub(super) fn exact_component_insert_construction(
                         View::u64_le_at(bytes, start + 25)?,
                     )
                 }
-                (395, "258")
+                (395, _)
                     if bytes.get(start + 11..start + 21)? == [0; 10]
                         && bytes.get(start + 29..start + 33)? == [0; 4]
                         && bytes.get(start + 33) == Some(&1)
@@ -1026,7 +1026,7 @@ pub(super) fn exact_copy_paste_component_operation(
         let relation_record_index = *scope.reference_members().values().next()?;
         // The compact frame omits one four-byte prologue field, so both placements
         // and every marked reference before them move four bytes earlier.
-        let source_at = match (scope.kind_name(), scope.frame_length()) {
+        let source_at = match (scope.source_kind_name(), scope.frame_length()) {
             ("CopyPaste", 529) => 38,
             ("CopyPaste", 525) => 34,
             _ => return None,

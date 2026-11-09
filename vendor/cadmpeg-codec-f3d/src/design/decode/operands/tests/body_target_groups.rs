@@ -16,7 +16,7 @@ use crate::records::topology::extrude_selection::{
 };
 use cadmpeg_ir::ids::FaceId;
 
-const SCOPE: u32 = 80;
+pub(super) const SCOPE: u32 = 80;
 const GROUP: u32 = 90;
 const MEMBER: u32 = 201;
 
@@ -27,7 +27,7 @@ fn face_run(usage: DesignExtrudeFaceRole) -> DesignConstructionOperandRole {
     }
 }
 
-fn group(role: DesignConstructionOperandRole) -> DesignConstructionOperandGroup {
+pub(super) fn group(role: DesignConstructionOperandRole) -> DesignConstructionOperandGroup {
     DesignConstructionOperandGroup::try_from(DesignConstructionOperandGroupDraft {
         id: format!("f3d:Design/BulkStream.dat:operand-group#{GROUP}"),
         scope_record_index: SCOPE,

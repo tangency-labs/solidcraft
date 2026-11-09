@@ -324,7 +324,7 @@ fn thread_bound_hole_scope_requires_reciprocal_tail_and_history() {
         serde_json::from_str(&wire).unwrap();
     assert_eq!(serde_json::to_string(&decoded).unwrap(), wire);
     for offset in [
-        0, 4, 12, 17, 21, 28, 32, 38, 42, 46, 52, 69, 74, 78, 84, 87, 91, 98, 102, 108,
+        0, 4, 12, 17, 21, 28, 32, 38, 40, 42, 46, 52, 74, 78, 85, 87, 91, 98, 102, 108,
     ] {
         let mut invalid = tail;
         invalid[offset] ^= 1;
@@ -335,6 +335,148 @@ fn thread_bound_hole_scope_requires_reciprocal_tail_and_history() {
         invalid[61..69].copy_from_slice(&duration.to_le_bytes());
         assert!(parse(&invalid).is_none());
     }
+    let mut independent_epochs = tail;
+    independent_epochs[69..73].copy_from_slice(&3u32.to_le_bytes());
+    assert!(parse(&independent_epochs).is_some());
+    let mut suppressed = tail;
+    suppressed[39] = 1;
+    suppressed[84] = 1;
+    assert!(parse(&suppressed).is_some());
+    for (at, value) in [(39, 2), (84, 2)] {
+        let mut invalid = tail;
+        invalid[at] = value;
+        assert!(parse(&invalid).is_none(), "flag at {at}");
+    }
+}
+
+fn push_marked(out: &mut Vec<u8>, record_index: u32) {
+    out.push(1);
+    out.extend_from_slice(&record_index.to_le_bytes());
+    out.extend_from_slice(&[0; 6]);
+}
+
+/// A reciprocal Hole tail of scope 12 listing `members`, with or without the
+/// further reference after the first companion.
+fn reciprocal_hole_tail(members: &[u32], further: bool, suppressed: bool) -> Vec<u8> {
+    let first = members.get(1).map_or(99, |thread| thread - 1);
+    let mut tail = Vec::new();
+    tail.extend_from_slice(&1u32.to_le_bytes());
+    tail.extend_from_slice(&[0; 8]);
+    tail.extend_from_slice(&u32::try_from(members.len()).unwrap().to_le_bytes());
+    for member in members {
+        push_marked(&mut tail, *member);
+    }
+    tail.extend_from_slice(&[0, u8::from(suppressed), 0]);
+    push_marked(&mut tail, first);
+    if further {
+        push_marked(&mut tail, 5);
+    } else {
+        tail.push(0);
+    }
+    tail.extend_from_slice(&8u32.to_le_bytes());
+    tail.extend_from_slice(&6u32.to_le_bytes());
+    tail.extend_from_slice(&0.25f64.to_le_bytes());
+    tail.extend_from_slice(&4u32.to_le_bytes());
+    push_marked(&mut tail, first - 1);
+    tail.extend_from_slice(&[u8::from(suppressed), 0]);
+    push_marked(&mut tail, first - 2);
+    push_marked(&mut tail, 12);
+    tail.push(0);
+    tail
+}
+
+fn parse_hole_scope(tail: &[u8]) -> Option<crate::records::feature::scope::DesignParameterScope> {
+    parse_hole_scope_in_state(tail, 9)
+}
+
+fn parse_hole_scope_in_state(
+    tail: &[u8],
+    history_state: u32,
+) -> Option<crate::records::feature::scope::DesignParameterScope> {
+    use crate::design::test_support::indexed_record_offsets_for_test;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    bytes.extend_from_slice(b"300");
+    bytes.extend_from_slice(&12u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 10]);
+    bytes.extend_from_slice(&2u32.to_le_bytes());
+    push_marked(&mut bytes, 55);
+    push_marked(&mut bytes, 56);
+    bytes.extend_from_slice(&history_state.to_le_bytes());
+    lp_utf16(&mut bytes, "Hole");
+    bytes.extend_from_slice(tail);
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    bytes.extend_from_slice(b"260");
+    bytes.extend_from_slice(&12u32.to_le_bytes());
+    super::parse_parameter_scope(
+        &bytes,
+        &indexed_record_offsets_for_test(&bytes),
+        12,
+        &"300".to_owned().try_into().unwrap(),
+        0,
+    )
+    .unwrap()
+}
+
+#[test]
+fn reciprocal_hole_tail_length_follows_its_members_and_further_reference() {
+    for (members, further, length) in [
+        (&[12][..], false, 98),
+        (&[12][..], true, 108),
+        (&[12, 100][..], false, 109),
+        (&[12, 100][..], true, 119),
+    ] {
+        for suppressed in [false, true] {
+            let tail = reciprocal_hole_tail(members, further, suppressed);
+            assert_eq!(tail.len(), length);
+            let scope = parse_hole_scope(&tail).expect("reciprocal Hole tail");
+            assert_eq!(scope.history_state_id(), Some(9));
+            assert_eq!(scope.previous_history_state_id(), Some(8), "{length}");
+            let wire = serde_json::to_string(&scope).unwrap();
+            let decoded: crate::records::feature::scope::DesignParameterScope =
+                serde_json::from_str(&wire).unwrap();
+            assert_eq!(serde_json::to_string(&decoded).unwrap(), wire);
+        }
+    }
+}
+
+#[test]
+fn reciprocal_hole_tail_needs_its_own_members_and_companion_chain() {
+    assert!(parse_hole_scope(&reciprocal_hole_tail(&[13], false, false)).is_none());
+    assert!(parse_hole_scope(&reciprocal_hole_tail(&[12, 12], false, false)).is_none());
+    assert!(parse_hole_scope(&reciprocal_hole_tail(&[12, 100, 101], false, false)).is_none());
+    let mut wrong_thread_companion = reciprocal_hole_tail(&[12, 100], false, false);
+    wrong_thread_companion[42..46].copy_from_slice(&101u32.to_le_bytes());
+    assert!(parse_hole_scope(&wrong_thread_companion).is_none());
+    let one_member = reciprocal_hole_tail(&[12], false, false);
+    for (at, value) in [
+        (27, 1),
+        (29, 1),
+        (30, 7),
+        (41, 2),
+        (62, 0),
+        (74, 1),
+        (75, 0),
+        (86, 0),
+        (97, 1),
+    ] {
+        let mut invalid = one_member.clone();
+        invalid[at] = value;
+        assert!(parse_hole_scope(&invalid).is_none(), "byte {at}");
+    }
+    let mut short = one_member.clone();
+    short.pop();
+    assert!(parse_hole_scope(&short).is_none());
+    let mut suppressed = reciprocal_hole_tail(&[12], false, true);
+    suppressed[42..46].copy_from_slice(&u32::MAX.to_le_bytes());
+    assert!(parse_hole_scope_in_state(&suppressed, u32::MAX).is_some());
+    suppressed.extend_from_slice(&[0, 0]);
+    assert!(parse_hole_scope_in_state(&suppressed, u32::MAX).is_none());
+    let exact = reciprocal_hole_tail(&[12], false, false);
+    assert_eq!(super::reciprocal_hole_tail(&exact, 12), Some(42));
+    let mut long = exact;
+    long.extend_from_slice(&[0, 0]);
+    assert_eq!(super::reciprocal_hole_tail(&long, 12), None);
 }
 
 #[test]
@@ -436,35 +578,39 @@ fn scope_class_type_selects_hole_and_preserves_the_display_name() {
 }
 
 #[test]
-fn stored_family_name_takes_precedence_over_the_class_type_family() {
+fn listed_type_guid_family_wins_over_stored_name() {
     use crate::records::feature::scope::DesignFeatureKind;
 
-    let hole = Some(&DesignFeatureKind::Hole);
+    let fillet = Some(&DesignFeatureKind::Fillet);
     assert_eq!(
-        super::scope_feature_kind("Perçage", hole),
-        Some(DesignFeatureKind::Hole)
+        super::scope_feature_kind("Raccordo", fillet),
+        Some(DesignFeatureKind::Fillet)
     );
     assert_eq!(
-        super::scope_feature_kind("Congé", Some(&DesignFeatureKind::Fillet)),
-        Some(DesignFeatureKind::Conge)
+        super::scope_feature_kind("Thread", fillet),
+        Some(DesignFeatureKind::Fillet)
     );
     assert_eq!(
-        super::scope_feature_kind("Thread", hole),
+        super::scope_feature_kind("Congé", fillet),
+        Some(DesignFeatureKind::Fillet)
+    );
+    assert_eq!(
+        super::scope_feature_kind("Thread", None),
         Some(DesignFeatureKind::Thread)
     );
-    assert!(matches!(
+    assert_eq!(
         super::scope_feature_kind("Perçage", None),
-        Some(DesignFeatureKind::Native(_))
-    ));
+        DesignFeatureKind::try_from("Perçage".to_owned()).ok()
+    );
     for shared in [
         "D57B1A22-9D5A-4D7D-A909-E08C579612CA",
         "7AFA0A65-B53C-472C-ACA4-5C7C0A65001C",
     ] {
         assert_eq!(super::family::from_type_guid(shared), None);
-        assert!(matches!(
+        assert_eq!(
             super::scope_feature_kind("CutPaste", super::family::from_type_guid(shared).as_ref()),
-            Some(DesignFeatureKind::Native(_))
-        ));
+            DesignFeatureKind::try_from("CutPaste".to_owned()).ok()
+        );
     }
     assert_eq!(
         super::family::from_type_guid("1c037a07-4a15-43f6-abfc-bbf61b9038d4"),
@@ -503,4 +649,20 @@ fn a_scanned_count_whose_table_overflows_is_rejected_not_fatal() {
     assert!(!reference_table_ends_at(usize::MAX - 2, 1, 11, 126));
     let wide = usize::MAX / 11 + 1;
     assert!(!reference_table_ends_at(100, wide, 11, 126));
+}
+
+#[test]
+fn only_the_class_guid_selects_the_path_pattern_family() {
+    use crate::records::feature::scope::DesignFeatureKind;
+
+    let path_pattern = super::family::from_type_guid("B0B3D9E5-1C25-47BC-ABCD-E723F193DF1B");
+    assert_eq!(path_pattern, Some(DesignFeatureKind::PathPattern));
+    assert_eq!(
+        super::scope_feature_kind("Rés. traj.", path_pattern.as_ref()),
+        Some(DesignFeatureKind::PathPattern)
+    );
+    assert_eq!(
+        super::scope_feature_kind("PathPattern", None),
+        Some(DesignFeatureKind::native("PathPattern"))
+    );
 }

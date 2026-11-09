@@ -81,6 +81,8 @@ fn path_fixture() -> (
             .try_into()
             .unwrap(),
         context_id_offset: 0,
+        serialization_form:
+            crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
         identity_record_index: 203,
         identity_record_offset: 0,
         primary_identity: 7,

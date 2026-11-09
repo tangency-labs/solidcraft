@@ -170,7 +170,8 @@ fn arrangement_region_at(
             decode_ctx,
         )
     })
-    .unwrap();
+    .unwrap()
+    .map(|found| found.region);
     work.finish_selection();
     let losses = work.losses();
     assert!(losses.is_empty(), "unexpected losses {losses:?}");

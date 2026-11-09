@@ -5,6 +5,10 @@ use crate::records::feature::scope::DesignFeatureKind;
 
 const FAMILIES: &[(&str, DesignFeatureKind)] = &[
     (
+        "359F7902-43B0-445C-8F4B-FED1D15B2680",
+        DesignFeatureKind::Align,
+    ),
+    (
         "AA8B3D40-B67D-4AF1-B3CF-E1E00279B5F0",
         DesignFeatureKind::AsBuilt,
     ),
@@ -15,6 +19,14 @@ const FAMILIES: &[(&str, DesignFeatureKind)] = &[
     (
         "D7015B81-AB4D-4C89-BED7-AA4411E1964A",
         DesignFeatureKind::BaseFeature,
+    ),
+    (
+        "99F6967E-ED35-4222-B906-5CCF0AC70B53",
+        DesignFeatureKind::BaseMeshFeature,
+    ),
+    (
+        "49004167-470D-4892-B50E-5C589B1486D2",
+        DesignFeatureKind::BoundaryFill,
     ),
     (
         "F193B033-8CB7-4CC9-B18E-D1E06A07D72E",
@@ -33,12 +45,28 @@ const FAMILIES: &[(&str, DesignFeatureKind)] = &[
         DesignFeatureKind::Chamfer,
     ),
     (
+        "DB2E4EDC-ADC2-4220-8A0C-011B6FE41C4F",
+        DesignFeatureKind::CoilPrimitive,
+    ),
+    (
         "2A94257F-2020-4B19-9A68-103A2672F1B7",
         DesignFeatureKind::Combine,
     ),
     (
         "428B5C6E-8F2C-42D7-83B7-2C09BD91F83E",
         DesignFeatureKind::ComponentInsert,
+    ),
+    (
+        "BA3059E4-4B23-4D02-9D18-E7BB95C991F3",
+        DesignFeatureKind::CopyPasteBodies,
+    ),
+    (
+        "6AA4C36C-52A2-48D2-A062-69FE123B84D1",
+        DesignFeatureKind::CylinderPrimitive,
+    ),
+    (
+        "1339A425-1AC9-4274-9311-7D61261B8B9E",
+        DesignFeatureKind::Decal,
     ),
     (
         "29EF07D3-7BAF-4FA1-A28A-43A36279EA6D",
@@ -65,6 +93,10 @@ const FAMILIES: &[(&str, DesignFeatureKind)] = &[
         DesignFeatureKind::Fillet,
     ),
     (
+        "6C90740C-229E-4EE5-8F35-A4E5AE4F7C73",
+        DesignFeatureKind::Form,
+    ),
+    (
         "1C037A07-4A15-43F6-ABFC-BBF61B9038D4",
         DesignFeatureKind::Hole,
     ),
@@ -85,6 +117,18 @@ const FAMILIES: &[(&str, DesignFeatureKind)] = &[
         DesignFeatureKind::Move,
     ),
     (
+        "21B67709-045F-4903-B3FA-FD82E3DC3ADA",
+        DesignFeatureKind::MoveFace,
+    ),
+    (
+        "D087EFE5-2D28-42E6-BB45-61739E7D0204",
+        DesignFeatureKind::OffsetFaces,
+    ),
+    (
+        "B0B3D9E5-1C25-47BC-ABCD-E723F193DF1B",
+        DesignFeatureKind::PathPattern,
+    ),
+    (
         "73615646-8752-4EE6-AD02-0B90804B7CD7",
         DesignFeatureKind::Pipe,
     ),
@@ -97,8 +141,24 @@ const FAMILIES: &[(&str, DesignFeatureKind)] = &[
         DesignFeatureKind::RPattern,
     ),
     (
+        "4A782808-FBDD-4351-A10A-F7AE5693D330",
+        DesignFeatureKind::RemoveBody,
+    ),
+    (
+        "693D6578-4BCE-44F8-B15A-2CE5162A23EE",
+        DesignFeatureKind::ReverseNormal,
+    ),
+    (
         "E3849A15-2FC6-42A0-AF3A-2F1D7273B406",
         DesignFeatureKind::Revolve,
+    ),
+    (
+        "548B7CBE-2184-4DB5-8B56-24418E5005DF",
+        DesignFeatureKind::Scale,
+    ),
+    (
+        "D45FD6C4-161B-4240-BFAC-83A7C2C97A0C",
+        DesignFeatureKind::Scale,
     ),
     (
         "E8063467-BC05-4688-8196-AECB90F0EFEE",
@@ -109,22 +169,84 @@ const FAMILIES: &[(&str, DesignFeatureKind)] = &[
         DesignFeatureKind::Sketch,
     ),
     (
+        "04A353F2-AA37-4163-9D4D-A07A7AA9AFA5",
+        DesignFeatureKind::SpherePrimitive,
+    ),
+    (
         "65CA3206-E33A-471E-8E40-2C72B57C6181",
         DesignFeatureKind::Split,
+    ),
+    (
+        "7C5886AE-A774-4848-A89C-C3A578A9763A",
+        DesignFeatureKind::SplitFace,
+    ),
+    (
+        "2C122D9F-4F8A-6383-D14C-E00CE77B2226",
+        DesignFeatureKind::SurfaceDeleteFace,
+    ),
+    (
+        "D2BCAE08-CF42-4316-865F-8ED1DFD548E4",
+        DesignFeatureKind::SurfaceExtend,
+    ),
+    (
+        "1589BC73-D484-4A6E-8E69-2A1531E845F5",
+        DesignFeatureKind::SurfaceOffset,
+    ),
+    (
+        "BF77AE1A-E8F6-43AB-A325-A2C984AF1C6B",
+        DesignFeatureKind::SurfacePatch,
+    ),
+    (
+        "16722593-7399-4963-9EB3-656FE1949577",
+        DesignFeatureKind::SurfaceStitch,
+    ),
+    (
+        "FF1741AE-E78B-4A5F-8418-751899E12F66",
+        DesignFeatureKind::SurfaceTrim,
     ),
     (
         "FCBB1707-4450-46B3-9E65-0F61682EA8CA",
         DesignFeatureKind::Sweep,
     ),
     (
+        "BCE0AD0E-377B-4A37-9F4F-112D0DAFEAA1",
+        DesignFeatureKind::Thicken,
+    ),
+    (
         "584D9526-EF22-4F6F-9FE1-5FCF1F3CE575",
         DesignFeatureKind::Thread,
+    ),
+    (
+        "13BE0EF0-467B-4F5A-BFFB-E0976171B678",
+        DesignFeatureKind::TorusPrimitive,
+    ),
+    (
+        "803DEC43-AEA6-42CC-B8D0-F593B5124BDD",
+        DesignFeatureKind::WorkAxis,
     ),
     (
         "D869265F-F339-4751-A066-91D30F81FF08",
         DesignFeatureKind::WorkPlane,
     ),
+    (
+        "5F40832C-61AA-4A05-95B1-EFA0BA483138",
+        DesignFeatureKind::WorkPoint,
+    ),
 ];
+
+/// Type GUID that `CopyPaste` and `CutPaste` scopes share.
+const PASTE_TYPE: &str = "D57B1A22-9D5A-4D7D-A909-E08C579612CA";
+
+/// Offset of the reference table that ends the compact `CopyPaste` prefix of
+/// a scope of the shared paste type, which types the scope as `CopyPaste`
+/// whatever its stored name.
+pub(super) fn paste_prefix_table(guid: &str, bytes: &[u8], start: usize) -> Option<usize> {
+    if !guid.eq_ignore_ascii_case(PASTE_TYPE) {
+        return None;
+    }
+    super::super::occurrence_transfer::compact_copy_paste_prefix(bytes, start)
+        .map(|prefix| prefix.table_at)
+}
 
 pub(super) fn from_type_guid(guid: &str) -> Option<DesignFeatureKind> {
     FAMILIES

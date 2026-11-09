@@ -17,6 +17,7 @@ use crate::records::parameters::DesignParameterCompanion;
 use crate::records::sketch_geometry::SketchCurveIdentity;
 use crate::records::sketch_geometry::SketchPoint;
 use crate::records::sketch_placement::DesignSketchPlacement;
+use cadmpeg_core::decode::u64_from_index;
 use cadmpeg_ir::math::Point2;
 use cadmpeg_ir::math::Point3;
 use cadmpeg_ir::sketches::SketchConstraintDefinitionInput;
@@ -880,6 +881,7 @@ fn exact_pair_suppresses_counted_frames_in_its_containing_companion() {
             id: format!("{stream}:sketch-point#{record_index}"),
             record_index,
             owner_reference: Some(100),
+            geometry_group: None,
             class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned())
                 .unwrap(),
             byte_offset: 0,
@@ -1050,6 +1052,7 @@ fn exact_pair_suppresses_counted_frames_in_its_containing_companion() {
         id: format!("{stream}:sketch-curve#42"),
         record_index: 42,
         owner_reference: Some(100),
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned()).unwrap(),
         byte_offset: 0,
         geometry_offset: 0,
@@ -1347,3 +1350,335 @@ fn repeated_linear_dimension_requires_disjoint_measurement_pairs() {
 mod spatial_distance;
 
 mod presentation_frames;
+
+#[test]
+fn diagonal_annotation_point_dimension_takes_its_payload_orientation() {
+    use crate::records::dimensions::{
+        DesignDimensionAnnotationFrame, DesignDimensionAnnotationFrameDraft,
+        DesignDimensionAnnotationOperand,
+    };
+    let point = |id: &str, u: f64, v: f64| {
+        SketchEntity::new(
+            SketchEntityId::mint(id).unwrap(),
+            SketchId::mint("generated:test:sketch#0").unwrap(),
+            SketchGeometry::try_from(SketchGeometryDefinition::Point {
+                position: Point2::new(u, v),
+            })
+            .unwrap(),
+        )
+    };
+    let first = point("generated:test:point#0", 0.0, 0.0);
+    let diagonal = point("generated:test:point#1", 5.0, 5.0);
+    let parameter = |source_kind: &str| {
+        parse_design_parameter_record(&parameter_record(
+            Some(44),
+            "value",
+            source_kind,
+            Some("mm"),
+            "d1",
+            0.5,
+        ))
+        .expect("generated dimension parameter is canonical")
+    };
+    let parameter_id = cadmpeg_ir::features::ParameterId::mint("generated:test:parameter#0")
+        .expect("identity grammar");
+    let raw_frame = |annotation_bytes: Vec<u8>| {
+        let owner_reference_at = 74 + u64_from_index(annotation_bytes.len()) + 1;
+        let operand = |index: u32, at: u64| DesignDimensionAnnotationOperand {
+            geometry_record_index: std::num::NonZeroU32::new(index),
+            geometry_reference_offset: at + 1,
+            role: 1,
+            role_offset: at + 11,
+        };
+        DesignDimensionAnnotationFrame::try_new(DesignDimensionAnnotationFrameDraft {
+            id: "f3d:Design/BulkStream.dat:design-dimension-annotation-frame#0".into(),
+            companion_record_index: None,
+            governing_companion_record_index: 15,
+            byte_offset: 0,
+            class_tag: "256".to_owned().try_into().unwrap(),
+            record_index: 14,
+            frame_length: 300,
+            operands: vec![operand(0, 24), operand(10, 39), operand(11, 54)],
+            entity_genesis: None,
+            metadata_absent: false,
+            annotation_bytes,
+            annotation_byte_offset: 74,
+            governing_owner_record_index: 13,
+            governing_owner_reference_offset: owner_reference_at,
+            return_members: [10, 11]
+                .into_iter()
+                .zip([owner_reference_at + 15, owner_reference_at + 26])
+                .map(|(value, offset)| crate::records::identity::Located {
+                    value: std::num::NonZeroU32::new(value).unwrap(),
+                    offset,
+                })
+                .collect(),
+            paired_class_tag: "257".to_owned().try_into().unwrap(),
+            paired_byte_offset: 300,
+            owner_reference: 100,
+            owner_reference_offset: 320,
+        })
+        .unwrap()
+    };
+    let frame = |first_point: [f64; 3], second_point: [f64; 3]| {
+        let mut annotation_bytes = Vec::new();
+        for value in first_point.into_iter().chain(second_point) {
+            annotation_bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        raw_frame(annotation_bytes)
+    };
+    let orient = |frame: &DesignDimensionAnnotationFrame, second: &SketchEntity, kind: &str| {
+        crate::design::dimensions::oriented_annotation_point_dimension(
+            frame,
+            [&first, second],
+            (&parameter(kind), &parameter_id),
+            0.0,
+        )
+    };
+    let horizontal = frame([1.0, 7.0, 0.0], [6.0, 7.0, 0.0]);
+    let vertical = frame([1.0, 7.0, 0.0], [1.0, 2.0, 0.0]);
+    let oblique = frame([1.0, 7.0, 0.0], [6.0, 2.0, 0.0]);
+    assert!(matches!(
+        orient(&horizontal, &diagonal, "Linear Dimension-2"),
+        Some(SketchConstraintDefinitionInput::HorizontalDistance { .. })
+    ));
+    assert!(matches!(
+        orient(&vertical, &diagonal, "Linear Dimension-2"),
+        Some(SketchConstraintDefinitionInput::VerticalDistance { .. })
+    ));
+    assert!(orient(&oblique, &diagonal, "Linear Dimension-2").is_none());
+    assert!(orient(&horizontal, &diagonal, "Diameter Dimension-2").is_none());
+    let off_diagonal = point("generated:test:point#2", 5.0, 4.0);
+    assert!(orient(&horizontal, &off_diagonal, "Linear Dimension-2").is_none());
+    let not_finite = frame([f64::NAN, 7.0, 0.0], [6.0, 7.0, 0.0]);
+    assert!(orient(&not_finite, &diagonal, "Linear Dimension-2").is_none());
+    let infinite = frame([1.0, 7.0, f64::INFINITY], [6.0, 7.0, 0.0]);
+    assert!(orient(&infinite, &diagonal, "Linear Dimension-2").is_none());
+    let short = raw_frame(vec![0; 47]);
+    assert!(orient(&short, &diagonal, "Linear Dimension-2").is_none());
+    let same_point = crate::design::dimensions::oriented_annotation_point_dimension(
+        &horizontal,
+        [&first, &first],
+        (&parameter("Linear Dimension-2"), &parameter_id),
+        f64::INFINITY,
+    );
+    assert!(same_point.is_none());
+}
+
+#[test]
+fn diagonal_annotation_dimension_projects_only_distinct_point_loci() {
+    use crate::records::dimensions::{
+        DesignDimensionAnnotationFrame, DesignDimensionAnnotationFrameDraft,
+        DesignDimensionAnnotationOperand,
+    };
+    let project = |value_mm: f64, operands: [u32; 2]| {
+        let stream = "f3d:A";
+        let placement = DesignSketchPlacement {
+            frame: crate::records::sketch_placement::DesignSketchFrame::new(
+                0,
+                crate::records::sketch_placement::DesignSketchFrameForm::ScopeCompact,
+            )
+            .unwrap(),
+
+            id: format!("{stream}:design-sketch-placement#0"),
+            scope_record_index: Some(10),
+            entity_id: crate::records::identity::DesignEntityId::try_from("0_100".to_owned())
+                .expect("valid entity ID"),
+
+            visibility: None,
+
+            class_tag: crate::records::references::DesignClassTag::try_from("356".to_owned())
+                .unwrap(),
+            record_index: 11,
+
+            paired_class_tag: crate::records::references::DesignClassTag::try_from(
+                "259".to_owned(),
+            )
+            .unwrap(),
+        };
+        let parameter = crate::records::parameters::DesignParameter::try_from(
+            crate::records::parameters::DesignParameterDraft {
+                id: format!("{stream}:design-parameter#20"),
+                byte_offset: 0,
+                class_tag: crate::records::references::DesignClassTag::try_from("305".to_owned())
+                    .unwrap(),
+                record_index: 20,
+                source_ordinal: 4,
+                source: crate::records::parameters::DesignParameterSource::new(
+                    "Linear Dimension-4".into(),
+                    Some(21),
+                    Some(crate::records::identity::Located {
+                        value: crate::records::parameters::DesignParameterDiscriminator::Code0,
+                        offset: 22,
+                    }),
+                )
+                .unwrap(),
+                expression: format!("{} mm", value_mm),
+                expression_offset: 40,
+                source_kind_offset: 60,
+
+                unit: Some(crate::records::identity::RecordedValue {
+                    value: "mm".into(),
+                    offset: 70,
+                }),
+                name: "d4".into(),
+                name_offset: 80,
+                evaluated_value: value_mm / 10.0,
+                evaluated_value_offset: 90,
+            },
+        )
+        .unwrap();
+        let owner = crate::records::parameters::DesignParameterOwner::try_from(
+            crate::records::parameters::DesignParameterOwnerWire {
+                id: format!("{stream}:design-parameter-owner#21"),
+                byte_offset: 0,
+                frame_length: 104,
+                class_tag: crate::records::references::DesignClassTag::try_from("292".to_owned())
+                    .unwrap(),
+                record_index: 21,
+                scope_record_index: 10,
+                local_ordinal: 0,
+                evaluated_value: value_mm / 10.0,
+                evaluated_value_offset: 40,
+                parameter_record_index: 20,
+                owned_ordinal: 0,
+                variant: Some(0),
+                companion_record_index: 22,
+            },
+        )
+        .unwrap();
+        let companion = DesignParameterCompanion::unbound(
+            format!("{stream}:design-parameter-companion#22"),
+            0,
+            crate::records::references::DesignClassTag::try_from("408".to_owned()).unwrap(),
+            22,
+            21,
+            std::num::NonZeroU64::new(1).unwrap(),
+            42,
+        )
+        .bound(crate::records::parameters::DesignCompanionPayload::new(
+            58,
+            0,
+            Vec::new(),
+        ));
+
+        let mut annotation_bytes = Vec::new();
+        for value in [1.0_f64, 7.0, 0.0, 6.0, 7.0, 0.0] {
+            annotation_bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        let operand = |index: u32, at: u64| DesignDimensionAnnotationOperand {
+            geometry_record_index: std::num::NonZeroU32::new(index),
+            geometry_reference_offset: at + 1,
+            role: 1,
+            role_offset: at + 11,
+        };
+        let frame = DesignDimensionAnnotationFrame::try_new(DesignDimensionAnnotationFrameDraft {
+            id: format!("{stream}:design-dimension-annotation-frame#14"),
+            companion_record_index: None,
+            governing_companion_record_index: 22,
+            byte_offset: 0,
+            class_tag: "256".to_owned().try_into().unwrap(),
+            record_index: 14,
+            frame_length: 300,
+            operands: vec![
+                operand(0, 24),
+                operand(operands[0], 39),
+                operand(operands[1], 54),
+            ],
+            entity_genesis: None,
+            metadata_absent: false,
+            annotation_bytes,
+            annotation_byte_offset: 74,
+            governing_owner_record_index: 21,
+            governing_owner_reference_offset: 123,
+            return_members: operands
+                .into_iter()
+                .zip([138, 149])
+                .map(|(value, offset)| crate::records::identity::Located {
+                    value: std::num::NonZeroU32::new(value).unwrap(),
+                    offset,
+                })
+                .collect(),
+            paired_class_tag: "257".to_owned().try_into().unwrap(),
+            paired_byte_offset: 300,
+            owner_reference: 100,
+            owner_reference_offset: 320,
+        })
+        .unwrap();
+        let point = |record_index: u32, position: Point2| {
+            SketchPoint::try_from(crate::records::sketch_geometry::SketchPointDraft {
+                id: format!("{stream}:sketch-point#{record_index}"),
+                record_index,
+                owner_reference: Some(100),
+                geometry_group: None,
+                class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned())
+                    .unwrap(),
+                byte_offset: 0,
+                coordinate_offset: 0,
+                companion: crate::records::sketch_geometry::SketchPointCompanion {
+                    incident_curves: Vec::new(),
+                },
+                record_form: crate::records::sketch_geometry::SketchPointRecordForm::version11(
+                    u64::from(record_index),
+                    crate::records::sketch_geometry::SketchPointClosure::Selector0State0,
+                    None,
+                    0.0,
+                ),
+                paired_reference: 0,
+                coordinates: position,
+            })
+            .unwrap()
+        };
+        let points = [
+            point(40, Point2::new(0.0, 0.0)),
+            point(41, Point2::new(2.0, 2.0)),
+        ];
+        let sketch = neutral_sketch_id(&placement);
+        let entities = points
+            .iter()
+            .map(|point| {
+                SketchEntity::new(
+                    SketchEntityId::mint(format!("synthetic:test:id#point-{}", point.record_index))
+                        .unwrap(),
+                    sketch.clone(),
+                    SketchGeometry::try_from(SketchGeometryDefinition::Point {
+                        position: point.coordinates(),
+                    })
+                    .unwrap(),
+                )
+                .with_native_ref(Some(point.id.clone()))
+            })
+            .collect::<Vec<_>>();
+        project_dimension_constraints(
+            &crate::design::dimensions::DimensionConstraintInputs {
+                placements: std::slice::from_ref(&placement),
+                parameters: std::slice::from_ref(&parameter),
+                owners: std::slice::from_ref(&owner),
+                pairs: &[],
+                groups: &[],
+                annotation_frames: std::slice::from_ref(&frame),
+                null_pairs: &[],
+                companions: std::slice::from_ref(&companion),
+                recipe_records: &[],
+                points: &points,
+                curves: &[],
+                entities: &entities,
+            },
+            &[],
+        )
+    };
+    let kinds = |constraints: Vec<cadmpeg_ir::sketches::SketchConstraint>| {
+        constraints
+            .into_iter()
+            .map(|constraint| constraint.definition.kind().clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(matches!(
+        kinds(project(2.0, [40, 41])).as_slice(),
+        [SketchConstraintDefinitionInput::HorizontalDistance { .. }]
+    ));
+    assert!(matches!(
+        kinds(project(0.0, [40, 40])).as_slice(),
+        [SketchConstraintDefinitionInput::Native { .. }]
+    ));
+}

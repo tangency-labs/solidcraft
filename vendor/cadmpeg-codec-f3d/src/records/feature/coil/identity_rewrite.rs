@@ -12,7 +12,7 @@ rewrite_native_record!(DesignCoilScope, []; {operation, extent, section, section
 rewrite_native_scalar!(DesignCoilSection);
 rewrite_native_scalar!(DesignCoilSectionPlacement);
 rewrite_native_enum!(DesignCoilSelection, []; {
-    Persistent {asset_id, context_id, identity_record_index, primary_identity, secondary},
-    FaceRecipe {asset_id, context_id, recipe_record_index, recipe_record_byte_offset, recipe_id, recipe_kind, design},
+    Persistent {asset_id, context_id, serialization_form, identity_record_index, primary_identity, secondary},
+    FaceRecipe {asset_id, context_id, serialization_form, recipe_record_index, recipe_record_byte_offset, recipe_id, recipe_kind, design},
 });
 rewrite_native_record!(DesignCoilTransform, []; {transform, transform_offset});

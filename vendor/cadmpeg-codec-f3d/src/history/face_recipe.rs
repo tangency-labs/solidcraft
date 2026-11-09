@@ -2,7 +2,9 @@
 //! Bind bounded-face nodes to complete historical face boundaries.
 
 use crate::history_records::AsmHistoricalTopology;
-use crate::records::topology::face::{DesignFaceOperand, DesignFaceRecipeStructure};
+use crate::records::topology::face::{
+    prefix_operand_ordinals, DesignFaceOperand, DesignFaceRecipeStructure,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 struct Corner {
@@ -190,22 +192,20 @@ impl FaceRecipeIndex {
         if header_value != operand.recipe_nodes.len() || header_value == 0 {
             return None;
         }
-        let mut keys = Vec::new();
+        let ordinals = prefix_operand_ordinals(&operand.recipe_references)?;
         let mut lanes = Vec::<BTreeSet<i64>>::new();
-        for reference in &operand.recipe_references {
-            let key = (reference.selector_offset, reference.token_offset);
-            let ordinal = keys
-                .iter()
-                .position(|other| *other == key)
-                .unwrap_or_else(|| {
-                    keys.push(key);
-                    lanes.push(BTreeSet::new());
-                    keys.len() - 1
-                });
+        for (reference, &ordinal) in operand.recipe_references.iter().zip(&ordinals) {
+            if ordinal == lanes.len() {
+                lanes.push(BTreeSet::new());
+            }
+            let lane = lanes.get_mut(ordinal)?;
+            if reference.design_reference < 0 {
+                continue;
+            }
             for face in super::effective_faces(reference) {
                 if let Some(slot) = super::stable_ref(face.as_str()) {
                     if self.boundaries.contains_key(&slot) {
-                        lanes[ordinal].insert(slot);
+                        lane.insert(slot);
                     }
                 }
             }

@@ -916,16 +916,31 @@ fn project_all_dimension_constraints(
             let constraint_id =
                 crate::ids::neutral_dimension_constraint_id(&parameter_id, "annotation");
             let copied = parameter_id.clone();
-            let exact = exact_definition(scope, parameter, &indices, copied).or_else(|| {
-                annotation_offset_dimension_definition(
-                    frame,
-                    (parameter, &parameter_id),
-                    scope,
-                    curves,
-                    &projected,
-                    linear_tolerance,
-                )
-            });
+            let exact = exact_definition(scope, parameter, &indices, copied)
+                .or_else(|| {
+                    annotation_offset_dimension_definition(
+                        frame,
+                        (parameter, &parameter_id),
+                        scope,
+                        curves,
+                        &projected,
+                        linear_tolerance,
+                    )
+                })
+                .or_else(|| {
+                    let [first, second] = indices.as_slice() else {
+                        return None;
+                    };
+                    oriented_annotation_point_dimension(
+                        frame,
+                        [
+                            projected.get(&(scope, *first)).copied()?,
+                            projected.get(&(scope, *second)).copied()?,
+                        ],
+                        (parameter, &parameter_id),
+                        linear_tolerance,
+                    )
+                });
             let definition = if let Some(definition) = exact {
                 definition
             } else {
@@ -4645,6 +4660,80 @@ fn indirect_angular_lines(
     })();
     let (first, second) = pair?;
     Some((first.clone(), second.clone()))
+}
+
+/// The directional distance of a two-point `Linear Dimension*` annotation
+/// frame whose horizontal and vertical point distances both equal the
+/// parameter, selected by the coordinate the two annotation payload points
+/// share.
+fn oriented_annotation_point_dimension(
+    frame: &DesignDimensionAnnotationFrame,
+    [first, second]: [&cadmpeg_ir::sketches::SketchEntity; 2],
+    (parameter, parameter_id): (&DesignParameter, &cadmpeg_ir::features::ParameterId),
+    linear_tolerance: f64,
+) -> Option<cadmpeg_ir::sketches::SketchConstraintDefinitionInput> {
+    use crate::layout::dimension_annotation_payload_points as payload_points;
+    use cadmpeg_ir::sketches::{
+        SketchConstraintDefinitionInput as Definition, SketchGeometryDefinition, SketchLocus,
+    };
+
+    if !parameter.source_kind_str().starts_with("Linear Dimension")
+        || !design_dimension_unit(parameter)
+        || first.id() == second.id()
+    {
+        return None;
+    }
+    let (
+        SketchGeometryDefinition::Point {
+            position: first_position,
+        },
+        SketchGeometryDefinition::Point {
+            position: second_position,
+        },
+    ) = (first.geometry.definition(), second.geometry.definition())
+    else {
+        return None;
+    };
+    let expected = parameter.evaluated_value().get() * 10.0;
+    if !linear_measurement_matches(
+        first_position.u - second_position.u,
+        expected,
+        linear_tolerance,
+    ) || !linear_measurement_matches(
+        first_position.v - second_position.v,
+        expected,
+        linear_tolerance,
+    ) {
+        return None;
+    }
+    let payload = frame.annotation_bytes().get(..payload_points::LEN)?;
+    let first_point = crate::bytes::f64s_at::<3>(payload, payload_points::FIRST_POINT)?;
+    let second_point = crate::bytes::f64s_at::<3>(payload, payload_points::SECOND_POINT)?;
+    if !first_point
+        .iter()
+        .chain(&second_point)
+        .all(|value| value.is_finite())
+    {
+        return None;
+    }
+    let [first_u, first_v, _] = first_point;
+    let [second_u, second_v, _] = second_point;
+    let first_locus = SketchLocus::Entity(first.id().clone());
+    let second_locus = SketchLocus::Entity(second.id().clone());
+    let parameter = parameter_id.clone();
+    match (first_u == second_u, first_v == second_v) {
+        (false, true) => Some(Definition::HorizontalDistance {
+            first: first_locus,
+            second: second_locus,
+            parameter,
+        }),
+        (true, false) => Some(Definition::VerticalDistance {
+            first: first_locus,
+            second: second_locus,
+            parameter,
+        }),
+        (true, true) | (false, false) => None,
+    }
 }
 
 fn directional_point_dimension(

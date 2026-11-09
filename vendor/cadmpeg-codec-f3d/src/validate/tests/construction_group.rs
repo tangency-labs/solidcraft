@@ -242,35 +242,34 @@ fn move_face_group_requires_the_selected_face_role() {
     };
     crate::test_support::with_decode_context(|decode| {
         let ir = cadmpeg_ir::CadIr::empty();
-        for kind in [DesignFeatureKind::MoveFace, DesignFeatureKind::DeplacerFace] {
-            let mut native = native(true, false);
-            let mut scope = DesignParameterScope::empty(
-                "f3d:Design/BulkStream.dat:design-parameter-scope#10",
-                kind,
-                10,
-            );
-            scope
-                .try_edit(|draft| {
-                    draft.reference_members = ReferenceRun::unlocated(vec![100, 101, 300]);
-                    draft.layout_fixture_references();
-                    draft.paired_byte_offset = draft.paired_byte_offset.max(draft.kind_offset + 96);
-                    draft.frame_length = draft.paired_byte_offset - draft.byte_offset;
-                    draft.layout_fixture_tail();
-                })
-                .unwrap();
-            native.design_parameter_scopes = vec![scope];
-            native.design_construction_operand_groups[0].operand_role =
-                DesignConstructionOperandRole::Other(DesignOperandRole::ROLE_0X10);
-            let ctx = super::super::Ctx::new(&ir, &native, decode);
-            let mut findings = Vec::new();
-            super::super::validate_construction_operand_groups(&ctx, &mut findings);
-            assert!(findings.is_empty(), "{findings:?}");
-            native.design_construction_operand_groups[0].operand_role =
-                DesignConstructionOperandRole::Other(DesignOperandRole::BODIES_A);
-            let ctx = super::super::Ctx::new(&ir, &native, decode);
-            super::super::validate_construction_operand_groups(&ctx, &mut findings);
-            assert_eq!(findings.len(), 1);
-        }
+        let kind = DesignFeatureKind::MoveFace;
+        let mut native = native(true, false);
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:design-parameter-scope#10",
+            kind,
+            10,
+        );
+        scope
+            .try_edit(|draft| {
+                draft.reference_members = ReferenceRun::unlocated(vec![100, 101, 300]);
+                draft.layout_fixture_references();
+                draft.paired_byte_offset = draft.paired_byte_offset.max(draft.kind_offset + 96);
+                draft.frame_length = draft.paired_byte_offset - draft.byte_offset;
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        native.design_parameter_scopes = vec![scope];
+        native.design_construction_operand_groups[0].operand_role =
+            DesignConstructionOperandRole::Other(DesignOperandRole::ROLE_0X10);
+        let ctx = super::super::Ctx::new(&ir, &native, decode);
+        let mut findings = Vec::new();
+        super::super::validate_construction_operand_groups(&ctx, &mut findings);
+        assert!(findings.is_empty(), "{findings:?}");
+        native.design_construction_operand_groups[0].operand_role =
+            DesignConstructionOperandRole::Other(DesignOperandRole::BODIES_A);
+        let ctx = super::super::Ctx::new(&ir, &native, decode);
+        super::super::validate_construction_operand_groups(&ctx, &mut findings);
+        assert_eq!(findings.len(), 1);
     });
 }
 
@@ -596,17 +595,104 @@ fn a_pattern_admits_a_path_carried_seed_group_without_members() {
 }
 
 #[test]
+fn a_path_carried_seed_group_admits_either_variant() {
+    use crate::records::feature::scope::DesignFeatureKind::RPattern;
+    let variant = path_seed_native(RPattern, 2, |group| group["frame"]["variant"] = true.into());
+    assert!(invalid_group_records(&variant).is_empty());
+}
+
+#[test]
 fn a_path_carried_seed_group_keeps_its_exact_shape() {
     use crate::records::feature::scope::DesignFeatureKind::{Fillet, RPattern};
     let bare_references = path_seed_native(RPattern, 0, |_| {});
     let one_path = path_seed_native(RPattern, 1, |_| {});
-    let variant = path_seed_native(RPattern, 2, |group| group["frame"]["variant"] = true.into());
     let member = path_seed_native(RPattern, 2, |group| {
         group["members"] = serde_json::json!([101]);
         group["member_offsets"] = serde_json::json!([1_026]);
     });
     let outside_patterns = path_seed_native(Fillet, 2, |_| {});
-    for native in [bare_references, one_path, variant, member, outside_patterns] {
+    for native in [bare_references, one_path, member, outside_patterns] {
         assert_eq!(invalid_group_records(&native).len(), 1);
     }
+}
+
+#[test]
+fn a_loft_construction_group_admits_the_point_role() {
+    use crate::records::topology::construction::DesignConstructionOperandRole;
+    use crate::records::topology::extrude_selection::DesignOperandRole;
+    crate::test_support::with_decode_context(|decode| {
+        let ir = cadmpeg_ir::examples::unit_cube().unwrap();
+        let mut native = native(true, false);
+        native.design_parameter_scopes[0]
+            .try_edit(|draft| {
+                draft.payload = crate::records::feature::scope::DesignScopePayload::Loft(Some(
+                    crate::records::feature::path_features::DesignLoftConstruction {
+                        operation:
+                            crate::records::feature::extrude::DesignExtrudeOperation::NewBody,
+                        operation_offset: draft.byte_offset + 29,
+                        reference_target: None,
+                    },
+                ));
+            })
+            .unwrap();
+        for (role, admitted) in [
+            (DesignOperandRole::ROLE_0X21, true),
+            (DesignOperandRole::ROLE_0X10, false),
+        ] {
+            native.design_construction_operand_groups[0].operand_role =
+                DesignConstructionOperandRole::Other(role);
+            let ctx = super::super::Ctx::new(&ir, &native, decode);
+            let mut findings = Vec::new();
+            super::super::validate_construction_operand_groups(&ctx, &mut findings);
+            assert_eq!(findings.is_empty(), admitted, "{role:?}: {findings:?}");
+        }
+    });
+}
+
+#[test]
+fn a_path_pattern_group_role_matches_its_scope_reference_ordinal() {
+    use crate::records::{
+        feature::scope::{DesignFeatureKind, DesignParameterScope},
+        identity::ReferenceRun,
+        topology::{
+            construction::DesignConstructionOperandRole, extrude_selection::DesignOperandRole,
+        },
+    };
+    crate::test_support::with_decode_context(|decode| {
+        let ir = cadmpeg_ir::CadIr::empty();
+        let findings = |members: Vec<u32>, ordinal: u32, role: DesignOperandRole| {
+            let mut native = native(true, false);
+            let mut scope = DesignParameterScope::empty(
+                "f3d:Design/BulkStream.dat:design-parameter-scope#10",
+                DesignFeatureKind::PathPattern,
+                10,
+            );
+            scope
+                .try_edit(|draft| {
+                    draft.reference_members = ReferenceRun::unlocated(members.clone());
+                    draft.layout_fixture_references();
+                    draft.paired_byte_offset = draft.paired_byte_offset.max(draft.kind_offset + 96);
+                    draft.frame_length = draft.paired_byte_offset - draft.byte_offset;
+                    draft.layout_fixture_tail();
+                })
+                .unwrap();
+            native.design_parameter_scopes = vec![scope];
+            native.design_construction_operand_groups[0].scope_reference_ordinal = ordinal;
+            native.design_construction_operand_groups[0].operand_role =
+                DesignConstructionOperandRole::Other(role);
+            let ctx = super::super::Ctx::new(&ir, &native, decode);
+            let mut findings = Vec::new();
+            super::super::validate_construction_operand_groups(&ctx, &mut findings);
+            findings.len()
+        };
+        let seed_table = || vec![300, 100, 101];
+        let path_table = || vec![300, 301, 302, 100, 101];
+        assert_eq!(findings(seed_table(), 1, DesignOperandRole::BODIES_B), 0);
+        assert_eq!(findings(seed_table(), 1, DesignOperandRole::ROLE_0X10), 0);
+        assert_eq!(findings(seed_table(), 1, DesignOperandRole::BODIES_A), 0);
+        assert_eq!(findings(seed_table(), 1, DesignOperandRole::ROLE_0X21), 1);
+        assert_eq!(findings(seed_table(), 1, DesignOperandRole::ROLE_0X5), 1);
+        assert_eq!(findings(path_table(), 3, DesignOperandRole::ROLE_0X5), 0);
+        assert_eq!(findings(path_table(), 3, DesignOperandRole::BODIES_B), 1);
+    });
 }

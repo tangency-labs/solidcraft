@@ -13,9 +13,10 @@ fn legacy_scale_resolves_explicit_point_data_center() {
     for extra_reference in [false, true] {
         let (bytes, scope, position_at) = legacy_scale_fixture(extra_reference);
         let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
-        let operation = exact_scale_operation(&bytes, &records, &scope, &HashMap::new())
-            .unwrap()
-            .expect("legacy Scale operation");
+        let operation =
+            exact_scale_operation(&bytes, &records, &scope, &HashMap::new(), &mut Vec::new())
+                .unwrap()
+                .expect("legacy Scale operation");
 
         assert_eq!(operation.body_group_record_index, 102);
         assert_eq!(operation.center_record_index, 105);
@@ -37,9 +38,10 @@ fn legacy_scale_resolves_explicit_point_data_center() {
 fn modern_localized_scale_resolves_explicit_point_data_center() {
     let (bytes, scope, position_at) = modern_scale_fixture();
     let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
-    let operation = exact_scale_operation(&bytes, &records, &scope, &HashMap::new())
-        .unwrap()
-        .expect("modern localized Scale operation");
+    let operation =
+        exact_scale_operation(&bytes, &records, &scope, &HashMap::new(), &mut Vec::new())
+            .unwrap()
+            .expect("modern localized Scale operation");
 
     assert_eq!(operation.body_group_record_index, 102);
     assert_eq!(operation.center_record_index, 105);
@@ -71,7 +73,7 @@ fn modern_scale_fixture() -> (Vec<u8>, DesignParameterScope, usize) {
     let position_at = append_point_data(&mut bytes, 105, [104, 103]);
     let mut scope = DesignParameterScope::empty(
         "generated:scale#100",
-        crate::records::feature::scope::DesignFeatureKind::Massstab,
+        crate::records::feature::scope::DesignFeatureKind::Scale,
         100,
     );
     scope
@@ -84,6 +86,7 @@ fn modern_scale_fixture() -> (Vec<u8>, DesignParameterScope, usize) {
             draft.layout_fixture_tail();
         })
         .unwrap();
+    scope.source_kind = Some("Maßstab".to_owned());
     (bytes, scope, position_at)
 }
 

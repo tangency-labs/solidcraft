@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::records::feature::direct_face::{DesignDraftFlags, DesignDraftOperation};
+use crate::records::feature::direct_face::{
+    DesignDraftFlags, DesignDraftOperation, DesignDraftTwoSided,
+};
 use crate::records::feature::scope::{
     DesignFeatureKind, DesignParameterScope, DesignScopePayloadMut,
 };
@@ -15,7 +17,9 @@ use crate::records::topology::entity_selection::{
 };
 use crate::records::topology::extrude_selection::DesignOperandRole;
 use crate::records::topology::fillet::HistoricalBinding;
-use cadmpeg_ir::features::{DraftAnchor, FaceSelection, FeatureDefinition, FeatureOperation};
+use cadmpeg_ir::features::{
+    DraftAnchor, DraftSecondSide, FaceSelection, FeatureDefinition, FeatureOperation,
+};
 use cadmpeg_ir::math::Vector3;
 
 const STREAM: &str = "f3d:test/Design/BulkStream.dat";
@@ -43,9 +47,11 @@ fn draft_scope(angle: f64, flipped: Option<bool>) -> DesignParameterScope {
             angle_offset: 0,
             opposite_angle_record_index: 91,
             opposite_angle_offset: 0,
+            opposite_angle: None,
             flags: flipped.map(|flipped| DesignDraftFlags {
                 flipped,
                 tangent_chain: false,
+                two_sided: None,
             }),
         });
     }
@@ -108,6 +114,8 @@ fn selection(primary_identity: u64, face_slots: &[i64]) -> DesignEntitySelection
         )
         .unwrap(),
         context_id_offset: 0,
+        serialization_form:
+            crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
         identity_record_index: 115,
         identity_record_offset: 0,
         primary_identity,
@@ -149,6 +157,10 @@ fn project(
         selections,
         &[],
         &[],
+        &crate::test_support::origin_types::origin_design_types(
+            "f3d:test/Design/MetaStream.dat",
+            39,
+        ),
     )
     .unwrap()?;
     let FeatureDefinition::Operation(FeatureOperation::Draft {
@@ -294,6 +306,7 @@ fn a_flip_reverses_the_pull_of_a_work_plane() {
             &[selection(282, &[])],
             &[],
             &[],
+            &[],
         )
         .unwrap()
         .unwrap();
@@ -332,6 +345,7 @@ fn a_flip_reverses_the_pull_of_a_parting_line() {
         &[selection(282, &[])],
         &[],
         &[],
+        &[],
     )
     .unwrap()
     .unwrap();
@@ -345,4 +359,147 @@ fn a_flip_reverses_the_pull_of_a_parting_line() {
     };
     assert_eq!(*pull.direction, Vector3::new(0.0, 0.0, -1.0));
     assert_eq!(outward, Some(false));
+}
+
+fn two_sided_scope(
+    first: f64,
+    second: f64,
+    two_sided: DesignDraftTwoSided,
+    flipped: bool,
+) -> DesignParameterScope {
+    let mut scope = draft_scope(first, Some(flipped));
+    if let DesignScopePayloadMut::Draft(Some(draft)) = scope.payload_mut() {
+        draft.opposite_angle = Some(cadmpeg_ir::scalar::Angle::new(second).unwrap());
+        draft.flags = Some(DesignDraftFlags {
+            flipped,
+            tangent_chain: false,
+            two_sided: Some(two_sided),
+        });
+    }
+    scope
+}
+
+fn slope(angle: f64) -> cadmpeg_ir::scalar::SlopeAngle {
+    cadmpeg_ir::scalar::SlopeAngle::new(angle).unwrap()
+}
+
+#[test]
+fn the_first_lane_drafts_the_plane_normal_side_whatever_the_flip() {
+    let (first, second) = (0.0873, 0.0524);
+    let plane = work_plane_scope();
+    for (two_sided, flipped, pull_z, angle, second_side) in [
+        (
+            DesignDraftTwoSided::TwoAngles,
+            false,
+            1.0,
+            first,
+            DraftSecondSide::Angle {
+                angle: slope(second),
+            },
+        ),
+        (
+            DesignDraftTwoSided::TwoAngles,
+            true,
+            -1.0,
+            -second,
+            DraftSecondSide::Angle {
+                angle: slope(-first),
+            },
+        ),
+        (
+            DesignDraftTwoSided::Symmetric,
+            false,
+            1.0,
+            first,
+            DraftSecondSide::Symmetric {},
+        ),
+        (
+            DesignDraftTwoSided::Symmetric,
+            true,
+            -1.0,
+            -first,
+            DraftSecondSide::Symmetric {},
+        ),
+    ] {
+        let opposite = if two_sided == DesignDraftTwoSided::Symmetric {
+            first
+        } else {
+            second
+        };
+        let scope = two_sided_scope(first, opposite, two_sided, flipped);
+        for (identity, scopes) in [
+            (282, vec![scope.clone(), plane.clone()]),
+            (42, vec![scope.clone()]),
+        ] {
+            let definition = super::super::project_draft(
+                &scope,
+                &scopes,
+                &groups(),
+                &[selection(identity, &[])],
+                &[],
+                &[],
+                &crate::test_support::origin_types::origin_design_types(
+                    "f3d:test/Design/MetaStream.dat",
+                    39,
+                ),
+            )
+            .unwrap()
+            .unwrap();
+            let FeatureDefinition::Operation(FeatureOperation::Draft {
+                anchor,
+                angle: projected_angle,
+                outward,
+                second_side: projected_second_side,
+                ..
+            }) = definition
+            else {
+                panic!("expected a Draft");
+            };
+            assert_eq!(
+                pull_direction(&anchor),
+                Some(Vector3::new(0.0, 0.0, pull_z))
+            );
+            assert_eq!(projected_angle, Some(slope(angle)));
+            assert_eq!(outward, Some(angle < 0.0));
+            assert_eq!(projected_second_side, Some(second_side));
+        }
+    }
+}
+
+#[test]
+fn a_two_sided_draft_needs_a_neutral_plane_pull() {
+    let one_sided = draft_scope(0.25, Some(false));
+    let two_sided = two_sided_scope(0.25, 0.1, DesignDraftTwoSided::TwoAngles, false);
+    for selections in [vec![], vec![selection(225, &[158])]] {
+        assert!(project(&one_sided, &selections).is_some());
+        assert!(project(&two_sided, &selections).is_none());
+    }
+
+    let plane = work_plane_scope();
+    let [faces, neutral] = groups();
+    let tool = group(103, 113, DesignOperandRole::ROLE_0X21);
+    for (scope, expected) in [(one_sided, true), (two_sided, false)] {
+        let mut scope = scope;
+        scope
+            .try_edit(|draft| {
+                draft.reference_members =
+                    ReferenceRun::unlocated(vec![101, 111, 102, 112, 103, 113]);
+                draft.layout_fixture_references();
+                draft.paired_byte_offset = draft.paired_byte_offset.max(draft.kind_offset + 96);
+                draft.frame_length = draft.paired_byte_offset - draft.byte_offset;
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        let definition = super::super::project_draft(
+            &scope,
+            &[scope.clone(), plane.clone()],
+            &[faces.clone(), neutral.clone(), tool.clone()],
+            &[selection(282, &[])],
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(definition.is_some(), expected);
+    }
 }

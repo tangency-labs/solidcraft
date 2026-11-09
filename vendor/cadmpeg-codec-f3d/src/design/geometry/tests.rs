@@ -214,6 +214,7 @@ fn empty_profile_table_arranges_face_around_open_sketch_branch() {
         )
     })
     .expect("arrangement collection admitted")
+    .map(|found| found.region)
     else {
         panic!("selected face must resolve from raw sketch geometry")
     };
@@ -665,7 +666,7 @@ fn coincident_circle_arc_arrangement_resolves_trimmed_faces() {
     let SketchProfileRegion::Trimmed {
         outer_boundary,
         hole_boundaries,
-    } = selected
+    } = selected.region
     else {
         panic!("arrangement selection must emit a trimmed boundary")
     };
@@ -1607,6 +1608,7 @@ fn arrangement_cycle_scan_skips_when_its_work_count_overflows() {
             nodes: [index, (index + 1) % 3],
             boundary: boundary.clone(),
             polyline: Vec::new(),
+            coincident: Vec::new(),
         })
         .collect();
     assert_eq!(super::arrangement_cycle_work(edges.len(), usize::MAX), None);
@@ -1633,6 +1635,7 @@ fn arrangement_ring_cycle_scan_skips_past_local_budget() {
             nodes: [index, (index + 1) % 500],
             boundary: boundary.clone(),
             polyline: Vec::new(),
+            coincident: Vec::new(),
         })
         .collect();
     let budget = cadmpeg_core::decode::WorkBudget::new(1);

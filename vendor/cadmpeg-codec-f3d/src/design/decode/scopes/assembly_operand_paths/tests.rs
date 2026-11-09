@@ -250,8 +250,83 @@ fn typed_path_reads_a_decimal_occurrence_key() {
     assert_eq!(path.identity_guids().len(), 4);
 }
 
-/// A typed path's identity GUIDs can be followed by a zero word, a pair count
-/// and that many pairs of occurrence identities.
+/// A typed path's identity GUIDs can be followed by a zero word, a list count
+/// and that many counted lists of occurrence identities.
+#[test]
+fn typed_path_reads_a_list_of_four_occurrence_identities() {
+    use crate::records::feature::assembly::TYPED_OCCURRENCE_PATH_TYPE_GUID as TYPED;
+    let plain = identity_qualified_path_bytes(*b"366", true);
+    let mut bytes = plain[..plain.len() - 8].to_vec();
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u32.to_le_bytes());
+    bytes.extend_from_slice(&4_u32.to_le_bytes());
+    let keys = [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+    ];
+    for key in keys {
+        push_guid(&mut bytes, key);
+    }
+    let path = exact_assembly_operand_path(&bytes, 0, 65, bytes.len(), path_link(), Some(TYPED))
+        .unwrap()
+        .expect("typed path with a list of four keys");
+    let [list] = path.occurrence_lists() else {
+        panic!("one list");
+    };
+    assert_eq!(
+        list.iter()
+            .map(|key| key.value.as_str())
+            .collect::<Vec<_>>(),
+        keys
+    );
+
+    // A key count of one or past the stored keys is refused.
+    let count_at = bytes.len() - 4 * 76 - 4;
+    for count in [0_u32, 1, 5, 65] {
+        let mut changed = bytes.clone();
+        changed[count_at..count_at + 4].copy_from_slice(&count.to_le_bytes());
+        assert!(
+            exact_assembly_operand_path(&changed, 0, 65, changed.len(), path_link(), Some(TYPED))
+                .unwrap()
+                .is_none(),
+            "key count {count} accepted"
+        );
+    }
+}
+
+#[test]
+fn occurrence_lists_keep_their_lengths_through_the_wire_form() {
+    use crate::records::feature::assembly::TYPED_OCCURRENCE_PATH_TYPE_GUID as TYPED;
+    let plain = identity_qualified_path_bytes(*b"366", true);
+    let mut bytes = plain[..plain.len() - 8].to_vec();
+    bytes.extend_from_slice(&0_u32.to_le_bytes());
+    bytes.extend_from_slice(&2_u32.to_le_bytes());
+    for count in [2_u32, 3] {
+        bytes.extend_from_slice(&count.to_le_bytes());
+        for _ in 0..count {
+            push_guid(&mut bytes, "66666666-6666-6666-6666-666666666666");
+        }
+    }
+    let path = exact_assembly_operand_path(&bytes, 0, 65, bytes.len(), path_link(), Some(TYPED))
+        .unwrap()
+        .expect("typed path with two lists");
+    let wire = serde_json::to_value(&path).unwrap();
+    assert_eq!(wire["occurrence_list_lengths"], serde_json::json!([2, 3]));
+    let mut overflowing = wire.clone();
+    overflowing["occurrence_list_lengths"] = serde_json::json!([usize::MAX, 2]);
+    assert!(
+        serde_json::from_value::<crate::records::feature::assembly::DesignAssemblyOperandPath>(
+            overflowing
+        )
+        .is_err()
+    );
+    let read: crate::records::feature::assembly::DesignAssemblyOperandPath =
+        serde_json::from_value(wire).unwrap();
+    assert_eq!(read, path);
+}
+
 #[test]
 fn typed_path_reads_its_occurrence_identity_pairs() {
     use crate::records::feature::assembly::TYPED_OCCURRENCE_PATH_TYPE_GUID as TYPED;
@@ -268,7 +343,9 @@ fn typed_path_reads_its_occurrence_identity_pairs() {
     let path = exact_assembly_operand_path(&bytes, 0, 65, bytes.len(), path_link(), Some(TYPED))
         .unwrap()
         .expect("typed path with an identity pair");
-    let pairs = path.paired_occurrence_keys();
+    let [pairs] = path.occurrence_lists() else {
+        panic!("one list");
+    };
     assert_eq!(pairs.len(), 2);
     assert_eq!(pairs[0].value.as_str(), "43");
     assert_eq!(
@@ -277,11 +354,12 @@ fn typed_path_reads_its_occurrence_identity_pairs() {
     );
     assert_eq!(path.identity_guids().len(), 4);
 
-    // The plain zero tail has no pairs; a pair without its `u32 2` is refused.
+    // The plain zero tail has no lists; a key count past the stored keys is
+    // refused.
     let plain = exact_assembly_operand_path(&plain, 0, 65, plain.len(), path_link(), Some(TYPED))
         .unwrap()
         .expect("typed path without pairs");
-    assert!(plain.paired_occurrence_keys().is_empty());
+    assert!(plain.occurrence_lists().is_empty());
     // A path its class admits, not its type, has no pairs.
     let mut untyped = bytes.clone();
     untyped[4..7].copy_from_slice(b"390");
@@ -321,7 +399,7 @@ fn wide_locator_path_continues_over_typed_records() {
         let mut bytes = wide_envelope_bytes(scope.record_index, false);
         bytes.truncate(97);
         write_reference(&mut bytes, 97 - 17, if continued { 67 } else { 66 });
-        // The first record ends in one occurrence identity pair.
+        // The first record ends in one occurrence identity list.
         let first = identity_qualified_path_bytes(*b"366", true);
         bytes.extend_from_slice(&first[..first.len() - 8]);
         for word in [0_u32, 1, 2, 2] {
@@ -373,8 +451,9 @@ fn wide_locator_path_continues_over_typed_records() {
     // The joined path keeps the first record's pair and its type.
     assert!(path.admitted_by_type());
     let pairs = path
-        .paired_occurrence_keys()
+        .occurrence_lists()
         .iter()
+        .flatten()
         .map(|key| key.value.as_str())
         .collect::<Vec<_>>();
     assert_eq!(pairs, ["43", "66666666-6666-6666-6666-666666666666"]);
@@ -706,5 +785,36 @@ fn rigid_group_locator_refuses_cross_version_lengths() {
                 version == frame_version
             );
         }
+    }
+}
+
+#[test]
+fn typed_path_refuses_unsettled_identity_words() {
+    use crate::records::feature::assembly::TYPED_OCCURRENCE_PATH_TYPE_GUID;
+
+    let bytes = identity_qualified_path_bytes(*b"340", true);
+    let identity_word = bytes.len() - (8 + 2 * 76 + 4 + 8);
+    let tail_word = bytes.len() - 8;
+    let read = |bytes: &[u8]| {
+        exact_assembly_operand_path(
+            bytes,
+            0,
+            65,
+            bytes.len(),
+            path_link(),
+            Some(TYPED_OCCURRENCE_PATH_TYPE_GUID),
+        )
+        .unwrap()
+    };
+    assert!(read(&bytes).is_some());
+    for (identity, tail) in [
+        (0x0000_0001_0000_0002u64, 0u64),
+        (2, 1),
+        (0x0000_0001_0000_0002, 1),
+    ] {
+        let mut changed = bytes.clone();
+        changed[identity_word..identity_word + 8].copy_from_slice(&identity.to_le_bytes());
+        changed[tail_word..tail_word + 8].copy_from_slice(&tail.to_le_bytes());
+        assert!(read(&changed).is_none());
     }
 }

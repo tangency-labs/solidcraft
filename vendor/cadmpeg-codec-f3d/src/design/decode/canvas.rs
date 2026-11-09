@@ -222,12 +222,19 @@ fn parse_canvas_layout(
     let scope_reference_at = geometry_at + offsets.scope;
     let component_at = geometry_at + offsets.component;
     let asset_at = geometry_at + offsets.asset;
-    let plane_entity_suffix = canvas_reference(
-        bytes,
-        plane_at,
-        layout,
-        "8D424E29-DE23-4B1F-A3AD-84C52A497D1A",
-    )?;
+    let plane_entity_suffix = if layout == DesignCanvasGeometryLayout::ExpandedPlaneless {
+        if *bytes.get(plane_at)? != 0 {
+            return None;
+        }
+        None
+    } else {
+        Some(canvas_reference(
+            bytes,
+            plane_at,
+            layout,
+            "8D424E29-DE23-4B1F-A3AD-84C52A497D1A",
+        )?)
+    };
     let scope_record_index = canvas_reference(
         bytes,
         scope_reference_at,
@@ -246,7 +253,11 @@ fn parse_canvas_layout(
         layout,
         "830A2A2B-0AA9-4D6A-ACA1-F7A2B2A06573",
     )?;
-    let expected_state = u8::from(layout != DesignCanvasGeometryLayout::Legacy);
+    let second_boundary_flag = match bytes.get(geometry_at + offsets.state)? {
+        0 => false,
+        1 if layout != DesignCanvasGeometryLayout::Legacy => true,
+        _ => return None,
+    };
     if scope_record_index != scope.record_index
         || canvas_reference(
             bytes,
@@ -258,7 +269,6 @@ fn parse_canvas_layout(
             .get(component_at + layout.reference_len()..asset_at)?
             .iter()
             .any(|byte| *byte != 0)
-        || bytes.get(geometry_at + offsets.state) != Some(&expected_state)
     {
         return None;
     }
@@ -307,6 +317,7 @@ fn parse_canvas_layout(
             boundary,
             geometry_payload,
         )
+        .and_then(|geometry| geometry.with_second_boundary_flag(second_boundary_flag))
         .ok()?,
         DesignCanvasAsset::new(
             asset_class_tag.try_into().ok()?,
@@ -419,7 +430,10 @@ mod tests {
             (25, 26, 58, 81, 158, 169, 181, 192, 193, 225, 11),
             (23, 24, 56, 107, 184, 235, 286, 337, 338, 370, 51),
             (24, 25, 57, 108, 185, 236, 288, 339, 340, 372, 51),
+            (29, 30, 62, 73, 150, 161, 173, 184, 185, 217, 11),
+            (29, 30, 62, 63, 140, 151, 163, 174, 175, 207, 11),
         ] {
+            let planeless = payload == plane + 1;
             let paired = label + 6;
             let asset = paired + 19 + width;
             let scope_at = asset + 35;
@@ -430,6 +444,9 @@ mod tests {
             header(&mut bytes, scope_at, *b"303", 30);
             if visibility == 24 {
                 bytes[21] = 1;
+            }
+            if visibility == 29 {
+                bytes[20] = 1;
             }
             bytes[visibility] = 1;
             bytes[first..first + 32].copy_from_slice(&modern[26..58]);
@@ -442,6 +459,9 @@ mod tests {
                 (asset_ref, 20, "830A2A2B-0AA9-4D6A-ACA1-F7A2B2A06573"),
                 (paired + 19, 50, "8EF00D65-F18D-4179-A644-FE0CA39943D6"),
             ] {
+                if planeless && at == plane {
+                    continue;
+                }
                 reference(&mut bytes, at, index);
                 if width == 51 {
                     bytes[at + 9..at + 13].copy_from_slice(&36u32.to_le_bytes());
@@ -476,7 +496,14 @@ mod tests {
             let wire = serde_json::to_value(&image).unwrap();
             assert_eq!(wire["geometry_frame_length"], paired);
             assert_eq!(wire["asset_byte_offset"], asset);
-            assert_eq!(wire["plane_reference_offset"], plane + 1);
+            if planeless {
+                assert_eq!(image.plane_entity_suffix, None);
+                assert_eq!(wire["plane_reference_offset"], plane);
+            } else {
+                assert_eq!(image.plane_entity_suffix, Some(40));
+                assert_eq!(wire["plane_reference_offset"], plane + 1);
+            }
+            assert!(!image.geometry().flag_assumed());
             let roundtrip: crate::records::canvas::DesignCanvasImage =
                 serde_json::from_value(wire.clone()).unwrap();
             assert_eq!(image, roundtrip);
@@ -486,12 +513,32 @@ mod tests {
                 serde_json::from_value::<crate::records::canvas::DesignCanvasImage>(inconsistent)
                     .is_err()
             );
-            for offset in [visibility, state, paired + 20, scope_ref + 1, plane + 5] {
+            let plane_mutation = if planeless { plane } else { plane + 5 };
+            for offset in [
+                visibility,
+                state,
+                paired + 20,
+                scope_ref + 1,
+                plane_mutation,
+            ] {
                 let mut invalid = bytes.clone();
                 invalid[offset] = 2;
                 assert!(
                     parse_canvas_image(&invalid, "Design/BulkStream.dat", &scope).is_none(),
                     "label offset {label}, mutation {offset}"
+                );
+            }
+            let mut toggled = bytes.clone();
+            toggled[state] ^= 1;
+            let toggled_image = parse_canvas_image(&toggled, "Design/BulkStream.dat", &scope);
+            if label == 210 {
+                assert!(toggled_image.is_none());
+            } else {
+                let toggled_image = toggled_image.unwrap();
+                assert!(toggled_image.geometry().flag_assumed());
+                assert_eq!(
+                    serde_json::to_value(&toggled_image).unwrap()["second_boundary_flag"],
+                    false
                 );
             }
             if width == 51 {

@@ -50,8 +50,11 @@ fn location(record_index: u32, point: Option<u32>) -> DesignHoleLocation {
                         .try_into()
                         .unwrap(),
                     context_id_offset: identity_offset - 30,
+                    serialization_form:
+                        crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
                     identity_record_index: record_index + 3,
                     identity_record_offset: identity_offset,
+                    identity_form: Default::default(),
                     sketch_record_index: 11,
                     sketch_record_index_offset: identity_offset
                         + u64_from_index(layout::SKETCH_RECORD_INDEX),

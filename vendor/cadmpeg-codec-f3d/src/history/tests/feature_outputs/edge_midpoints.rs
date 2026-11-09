@@ -70,6 +70,7 @@ fn edge_midpoints_use_named_input_state_and_bound_history() {
             &mut histories,
             &[],
             &owners,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -108,6 +109,7 @@ fn edge_midpoints_refuse_missing_or_ambiguous_input_history() {
             &mut histories,
             &[],
             &owners,
+            None,
         )
         .unwrap();
         assert!(!feature
@@ -137,6 +139,7 @@ fn edge_midpoints_refuse_a_truncated_state_chain() {
         &mut [history],
         &[],
         &owners,
+        None,
     )
     .unwrap();
     assert!(!feature
@@ -169,6 +172,7 @@ fn edge_midpoints_keep_features_with_equal_state_numbers_separate() {
         &mut histories,
         &[],
         &owners,
+        None,
     )
     .unwrap();
     for (feature, expected) in features.iter().zip(["1,0,0", "2,0,0"]) {
@@ -200,6 +204,166 @@ fn edge_midpoints_report_a_missing_input_carrier() {
         &mut [history],
         &[],
         &owners,
+        None,
+    )
+    .unwrap();
+    assert!(!feature
+        .source_properties
+        .contains_key(&cadmpeg_core::nonblank_literal!("edge_midpoints")));
+    assert_eq!(
+        losses
+            .iter()
+            .filter(|loss| loss.code
+                == crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.kind())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn edge_midpoints_refuse_endpoint_average_without_carrier_sample() {
+    let scope = scope_between(3, 0);
+    let mut history = midpoint_history("history:first", 1.0);
+    crate::test_support::history::edit(&mut history, 2, |topology, _| {
+        topology.edge_samples.clear();
+        topology.edge_curves = vec![
+            crate::history_records::AsmHistoricalOptionalCarrierBinding {
+                entity: 10,
+                carrier: Some(20),
+            },
+        ];
+        topology.curve_axes = vec![crate::history_records::AsmHistoricalCurveAxis {
+            curve: 20,
+            origin: cadmpeg_ir::math::Point3::new(0.0, 0.0, 0.0),
+            direction: cadmpeg_ir::math::Vector3::new(1.0, 0.0, 0.0),
+        }];
+        topology.edge_vertices = vec![crate::history_records::AsmHistoricalEdge {
+            edge: 10,
+            start_vertex: 100,
+            end_vertex: 101,
+        }];
+        topology.vertex_points = vec![
+            crate::history_records::AsmHistoricalCarrierBinding {
+                entity: 100,
+                carrier: 200,
+            },
+            crate::history_records::AsmHistoricalCarrierBinding {
+                entity: 101,
+                carrier: 201,
+            },
+        ];
+        topology.point_positions = vec![
+            crate::history_records::AsmHistoricalPoint {
+                point: 200,
+                position: cadmpeg_ir::math::Point3::new(0.0, 0.0, 0.0),
+            },
+            crate::history_records::AsmHistoricalPoint {
+                point: 201,
+                position: cadmpeg_ir::math::Point3::new(2.0, 0.0, 0.0),
+            },
+        ];
+    });
+    let mut feature = midpoint_fillet(&scope);
+    let owners = std::collections::HashMap::from([(scope.id.clone(), history.id.clone())]);
+    let losses = bind_feature_outputs(
+        std::slice::from_mut(&mut feature),
+        &[scope],
+        &mut [history],
+        &[],
+        &owners,
+        None,
+    )
+    .unwrap();
+    assert!(!feature
+        .source_properties
+        .contains_key(&cadmpeg_core::nonblank_literal!("edge_midpoints")));
+    assert_eq!(
+        losses
+            .iter()
+            .filter(|loss| loss.code
+                == crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.kind())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn edge_midpoints_refuse_endpoint_average_for_curved_edge() {
+    let scope = scope_between(3, 0);
+    let mut history = midpoint_history("history:first", 1.0);
+    crate::test_support::history::edit(&mut history, 2, |topology, _| {
+        topology.edge_samples.clear();
+        topology.edge_vertices = vec![crate::history_records::AsmHistoricalEdge {
+            edge: 10,
+            start_vertex: 100,
+            end_vertex: 101,
+        }];
+        topology.vertex_points = vec![
+            crate::history_records::AsmHistoricalCarrierBinding {
+                entity: 100,
+                carrier: 200,
+            },
+            crate::history_records::AsmHistoricalCarrierBinding {
+                entity: 101,
+                carrier: 201,
+            },
+        ];
+        topology.point_positions = vec![
+            crate::history_records::AsmHistoricalPoint {
+                point: 200,
+                position: cadmpeg_ir::math::Point3::new(0.0, 0.0, 0.0),
+            },
+            crate::history_records::AsmHistoricalPoint {
+                point: 201,
+                position: cadmpeg_ir::math::Point3::new(2.0, 0.0, 0.0),
+            },
+        ];
+    });
+    let mut feature = midpoint_fillet(&scope);
+    let owners = std::collections::HashMap::from([(scope.id.clone(), history.id.clone())]);
+    let losses = bind_feature_outputs(
+        std::slice::from_mut(&mut feature),
+        &[scope],
+        &mut [history],
+        &[],
+        &owners,
+        None,
+    )
+    .unwrap();
+    assert!(!feature
+        .source_properties
+        .contains_key(&cadmpeg_core::nonblank_literal!("edge_midpoints")));
+    assert_eq!(
+        losses
+            .iter()
+            .filter(|loss| loss.code
+                == crate::loss::F3dLossCode::HistoricalEdgeMidpointsUnresolved.kind())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn edge_midpoints_preserve_explicit_edge_selections_without_deleted_edge_fallback() {
+    let scope = scope_between(3, 0);
+    let mut history = midpoint_history("history:first", 1.0);
+    crate::test_support::history::edit(&mut history, 2, |topology, _| {
+        topology.edges = vec![99];
+        topology.edge_samples = vec![crate::history_records::AsmHistoricalEdgeSample {
+            edge: 99,
+            interior: cadmpeg_ir::math::Point3::new(5.0, 0.0, 0.0),
+            tangent: None,
+        }];
+    });
+    let mut feature = midpoint_fillet(&scope);
+    let owners = std::collections::HashMap::from([(scope.id.clone(), history.id.clone())]);
+    let losses = bind_feature_outputs(
+        std::slice::from_mut(&mut feature),
+        &[scope],
+        &mut [history],
+        &[],
+        &owners,
+        None,
     )
     .unwrap();
     assert!(!feature

@@ -18,6 +18,18 @@ pub(crate) fn fixture(
     Vec<DesignRecordHeader>,
     Vec<DesignEntityHeader>,
 ) {
+    fixture_with_flags(count, None)
+}
+
+pub(crate) fn fixture_with_flags(
+    count: u32,
+    flags: Option<([u8; 2], usize)>,
+) -> (
+    Vec<u8>,
+    DesignParameterScope,
+    Vec<DesignRecordHeader>,
+    Vec<DesignEntityHeader>,
+) {
     let stream = "f3d:FusionAssetName[Active]/Design1/BulkStream.dat";
     let mut bytes = Vec::new();
     let mut headers = Vec::new();
@@ -34,7 +46,28 @@ pub(crate) fn fixture(
         bytes.extend_from_slice(&1u32.to_le_bytes());
         lp_utf16(&mut bytes, "11111111-2222-3333-4444-555555555555");
         lp_utf16(&mut bytes, &entity.to_string());
-        bytes.extend_from_slice(&[0; 94]);
+        if let Some((flags, tail_length)) = flags {
+            let mut tail = [0; 93];
+            tail[0] = 1;
+            tail[8] = 1;
+            tail[41..45].copy_from_slice(&99u32.to_le_bytes());
+            tail[53..57].copy_from_slice(&99u32.to_le_bytes());
+            tail[57] = 1;
+            tail[58..62].copy_from_slice(&(record + 2).to_le_bytes());
+            tail[68..70].copy_from_slice(&flags);
+            tail[70] = 1;
+            tail[71..75].copy_from_slice(&(record + 1).to_le_bytes());
+            tail[82] = 1;
+            tail[83..87].copy_from_slice(&1u32.to_le_bytes());
+            if tail_length == 89 {
+                bytes.extend_from_slice(&tail[..53]);
+                bytes.extend_from_slice(&tail[57..]);
+            } else {
+                bytes.extend_from_slice(&tail);
+            }
+        } else {
+            bytes.extend_from_slice(&[0; 94]);
+        }
         indexed_header(&mut bytes, *b"259", record);
         headers.push(DesignRecordHeader {
             id: format!("{stream}:design-record-header#{start}"),

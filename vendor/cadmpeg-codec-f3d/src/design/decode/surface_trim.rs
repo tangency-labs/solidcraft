@@ -4,7 +4,7 @@
 use cadmpeg_core::container::ContainerRole;
 
 use crate::container::ContainerScan;
-use crate::design::decode::operands::parse_entity_selection_frame;
+use crate::design::decode::deleted_members::timestamp_table_spans_by_owner;
 use crate::design::decode::scopes::shared_frames::exact_indexed_header_at;
 use crate::design::decode::scopes::shared_frames::marked_record_reference;
 use crate::design::decode::sketch::{
@@ -13,6 +13,9 @@ use crate::design::decode::sketch::{
 };
 use crate::design::decode::text::design_record_id;
 use crate::ids::native_stream;
+use crate::layout::indexed_design_record_header as header;
+use crate::layout::surface_trim_cell_entry as cell_entry;
+use crate::layout::surface_trim_cell_table_prefix as cell_table;
 use crate::records::feature::{
     scope::DesignParameterScope,
     surface_ops::{
@@ -22,178 +25,107 @@ use crate::records::feature::{
 use cadmpeg_core::decode::View;
 use cadmpeg_core::CodecError;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 /// Decode the exact auxiliary BRep-cell carrier of a `SurfaceTrim` scope.
 ///
-/// The carrier is reached from the trimming entity selection. Two indexed
-/// records precede the cell table. The table itself is class-287 or class-325
-/// and has one 19-byte entry for each marked cell reference. The entries are
-/// cells selected for removal, and the trailing value is the total cell count
-/// of the operation's partition.
+/// The scope's record-timestamp table and one further indexed record precede
+/// the cell table. The table has one 19-byte entry for each marked cell
+/// reference, and its trailing value bounds every entry value.
 fn exact_surface_trim_operation(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
+    timestamp_tables: &HashMap<u32, Option<Range<usize>>>,
     scope: &DesignParameterScope,
 ) -> Option<DesignSurfaceTrimOperation> {
-    let parsed_prefix = (|| {
-        if scope.kind() != crate::records::feature::scope::DesignFeatureKind::SurfaceTrim
-            || scope.reference_members().len() != 4
+    if scope.kind() != crate::records::feature::scope::DesignFeatureKind::SurfaceTrim {
+        return None;
+    }
+    let timestamp_table = timestamp_tables.get(&scope.record_index)?.clone()?;
+    let following_start = next_indexed_record_offset(bytes, timestamp_table.end)?;
+    let cell_table_byte_offset =
+        next_indexed_record_offset(bytes, following_start.checked_add(header::LEN)?)?;
+    let chain_record = |start: usize, end: usize| {
+        let parsed = indexed_record_header_at(bytes, start)?;
+        Some(DesignSurfaceTrimChainRecord {
+            record_index: parsed.record_index,
+            byte_offset: u64::try_from(start).ok()?,
+            class_tag: parsed.class_tag,
+            frame_length: u64::try_from(end.checked_sub(start)?).ok()?,
+        })
+    };
+    let chain_records = [
+        chain_record(timestamp_table.start, following_start)?,
+        chain_record(following_start, cell_table_byte_offset)?,
+    ];
+
+    let cell_table = indexed_record_header_at(bytes, cell_table_byte_offset)?;
+    let (primary, paired) = records
+        .frames(cell_table.record_index)
+        .find(|(primary, _)| *primary == cell_table_byte_offset)?;
+    let cell_table_paired_class_tag =
+        exact_indexed_header_at(bytes, paired, cell_table.record_index)?;
+    let cell_count_offset = primary.checked_add(cell_table::CELL_COUNT)?;
+    if bytes
+        .get(primary.checked_add(cell_table::ZERO_RUN)?..cell_count_offset)?
+        .iter()
+        .any(|byte| *byte != 0)
+    {
+        return None;
+    }
+    let cell_count = usize::try_from(View::u32_le_at(bytes, cell_count_offset)?).ok()?;
+    let entries_start = primary.checked_add(cell_table::LEN)?;
+    let trailing_value_offset =
+        entries_start.checked_add(cell_count.checked_mul(cell_entry::LEN)?)?;
+    let trailing_zero_offset = trailing_value_offset.checked_add(4)?;
+    if paired != trailing_zero_offset.checked_add(4)?
+        || View::u32_le_at(bytes, trailing_zero_offset) != Some(0)
+    {
+        return None;
+    }
+    let trailing_value = View::u32_le_at(bytes, trailing_value_offset)?;
+    let total_cells = u64::from(trailing_value);
+    let mut cell_record_indices = HashSet::new();
+    let mut cell_entries = Vec::with_capacity(cell_count);
+    for entry_index in 0..cell_count {
+        let entry_start = entries_start.checked_add(entry_index.checked_mul(cell_entry::LEN)?)?;
+        let reference_start = entry_start.checked_add(cell_entry::RECORD_REFERENCE)?;
+        let cell_record_index = marked_record_reference(bytes, reference_start)?;
+        let ordinal_offset = entry_start.checked_add(cell_entry::VALUE)?;
+        let ordinal_value = View::u64_le_at(bytes, ordinal_offset)?;
+        if !cell_record_indices.insert(cell_record_index)
+            || records.offsets(cell_record_index).is_empty()
+            || ordinal_value == 0
+            || ordinal_value > total_cells
         {
             return None;
         }
-        let selection_record_index = *scope.reference_members().values().nth(3)?;
-        let (selection_byte_offset, _) = records.frames(selection_record_index).next()?;
-        let selection_class_tag =
-            exact_indexed_header_at(bytes, selection_byte_offset, selection_record_index)?;
-        let selection = parse_entity_selection_frame(
-            bytes,
-            selection_record_index,
-            u64::try_from(selection_byte_offset).ok()?,
-            &selection_class_tag,
-        )?;
-
-        let mut chain_start = usize::try_from(selection.next_byte_offset).ok()?;
-        let mut next_chain_record = || {
-            let parsed = indexed_record_header_at(bytes, chain_start)?;
-            let frame_end = next_indexed_record_offset(bytes, chain_start.checked_add(11)?)?;
-            let frame_length = u64::try_from(frame_end.checked_sub(chain_start)?).ok()?;
-            let record = DesignSurfaceTrimChainRecord {
-                record_index: parsed.record_index,
-                byte_offset: u64::try_from(chain_start).ok()?,
-                class_tag: parsed.class_tag,
-                frame_length,
-            };
-            chain_start = frame_end;
-            Some(record)
-        };
-        let chain_records = [next_chain_record()?, next_chain_record()?];
-
-        let cell_table_byte_offset = chain_start;
-        let cell_table = indexed_record_header_at(bytes, cell_table_byte_offset)?;
-        let cell_table_record_index = cell_table.record_index;
-        let cell_table_class_tag = cell_table.class_tag;
-        if !matches!(cell_table_class_tag.as_str(), "287" | "325") {
-            return None;
-        }
-        let (primary, paired) = records
-            .frames(cell_table_record_index)
-            .find(|(primary, _)| *primary == cell_table_byte_offset)?;
-        let cell_table_paired_class_tag =
-            exact_indexed_header_at(bytes, paired, cell_table_record_index)?;
-        if bytes.get(cell_table_byte_offset + 11..cell_table_byte_offset + 21)? != [0; 10] {
-            return None;
-        }
-        let cell_count_offset = cell_table_byte_offset.checked_add(21)?;
-        let cell_count = View::u32_le_at(bytes, cell_count_offset)?;
-        let cell_count_usize = usize::try_from(cell_count).ok()?;
-        let entries_start = cell_count_offset.checked_add(4)?;
-        let entries_bytes = cell_count_usize.checked_mul(19)?;
-        let trailing_value_offset = entries_start.checked_add(entries_bytes)?;
-        let trailing_zero_offset = trailing_value_offset.checked_add(4)?;
-        let expected_paired = trailing_zero_offset.checked_add(4)?;
-        if paired != expected_paired || View::u32_le_at(bytes, trailing_zero_offset) != Some(0) {
-            return None;
-        }
-        let trailing_value = View::u32_le_at(bytes, trailing_value_offset)?;
-        if trailing_value == 0 {
-            return None;
-        }
-        let total_cells = u64::from(trailing_value);
-        Some((
-            selection_record_index,
-            selection_byte_offset,
-            selection,
+        cell_entries.push(DesignSurfaceTrimCellEntry {
+            record_index: cell_record_index,
+            record_reference_offset: u64::try_from(reference_start.checked_add(1)?).ok()?,
+            ordinal: ordinal_value,
+            ordinal_offset: u64::try_from(ordinal_offset).ok()?,
+        });
+    }
+    DesignSurfaceTrimOperation::try_from(
+        crate::records::feature::surface_ops::DesignSurfaceTrimOperationWire {
+            id: String::new(),
+            scope_record_index: scope.record_index,
             chain_records,
-            cell_table_record_index,
-            cell_table_class_tag,
-            cell_table_paired_class_tag,
-            cell_count_offset,
-            cell_count_usize,
-            entries_start,
-            trailing_value_offset,
-            trailing_zero_offset,
+            cell_table_record_index: cell_table.record_index,
+            cell_table_byte_offset: u64::try_from(primary).ok()?,
+            cell_table_class_tag: cell_table.class_tag,
+            cell_table_frame_length: u64::try_from(paired.checked_sub(primary)?).ok()?,
+            cell_table_paired_class_tag: cell_table_paired_class_tag.try_into().ok()?,
+            cell_table_paired_byte_offset: u64::try_from(paired).ok()?,
+            cell_count_offset: u64::try_from(cell_count_offset).ok()?,
+            cell_entries,
             trailing_value,
-            total_cells,
-            primary,
-            paired,
-        ))
-    })();
-    let parsed_prefix = parsed_prefix?;
-    let (
-        selection_record_index,
-        selection_byte_offset,
-        selection,
-        chain_records,
-        cell_table_record_index,
-        cell_table_class_tag,
-        cell_table_paired_class_tag,
-        cell_count_offset,
-        cell_count_usize,
-        entries_start,
-        trailing_value_offset,
-        trailing_zero_offset,
-        trailing_value,
-        total_cells,
-        primary,
-        paired,
-    ) = parsed_prefix;
-
-    let mut cell_entries = Vec::new();
-
-    let mut cell_record_indices = HashSet::new();
-
-    let mut cell_ordinals = HashSet::new();
-    let parsed = (|| {
-        for ordinal in 0..cell_count_usize {
-            let entry_start = entries_start.checked_add(ordinal.checked_mul(19)?)?;
-            let cell_record_index = marked_record_reference(bytes, entry_start)?;
-            if !cell_record_indices.insert(cell_record_index) {
-                return None;
-            }
-            if records.offsets(cell_record_index).is_empty() {
-                return None;
-            }
-            let cell_record_reference_offset = u64::try_from(entry_start.checked_add(1)?).ok()?;
-            let ordinal_offset = u64::try_from(entry_start.checked_add(11)?).ok()?;
-            let ordinal_value = View::u64_le_at(bytes, entry_start.checked_add(11)?)?;
-            if ordinal_value == 0
-                || ordinal_value > total_cells
-                || !cell_ordinals.insert(ordinal_value)
-            {
-                return None;
-            }
-            cell_entries.push(DesignSurfaceTrimCellEntry {
-                record_index: cell_record_index,
-                record_reference_offset: cell_record_reference_offset,
-                ordinal: ordinal_value,
-                ordinal_offset,
-            });
-        }
-        DesignSurfaceTrimOperation::try_from(
-            crate::records::feature::surface_ops::DesignSurfaceTrimOperationWire {
-                id: String::new(),
-                scope_record_index: scope.record_index,
-                selection_record_index,
-                selection_byte_offset: u64::try_from(selection_byte_offset).ok()?,
-                selection_next_record_index: selection.next_record_index,
-                selection_next_byte_offset: selection.next_byte_offset,
-                chain_records,
-                cell_table_record_index,
-                cell_table_byte_offset: u64::try_from(primary).ok()?,
-                cell_table_class_tag,
-                cell_table_frame_length: u64::try_from(paired.checked_sub(primary)?).ok()?,
-                cell_table_paired_class_tag: cell_table_paired_class_tag.try_into().ok()?,
-                cell_table_paired_byte_offset: u64::try_from(paired).ok()?,
-                cell_count_offset: u64::try_from(cell_count_offset).ok()?,
-                cell_entries,
-                trailing_value,
-                trailing_value_offset: u64::try_from(trailing_value_offset).ok()?,
-                trailing_zero_offset: u64::try_from(trailing_zero_offset).ok()?,
-            },
-        )
-        .ok()
-    })();
-    parsed
+            trailing_value_offset: u64::try_from(trailing_value_offset).ok()?,
+            trailing_zero_offset: u64::try_from(trailing_zero_offset).ok()?,
+        },
+    )
+    .ok()
 }
 
 /// Decode every exact `SurfaceTrim` BRep-cell carrier into its own native arena.
@@ -202,6 +134,7 @@ pub(crate) fn decode_surface_trim_operations(
     scopes: &[DesignParameterScope],
 ) -> Result<Vec<DesignSurfaceTrimOperation>, CodecError> {
     let mut record_offsets = HashMap::<String, IndexedRecordOffsets>::new();
+    let mut timestamp_tables = HashMap::<String, HashMap<u32, Option<Range<usize>>>>::new();
     let mut out = Vec::new();
     for scope in scopes.iter().filter(|scope| {
         scope.kind() == crate::records::feature::scope::DesignFeatureKind::SurfaceTrim
@@ -215,7 +148,12 @@ pub(crate) fn decode_surface_trim_operations(
         };
         let bytes = scan.entry_bytes(&entry.name)?;
         let records = cached_owned_record_offsets(&mut record_offsets, stream, bytes);
-        let Some(mut operation) = exact_surface_trim_operation(bytes, records, scope) else {
+        let timestamp_tables = timestamp_tables
+            .entry(stream.to_owned())
+            .or_insert_with(|| timestamp_table_spans_by_owner(bytes));
+        let Some(mut operation) =
+            exact_surface_trim_operation(bytes, records, timestamp_tables, scope)
+        else {
             continue;
         };
         operation.id = design_record_id(

@@ -120,3 +120,46 @@ fn parameter_owner_legacy_forms_keep_external_scalar_offsets() {
         assert_eq!(serde_json::to_value(owner).unwrap(), json);
     }
 }
+
+#[test]
+fn text_parameter_owner_stores_its_text_in_place_of_the_scalar() {
+    let mut input = wire();
+    input.evaluated_value_offset = 320;
+    let mut json = serde_json::to_value(&input).unwrap();
+    json["text_value"] = "AB".into();
+    json["text_value_offset"] = 144.into();
+    let owner: DesignParameterOwner = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(owner.text_value(), Some("AB"));
+    assert_eq!(owner.frame_length(), 104);
+    assert_eq!(owner.evaluated_value_offset(), 320);
+    assert_eq!(serde_json::to_value(&owner).unwrap(), json);
+
+    let mut long = json;
+    long["text_value"] = "Hello".into();
+    long["frame_length"] = 110.into();
+    assert!(serde_json::from_value::<DesignParameterOwner>(long.clone()).is_ok());
+    for (field, value) in [
+        ("frame_length", serde_json::json!(104)),
+        ("text_value_offset", serde_json::json!(145)),
+        ("text_value_offset", serde_json::Value::Null),
+    ] {
+        let mut changed = long.clone();
+        changed[field] = value;
+        assert!(
+            serde_json::from_value::<DesignParameterOwner>(changed).is_err(),
+            "{field}"
+        );
+    }
+
+    let mut compact = long.clone();
+    compact.as_object_mut().unwrap().remove("variant");
+    compact["frame_length"] = 109.into();
+    assert!(serde_json::from_value::<DesignParameterOwner>(compact.clone()).is_ok());
+    compact["frame_length"] = 105.into();
+    assert!(serde_json::from_value::<DesignParameterOwner>(compact).is_err());
+
+    let mut numeric = long;
+    numeric.as_object_mut().unwrap().remove("text_value");
+    numeric.as_object_mut().unwrap().remove("text_value_offset");
+    assert!(serde_json::from_value::<DesignParameterOwner>(numeric).is_err());
+}

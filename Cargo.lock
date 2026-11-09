@@ -607,9 +607,9 @@ checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
 name = "cadmpeg-asm"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f80465a56e7b94ff963361bac3661f7ad8a4fd70d3bc5ece03147ee97fcf9389"
+checksum = "51ffe79ab52c51844a350671f0de1e43ce22e2f24561a6eb0c762b5670591e7f"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-codec-f3d"
-version = "0.6.8"
+version = "0.6.10"
 dependencies = [
  "cadmpeg-asm",
  "cadmpeg-container",
@@ -639,9 +639,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-codec-freecad"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93854d9b21ab1cfd95267d5af63996add743e6a0430e2ba4c46ab8527c3281c9"
+checksum = "e8c9908a324372fcad3b3301bf8b0d11346e78af5df3eac7f94c0c2c633f6b4d"
 dependencies = [
  "cadmpeg-container",
  "cadmpeg-core",
@@ -655,9 +655,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-codec-rhino"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af35a93cacdb11f48cb3824b0b124c504a3bcaef52ad3f0994a71d3c3229a1f2"
+checksum = "e116465f5c1fcaa5d5d5b93351f0d0c1508878c5ab849e019406ce35df353888"
 dependencies = [
  "cadmpeg-container",
  "cadmpeg-core",
@@ -674,9 +674,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-codec-step"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae81bd1687573e42cc6f3ec998ab1ccc4ed14488f62a5e01d0aafab1a055ed22"
+checksum = "ecf6e546e36fe362d5036e71dfc0c594167705651b5be3ff969cad2e5983aff0"
 dependencies = [
  "base64",
  "cadmpeg-container",
@@ -691,9 +691,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-container"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a887da7bb0bb5691e411925eb78f29aab3ccfa536f38a0496bd7fe748e4d6d5e"
+checksum = "4244e58afefddc1070ccce32c6039f1089ebbedb1f3793d47e6b0ecad7b13471"
 dependencies = [
  "cadmpeg-core",
  "crc32fast",
@@ -703,9 +703,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-core"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c822da1164ca9321e8d80830afee2ebede116f68370fd6d0f7d45f5ae6d30f3"
+checksum = "9264300390d9e7b8691802b6c40b458302ad70fd887b03fb45533ef977fe2fd8"
 dependencies = [
  "flate2",
  "memchr",
@@ -719,9 +719,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-ir"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9713d3893339a531c1c0c831f15bd6164478b13ecd3f79f6cd1893fcaa16ace"
+checksum = "6ef26b432ed39be7068e344ff927a9652bb5adf9d46017f73d5e50ae8a5bbcac"
 dependencies = [
  "base64",
  "cadmpeg-core",
@@ -736,9 +736,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-measure"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f7c43c6c62434b6152c36ed6854869adc804e67a6263c7bc70632c38b2792de"
+checksum = "53e72932abe8529ff1f1d91764fda18a98f19733ad3f1cc0912c8ce8fc9609eb"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -748,9 +748,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-protein"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a56ee77c18a6dfe816708c2410cf3e55b92b03f5e3c274f6e5494f809370659"
+checksum = "c0228139117997bc5958ba0714908e00fd7c992b39e8f04fcf6ff9bffbf2e694"
 dependencies = [
  "cadmpeg-container",
  "cadmpeg-core",
@@ -763,9 +763,9 @@ dependencies = [
 
 [[package]]
 name = "cadmpeg-registry"
-version = "0.6.8"
+version = "0.6.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b26e960728b9f68b4a43a2f2969b7959a0fd16488a319d6bef125216a436700a"
+checksum = "99bf10e589ed43e9cc89020cbb0d43bad23aeddf6454a09cf4559fd6d4e974c6"
 dependencies = [
  "cadmpeg-codec-f3d",
  "cadmpeg-codec-freecad",

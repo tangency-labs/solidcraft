@@ -426,6 +426,8 @@ fn compact_coil_placement_accepts_identity_and_matrix_frames() {
                     .to_owned()
                     .try_into()
                     .expect("GUID"),
+                serialization_form:
+                    crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
                 identity_record_index: 103,
                 primary_identity: 1331,
                 secondary: Some(crate::records::identity::DesignSecondaryIdentity {
@@ -764,6 +766,8 @@ fn compact_coil_placement_accepts_face_recipe_selection() {
                 .to_owned()
                 .try_into()
                 .expect("GUID"),
+            serialization_form:
+                crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
             recipe_record_index: 103,
             recipe_record_byte_offset: recipes[0].byte_offset - 15,
             recipe_id: recipes[0].id.clone(),
@@ -1160,5 +1164,88 @@ fn long_coil_scope_discriminators_use_the_ten_reference_envelope() {
             .try_into()
             .unwrap()
         );
+    }
+}
+
+#[test]
+fn ten_reference_coil_scope_uses_the_compact_discriminator_lanes() {
+    let scope = |operation: u32, constant: u32, ninth_reference: u32| {
+        let reference_members: [u32; 10] =
+            [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010];
+        let kind = "CoilPrimitive";
+        let frame_length = 466;
+        let tail_length = 78;
+        let kind_length = 4 + kind.encode_utf16().count() * 2;
+        let kind_at = frame_length - tail_length - kind_length;
+        let reference_count_at = kind_at - 4 - 4 - reference_members.len() * 11;
+        let mut bytes = vec![0; reference_count_at];
+        bytes[0..4].copy_from_slice(&3u32.to_le_bytes());
+        bytes[4..7].copy_from_slice(b"399");
+        bytes[7..11].copy_from_slice(&331u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&operation.to_le_bytes());
+        bytes[26..30].copy_from_slice(&constant.to_le_bytes());
+        bytes[30..34].copy_from_slice(&1u32.to_le_bytes());
+        for (offset, target) in [(34usize, 1005u32), (45, ninth_reference)] {
+            bytes[offset] = 1;
+            bytes[offset + 1..offset + 5].copy_from_slice(&target.to_le_bytes());
+        }
+        bytes[92..96].copy_from_slice(&2u32.to_le_bytes());
+        bytes[107..111].copy_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(
+            &(u32::try_from(reference_members.len()).expect("fixture value fits u32"))
+                .to_le_bytes(),
+        );
+        for reference in reference_members {
+            bytes.push(1);
+            bytes.extend_from_slice(&reference.to_le_bytes());
+            bytes.extend_from_slice(&[0; 6]);
+        }
+        bytes.extend_from_slice(&307u32.to_le_bytes());
+        lp_utf16(&mut bytes, kind);
+        let mut tail = vec![0; tail_length];
+        tail[0..4].copy_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&tail);
+        bytes.extend_from_slice(&3u32.to_le_bytes());
+        bytes.extend_from_slice(b"261");
+        bytes.extend_from_slice(&331u32.to_le_bytes());
+        assert_eq!(bytes.len(), frame_length + 11);
+        parse_parameter_scope(
+            &bytes,
+            &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+            331,
+            &crate::records::references::DesignClassTag::try_from("399".to_owned()).unwrap(),
+            0,
+        )
+        .unwrap()
+        .expect("ten-reference Coil scope")
+    };
+
+    let join = scope(1, 1, 1009);
+    assert_eq!(join.coil_operation(), Some(DesignExtrudeOperation::Join));
+    assert_eq!(join.coil_operation_offset(), Some(20));
+    assert_eq!(
+        join.coil_extent(),
+        Some(DesignCoilExtent::RevolutionsHeight)
+    );
+    assert_eq!(
+        join.coil_section(),
+        Some(DesignCoilSection::ExternalTriangle)
+    );
+    assert_eq!(join.coil_section_offset(), Some(107));
+    assert_eq!(
+        join.coil_section_placement(),
+        Some(DesignCoilSectionPlacement::Center)
+    );
+    assert_eq!(join.coil_section_placement_offset(), Some(92));
+    assert_eq!(join.coil_clockwise(), Some(true));
+    assert_eq!(join.coil_clockwise_offset(), Some(25));
+
+    assert!(join.coil_has_ten_reference_target());
+
+    assert_eq!(scope(2, 1, 1009).coil_operation(), None);
+    assert_eq!(scope(1, 1, 1008).coil_operation(), None);
+    for compact_lanes in [scope(1, 4, 1009), scope(1, 4, 1008)] {
+        assert_eq!(compact_lanes.coil_operation(), None);
+        assert!(!compact_lanes.coil_has_ten_reference_target());
     }
 }

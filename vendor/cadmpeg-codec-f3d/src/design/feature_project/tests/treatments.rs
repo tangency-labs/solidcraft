@@ -88,6 +88,7 @@ fn draft_entity_neutral_selection_projects_a_unique_historical_face() {
             angle_offset: 0,
             opposite_angle_record_index: 91,
             opposite_angle_offset: 0,
+            opposite_angle: None,
             flags: None,
         });
     }
@@ -151,6 +152,8 @@ fn draft_entity_neutral_selection_projects_a_unique_historical_face() {
         )
         .unwrap(),
         context_id_offset: 0,
+        serialization_form:
+            crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
         identity_record_index: 115,
         identity_record_offset: 0,
         primary_identity: 225,
@@ -186,7 +189,11 @@ fn draft_entity_neutral_selection_projects_a_unique_historical_face() {
         std::num::NonZeroU64::new(1).unwrap(),
     )
     .unwrap();
-    let project = |selection: &DesignEntitySelectionOperand| {
+    let origin = crate::test_support::origin_types::origin_design_types(
+        "f3d:test/Design/MetaStream.dat",
+        39,
+    );
+    let project_with = |selection: &DesignEntitySelectionOperand, design_types| {
         crate::test_support::with_decode_context(|decode_ctx| {
             crate::design::feature_project::project_parameter_design_with_edge_identities(
                 decode_ctx,
@@ -195,12 +202,26 @@ fn draft_entity_neutral_selection_projects_a_unique_historical_face() {
                     timelines: std::slice::from_ref(&timeline),
                     construction_groups: &groups,
                     entity_selection_operands: std::slice::from_ref(selection),
+                    design_types,
                     ..Default::default()
                 },
             )
         })
         .expect("authored Draft timeline")
     };
+    let project = |selection: &DesignEntitySelectionOperand| project_with(selection, &origin);
+    let native = |features: &[cadmpeg_ir::features::Feature]| {
+        matches!(
+            features[0].evaluation.definition(),
+            FeatureDefinition::Operation(FeatureOperation::Native {
+                kind: cadmpeg_ir::features::NativeFeatureKind::Draft,
+                ..
+            })
+        )
+    };
+    // Without a complete origin run, the identity can still name an origin plane.
+    assert!(native(&project_with(&selection, &[]).features));
+    assert!(native(&project_with(&selection, &origin[..1]).features));
 
     let crate::design::feature_project::ProjectedParameterDesign { features, .. } =
         project(&selection);
@@ -403,7 +424,7 @@ fn localized_fillet_scope() -> DesignParameterScope {
 }
 
 fn localized_fillet_scope_without_owners() -> DesignParameterScope {
-    DesignParameterScope::try_new(
+    let mut scope = DesignParameterScope::try_new(
         DesignParameterScopeDraft {
             id: "f3d:native/BulkStream.dat:scope#12".into(),
             byte_offset: 100,
@@ -413,6 +434,7 @@ fn localized_fillet_scope_without_owners() -> DesignParameterScope {
             kind_offset: 210,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: None,
 
             previous_history_state_id: None,
@@ -424,14 +446,17 @@ fn localized_fillet_scope_without_owners() -> DesignParameterScope {
                 "reference_members",
             )
             .unwrap(),
-            payload: DesignFeatureKind::Conge.try_into().unwrap(),
+            payload: DesignFeatureKind::Fillet.try_into().unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: DesignClassTag::try_from("261".to_owned()).unwrap(),
             paired_byte_offset: 300,
         }
         .with_fixture_layout(),
     )
-    .unwrap()
+    .unwrap();
+    scope.source_kind = Some("Congé".to_owned());
+    scope
 }
 
 fn localized_fillet_group(
@@ -814,13 +839,7 @@ fn localized_fillet_radius_parameters_pair_with_counted_edge_groups_in_order() {
         owner(40, 41, 3),
     ];
     let mut indexed_scope = scope.clone();
-    if let DesignScopePayloadMut::Fillet(slot)
-    | DesignScopePayloadMut::Conge(slot)
-    | DesignScopePayloadMut::Abrundung(slot)
-    | DesignScopePayloadMut::Arredondamento(slot)
-    | DesignScopePayloadMut::Empalme(slot)
-    | DesignScopePayloadMut::FilletJa(slot) = indexed_scope.payload_mut()
-    {
+    if let DesignScopePayloadMut::Fillet(slot) = indexed_scope.payload_mut() {
         *slot = Some(DesignFixedFilletParameters {
             groups: vec![DesignFixedFilletGroup::try_new(
                 Some(DesignFixedFilletScalar {
@@ -1333,8 +1352,7 @@ fn localized_fillet_radius_parameters_pair_with_counted_edge_groups_in_order() {
         })
         .unwrap();
     if let DesignScopePayloadMut::SurfacePatch(slot) = patch_scope.payload_mut() {
-        let slot = &mut slot.boundaries;
-        *slot = vec![patch_boundary(2, 300, 100)];
+        slot.boundaries.clear();
     }
     patch_group.operand_role = DesignConstructionOperandRole::Other(DesignOperandRole::PROFILE);
     assert!(matches!(
@@ -1343,8 +1361,120 @@ fn localized_fillet_radius_parameters_pair_with_counted_edge_groups_in_order() {
             boundary: cadmpeg_ir::features::SurfaceBoundary::Path(
                 cadmpeg_ir::features::PathRef::Native(ref native)
             ),
+            support_faces: cadmpeg_ir::features::FaceSelection::Faces(ref faces),
+            ref continuity,
+            merge_result: Some(false),
+        })) if native == &patch_group.id && faces.is_empty() && continuity.resolved().is_none()
+    ));
+
+    let mut extra_member = patch_group.clone();
+    extra_member
+        .try_set_members(vec![
+            Located {
+                value: 200,
+                offset: 0,
+            },
+            Located {
+                value: 201,
+                offset: 11,
+            },
+        ])
+        .unwrap();
+    assert!(crate::test_support::with_decode_context(|ctx| {
+        crate::design::feature_project::project_surface_patch(
+            ctx,
+            &patch_scope,
+            &[extra_member],
+            &[],
+            &[],
+            &[],
+        )
+    })
+    .unwrap()
+    .is_none());
+
+    let mut claimed_tool = group(300, 2, vec![400]);
+    claimed_tool.operand_role = DesignConstructionOperandRole::Other(DesignOperandRole::PROFILE);
+    assert!(crate::test_support::with_decode_context(|ctx| {
+        crate::design::feature_project::project_surface_patch(
+            ctx,
+            &patch_scope,
+            &[patch_group.clone(), claimed_tool],
+            &[],
+            &[],
+            &[],
+        )
+    })
+    .unwrap()
+    .is_none());
+
+    let mut settings_scope = patch_scope.clone();
+    if let DesignScopePayloadMut::SurfacePatch(slot) = settings_scope.payload_mut() {
+        slot.boundaries = vec![patch_boundary(2, 300, 100)];
+    }
+    assert!(crate::test_support::with_decode_context(|ctx| {
+        crate::design::feature_project::project_surface_patch(
+            ctx,
+            &settings_scope,
+            std::slice::from_ref(&patch_group),
+            &[],
+            &[],
+            &[],
+        )
+    })
+    .unwrap()
+    .is_none());
+
+    let mut two_profiles_scope = patch_scope.clone();
+    two_profiles_scope
+        .try_edit(|draft| {
+            draft.frame_length = 361;
+            draft.reference_members = ReferenceRun::unlocated(vec![100, 200, 101, 201, 300]);
+            draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+            draft.layout_fixture_references();
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    let mut second_profile = group(101, 2, vec![201]);
+    second_profile.operand_role = DesignConstructionOperandRole::Other(DesignOperandRole::PROFILE);
+    assert!(matches!(
+        crate::test_support::with_decode_context(|ctx| {
+            crate::design::feature_project::project_surface_patch(ctx, &two_profiles_scope, &[patch_group.clone(), second_profile], &[], &[], &[])
+        }).unwrap(),
+        Some(FeatureDefinition::Operation(FeatureOperation::FilledSurface {
+            boundary: cadmpeg_ir::features::SurfaceBoundary::Path(
+                cadmpeg_ir::features::PathRef::Native(ref native)
+            ),
+            ref continuity,
+            merge_result: Some(false),
             ..
-        })) if native == &patch_group.id
+        })) if native == &two_profiles_scope.id && continuity.resolved().is_none()
+    ));
+
+    let mut three_profiles_scope = two_profiles_scope.clone();
+    three_profiles_scope
+        .try_edit(|draft| {
+            draft.frame_length = 383;
+            draft.reference_members =
+                ReferenceRun::unlocated(vec![100, 200, 101, 201, 102, 202, 300]);
+            draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+            draft.layout_fixture_references();
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    let mut second_profile = group(101, 2, vec![201]);
+    second_profile.operand_role = DesignConstructionOperandRole::Other(DesignOperandRole::PROFILE);
+    let mut third_profile = group(102, 4, vec![202]);
+    third_profile.operand_role = DesignConstructionOperandRole::Other(DesignOperandRole::PROFILE);
+    assert!(matches!(
+        crate::test_support::with_decode_context(|ctx| {
+            crate::design::feature_project::project_surface_patch(ctx, &three_profiles_scope, &[patch_group.clone(), second_profile, third_profile], &[], &[], &[])
+        }).unwrap(),
+        Some(FeatureDefinition::Operation(FeatureOperation::FilledSurface {
+            ref continuity,
+            merge_result: Some(false),
+            ..
+        })) if continuity.resolved().is_none()
     ));
 
     // The earlier scope-envelope generation is fourteen bytes shorter in both

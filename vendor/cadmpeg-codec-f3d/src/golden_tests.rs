@@ -80,6 +80,12 @@ use cadmpeg_core::CodecError;
 #[allow(clippy::vec_init_then_push)]
 fn fixtures() -> Vec<(&'static str, Vec<u8>)> {
     vec![
+        (
+            "display_scene_poses",
+            crate::test_support::scene::archive(&crate::test_support::scene::override_row(&[
+                3, 17,
+            ])),
+        ),
         ("topology_base", f3d_with_smbh(&synthetic_geometry_smbh())),
         ("wire_body", f3d_with_smbh(&synthetic_wire_body_smbh())),
         (
@@ -869,7 +875,7 @@ const MUTATION_MM: f64 = 1.0;
 /// Fixtures whose measures the mutation lane compares across the patch
 /// writer: every fixture with a point except `design_copy_paste`, whose
 /// occurrences place its bodies.
-const MEASURED_FIXTURE_FLOOR: usize = 59;
+const MEASURED_FIXTURE_FLOOR: usize = 60;
 
 /// Fixtures with no point for the mutation lane to move.
 const FIXTURES_WITHOUT_POINTS: [&str; 1] = ["container_metadata_only"];

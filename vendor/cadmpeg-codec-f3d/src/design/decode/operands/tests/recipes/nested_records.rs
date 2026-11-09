@@ -66,6 +66,7 @@ fn topology_operands_follow_consecutive_nested_records_to_their_recipes() {
             kind_offset: 1100,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: None,
 
             previous_history_state_id: None,
@@ -81,6 +82,7 @@ fn topology_operands_follow_consecutive_nested_records_to_their_recipes() {
                 .try_into()
                 .unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: crate::records::references::DesignClassTag::try_from(
                 "261".to_owned(),
             )
@@ -1472,6 +1474,7 @@ fn topology_operands_follow_consecutive_nested_records_to_their_recipes() {
         candidate_edges: Vec::new(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     });
     bind_face_operand_candidates(
         std::slice::from_mut(&mut operand),
@@ -1533,6 +1536,7 @@ fn topology_operands_follow_consecutive_nested_records_to_their_recipes() {
         candidate_edges: Vec::new(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     }];
     direct_face.alternate_selector_candidate_faces.clear();
     direct_face.resolved_face_slots.clear();

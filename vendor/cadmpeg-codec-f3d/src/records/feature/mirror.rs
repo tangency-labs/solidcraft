@@ -7,6 +7,11 @@ use cadmpeg_ir::features::{FinitePoint3, FiniteVector3};
 use cadmpeg_ir::scalar::PositiveReal;
 use serde::{Deserialize, Serialize};
 
+cadmpeg_core::named_optional_field!(
+    deserialize_assumed_plane_scope,
+    DesignMirrorAssumedPlaneScope,
+    "assumed_plane_scope"
+);
 cadmpeg_core::named_optional_field!(deserialize_plane_normal, FiniteVector3, "plane_normal");
 cadmpeg_core::named_optional_field!(deserialize_plane_origin, FinitePoint3, "plane_origin");
 cadmpeg_core::named_optional_field!(
@@ -50,7 +55,7 @@ cadmpeg_core::named_optional_field!(
     "stitch_tolerance_scope"
 );
 /// Exact construction carried by a Mirror scope.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     try_from = "DesignMirrorConstructionWire",
     into = "DesignMirrorConstructionWire"
@@ -81,6 +86,9 @@ pub(crate) struct DesignMirrorConstruction {
     pub(crate) plane_selection_record_index: Option<u32>,
     /// Proven selected-face mirror plane, when exact.
     pub(crate) plane: Option<DesignPlane>,
+    /// `WorkPlane` scope read from the plane selection identity when no face
+    /// candidate gives a plane.
+    pub(crate) assumed_plane_scope: Option<DesignMirrorAssumedPlaneScope>,
 }
 
 /// Native carrier of a Mirror stitch tolerance.
@@ -169,6 +177,47 @@ struct DesignMirrorConstructionWire {
         deserialize_with = "deserialize_plane_normal"
     )]
     plane_normal: Option<FiniteVector3>,
+    /// `WorkPlane` scope read from the plane selection identity.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_assumed_plane_scope"
+    )]
+    assumed_plane_scope: Option<DesignMirrorAssumedPlaneScope>,
+}
+
+/// `WorkPlane` scope at the compact plane-selection identity plus one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DesignMirrorAssumedPlaneScope {
+    pub(crate) scope_record_index: u32,
+    /// Byte offset of the plane-selection primary identity.
+    pub(crate) identity_offset: u64,
+    /// Face candidates of the plane selection, each without a usable plane.
+    pub(crate) unusable_faces: Vec<DesignMirrorUnusablePlaneFace>,
+}
+
+/// Historical face named by a Mirror plane selection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DesignMirrorUnusablePlaneFace {
+    pub(crate) history_id: String,
+    pub(crate) face_slot: i64,
+    pub(crate) defect: DesignMirrorPlaneFaceDefect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DesignMirrorPlaneFaceDefect {
+    AbsentFromPrecedingState,
+    NotPlanar,
+}
+
+impl DesignMirrorPlaneFaceDefect {
+    pub(crate) fn describe(self) -> &'static str {
+        match self {
+            Self::AbsentFromPrecedingState => "absent from the preceding state",
+            Self::NotPlanar => "not planar",
+        }
+    }
 }
 
 impl TryFrom<DesignMirrorConstructionWire> for DesignMirrorConstruction {
@@ -199,6 +248,7 @@ impl TryFrom<DesignMirrorConstructionWire> for DesignMirrorConstruction {
                 (Some(origin), Some(normal)) => Some(DesignPlane::from_parts(origin, normal).ok_or("plane_normal must be a unit vector")?),
                 _ => return Err("plane_origin and plane_normal must occur together".into()),
             },
+            assumed_plane_scope: wire.assumed_plane_scope,
         })
     }
 }
@@ -237,6 +287,7 @@ impl From<DesignMirrorConstruction> for DesignMirrorConstructionWire {
             plane_normal: record
                 .plane
                 .map(|plane| FiniteVector3::from(plane.normal())),
+            assumed_plane_scope: record.assumed_plane_scope,
         }
     }
 }

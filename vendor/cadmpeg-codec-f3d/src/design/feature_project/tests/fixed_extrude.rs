@@ -85,6 +85,7 @@ fn fixed_extrude(
                         side_extent_discriminators: [1, 1],
                         side_extent_discriminator_offsets: [177, 190],
                         first_side_target_ordinal: None,
+                        distance_tail: None,
                         extent,
                         direction_face_extend_offsets: [132, 136],
                         direction_reversed: false,
@@ -115,7 +116,8 @@ fn fixed_extrude(
                                 )
                                 .expect("valid entity identity"),
                                 entity_reference_offset: 420,
-                                region_selection: None,
+                                compact_tail_flags: None,
+            region_selection: None,
                                 paired_class_tag:
                                     crate::records::references::DesignClassTag::try_from(
                                         "259".to_owned(),
@@ -131,6 +133,7 @@ fn fixed_extrude(
             )),
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: None,
             previous_history_state_id: None,
             previous_history_state_id_offset: None,
@@ -142,6 +145,7 @@ fn fixed_extrude(
             )
             .unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: crate::records::references::DesignClassTag::try_from(
                 "261".to_owned(),
             )
@@ -253,3 +257,105 @@ fn multiple_native_sketch_profiles_keep_the_extrude_native() {
     ]);
     assert!(projected(&scope).is_none());
 }
+
+/// The measurement word, when present, states whether each side travels the
+/// stored distance, for a fixed lane and an indexed parameter alike.
+#[test]
+fn the_measurement_word_selects_each_side_or_whole_symmetric_travel() {
+    use crate::records::feature::extrude::{DesignExtrudeDistanceTail, DesignExtrudeMeasurement};
+    let whole_travel = |scope: &DesignParameterScope, along: Option<f64>| {
+        let along = along.map(|value| {
+            crate::design::decode::parameters::parse_design_parameter_record(
+                &crate::design::test_support::parameter_record(
+                    Some(44),
+                    "value",
+                    "AlongDistance",
+                    Some("mm"),
+                    "d1",
+                    value,
+                ),
+            )
+            .expect("generated feature parameter is canonical")
+        });
+        let parameters = along.iter().map(|along| (0, along)).collect::<Vec<_>>();
+        let placement = placement();
+        let definition = crate::test_support::with_decode_context(|decode_ctx| {
+            project_extrude(
+                decode_ctx,
+                scope,
+                &parameters,
+                &[],
+                &[],
+                std::slice::from_ref(&placement),
+                &[],
+            )
+        })
+        .expect("project the extrude feature")?;
+        let FeatureDefinition::Operation(FeatureOperation::Extrude {
+            extent:
+                ExtrudeExtent::Symmetric {
+                    side:
+                        ExtrudeSide {
+                            termination: LinearTermination::Blind { length },
+                            ..
+                        },
+                },
+            ..
+        }) = definition
+        else {
+            panic!("symmetric blind Extrude: {definition:?}");
+        };
+        Some(length.get())
+    };
+    let scope =
+        |fixed: Option<f64>, sides: [u32; 2], measurement: Option<DesignExtrudeMeasurement>| {
+            let mut scope = fixed_extrude(
+                DesignExtrudeExtent::SymmetricDistance,
+                DesignFixedExtrudeParameters {
+                    along_distance: fixed
+                        .map(|value| DesignFixedExtrudeDistance::FixedScalar(distance(value, 11))),
+                    ..Default::default()
+                },
+            );
+            let Some(DesignExtrudePrologue::ReferenceAware {
+                side_extent_discriminators,
+                distance_tail,
+                ..
+            }) = scope.extrude_prologue_mut()
+            else {
+                panic!("reference-aware prologue");
+            };
+            *side_extent_discriminators = sides;
+            *distance_tail = measurement.map(|measurement| DesignExtrudeDistanceTail {
+                target_option: 1,
+                target_option_offset: 186,
+                measurement,
+                measurement_offset: 199,
+            });
+            scope
+        };
+    for sides in [[1, 0], [1, 1]] {
+        for (measurement, factor) in [
+            (DesignExtrudeMeasurement::EachSide, 2.0),
+            (DesignExtrudeMeasurement::WholeTravel, 1.0),
+        ] {
+            let fixed = whole_travel(&scope(Some(1.2), sides, Some(measurement)), None)
+                .expect("a fixed lane with a measurement word");
+            assert!(
+                (fixed - 12.0 * factor).abs() < 1.0e-12,
+                "{sides:?} {measurement:?}"
+            );
+            let parameter = whole_travel(&scope(None, sides, Some(measurement)), Some(0.55))
+                .expect("a parameter with a measurement word");
+            assert!(
+                (parameter - 5.5 * factor).abs() < 1.0e-12,
+                "{sides:?} {measurement:?}"
+            );
+        }
+    }
+    assert!(whole_travel(&scope(Some(1.2), [1, 0], None), None).is_none());
+    let untailed = whole_travel(&scope(None, [1, 0], None), Some(0.55)).unwrap();
+    assert!((untailed - 5.5).abs() < 1.0e-12);
+}
+
+mod through_all;

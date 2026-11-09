@@ -21,7 +21,7 @@ impl TreatmentIndex {
             super::treatment_face_supports(&result.faces, result, preceding, &result_boundaries);
         let supports = rows
             .into_iter()
-            .map(|(face, carrier, supports)| (face, (carrier, supports)))
+            .map(|(face, carrier, supports, _)| (face, (carrier, supports)))
             .collect::<HashMap<_, _>>();
         let mut radii = HashMap::new();
         for radius in &result.surface_radii {

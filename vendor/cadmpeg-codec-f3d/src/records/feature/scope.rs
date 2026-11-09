@@ -13,7 +13,9 @@ use super::assembly_features::{
     DesignDerivedInstanceConstruction,
 };
 use super::base_feature::DesignBaseFeatureConstruction;
-use super::body_ops::{DesignCopyPasteBodiesOperation, DesignScaleOperation};
+use super::body_ops::{
+    DesignCopyPasteBodiesOperation, DesignReverseNormalOperation, DesignScaleOperation,
+};
 use super::coil::{
     DesignCoilExtent, DesignCoilPlacement, DesignCoilScope, DesignCoilSection,
     DesignCoilSectionPlacement, DesignCoilTransform,
@@ -70,6 +72,16 @@ cadmpeg_core::named_optional_field!(
 );
 
 cadmpeg_core::named_optional_field!(deserialize_source_kind, String, "source_kind");
+cadmpeg_core::named_optional_field!(
+    deserialize_label,
+    crate::records::identity::Located<String>,
+    "label"
+);
+cadmpeg_core::named_optional_field!(
+    deserialize_deleted_members,
+    super::deleted_members::DesignDeletedMembers,
+    "deleted_members"
+);
 cadmpeg_core::named_optional_field!(
     deserialize_assembly_alignment,
     DesignAssemblyAlignment,
@@ -239,9 +251,19 @@ cadmpeg_core::named_optional_field!(
     "ruled_surface_operation"
 );
 cadmpeg_core::named_optional_field!(
+    deserialize_path_pattern_settings,
+    crate::records::feature::patterns::DesignPathPatternSettings,
+    "path_pattern_settings"
+);
+cadmpeg_core::named_optional_field!(
     deserialize_scale_operation,
     DesignScaleOperation,
     "scale_operation"
+);
+cadmpeg_core::named_optional_field!(
+    deserialize_reverse_normal_operation,
+    DesignReverseNormalOperation,
+    "reverse_normal_operation"
 );
 cadmpeg_core::named_optional_field!(
     deserialize_solid_primitive,
@@ -349,6 +371,13 @@ impl From<DesignFaceRecipeKind> for ConstructionRecipeKind {
 /// Nonempty source spelling outside the specialized feature-family names.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DesignNativeFeatureName(std::sync::Arc<str>);
+
+impl DesignFeatureKind {
+    /// Native kind carrying a stored family name.
+    pub(crate) fn native(name: &str) -> Self {
+        Self::Native(DesignNativeFeatureName(name.into()))
+    }
+}
 
 /// Optional payloads can be uninterpreted; a counted collection is decoded even when empty.
 trait ScopePayloadCompleteness {
@@ -557,46 +586,24 @@ impl Serialize for DesignFeatureKind {
 design_feature_kinds! {
     data {
         Sketch => "Sketch": Option<DesignSketchEntityBinding>,
-        Esquisse => "Esquisse": Option<DesignSketchEntityBinding>,
-        Skizze => "Skizze": Option<DesignSketchEntityBinding>,
-        Esboco => "Esboço": Option<DesignSketchEntityBinding>,
-        Boceto => "Boceto": Option<DesignSketchEntityBinding>,
-        SketchJa => "スケッチ": Option<DesignSketchEntityBinding>,
         Assemble => "Assemble": Option<DesignAssemblyAlignment>,
         AsBuilt => "As-built": Option<DesignAssemblyAlignment>,
         Extrude => "Extrude": Option<DesignExtrudeScope>,
-        Extrusion => "Extrusion": Option<DesignExtrudeScope>,
-        Extrusao => "Extrusão": Option<DesignExtrudeScope>,
-        Extruir => "Extruir": Option<DesignExtrudeScope>,
-        ExtrudeJa => "押し出し": Option<DesignExtrudeScope>,
         Fillet => "Fillet": Option<DesignFixedFilletParameters>,
-        Conge => "Congé": Option<DesignFixedFilletParameters>,
-        Abrundung => "Abrundung": Option<DesignFixedFilletParameters>,
-        Arredondamento => "Arredondamento": Option<DesignFixedFilletParameters>,
-        Empalme => "Empalme": Option<DesignFixedFilletParameters>,
-        FilletJa => "フィレット": Option<DesignFixedFilletParameters>,
         Chamfer => "Chamfer": Option<DesignFixedChamferParameters>,
-        Chanfrein => "Chanfrein": Option<DesignFixedChamferParameters>,
-        Chaflan => "Chaflán": Option<DesignFixedChamferParameters>,
-        ChamferJa => "面取り": Option<DesignFixedChamferParameters>,
         Combine => "Combine": Option<DesignCombineOperation>,
         Draft => "Draft": Option<DesignDraftOperation>,
         CPattern => "C-Pattern": Option<DesignCircularPatternConstruction>,
         CircularPattern => "Circular Pattern": Option<DesignCircularPatternConstruction>,
-        ReseauC => "Réseau C": Option<DesignCircularPatternConstruction>,
         RPattern => "R-Pattern": Option<DesignRectangularPatternConstruction>,
         RectangularPattern => "Rectangular Pattern": Option<DesignRectangularPatternConstruction>,
         Mirror => "Mirror": Option<DesignMirrorConstruction>,
-        SymetrieMiroir => "Symétrie miroir": Option<DesignMirrorConstruction>,
+        PathPattern => "PathPattern": Option<crate::records::feature::patterns::DesignPathPatternSettings>,
         Align => "Align": Option<DesignAlignEnvelope>,
         Move => "Move": Option<DesignMoveOperation>,
         MoveFace => "MoveFace": Option<DesignMoveOperation>,
-        DeplacerFace => "DéplacerFace": Option<DesignMoveOperation>,
         OffsetFaces => "OffsetFaces": Option<DesignOffsetFacesOperation>,
-        DecalerLesFaces => "DécalerLesFaces": Option<DesignOffsetFacesOperation>,
         Shell => "Shell": Option<DesignShellOperation>,
-        Schale => "Schale": Option<DesignShellOperation>,
-        Vaciado => "Vaciado": Option<DesignShellOperation>,
         Thicken => "Thicken": Option<DesignThickenOperation>,
         SpirePrimitive => "SpirePrimitive": Option<DesignCoilScope>,
         CoilPrimitive => "CoilPrimitive": Option<DesignCoilScope>,
@@ -606,8 +613,6 @@ design_feature_kinds! {
         SurfaceOffset => "SurfaceOffset": Option<DesignSurfaceOffsetOperation>,
         Hole => "Hole": crate::records::feature::hole::DesignHoleScope,
         Scale => "Scale": Option<DesignScaleOperation>,
-        Massstab => "Maßstab": Option<DesignScaleOperation>,
-        Escala => "Escala": Option<DesignScaleOperation>,
         Thread => "Thread": Option<DesignThreadConstruction>,
         Emboss => "Emboss": Option<DesignEmbossConstruction>,
         EdgeFlange => "EdgeFlange": Option<DesignEdgeFlangeOperation>,
@@ -617,20 +622,18 @@ design_feature_kinds! {
         CopyPaste => "CopyPaste": Option<DesignCopyPasteComponentOperation>,
         JointOrigin => "JointOrigin": Option<DesignJointOriginTransform>,
         WorkPlane => "WorkPlane": Option<DesignWorkPlaneTransform>,
-        PlanoDeObra => "PlanoDeObra": Option<DesignWorkPlaneTransform>,
         WorkAxis => "WorkAxis": Option<DesignWorkAxisConstruction>,
         WorkPoint => "WorkPoint": Option<DesignWorkPointConstruction>,
         DerivedInstance => "DerivedInstance": Option<DesignDerivedInstanceConstruction>,
         BaseFeature => "Base Feature": Option<DesignBaseFeatureConstruction>,
         CopyPasteBodies => "CopyPasteBodies": Option<DesignCopyPasteBodiesOperation>,
+        ReverseNormal => "Reverse Normal": Option<DesignReverseNormalOperation>,
     }
     fixed {
         Revolve => "Revolve": Option<DesignRevolveConstruction>,
         Loft => "Loft": Option<DesignLoftConstruction>,
-        Solevacion => "Solevación": Option<DesignLoftConstruction>,
         Pipe => "Pipe": Option<DesignPipeConstruction>,
         SpherePrimitive => "SpherePrimitive": Option<DesignSpherePrimitive>,
-        EsferaPrimitiva => "EsferaPrimitiva": Option<DesignSpherePrimitive>,
         TorusPrimitive => "TorusPrimitive": Option<DesignTorusPrimitive>,
         BoxPrimitive => "BoxPrimitive": Option<DesignBoxPrimitive>,
         CylinderPrimitive => "CylinderPrimitive": Option<DesignCylinderPrimitive>,
@@ -645,7 +648,6 @@ design_feature_kinds! {
         BoundaryFill => "BoundaryFill",
         Split => "Split",
         Canvas => "Canvas",
-        Lienzo => "Lienzo",
         Decal => "Decal",
         BaseMeshFeature => "Base Mesh Feature",
         CustomFeature => "CustomFeature",
@@ -718,6 +720,9 @@ pub(crate) struct DesignParameterScope {
     pub(crate) feature_ordinal: std::num::NonZeroU32,
     /// Byte offset of `feature_ordinal`.
     feature_ordinal_offset: u64,
+    /// Label and offset of its UTF-16LE code units.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) label: Option<crate::records::identity::Located<String>>,
     /// ASM delta-state identity produced by this scope, when active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     history_state_id: Option<i64>,
@@ -738,6 +743,10 @@ pub(crate) struct DesignParameterScope {
     /// group grammar does not close.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) unclosed_construction_operand_groups: Vec<u32>,
+    /// Record-timestamp evidence for reference members that name deleted
+    /// members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) deleted_members: Option<super::deleted_members::DesignDeletedMembers>,
     /// Per-file dynamic class tag of the paired header.
     pub(crate) paired_class_tag: DesignClassTag,
     /// Byte offset of the paired indexed record header.
@@ -763,6 +772,8 @@ pub(crate) struct DesignParameterScopeDraft {
     pub(crate) feature_ordinal: std::num::NonZeroU32,
     /// Byte offset of `feature_ordinal`.
     pub(crate) feature_ordinal_offset: u64,
+    /// Label and offset of its UTF-16LE code units.
+    pub(crate) label: Option<crate::records::identity::Located<String>>,
     /// ASM delta-state identity produced by this scope, when active.
     pub(crate) history_state_id: Option<i64>,
     /// ASM delta-state identity immediately preceding this scope, when active.
@@ -778,6 +789,9 @@ pub(crate) struct DesignParameterScopeDraft {
     /// Reference members whose records open a construction-operand group the
     /// group grammar does not close.
     pub(crate) unclosed_construction_operand_groups: Vec<u32>,
+    /// Record-timestamp evidence for reference members that name deleted
+    /// members.
+    pub(crate) deleted_members: Option<super::deleted_members::DesignDeletedMembers>,
     /// Per-file dynamic class tag of the paired header.
     pub(crate) paired_class_tag: DesignClassTag,
     /// Byte offset of the paired indexed record header.
@@ -829,6 +843,13 @@ struct DesignParameterScopeSerde {
     feature_ordinal: u32,
     /// Byte offset of `feature_ordinal`.
     feature_ordinal_offset: u64,
+    /// Label and offset of its UTF-16LE code units.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_label"
+    )]
+    label: Option<crate::records::identity::Located<String>>,
     /// ASM delta-state identity produced by this scope, when active.
     #[serde(
         default,
@@ -892,6 +913,19 @@ struct DesignParameterScopeSerde {
         deserialize_with = "deserialize_scale_operation"
     )]
     scale_operation: Option<DesignScaleOperation>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_reverse_normal_operation"
+    )]
+    reverse_normal_operation: Option<DesignReverseNormalOperation>,
+    /// Fixed settings carried by a `PathPattern` scope.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_path_pattern_settings"
+    )]
+    path_pattern_settings: Option<crate::records::feature::patterns::DesignPathPatternSettings>,
     /// Exact tolerance and setting-record references carried by a `SurfaceStitch` scope.
     #[serde(
         default,
@@ -1090,6 +1124,14 @@ struct DesignParameterScopeSerde {
     /// group grammar does not close.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     unclosed_construction_operand_groups: Vec<u32>,
+    /// Record-timestamp evidence for reference members that name deleted
+    /// members.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_deleted_members"
+    )]
+    deleted_members: Option<super::deleted_members::DesignDeletedMembers>,
     /// Exact point-and-direction construction carried by a `Hole` scope.
     #[serde(
         default,
@@ -1621,6 +1663,12 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
         if wire.scale_operation.is_some() {
             present.push("scale_operation");
         }
+        if wire.reverse_normal_operation.is_some() {
+            present.push("reverse_normal_operation");
+        }
+        if wire.path_pattern_settings.is_some() {
+            present.push("path_pattern_settings");
+        }
         if wire.surface_stitch_operation.is_some() {
             present.push("surface_stitch_operation");
         }
@@ -1702,13 +1750,11 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                 present.join(", ")
             )));
         }
+        if wire.kind == DesignFeatureKind::PathPattern && wire.source_kind.is_none() {
+            wire.kind = DesignFeatureKind::native(wire.kind.as_str());
+        }
         let payload = match &wire.kind {
             DesignFeatureKind::Sketch => DesignScopePayload::Sketch(wire.sketch_entity.take()),
-            DesignFeatureKind::Esquisse => DesignScopePayload::Esquisse(wire.sketch_entity.take()),
-            DesignFeatureKind::Skizze => DesignScopePayload::Skizze(wire.sketch_entity.take()),
-            DesignFeatureKind::Esboco => DesignScopePayload::Esboco(wire.sketch_entity.take()),
-            DesignFeatureKind::Boceto => DesignScopePayload::Boceto(wire.sketch_entity.take()),
-            DesignFeatureKind::SketchJa => DesignScopePayload::SketchJa(wire.sketch_entity.take()),
             DesignFeatureKind::Assemble => {
                 DesignScopePayload::Assemble(wire.assembly_alignment.take())
             }
@@ -1716,39 +1762,11 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                 DesignScopePayload::AsBuilt(wire.assembly_alignment.take())
             }
             DesignFeatureKind::Extrude => DesignScopePayload::Extrude(wire.extrude.take()),
-            DesignFeatureKind::Extrusion => DesignScopePayload::Extrusion(wire.extrude.take()),
-            DesignFeatureKind::Extrusao => DesignScopePayload::Extrusao(wire.extrude.take()),
-            DesignFeatureKind::Extruir => DesignScopePayload::Extruir(wire.extrude.take()),
-            DesignFeatureKind::ExtrudeJa => DesignScopePayload::ExtrudeJa(wire.extrude.take()),
             DesignFeatureKind::Fillet => {
                 DesignScopePayload::Fillet(wire.fixed_fillet_parameters.take())
             }
-            DesignFeatureKind::Conge => {
-                DesignScopePayload::Conge(wire.fixed_fillet_parameters.take())
-            }
-            DesignFeatureKind::Abrundung => {
-                DesignScopePayload::Abrundung(wire.fixed_fillet_parameters.take())
-            }
-            DesignFeatureKind::Arredondamento => {
-                DesignScopePayload::Arredondamento(wire.fixed_fillet_parameters.take())
-            }
-            DesignFeatureKind::Empalme => {
-                DesignScopePayload::Empalme(wire.fixed_fillet_parameters.take())
-            }
-            DesignFeatureKind::FilletJa => {
-                DesignScopePayload::FilletJa(wire.fixed_fillet_parameters.take())
-            }
             DesignFeatureKind::Chamfer => {
                 DesignScopePayload::Chamfer(wire.fixed_chamfer_parameters.take())
-            }
-            DesignFeatureKind::Chanfrein => {
-                DesignScopePayload::Chanfrein(wire.fixed_chamfer_parameters.take())
-            }
-            DesignFeatureKind::Chaflan => {
-                DesignScopePayload::Chaflan(wire.fixed_chamfer_parameters.take())
-            }
-            DesignFeatureKind::ChamferJa => {
-                DesignScopePayload::ChamferJa(wire.fixed_chamfer_parameters.take())
             }
             DesignFeatureKind::Combine => {
                 DesignScopePayload::Combine(wire.combine_operation.take())
@@ -1761,9 +1779,6 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
             DesignFeatureKind::CircularPattern => {
                 DesignScopePayload::CircularPattern(wire.circular_pattern_construction.take())
             }
-            DesignFeatureKind::ReseauC => {
-                DesignScopePayload::ReseauC(wire.circular_pattern_construction.take())
-            }
             DesignFeatureKind::RPattern => {
                 DesignScopePayload::RPattern(wire.rectangular_pattern_construction.take())
             }
@@ -1773,15 +1788,9 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
             DesignFeatureKind::Mirror => {
                 DesignScopePayload::Mirror(wire.mirror_construction.take())
             }
-            DesignFeatureKind::SymetrieMiroir => {
-                DesignScopePayload::SymetrieMiroir(wire.mirror_construction.take())
-            }
             DesignFeatureKind::Align => DesignScopePayload::Align(wire.align_envelope.take()),
             DesignFeatureKind::Move => DesignScopePayload::Move(wire.move_operation.take()),
             DesignFeatureKind::MoveFace => DesignScopePayload::MoveFace(wire.move_operation.take()),
-            DesignFeatureKind::DeplacerFace => {
-                DesignScopePayload::DeplacerFace(wire.move_operation.take())
-            }
             DesignFeatureKind::OffsetFaces => {
                 DesignScopePayload::OffsetFaces(match wire.direct_face_operation.take() {
                     None => None,
@@ -1789,17 +1798,6 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                     Some(_) => {
                         return Err(DesignParameterScopePayloadError(
                             "direct_face_operation.operation does not match OffsetFaces".into(),
-                        ))
-                    }
-                })
-            }
-            DesignFeatureKind::DecalerLesFaces => {
-                DesignScopePayload::DecalerLesFaces(match wire.direct_face_operation.take() {
-                    None => None,
-                    Some(DesignDirectFaceOperation::OffsetFaces(value)) => Some(value),
-                    Some(_) => {
-                        return Err(DesignParameterScopePayloadError(
-                            "direct_face_operation.operation does not match DecalerLesFaces".into(),
                         ))
                     }
                 })
@@ -1831,28 +1829,6 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                     }
                 })
             }
-            DesignFeatureKind::Schale => {
-                DesignScopePayload::Schale(match wire.direct_face_operation.take() {
-                    None => None,
-                    Some(DesignDirectFaceOperation::Shell(value)) => Some(value),
-                    Some(_) => {
-                        return Err(DesignParameterScopePayloadError(
-                            "direct_face_operation.operation does not match Schale".into(),
-                        ))
-                    }
-                })
-            }
-            DesignFeatureKind::Vaciado => {
-                DesignScopePayload::Vaciado(match wire.direct_face_operation.take() {
-                    None => None,
-                    Some(DesignDirectFaceOperation::Shell(value)) => Some(value),
-                    Some(_) => {
-                        return Err(DesignParameterScopePayloadError(
-                            "direct_face_operation.operation does not match Vaciado".into(),
-                        ))
-                    }
-                })
-            }
             DesignFeatureKind::Thicken => {
                 DesignScopePayload::Thicken(match wire.direct_face_operation.take() {
                     None => None,
@@ -1880,21 +1856,6 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                     ))
                 }
             }),
-            DesignFeatureKind::Solevacion => {
-                DesignScopePayload::Solevacion(match wire.path_feature.take() {
-                    None => None,
-                    Some(DesignPathFeatureWire {
-                        path_feature_construction: Some(DesignPathFeatureConstruction::Loft(value)),
-                        sweep_profile: None,
-                    }) => Some(value),
-                    Some(_) => {
-                        return Err(DesignParameterScopePayloadError(
-                            "path_feature_construction or sweep_profile does not match Solevación"
-                                .into(),
-                        ))
-                    }
-                })
-            }
             DesignFeatureKind::Sweep => DesignScopePayload::Sweep(match wire.path_feature.take() {
                 None => None,
                 Some(DesignPathFeatureWire {
@@ -1955,10 +1916,9 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
             }
             DesignFeatureKind::Split => DesignScopePayload::Split,
             DesignFeatureKind::Scale => DesignScopePayload::Scale(wire.scale_operation.take()),
-            DesignFeatureKind::Massstab => {
-                DesignScopePayload::Massstab(wire.scale_operation.take())
+            DesignFeatureKind::ReverseNormal => {
+                DesignScopePayload::ReverseNormal(wire.reverse_normal_operation.take())
             }
-            DesignFeatureKind::Escala => DesignScopePayload::Escala(wire.scale_operation.take()),
             DesignFeatureKind::Emboss => {
                 DesignScopePayload::Emboss(wire.emboss_construction.take())
             }
@@ -1982,14 +1942,10 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                 DesignScopePayload::JointOrigin(wire.joint_origin_frame.take())
             }
             DesignFeatureKind::Canvas => DesignScopePayload::Canvas,
-            DesignFeatureKind::Lienzo => DesignScopePayload::Lienzo,
             DesignFeatureKind::Decal => DesignScopePayload::Decal,
             DesignFeatureKind::BaseMeshFeature => DesignScopePayload::BaseMeshFeature,
             DesignFeatureKind::WorkPlane => {
                 DesignScopePayload::WorkPlane(wire.work_plane_frame.take())
-            }
-            DesignFeatureKind::PlanoDeObra => {
-                DesignScopePayload::PlanoDeObra(wire.work_plane_frame.take())
             }
             DesignFeatureKind::WorkAxis => {
                 DesignScopePayload::WorkAxis(wire.work_axis_construction.take())
@@ -2014,6 +1970,9 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                 DesignScopePayload::CopyPasteBodies(wire.copy_paste_bodies_operation.take())
             }
             DesignFeatureKind::SplitFace => DesignScopePayload::SplitFace,
+            DesignFeatureKind::PathPattern => {
+                DesignScopePayload::PathPattern(wire.path_pattern_settings.take())
+            }
             DesignFeatureKind::DeleteFace => DesignScopePayload::DeleteFace,
             DesignFeatureKind::SurfaceDeleteFace => DesignScopePayload::SurfaceDeleteFace,
             DesignFeatureKind::RemoveBody => DesignScopePayload::RemoveBody,
@@ -2025,17 +1984,6 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                     Some(_) => {
                         return Err(DesignParameterScopePayloadError(
                             "solid_primitive.primitive does not match SpherePrimitive".into(),
-                        ))
-                    }
-                })
-            }
-            DesignFeatureKind::EsferaPrimitiva => {
-                DesignScopePayload::EsferaPrimitiva(match wire.solid_primitive.take() {
-                    None => None,
-                    Some(DesignSolidPrimitive::Sphere(value)) => Some(value),
-                    Some(_) => {
-                        return Err(DesignParameterScopePayloadError(
-                            "solid_primitive.primitive does not match EsferaPrimitiva".into(),
                         ))
                     }
                 })
@@ -2087,6 +2035,8 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
             || wire.align_envelope.is_some()
             || wire.move_operation.is_some()
             || wire.scale_operation.is_some()
+            || wire.reverse_normal_operation.is_some()
+            || wire.path_pattern_settings.is_some()
             || wire.surface_stitch_operation.is_some()
             || wire.surface_extend_operation.is_some()
             || wire.surface_offset_operation.is_some()
@@ -2142,6 +2092,7 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
                 DesignParameterScopePayloadError("feature_ordinal must be nonzero".into())
             })?,
             feature_ordinal_offset: wire.feature_ordinal_offset,
+            label: wire.label,
             history_state_id: wire.history_state_id,
             previous_history_state_id: wire.previous_history_state_id,
             previous_history_state_id_offset: wire.previous_history_state_id_offset,
@@ -2154,6 +2105,7 @@ impl TryFrom<DesignParameterScopeSerde> for DesignParameterScope {
             .map_err(DesignParameterScopePayloadError)?,
             payload,
             unclosed_construction_operand_groups: wire.unclosed_construction_operand_groups,
+            deleted_members: wire.deleted_members,
             paired_class_tag: wire
                 .paired_class_tag
                 .try_into()
@@ -2194,6 +2146,7 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             coil: None,
             feature_ordinal: scope.feature_ordinal.get(),
             feature_ordinal_offset: scope.feature_ordinal_offset,
+            label: scope.label,
             history_state_id: scope.history_state_id,
             history_state_id_offset,
             previous_history_state_id: scope.previous_history_state_id,
@@ -2206,6 +2159,8 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             align_envelope: None,
             move_operation: None,
             scale_operation: None,
+            reverse_normal_operation: None,
+            path_pattern_settings: None,
             surface_stitch_operation: None,
             surface_extend_operation: None,
             surface_offset_operation: None,
@@ -2236,6 +2191,7 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             joint_origin_frame: None,
             work_point_construction: None,
             unclosed_construction_operand_groups: scope.unclosed_construction_operand_groups,
+            deleted_members: scope.deleted_members,
             hole_construction: None,
             hole_extent: None,
             sketch_entity: None,
@@ -2243,11 +2199,7 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             paired_byte_offset: scope.paired_byte_offset,
         };
         match scope.payload {
-            DesignScopePayload::Extrude(value)
-            | DesignScopePayload::Extrusion(value)
-            | DesignScopePayload::Extrusao(value)
-            | DesignScopePayload::Extruir(value)
-            | DesignScopePayload::ExtrudeJa(value) => wire.extrude = value,
+            DesignScopePayload::Extrude(value) => wire.extrude = value,
             DesignScopePayload::SpirePrimitive(value)
             | DesignScopePayload::CoilPrimitive(value) => wire.coil = value,
             DesignScopePayload::BaseFlange(value) => wire.base_flange = value,
@@ -2257,7 +2209,7 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
                     sweep_profile: None,
                 });
             }
-            DesignScopePayload::Loft(value) | DesignScopePayload::Solevacion(value) => {
+            DesignScopePayload::Loft(value) => {
                 wire.path_feature = value.map(|value| DesignPathFeatureWire {
                     path_feature_construction: Some(DesignPathFeatureConstruction::Loft(value)),
                     sweep_profile: None,
@@ -2277,18 +2229,12 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
                     sweep_profile: None,
                 });
             }
-            DesignScopePayload::WorkPlane(value) | DesignScopePayload::PlanoDeObra(value) => {
+            DesignScopePayload::WorkPlane(value) => {
                 wire.work_plane_frame = value;
             }
             DesignScopePayload::JointOrigin(value) => wire.joint_origin_frame = value,
-            DesignScopePayload::Sketch(value)
-            | DesignScopePayload::Esquisse(value)
-            | DesignScopePayload::Skizze(value)
-            | DesignScopePayload::Esboco(value)
-            | DesignScopePayload::Boceto(value)
-            | DesignScopePayload::SketchJa(value) => wire.sketch_entity = value,
-            DesignScopePayload::SpherePrimitive(value)
-            | DesignScopePayload::EsferaPrimitiva(value) => {
+            DesignScopePayload::Sketch(value) => wire.sketch_entity = value,
+            DesignScopePayload::SpherePrimitive(value) => {
                 wire.solid_primitive = value.map(DesignSolidPrimitive::Sphere);
             }
             DesignScopePayload::TorusPrimitive(value) => {
@@ -2301,28 +2247,26 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
                 wire.solid_primitive = value.map(DesignSolidPrimitive::Cylinder);
             }
             DesignScopePayload::ReplaceFace => {}
-            DesignScopePayload::OffsetFaces(value) | DesignScopePayload::DecalerLesFaces(value) => {
+            DesignScopePayload::OffsetFaces(value) => {
                 wire.direct_face_operation = value.map(DesignDirectFaceOperation::OffsetFaces);
             }
-            DesignScopePayload::Shell(value)
-            | DesignScopePayload::Schale(value)
-            | DesignScopePayload::Vaciado(value) => {
+            DesignScopePayload::Shell(value) => {
                 wire.direct_face_operation = value.map(DesignDirectFaceOperation::Shell);
             }
             DesignScopePayload::Thicken(value) => {
                 wire.direct_face_operation = value.map(DesignDirectFaceOperation::Thicken);
             }
             DesignScopePayload::Align(value) => wire.align_envelope = value,
-            DesignScopePayload::Move(value)
-            | DesignScopePayload::MoveFace(value)
-            | DesignScopePayload::DeplacerFace(value) => {
+            DesignScopePayload::Move(value) | DesignScopePayload::MoveFace(value) => {
                 wire.move_operation = value;
             }
-            DesignScopePayload::Scale(value)
-            | DesignScopePayload::Massstab(value)
-            | DesignScopePayload::Escala(value) => {
+            DesignScopePayload::Scale(value) => {
                 wire.scale_operation = value;
             }
+            DesignScopePayload::ReverseNormal(value) => {
+                wire.reverse_normal_operation = value;
+            }
+            DesignScopePayload::PathPattern(value) => wire.path_pattern_settings = value,
             DesignScopePayload::SurfaceStitch(value) => wire.surface_stitch_operation = Some(value),
             DesignScopePayload::SurfaceExtend(value) => wire.surface_extend_operation = value,
             DesignScopePayload::SurfaceOffset(value) => wire.surface_offset_operation = value,
@@ -2333,25 +2277,17 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             }
             DesignScopePayload::EdgeFlange(value) => wire.edge_flange_operation = value,
             DesignScopePayload::Hem(value) => wire.hem_operation = value,
-            DesignScopePayload::Fillet(value)
-            | DesignScopePayload::Conge(value)
-            | DesignScopePayload::Abrundung(value)
-            | DesignScopePayload::Arredondamento(value)
-            | DesignScopePayload::Empalme(value)
-            | DesignScopePayload::FilletJa(value) => wire.fixed_fillet_parameters = value,
-            DesignScopePayload::Chamfer(value)
-            | DesignScopePayload::Chanfrein(value)
-            | DesignScopePayload::Chaflan(value)
-            | DesignScopePayload::ChamferJa(value) => {
+            DesignScopePayload::Fillet(value) => wire.fixed_fillet_parameters = value,
+            DesignScopePayload::Chamfer(value) => {
                 wire.fixed_chamfer_parameters = value;
             }
             DesignScopePayload::Combine(value) => wire.combine_operation = value,
             DesignScopePayload::Thread(value) => wire.thread_construction = value,
             DesignScopePayload::Emboss(value) => wire.emboss_construction = value,
             DesignScopePayload::Draft(value) => wire.draft_operation = value,
-            DesignScopePayload::CPattern(value)
-            | DesignScopePayload::CircularPattern(value)
-            | DesignScopePayload::ReseauC(value) => wire.circular_pattern_construction = value,
+            DesignScopePayload::CPattern(value) | DesignScopePayload::CircularPattern(value) => {
+                wire.circular_pattern_construction = value;
+            }
             DesignScopePayload::RPattern(value) | DesignScopePayload::RectangularPattern(value) => {
                 wire.rectangular_pattern_construction = value;
             }
@@ -2366,7 +2302,7 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             }
             DesignScopePayload::CopyPaste(value) => wire.copy_paste_component_operation = value,
             DesignScopePayload::CopyPasteBodies(value) => wire.copy_paste_bodies_operation = value,
-            DesignScopePayload::Mirror(value) | DesignScopePayload::SymetrieMiroir(value) => {
+            DesignScopePayload::Mirror(value) => {
                 wire.mirror_construction = value;
             }
             DesignScopePayload::BaseFeature(value) => wire.base_feature_construction = value,
@@ -2380,7 +2316,6 @@ impl From<DesignParameterScope> for DesignParameterScopeSerde {
             | DesignScopePayload::BoundaryFill
             | DesignScopePayload::Split
             | DesignScopePayload::Canvas
-            | DesignScopePayload::Lienzo
             | DesignScopePayload::Decal
             | DesignScopePayload::BaseMeshFeature
             | DesignScopePayload::CustomFeature
@@ -2468,6 +2403,18 @@ impl DesignParameterScope {
             .checked_sub(draft.feature_ordinal_offset)
             .and_then(|length| usize::try_from(length).ok())
             .ok_or_else(|| fail("feature_ordinal_offset"))?;
+        if let Some(label) = &draft.label {
+            let units = label.value.encode_utf16().count();
+            if units == 0
+                || units > 256
+                || label.value.chars().any(char::is_control)
+                || draft.feature_ordinal_offset.checked_add(12) != Some(label.offset)
+                || 78usize.checked_add(units * 2) != Some(tail)
+                || draft.previous_history_state_id_offset.is_some()
+            {
+                return Err(fail("label"));
+            }
+        }
         // The reference-table stride shows the reference spelling: 11-byte
         // plain references or 51-byte typed references.
         // A table that fits neither width falls through to the plain checks.
@@ -2596,6 +2543,7 @@ impl DesignParameterScope {
             history_state_id_offset,
             feature_ordinal: draft.feature_ordinal,
             feature_ordinal_offset: draft.feature_ordinal_offset,
+            label: draft.label,
             history_state_id: draft.history_state_id,
             previous_history_state_id: draft.previous_history_state_id,
             previous_history_state_id_offset: draft.previous_history_state_id_offset,
@@ -2604,6 +2552,7 @@ impl DesignParameterScope {
             occurrence_transfer: None,
             payload: draft.payload,
             unclosed_construction_operand_groups: draft.unclosed_construction_operand_groups,
+            deleted_members: draft.deleted_members,
             paired_class_tag: draft.paired_class_tag,
             paired_byte_offset: draft.paired_byte_offset,
         };
@@ -2627,6 +2576,7 @@ impl DesignParameterScope {
             kind_offset: self.kind_offset,
             feature_ordinal: self.feature_ordinal,
             feature_ordinal_offset: self.feature_ordinal_offset,
+            label: self.label,
             history_state_id: self.history_state_id,
             previous_history_state_id: self.previous_history_state_id,
             previous_history_state_id_offset: self.previous_history_state_id_offset,
@@ -2634,6 +2584,7 @@ impl DesignParameterScope {
             reference_members: self.reference_members,
             payload: self.payload,
             unclosed_construction_operand_groups: self.unclosed_construction_operand_groups,
+            deleted_members: self.deleted_members,
             paired_class_tag: self.paired_class_tag,
             paired_byte_offset: self.paired_byte_offset,
         }
@@ -2660,6 +2611,11 @@ impl DesignParameterScope {
     pub(crate) fn frame_length(&self) -> u64 {
         self.frame_length
     }
+    #[cfg(test)]
+    pub(crate) fn set_fixture_kind_offset(&mut self, offset: u64) {
+        self.kind_offset = offset;
+    }
+
     pub(crate) fn kind_offset(&self) -> u64 {
         self.kind_offset
     }
@@ -2726,11 +2682,7 @@ impl DesignParameterScope {
 
     fn extrude(&self) -> Option<&DesignExtrudeScope> {
         match &self.payload {
-            DesignScopePayload::Extrude(value)
-            | DesignScopePayload::Extrusion(value)
-            | DesignScopePayload::Extrusao(value)
-            | DesignScopePayload::Extruir(value)
-            | DesignScopePayload::ExtrudeJa(value) => value.as_ref(),
+            DesignScopePayload::Extrude(value) => value.as_ref(),
             _ => None,
         }
     }
@@ -2738,11 +2690,7 @@ impl DesignParameterScope {
     #[cfg(test)]
     pub(crate) fn extrude_mut(&mut self) -> Option<&mut DesignExtrudeScope> {
         match &mut self.payload {
-            DesignScopePayload::Extrude(value)
-            | DesignScopePayload::Extrusion(value)
-            | DesignScopePayload::Extrusao(value)
-            | DesignScopePayload::Extruir(value)
-            | DesignScopePayload::ExtrudeJa(value) => value.as_mut(),
+            DesignScopePayload::Extrude(value) => value.as_mut(),
             _ => None,
         }
     }
@@ -2764,18 +2712,14 @@ impl DesignParameterScope {
 
     pub(crate) fn work_plane_frame(&self) -> Option<&DesignWorkPlaneTransform> {
         match &self.payload {
-            DesignScopePayload::WorkPlane(value) | DesignScopePayload::PlanoDeObra(value) => {
-                value.as_ref()
-            }
+            DesignScopePayload::WorkPlane(value) => value.as_ref(),
             _ => None,
         }
     }
 
     pub(crate) fn work_plane_frame_mut(&mut self) -> Option<&mut DesignWorkPlaneTransform> {
         match &mut self.payload {
-            DesignScopePayload::WorkPlane(value) | DesignScopePayload::PlanoDeObra(value) => {
-                value.as_mut()
-            }
+            DesignScopePayload::WorkPlane(value) => value.as_mut(),
             _ => None,
         }
     }
@@ -2797,12 +2741,7 @@ impl DesignParameterScope {
 
     pub(crate) fn sketch_entity(&self) -> Option<&DesignSketchEntityBinding> {
         match &self.payload {
-            DesignScopePayload::Sketch(value)
-            | DesignScopePayload::Esquisse(value)
-            | DesignScopePayload::Skizze(value)
-            | DesignScopePayload::Esboco(value)
-            | DesignScopePayload::Boceto(value)
-            | DesignScopePayload::SketchJa(value) => value.as_ref(),
+            DesignScopePayload::Sketch(value) => value.as_ref(),
             _ => None,
         }
     }
@@ -2816,18 +2755,30 @@ impl DesignParameterScope {
 
     pub(crate) fn move_operation(&self) -> Option<&DesignMoveOperation> {
         match &self.payload {
-            DesignScopePayload::Move(value)
-            | DesignScopePayload::MoveFace(value)
-            | DesignScopePayload::DeplacerFace(value) => value.as_ref(),
+            DesignScopePayload::Move(value) | DesignScopePayload::MoveFace(value) => value.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn path_pattern_settings(
+        &self,
+    ) -> Option<&crate::records::feature::patterns::DesignPathPatternSettings> {
+        match &self.payload {
+            DesignScopePayload::PathPattern(value) => value.as_ref(),
             _ => None,
         }
     }
 
     pub(crate) fn scale_operation(&self) -> Option<&DesignScaleOperation> {
         match &self.payload {
-            DesignScopePayload::Scale(value)
-            | DesignScopePayload::Massstab(value)
-            | DesignScopePayload::Escala(value) => value.as_ref(),
+            DesignScopePayload::Scale(value) => value.as_ref(),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn reverse_normal_operation(&self) -> Option<&DesignReverseNormalOperation> {
+        match &self.payload {
+            DesignScopePayload::ReverseNormal(value) => value.as_ref(),
             _ => None,
         }
     }
@@ -2876,22 +2827,14 @@ impl DesignParameterScope {
 
     pub(crate) fn fixed_fillet_parameters(&self) -> Option<&DesignFixedFilletParameters> {
         match &self.payload {
-            DesignScopePayload::Fillet(value)
-            | DesignScopePayload::Conge(value)
-            | DesignScopePayload::Abrundung(value)
-            | DesignScopePayload::Arredondamento(value)
-            | DesignScopePayload::Empalme(value)
-            | DesignScopePayload::FilletJa(value) => value.as_ref(),
+            DesignScopePayload::Fillet(value) => value.as_ref(),
             _ => None,
         }
     }
 
     pub(crate) fn fixed_chamfer_parameters(&self) -> Option<&DesignFixedChamferParameters> {
         match &self.payload {
-            DesignScopePayload::Chamfer(value)
-            | DesignScopePayload::Chanfrein(value)
-            | DesignScopePayload::Chaflan(value)
-            | DesignScopePayload::ChamferJa(value) => value.as_ref(),
+            DesignScopePayload::Chamfer(value) => value.as_ref(),
             _ => None,
         }
     }
@@ -2941,9 +2884,9 @@ impl DesignParameterScope {
         &self,
     ) -> Option<&DesignCircularPatternConstruction> {
         match &self.payload {
-            DesignScopePayload::CPattern(value)
-            | DesignScopePayload::CircularPattern(value)
-            | DesignScopePayload::ReseauC(value) => value.as_ref(),
+            DesignScopePayload::CPattern(value) | DesignScopePayload::CircularPattern(value) => {
+                value.as_ref()
+            }
             _ => None,
         }
     }
@@ -2952,9 +2895,9 @@ impl DesignParameterScope {
         &mut self,
     ) -> Option<&mut DesignCircularPatternConstruction> {
         match &mut self.payload {
-            DesignScopePayload::CPattern(value)
-            | DesignScopePayload::CircularPattern(value)
-            | DesignScopePayload::ReseauC(value) => value.as_mut(),
+            DesignScopePayload::CPattern(value) | DesignScopePayload::CircularPattern(value) => {
+                value.as_mut()
+            }
             _ => None,
         }
     }
@@ -3035,18 +2978,14 @@ impl DesignParameterScope {
 
     pub(crate) fn mirror_construction(&self) -> Option<&DesignMirrorConstruction> {
         match &self.payload {
-            DesignScopePayload::Mirror(value) | DesignScopePayload::SymetrieMiroir(value) => {
-                value.as_ref()
-            }
+            DesignScopePayload::Mirror(value) => value.as_ref(),
             _ => None,
         }
     }
 
     pub(crate) fn mirror_construction_mut(&mut self) -> Option<&mut DesignMirrorConstruction> {
         match &mut self.payload {
-            DesignScopePayload::Mirror(value) | DesignScopePayload::SymetrieMiroir(value) => {
-                value.as_mut()
-            }
+            DesignScopePayload::Mirror(value) => value.as_mut(),
             _ => None,
         }
     }
@@ -3167,6 +3106,23 @@ impl DesignParameterScope {
             .and_then(|coil| coil.operation.map(|field| field.offset))
     }
 
+    /// Whether this scope is a ten-reference `CoilPrimitive` form, whose
+    /// Boolean target group has role `0x0000000400000000`.
+    pub(crate) fn coil_has_ten_reference_target(&self) -> bool {
+        let at = |relative: usize| {
+            u64::try_from(relative)
+                .ok()
+                .and_then(|relative| self.byte_offset().checked_add(relative))
+        };
+        self.kind() == DesignFeatureKind::CoilPrimitive
+            && self.reference_members().len() == 10
+            && self.coil_operation_offset().is_some_and(|offset| {
+                at(crate::layout::coil_long_scope_fixed_prologue::OPERATION) == Some(offset)
+                    || at(crate::layout::coil_ten_reference_compact_prologue::OPERATION)
+                        == Some(offset)
+            })
+    }
+
     pub(crate) fn coil_extent(&self) -> Option<DesignCoilExtent> {
         self.coil()
             .and_then(|coil| coil.extent.map(|field| field.value()))
@@ -3222,9 +3178,7 @@ impl DesignParameterScope {
     pub(crate) fn has_path_construction(&self) -> bool {
         match &self.payload {
             DesignScopePayload::Revolve(value) => value.is_some(),
-            DesignScopePayload::Loft(value) | DesignScopePayload::Solevacion(value) => {
-                value.is_some()
-            }
+            DesignScopePayload::Loft(value) => value.is_some(),
             DesignScopePayload::Pipe(value) => value.is_some(),
             DesignScopePayload::Sweep(value) => value
                 .as_ref()
@@ -3338,6 +3292,7 @@ impl DesignParameterScope {
             kind_offset: 32,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 48,
+            label: None,
             history_state_id: None,
             previous_history_state_id: None,
             previous_history_state_id_offset: None,
@@ -3348,6 +3303,7 @@ impl DesignParameterScope {
             }]),
             payload: payload.try_into().unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: DesignClassTag::try_from("257".to_owned()).unwrap(),
             paired_byte_offset: 128,
         })

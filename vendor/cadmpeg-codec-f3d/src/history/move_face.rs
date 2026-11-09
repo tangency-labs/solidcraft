@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Selected faces of a `MoveFace` or `OffsetFaces` feature, from the transitions
-//! that move them.
+//! that move them and from the bounded-face recipes of the group members.
 
 use super::output_chain::OutputChain;
 use super::surface_rows::{Carrier, StateRows};
 use crate::history_records::{AsmDeltaState, AsmHistoricalTopology, AsmHistory};
+use crate::records::recipes::ConstructionRecipeKind;
+use crate::records::topology::face::DesignFaceOperand;
 use cadmpeg_ir::features::{FaceMotion, FaceSelection};
 use cadmpeg_ir::math::Vector3;
 use std::collections::{BTreeSet, HashSet};
@@ -144,6 +146,47 @@ fn updated_faces(
     Some(updated)
 }
 
+/// Faces of the input state that the bounded-face recipes of a `MoveFace` or
+/// `OffsetFaces` group select, sorted: one distinct face per distinct member.
+fn recipe_face_selection(
+    members: &[u32],
+    operands: &[&DesignFaceOperand],
+    input: &AsmHistoricalTopology,
+) -> Option<Vec<i64>> {
+    let mut seen = HashSet::new();
+    let mut faces = BTreeSet::new();
+    for member in members {
+        if !seen.insert(member) {
+            continue;
+        }
+        let mut matching = operands
+            .iter()
+            .filter(|operand| operand.record_index() == *member);
+        let (Some(operand), None) = (matching.next(), matching.next()) else {
+            return None;
+        };
+        if operand.recipe_kind != ConstructionRecipeKind::BoundedFace {
+            return None;
+        }
+        let [face] = operand.resolved_face_slots.as_slice() else {
+            return None;
+        };
+        if !input.faces.contains(face) || !faces.insert(*face) {
+            return None;
+        }
+    }
+    (!faces.is_empty()).then(|| faces.into_iter().collect())
+}
+
+/// The selection that the transitions and the member recipes state. Two
+/// different selections state none.
+fn agreed_selection(moved: Option<Vec<i64>>, recipes: Option<Vec<i64>>) -> Option<Vec<i64>> {
+    match (moved, recipes) {
+        (Some(moved), Some(recipes)) => (moved == recipes).then_some(moved),
+        (moved, recipes) => moved.or(recipes),
+    }
+}
+
 /// The states that one `MoveFace` or `OffsetFaces` feature spans.
 pub(super) struct MoveFaceStates<'a> {
     pub(super) histories: &'a [AsmHistory],
@@ -153,13 +196,15 @@ pub(super) struct MoveFaceStates<'a> {
 }
 
 /// Bind a selection that still names its operand group to the faces that its
-/// transitions move.
+/// transitions move or its member recipes select. When both state a selection,
+/// they agree or the group stays native.
 pub(super) fn bind_move_face_selection(
     selection: &mut FaceSelection,
     motion: &FaceMotion,
     feature_id: &cadmpeg_ir::features::FeatureId,
     scope: &crate::records::feature::scope::DesignParameterScope,
     groups: &[crate::records::topology::construction::DesignConstructionOperandGroup],
+    operands: &[DesignFaceOperand],
     states: &MoveFaceStates<'_>,
 ) {
     let MoveFaceStates {
@@ -179,13 +224,24 @@ pub(super) fn bind_move_face_selection(
         return;
     }
     let members: Vec<u32> = group.members().iter().map(|member| member.value).collect();
-    let Some(updated) = updated_faces(histories, history, state, previous.state_id) else {
+    let Some(input) = history.topology(previous) else {
         return;
     };
-    let (Some(input), Some(output)) = (history.topology(previous), history.topology(state)) else {
-        return;
-    };
-    let Some(faces) = moved_face_selection(&members, motion, &updated, input, output) else {
+    let moved = history.topology(state).and_then(|output| {
+        let updated = updated_faces(histories, history, state, previous.state_id)?;
+        moved_face_selection(&members, motion, &updated, input, output)
+    });
+    let stream = crate::ids::native_stream(&scope.id);
+    let group_operands: Vec<_> = operands
+        .iter()
+        .filter(|operand| {
+            crate::ids::native_stream(&operand.id) == stream
+                && operand.scope_record_index == scope.record_index
+                && operand.group_record_index() == Some(group.record_index)
+        })
+        .collect();
+    let recipes = recipe_face_selection(&members, &group_operands, input);
+    let Some(faces) = agreed_selection(moved, recipes) else {
         return;
     };
     let prefix = crate::ids::feature_input_prefix(feature_id, previous.state_id);

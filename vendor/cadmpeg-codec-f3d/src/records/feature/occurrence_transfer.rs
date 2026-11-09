@@ -181,11 +181,15 @@ impl DesignOccurrenceTransfer {
                     ..
                 },
                 "CopyPaste",
-                length @ (525 | 529),
+                _,
             ) => {
-                let source_at = u64_from_index(copy_prefix::SOURCE_TRANSFORM)
-                    + if length == 525 { 0 } else { 4 };
-                if scope.byte_offset().checked_add(source_at) != Some(*source_transform_offset) {
+                let Some(source_at) = source_transform_offset.checked_sub(scope.byte_offset())
+                else {
+                    return false;
+                };
+                if source_at != u64_from_index(copy_prefix::SOURCE_TRANSFORM)
+                    && source_at != u64_from_index(copy_prefix::SOURCE_TRANSFORM) + 4
+                {
                     return false;
                 }
                 Some(source_at + u64_from_index(copy_prefix::LEN - copy_prefix::SOURCE_TRANSFORM))

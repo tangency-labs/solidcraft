@@ -130,6 +130,7 @@ fn extent(
             &[],
             &[],
             (&[], &[]),
+            &[],
         )?
     else {
         panic!("expected a revolve");

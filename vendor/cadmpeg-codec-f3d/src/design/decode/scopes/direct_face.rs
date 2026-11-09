@@ -7,7 +7,6 @@ use super::parameter_scope::parameter_scope_payload_length;
 use super::point_data::exact_point_data_construction;
 use super::shared_frames::exact_fixed_scalar;
 use super::shared_frames::marked_record_reference;
-use super::thicken_shell::exact_legacy_thicken_class_347;
 use super::thicken_shell::exact_shell_class_369_261;
 use super::thicken_shell::exact_shell_wall_slots;
 use crate::bytes::lp_ascii_filtered_view;
@@ -15,10 +14,13 @@ use crate::design::decode::sketch::IndexedRecordOffsets;
 use crate::design::design_feature_family;
 use crate::design::DesignFeatureFamily;
 use crate::layout::indexed_design_record_header as indexed_header;
+use crate::layout::move_marked_transform_prologue as marked_move;
 use crate::layout::move_transform_frame_253 as move_frame;
 use crate::layout::move_transform_frame_254 as move_frame_254;
 use crate::layout::move_transform_frame_273 as move_frame_273;
 use crate::layout::move_transform_frame_274 as move_frame_274;
+use crate::layout::scale_legacy_uniform_tail as scale_tail;
+use crate::records::entity_header::SegmentType;
 use crate::records::feature::body_ops::DesignScaleOperation;
 use crate::records::feature::direct_face;
 use crate::records::feature::direct_face::DesignDirectFaceOperation;
@@ -27,6 +29,9 @@ use crate::records::feature::scope;
 use crate::records::feature::scope::DesignParameterScope;
 use cadmpeg_core::decode::View;
 use std::collections::HashMap;
+
+const RIGID_TRANSFORM_TYPE_GUID: &str = "84E6245F-1CDC-4FB8-8048-163A85FAD3F0";
+const RIGID_TRANSFORM_TYPE_VERSION: u32 = 2;
 
 /// Primary-header offset of the marked distance reference of an `OffsetFaces`
 /// scope, or `None` when its prologue is not a known form.
@@ -106,60 +111,6 @@ pub(super) fn exact_direct_face_operation(
                 },
             ))
         }
-        DesignFeatureFamily::Thicken if scope.reference_members().len() >= 3 => {
-            if let Some(operation) = exact_legacy_thicken_class_347(bytes, records, scope) {
-                return Some(operation);
-            }
-            let (reference_offset, thickness_is_first) = match parameter_scope_payload_length(scope)
-            {
-                Some(length)
-                    if length
-                        == 276
-                            + 11 * u64::try_from(
-                                scope.reference_members().len().checked_sub(2)?,
-                            )
-                            .ok()?
-                        && bytes.get(start + 34) == Some(&1)
-                        && View::u32_le_at(bytes, start + 35)
-                            == scope.reference_members().values().nth(1).copied()
-                        && bytes.get(start + 39..start + 45) == Some(&[0; 6])
-                        && matches!(bytes.get(start + 45), Some(0 | 1))
-                        && bytes.get(start + 46..start + 48) == Some(&[1, 1])
-                        && View::u32_le_at(bytes, start + 48)
-                            == scope.reference_members().values().next().copied() =>
-                {
-                    (47, true)
-                }
-                Some(281)
-                    if matches!(bytes.get(start + 45), Some(0 | 1))
-                        && bytes.get(start + 46) == Some(&1) =>
-                {
-                    (46, false)
-                }
-                Some(287) if bytes.get(start + 47) == Some(&1) => (47, false),
-                _ => return None,
-            };
-            let thickness_record_index = View::u32_le_at(bytes, start + reference_offset + 1)?;
-            let expected_thickness = if thickness_is_first {
-                scope.reference_members().values().next()
-            } else {
-                scope.reference_members().values().next_back()
-            };
-            if expected_thickness != Some(&thickness_record_index) {
-                return None;
-            }
-            let scalar = exact_fixed_scalar(bytes, records, thickness_record_index)?;
-            if scalar.value.get() == 0.0 {
-                return None;
-            }
-            Some(DesignDirectFaceOperation::Thicken(
-                direct_face::DesignThickenOperation {
-                    signed_thickness: scalar.value,
-                    thickness_record_index,
-                    thickness_offset: scalar.value_offset,
-                },
-            ))
-        }
         DesignFeatureFamily::Shell if scope.reference_members().len() == 3 => {
             let (thickness_record_index, thickness_is_first, outward, outward_offset) =
                 match parameter_scope_payload_length(scope) {
@@ -179,7 +130,7 @@ pub(super) fn exact_direct_face_operation(
                         (
                             View::u32_le_at(bytes, start + 29)?,
                             true,
-                            bytes[start + 20] == 1 || bytes[start + 21] != 0,
+                            bytes[start + 21] != 0,
                             start + 21,
                         )
                     }
@@ -268,11 +219,47 @@ pub(super) fn exact_move_operation(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     scope: &DesignParameterScope,
+    class_types: &HashMap<u32, &SegmentType>,
 ) -> Option<DesignMoveOperation> {
     if design_feature_family(&scope.kind()) != Some(DesignFeatureFamily::Move) {
         return None;
     }
-    unique_move_transform(bytes, records, scope.reference_members().values())
+    marked_move_transform(bytes, records, scope).or_else(|| {
+        unique_move_transform(
+            bytes,
+            records,
+            scope.reference_members().values(),
+            class_types,
+        )
+    })
+}
+
+/// The transform record that a `Move` scope selects by the marked reference
+/// in its prologue.
+fn marked_move_transform(
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    scope: &DesignParameterScope,
+) -> Option<DesignMoveOperation> {
+    let start = usize::try_from(scope.byte_offset()).ok()?;
+    let transform_record_index =
+        marked_record_reference(bytes, start + marked_move::TRANSFORM_REFERENCE)?;
+    if bytes.get(start + marked_move::ZERO_RUN_10..start + marked_move::TRANSFORM_REFERENCE)?
+        != [0; 10]
+        || View::u32_le_at(bytes, start + marked_move::REFERENCE_FLAG)? != 1
+        || marked_record_reference(bytes, start + marked_move::FIRST_REFERENCE)?
+            != *scope.reference_members().values().next()?
+        || !scope
+            .reference_members()
+            .values()
+            .any(|index| *index == transform_record_index)
+    {
+        return None;
+    }
+    let mut operation = move_face_transform(bytes, records, transform_record_index)?;
+    operation.transform_reference_offset =
+        Some(u64_from_index(start + marked_move::TRANSFORM_REFERENCE));
+    Some(operation)
 }
 
 /// Primary-header offset of the marked transform reference of a `MoveFace`
@@ -294,11 +281,9 @@ fn move_face_transform_marker(
         _ => return None,
     };
     // A byte one precedes the marked transform reference. A u32 one follows it,
-    // then the marked reference to the selected-face group, the first reference.
-    let first_reference = scope.reference_members().values().next()?;
+    // then the marked reference to the selected-face group.
     (bytes.get(start + transform_marker - 1) == Some(&1)
-        && View::u32_le_at(bytes, start + transform_marker + 11) == Some(1)
-        && marked_record_reference(bytes, start + transform_marker + 15) == Some(*first_reference))
+        && View::u32_le_at(bytes, start + transform_marker + 11) == Some(1))
     .then_some(transform_marker)
 }
 
@@ -312,18 +297,22 @@ pub(super) fn exact_move_face_operation(
     }
     let start = usize::try_from(scope.byte_offset()).ok()?;
     let transform_marker = move_face_transform_marker(bytes, scope, start)?;
-    let transform_record_index = scope.reference_members().values().next_back()?;
-    if marked_record_reference(bytes, start + transform_marker) != Some(*transform_record_index) {
+    let transform = marked_record_reference(bytes, start + transform_marker)?;
+    let group = marked_record_reference(bytes, start + transform_marker + 15)?;
+    // The transform is the last reference after the group and its members, or
+    // the first reference before them.
+    let mut references = scope.reference_members().values().copied();
+    let first = references.next()?;
+    let second = references.next()?;
+    let last = references.next_back()?;
+    if !(first == group && last == transform || first == transform && second == group) {
         return None;
     }
-    move_face_transform(bytes, records, *transform_record_index)
+    move_face_transform(bytes, records, transform)
 }
 
 fn is_move_face(scope: &DesignParameterScope) -> bool {
-    matches!(
-        scope.kind(),
-        scope::DesignFeatureKind::MoveFace | scope::DesignFeatureKind::DeplacerFace
-    )
+    scope.kind() == scope::DesignFeatureKind::MoveFace
 }
 
 /// The rigid transform of the record a `MoveFace` scope marks. The marked
@@ -378,6 +367,7 @@ fn move_transform_at(bytes: &[u8], start: usize, record_index: u32) -> Option<De
         transform_record_index: record_index,
         form,
         form_offset: u64_from_index(start + move_frame::FORM),
+        transform_reference_offset: None,
     })
 }
 
@@ -386,45 +376,24 @@ fn unique_move_transform<'a>(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     record_indices: impl IntoIterator<Item = &'a u32>,
+    class_types: &HashMap<u32, &SegmentType>,
 ) -> Option<DesignMoveOperation> {
     let mut candidate = None;
     for record_index in record_indices {
         for (start, paired) in records.frames(*record_index) {
-            let class_tag_len = usize::try_from(View::u32_le_at(bytes, start)?).ok()?;
-            if class_tag_len > 2000 {
-                return None;
-            }
-            let after_tag = start.checked_add(4)?.checked_add(class_tag_len)?;
-            let class_tag = std::str::from_utf8(bytes.get(start + 4..after_tag)?).ok()?;
-            if !class_tag.bytes().all(|byte| byte.is_ascii_graphic()) {
-                return None;
-            }
-            let frame_length = paired.checked_sub(start)?;
+            let Some((_, after_tag)) =
+                lp_ascii_filtered_view(bytes, start, 3..=3, u8::is_ascii_digit)
+            else {
+                continue;
+            };
             if View::u32_le_at(bytes, after_tag) != Some(*record_index) {
-                continue;
-            }
-            let Some(lengths) = move_transform_lengths(class_tag) else {
-                continue;
-            };
-            if !lengths.contains(&frame_length) {
-                continue;
-            }
-            let expected_paired_class = match class_tag {
-                "447" => Some("263"),
-                "456" => Some("258"),
-                "452" => Some("262"),
-                _ => None,
-            };
-            if expected_paired_class.is_some_and(|expected| {
-                lp_ascii_filtered_view(bytes, paired, 3..=3, u8::is_ascii_digit)
-                    .is_none_or(|(paired_class_tag, _)| paired_class_tag != expected)
-            }) {
                 continue;
             }
             let Some(next) = move_transform_at(bytes, start, *record_index) else {
                 continue;
             };
-            if !move_transform_form_holds(class_tag, next.form) {
+            if !rigid_transform_rule_breaks(bytes, start, paired, next.form, class_types).is_empty()
+            {
                 continue;
             }
             if candidate.replace(next).is_some() {
@@ -435,28 +404,73 @@ fn unique_move_transform<'a>(
     candidate
 }
 
-fn move_transform_lengths(class_tag: &str) -> Option<&'static [usize]> {
-    match class_tag {
-        "296" | "362" | "433" | "447" | "293" | "393" | "442" | "451" | "456" | "452" => {
-            Some(&[move_frame::LEN])
-        }
-        "349" => Some(&[move_frame_254::LEN, move_frame_274::LEN]),
-        "368" => Some(&[move_frame_254::LEN]),
-        "330" | "273" | "408" | "372" | "289" | "394" | "406" | "282" | "403" | "391" => {
-            Some(&[move_frame_273::LEN])
-        }
-        _ => None,
+fn rigid_transform_rule_breaks(
+    bytes: &[u8],
+    start: usize,
+    paired: usize,
+    form: direct_face::DesignMoveForm,
+    class_types: &HashMap<u32, &SegmentType>,
+) -> Vec<String> {
+    let mut breaks = Vec::new();
+    let typed = lp_ascii_filtered_view(bytes, start, 3..=3, u8::is_ascii_digit)
+        .and_then(|(class_tag, _)| class_tag.parse::<u32>().ok())
+        .and_then(|class_tag| class_types.get(&class_tag))
+        .is_some_and(|row| {
+            row.version == RIGID_TRANSFORM_TYPE_VERSION
+                && row
+                    .type_guid
+                    .as_str()
+                    .eq_ignore_ascii_case(RIGID_TRANSFORM_TYPE_GUID)
+        });
+    if !typed {
+        breaks.push(format!(
+            "a class type other than {RIGID_TRANSFORM_TYPE_GUID} version {RIGID_TRANSFORM_TYPE_VERSION}"
+        ));
     }
+    let Some(frame_length) = paired.checked_sub(start) else {
+        breaks.push("a paired header before its primary header".to_owned());
+        return breaks;
+    };
+    let length_form = match frame_length {
+        move_frame::LEN | move_frame_254::LEN => direct_face::DesignMoveForm::Form5,
+        move_frame_273::LEN | move_frame_274::LEN => direct_face::DesignMoveForm::Form1,
+        _ => {
+            breaks.push(format!("a {frame_length}-byte frame"));
+            return breaks;
+        }
+    };
+    if form != length_form {
+        breaks.push(format!(
+            "form word {} in a {frame_length}-byte frame",
+            u32::from(form)
+        ));
+    }
+    breaks
 }
 
-fn move_transform_form_holds(class_tag: &str, form: direct_face::DesignMoveForm) -> bool {
-    match class_tag {
-        "330" | "273" | "408" | "372" | "289" | "394" | "406" | "282" | "403" | "391" => {
-            form == direct_face::DesignMoveForm::Form1
-        }
-        "452" => form == direct_face::DesignMoveForm::Form5,
-        _ => true,
-    }
+pub(super) fn marked_move_transform_loss(
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    scope: &DesignParameterScope,
+    operation: &DesignMoveOperation,
+    class_types: &HashMap<u32, &SegmentType>,
+) -> Option<cadmpeg_ir::report::loss::LossNote> {
+    operation.transform_reference_offset?;
+    let start = usize::try_from(operation.form_offset)
+        .ok()?
+        .checked_sub(move_frame::FORM)?;
+    let (_, paired) = records
+        .frames(operation.transform_record_index)
+        .find(|(frame_start, _)| *frame_start == start)?;
+    let breaks = rigid_transform_rule_breaks(bytes, start, paired, operation.form, class_types);
+    (!breaks.is_empty()).then(|| {
+        crate::loss::F3dLossCode::FeatureMoveTransformAssumed.note(format!(
+            "Move scope {} keeps the rigid matrix of its marked transform record {}, which has {} (DR-306).",
+            scope.id,
+            operation.transform_record_index,
+            breaks.join(" and ")
+        ))
+    })
 }
 
 pub(crate) fn move_operation_links_hold(
@@ -466,8 +480,12 @@ pub(crate) fn move_operation_links_hold(
     scope.move_operation().is_none_or(|operation| {
         header.is_some_and(|header| {
             (is_move_face(scope)
-                || (move_transform_lengths(header.class_tag.as_str()).is_some()
-                    && move_transform_form_holds(header.class_tag.as_str(), operation.form)))
+                || operation.transform_reference_offset.is_none_or(|offset| {
+                    scope
+                        .byte_offset()
+                        .checked_add(u64_from_index(marked_move::TRANSFORM_REFERENCE))
+                        == Some(offset)
+                }))
                 && scope
                     .reference_members()
                     .values()
@@ -490,8 +508,19 @@ pub(super) fn exact_scale_operation(
     records: &IndexedRecordOffsets,
     scope: &DesignParameterScope,
     stream_types: &HashMap<u64, (&str, u32)>,
+    losses: &mut Vec<cadmpeg_ir::report::loss::LossNote>,
 ) -> Result<Option<DesignScaleOperation>, cadmpeg_core::CodecError> {
-    (|| {
+    let reference_count = scope.reference_members().len();
+    let payload_form = matches!(
+        (parameter_scope_payload_length(scope), reference_count),
+        (Some(297 | 299), 5) | (Some(308), 6)
+    );
+    let english_frame_form = matches!(
+        (scope.frame_length(), reference_count),
+        (307 | 309, 5) | (318, 6)
+    );
+    let mut read_by_english_frame = false;
+    let operation = (|| -> Option<Result<DesignScaleOperation, cadmpeg_core::CodecError>> {
         if design_feature_family(&scope.kind()) != Some(DesignFeatureFamily::Scale) {
             return None;
         }
@@ -528,12 +557,10 @@ pub(super) fn exact_scale_operation(
                     center,
                 )
             } else if scope.kind() == scope::DesignFeatureKind::Scale
-                && matches!(
-                    (scope.frame_length(), scope.reference_members().len()),
-                    (307 | 309, 5) | (318, 6)
-                )
+                && (payload_form || english_frame_form)
             {
-                if scope.frame_length() == 309 {
+                read_by_english_frame = !payload_form;
+                if read_by_english_frame && scope.frame_length() == 309 {
                     let (guid, _) = crate::bytes::lp_utf16_bounded_view(
                         bytes,
                         start.checked_add(75)?,
@@ -546,6 +573,28 @@ pub(super) fn exact_scale_operation(
                         || scope.feature_ordinal_offset() != scope.byte_offset().checked_add(231)?
                         || scope.previous_history_state_id_offset()
                             != scope.byte_offset().checked_add(262)
+                    {
+                        return None;
+                    }
+                }
+                if parameter_scope_payload_length(scope) == Some(299) {
+                    let (guid, _) = crate::bytes::lp_utf16_bounded_view(
+                        bytes,
+                        start.checked_add(75)?,
+                        36..=36,
+                    )?;
+                    if !guid.eq_str("00000000-0000-0000-0000-000000000000")
+                        || View::u24_le_at(bytes, start.checked_add(151)?)? != 0
+                        || scope.reference_count_offset() != scope.byte_offset().checked_add(154)?
+                        || scope.kind_offset() != scope.byte_offset().checked_add(221)?
+                        || scope.feature_ordinal_offset()
+                            != scope
+                                .paired_byte_offset()
+                                .checked_sub(u64::try_from(scale_tail::LEN).ok()?)?
+                        || scope.previous_history_state_id_offset()
+                            != scope.feature_ordinal_offset().checked_add(
+                                u64::try_from(scale_tail::PREVIOUS_HISTORY_STATE_ID).ok()?,
+                            )
                     {
                         return None;
                     }
@@ -591,7 +640,18 @@ pub(super) fn exact_scale_operation(
             uniform_factor_offset: u64_from_index(uniform_factor_offset),
         }))
     })()
-    .transpose()
+    .transpose()?;
+    if operation.is_some() && read_by_english_frame {
+        losses.push(
+            crate::loss::F3dLossCode::FeatureScaleFrameLengthFormAssumed.note(format!(
+                "{} reads the legacy Scale form of its {}-byte frame; its {}-byte payload matches no form.",
+                scope.id,
+                scope.frame_length(),
+                parameter_scope_payload_length(scope).unwrap_or_default()
+            )),
+        );
+    }
+    Ok(operation)
 }
 
 #[cfg(test)]

@@ -382,6 +382,7 @@ fn annotation_metadata_interval_findings(
                 })
                 .collect(),
                 entity_genesis,
+                metadata_absent: false,
                 annotation_bytes: vec![7, 8],
                 annotation_byte_offset: if entity_genesis.is_some() { 241 } else { 174 },
                 governing_owner_record_index: 6,

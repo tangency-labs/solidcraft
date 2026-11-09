@@ -15,6 +15,35 @@ use crate::records::references::DesignClassTag;
 use serde::Deserialize;
 use serde::Serialize;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u32", into = "u32")]
+pub(crate) enum SelectionSerializationForm {
+    #[default]
+    Zero,
+    One,
+}
+
+impl TryFrom<u32> for SelectionSerializationForm {
+    type Error = &'static str;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Zero),
+            1 => Ok(Self::One),
+            _ => Err("selection serialization form must be 0 or 1"),
+        }
+    }
+}
+
+impl From<SelectionSerializationForm> for u32 {
+    fn from(value: SelectionSerializationForm) -> Self {
+        match value {
+            SelectionSerializationForm::Zero => 0,
+            SelectionSerializationForm::One => 1,
+        }
+    }
+}
+
 /// Persistent Design entity selected through a nested indexed-record frame.
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(try_from = "DesignEntitySelectionOperandWire")]
@@ -39,6 +68,7 @@ pub(crate) struct DesignEntitySelectionOperand {
     pub(crate) context_id: DesignRelaxedGuidText,
     /// Byte offset of the context UUID's UTF-16LE code units.
     context_id_offset: u64,
+    serialization_form: SelectionSerializationForm,
     /// Byte offset of the nested identity record.
     identity_record_offset: u64,
     /// Primary entity identity in the nested identity pair; for a Sketch
@@ -76,6 +106,7 @@ impl Clone for DesignEntitySelectionOperand {
             asset_id_offset: self.asset_id_offset,
             context_id: self.context_id.clone(),
             context_id_offset: self.context_id_offset,
+            serialization_form: self.serialization_form,
             identity_record_offset: self.identity_record_offset,
             primary_identity: self.primary_identity,
             historical_edge_candidates: self.historical_edge_candidates.clone(),
@@ -100,6 +131,8 @@ impl Serialize for DesignEntitySelectionOperand {
             asset_id_offset: u64,
             context_id: &'a str,
             context_id_offset: u64,
+            #[serde(skip_serializing_if = "crate::history_records::is_default")]
+            serialization_form: SelectionSerializationForm,
             identity_record_index: u32,
             identity_record_offset: u64,
             primary_identity: u64,
@@ -134,6 +167,7 @@ impl Serialize for DesignEntitySelectionOperand {
             asset_id_offset: self.asset_id_offset,
             context_id: self.context_id.as_str(),
             context_id_offset: self.context_id_offset,
+            serialization_form: self.serialization_form,
             identity_record_index: self.identity_record_index(),
             identity_record_offset: self.identity_record_offset,
             primary_identity: self.primary_identity,
@@ -182,17 +216,30 @@ impl DesignEntitySelectionOperand {
                 }
             }
             Some(secondary)
-                if draft.class_tag.as_str() == "338"
+                if draft.identity_record_offset.checked_add(u64_from_index(
+                    crate::layout::marked_sketch_curve_identity::OWNER_RECORD_INDEX,
+                )) == Some(draft.primary_identity_offset)
                     && draft.identity_record_offset.checked_add(u64_from_index(
-                        crate::layout::class_338_sketch_curve_identity::OWNER_RECORD_INDEX,
-                    )) == Some(draft.primary_identity_offset)
-                    && draft.identity_record_offset.checked_add(u64_from_index(
-                        crate::layout::class_338_sketch_curve_identity::CURVE_PERSISTENT_ID,
+                        crate::layout::marked_sketch_curve_identity::CURVE_PERSISTENT_ID,
                     )) == Some(secondary.identity.offset)
                     && secondary.curve_identity.is_none() =>
             {
                 EntitySelectionFrame::SketchCurve {
                     secondary: secondary.identity.value,
+                }
+            }
+            Some(secondary)
+                if draft.identity_record_offset.checked_add(u64_from_index(
+                    crate::layout::work_point_sketch_point_compact_identity::SKETCH_RECORD_INDEX,
+                )) == Some(draft.primary_identity_offset)
+                    && draft.identity_record_offset.checked_add(u64_from_index(
+                        crate::layout::work_point_sketch_point_compact_identity::POINT_PERSISTENT_ID,
+                    )) == Some(secondary.identity.offset)
+                    && secondary.curve_identity.is_none() =>
+            {
+                EntitySelectionFrame::SketchPoint {
+                    secondary: secondary.identity.value,
+                    next_record_index: draft.next_record_index,
                 }
             }
             _ => return Err(
@@ -226,6 +273,7 @@ impl DesignEntitySelectionOperand {
             asset_id_offset: draft.asset_id_offset,
             context_id: draft.context_id,
             context_id_offset: draft.context_id_offset,
+            serialization_form: draft.serialization_form,
             identity_record_offset: draft.identity_record_offset,
             primary_identity: draft.primary_identity,
             historical_edge_candidates: draft.historical_edge_candidates,
@@ -270,6 +318,7 @@ impl DesignEntitySelectionOperand {
             asset_id_offset: self.asset_id_offset,
             context_id: self.context_id,
             context_id_offset: self.context_id_offset,
+            serialization_form: self.serialization_form,
             identity_record_index,
             identity_record_offset: self.identity_record_offset,
             primary_identity: self.primary_identity,
@@ -306,10 +355,34 @@ impl DesignEntitySelectionOperand {
     pub(crate) fn secondary(&self) -> Option<DesignSecondaryIdentity<Located<u64>>> {
         self.selection.secondary(self.identity_record_offset)
     }
+    /// The owning Sketch record index and sketch-point persistent id of a
+    /// compact sketch-point identity.
+    pub(crate) fn sketch_point(&self) -> Option<(u64, u64)> {
+        match self.selection {
+            EntitySelectionFrame::SketchPoint { secondary, .. } => {
+                Some((self.primary_identity, secondary))
+            }
+            _ => None,
+        }
+    }
+    /// The primary and secondary identities that history normalization
+    /// resolves. Every frame form except the compact sketch-point identity
+    /// supplies them; that identity names a Sketch record and a sketch point.
+    pub(crate) fn topology_identities(&self) -> Option<(u64, Option<u64>)> {
+        self.sketch_point().is_none().then(|| {
+            (
+                self.primary_identity,
+                self.secondary().map(|secondary| secondary.identity.value),
+            )
+        })
+    }
     pub(crate) fn next_record_index(&self) -> u32 {
         match self.selection {
             EntitySelectionFrame::Primary { next_record_index }
             | EntitySelectionFrame::Pair {
+                next_record_index, ..
+            }
+            | EntitySelectionFrame::SketchPoint {
                 next_record_index, ..
             } => next_record_index,
             EntitySelectionFrame::SketchCurve { .. } => self.frame.index(4),
@@ -345,6 +418,7 @@ pub(crate) struct DesignEntitySelectionOperandDraft {
     pub(crate) context_id: DesignRelaxedGuidText,
     /// Byte offset of the context UUID's UTF-16LE code units.
     pub(crate) context_id_offset: u64,
+    pub(crate) serialization_form: SelectionSerializationForm,
     /// Nested indexed record that carries the persistent entity identity.
     pub(crate) identity_record_index: u32,
     /// Byte offset of the nested identity record.
@@ -392,6 +466,8 @@ struct DesignEntitySelectionOperandWire {
     context_id: String,
     /// Byte offset of the context UUID's UTF-16LE code units.
     context_id_offset: u64,
+    #[serde(default, skip_serializing_if = "crate::history_records::is_default")]
+    serialization_form: SelectionSerializationForm,
     /// Nested indexed record that carries the persistent entity identity.
     identity_record_index: u32,
     /// Byte offset of the nested identity record.
@@ -464,6 +540,7 @@ impl TryFrom<DesignEntitySelectionOperandWire> for DesignEntitySelectionOperand 
             asset_id_offset: wire.asset_id_offset,
             context_id: wire.context_id.try_into()?,
             context_id_offset: wire.context_id_offset,
+            serialization_form: wire.serialization_form,
             identity_record_index: wire.identity_record_index,
             identity_record_offset: wire.identity_record_offset,
             primary_identity: wire.primary_identity,
@@ -505,6 +582,7 @@ impl From<DesignEntitySelectionOperand> for DesignEntitySelectionOperandWire {
             asset_id_offset: record.asset_id_offset,
             context_id: record.context_id.into(),
             context_id_offset: record.context_id_offset,
+            serialization_form: record.serialization_form,
             identity_record_index: record.identity_record_index,
             identity_record_offset: record.identity_record_offset,
             primary_identity: record.primary_identity,
@@ -556,7 +634,7 @@ pub(crate) struct DesignLoftLegacyBodyCarrier {
     pub(crate) record_index: u32,
     /// Primary indexed-header byte offset.
     pub(crate) byte_offset: u64,
-    /// Per-file dynamic primary class tag (`322` or `411`).
+    /// Per-file dynamic primary class tag.
     pub(crate) class_tag: DesignClassTag,
     /// Byte offset of `owner_scope_record_index`.
     pub(crate) owner_scope_record_index_offset: u64,
@@ -588,7 +666,7 @@ pub(crate) struct DesignLoftLegacyBodyCarrier {
     pub(crate) next_reference_offset: u64,
     /// Source location of the additional owning-scope reference, when present.
     pub(crate) trailing_scope_reference_offset: Option<u64>,
-    /// Per-file dynamic paired class tag (`262` or `266`).
+    /// Per-file dynamic paired class tag.
     pub(crate) paired_class_tag: DesignClassTag,
     /// Same-index paired-header byte offset.
     pub(crate) paired_byte_offset: u64,
@@ -652,7 +730,7 @@ struct DesignLoftLegacyBodyCarrierRef<'a> {
     repeated_opaque_index_offset: u64,
     next_next_record_index: u32,
     next_next_reference_offset: u64,
-    flags: NativeBytes<[u8; 2]>,
+    flags: NativeBytes<&'a [u8]>,
     flags_offset: u64,
     next_record_index: u32,
     next_reference_offset: u64,
@@ -687,7 +765,13 @@ impl Serialize for DesignLoftLegacyBodyCarrier {
             repeated_opaque_index_offset: self.repeated_opaque_index_offset,
             next_next_record_index: self.next_next_record_index,
             next_next_reference_offset: self.next_next_reference_offset,
-            flags: ([0, 0]).into(),
+            flags: NativeBytes::from(
+                if self.next_reference_offset.checked_sub(self.flags_offset) == Some(3) {
+                    &[1, 0, 0][..]
+                } else {
+                    &[0, 0][..]
+                },
+            ),
             flags_offset: self.flags_offset,
             next_record_index: self.next_record_index,
             next_reference_offset: self.next_reference_offset,
@@ -724,7 +808,7 @@ struct DesignLoftLegacyBodyCarrierSerde {
     repeated_opaque_index_offset: u64,
     next_next_record_index: u32,
     next_next_reference_offset: u64,
-    flags: NativeBytes<[u8; 2]>,
+    flags: NativeBytes<Vec<u8>>,
     flags_offset: u64,
     next_record_index: u32,
     next_reference_offset: u64,
@@ -764,8 +848,14 @@ impl TryFrom<DesignLoftLegacyBodyCarrierSerde> for DesignLoftLegacyBodyCarrier {
         if wire.repeated_opaque_index != wire.opaque_index {
             return Err("repeated_opaque_index disagrees with opaque_index".into());
         }
-        if wire.flags != [0, 0] {
-            return Err("flags must be zero".into());
+        let expected_flags: &[u8] =
+            if wire.next_reference_offset.checked_sub(wire.flags_offset) == Some(3) {
+                &[1, 0, 0]
+            } else {
+                &[0, 0]
+            };
+        if wire.flags.as_ref() != expected_flags {
+            return Err("flags disagree with frame layout".into());
         }
         let trailing_scope_reference_offset = match (
             wire.trailing_scope_record_index,
@@ -832,7 +922,16 @@ impl From<DesignLoftLegacyBodyCarrier> for DesignLoftLegacyBodyCarrierSerde {
             repeated_opaque_index_offset: carrier.repeated_opaque_index_offset,
             next_next_record_index: carrier.next_next_record_index,
             next_next_reference_offset: carrier.next_next_reference_offset,
-            flags: ([0, 0]).into(),
+            flags: (if carrier
+                .next_reference_offset
+                .checked_sub(carrier.flags_offset)
+                == Some(3)
+            {
+                vec![1, 0, 0]
+            } else {
+                vec![0, 0]
+            })
+            .into(),
             flags_offset: carrier.flags_offset,
             next_record_index: carrier.next_record_index,
             next_reference_offset: carrier.next_reference_offset,
@@ -874,6 +973,10 @@ enum EntitySelectionFrame {
     SketchCurve {
         secondary: u64,
     },
+    SketchPoint {
+        secondary: u64,
+        next_record_index: u32,
+    },
 }
 
 impl EntitySelectionFrame {
@@ -881,8 +984,11 @@ impl EntitySelectionFrame {
         match self {
             Self::Primary { .. } => 21,
             Self::Pair { .. } => 29,
+            Self::SketchPoint { .. } => u64_from_index(
+                crate::layout::work_point_sketch_point_compact_identity::SKETCH_RECORD_INDEX,
+            ),
             Self::SketchCurve { .. } => {
-                u64_from_index(crate::layout::class_338_sketch_curve_identity::OWNER_RECORD_INDEX)
+                u64_from_index(crate::layout::marked_sketch_curve_identity::OWNER_RECORD_INDEX)
             }
         }
     }
@@ -890,8 +996,11 @@ impl EntitySelectionFrame {
         match self {
             Self::Primary { .. } => 29,
             Self::Pair { .. } => 45,
+            Self::SketchPoint { .. } => {
+                u64_from_index(crate::layout::work_point_sketch_point_compact_identity::LEN)
+            }
             Self::SketchCurve { .. } => {
-                u64_from_index(crate::layout::class_338_sketch_curve_identity::LEN)
+                u64_from_index(crate::layout::marked_sketch_curve_identity::LEN)
             }
         }
     }
@@ -915,7 +1024,17 @@ impl EntitySelectionFrame {
                     value: secondary,
                     offset: offset
                         + u64_from_index(
-                            crate::layout::class_338_sketch_curve_identity::CURVE_PERSISTENT_ID,
+                            crate::layout::marked_sketch_curve_identity::CURVE_PERSISTENT_ID,
+                        ),
+                },
+                curve_identity: None,
+            }),
+            Self::SketchPoint { secondary, .. } => Some(DesignSecondaryIdentity {
+                identity: Located {
+                    value: secondary,
+                    offset: offset
+                        + u64_from_index(
+                            crate::layout::work_point_sketch_point_compact_identity::POINT_PERSISTENT_ID,
                         ),
                 },
                 curve_identity: None,
@@ -1003,8 +1122,17 @@ pub(crate) struct DesignProfileCurveSelection {
     /// Byte offset of the identity record at the selection index plus three.
     pub(crate) identity_record_offset: u64,
     pub(crate) identity_end_offset: u64,
-    /// Ordered region lists with their boundary loops.
-    pub(crate) loop_lists: [Vec<Vec<DesignProfileCurveLoop>>; 2],
+    /// Ordered region groups with their boundary loops.
+    pub(crate) groups: Vec<DesignProfileRegionGroup>,
+}
+
+/// One stored region and the further regions counted after it.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DesignProfileRegionGroup {
+    /// The group's first region.
+    pub(crate) region: Vec<DesignProfileCurveLoop>,
+    /// The further regions of the group, in stored order.
+    pub(crate) further: Vec<Vec<DesignProfileCurveLoop>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
@@ -1018,35 +1146,48 @@ impl DesignProfileCurveSelection {
         self.lists_end() == Some(self.identity_end_offset)
     }
 
+    /// Every region in stored order: each group's first region, then its
+    /// further regions.
+    pub(crate) fn regions(&self) -> impl Iterator<Item = &Vec<DesignProfileCurveLoop>> {
+        self.groups
+            .iter()
+            .flat_map(|group| std::iter::once(&group.region).chain(&group.further))
+    }
+
     pub(crate) fn lists_end(&self) -> Option<u64> {
-        let mut cursor =
-            self.identity_record_offset
-                .checked_add(cadmpeg_core::decode::u64_from_index(
-                    crate::layout::typed_reference_profile_identity_record::FIRST_REGION_COUNT,
-                ))?;
-        if self.loop_lists[0].is_empty() {
-            return None;
-        }
-        for regions in &self.loop_lists {
-            cursor = cursor.checked_add(4)?;
-            for loops in regions {
-                if loops.is_empty() || loops.iter().filter(|loop_| loop_.outer).count() != 1 {
+        fn region_end(region: &[DesignProfileCurveLoop], cursor: u64) -> Option<u64> {
+            if region.is_empty() || region.iter().filter(|loop_| loop_.outer).count() != 1 {
+                return None;
+            }
+            let mut cursor = cursor.checked_add(4)?;
+            for loop_ in region {
+                if loop_.entries.is_empty() {
                     return None;
                 }
                 cursor = cursor.checked_add(4)?;
-                for loop_ in loops {
-                    if loop_.entries.is_empty() {
+                for entry in &loop_.entries {
+                    if entry.primary_id_offset != cursor.checked_add(4)? {
                         return None;
                     }
-                    cursor = cursor.checked_add(4)?;
-                    for entry in &loop_.entries {
-                        if entry.primary_id_offset != cursor.checked_add(4)? {
-                            return None;
-                        }
-                        cursor = cursor.checked_add(40)?;
-                    }
-                    cursor = cursor.checked_add(1)?;
+                    cursor = cursor.checked_add(40)?;
                 }
+                cursor = cursor.checked_add(1)?;
+            }
+            Some(cursor)
+        }
+        if self.groups.is_empty() {
+            return None;
+        }
+        let mut cursor = self
+            .identity_record_offset
+            .checked_add(cadmpeg_core::decode::u64_from_index(
+                crate::layout::typed_reference_profile_identity_record::REGION_GROUP_COUNT,
+            ))?
+            .checked_add(4)?;
+        for group in &self.groups {
+            cursor = region_end(&group.region, cursor)?.checked_add(4)?;
+            for region in &group.further {
+                cursor = region_end(region, cursor)?;
             }
         }
         Some(cursor)

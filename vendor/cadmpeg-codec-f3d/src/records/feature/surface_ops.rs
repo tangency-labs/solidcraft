@@ -117,7 +117,7 @@ pub(crate) struct DesignSurfaceTrimCellEntry {
     pub(crate) record_index: u32,
     /// Byte offset of the marked cell-record reference.
     pub(crate) record_reference_offset: u64,
-    /// One-based partition ordinal of a cell selected for removal.
+    /// One-based entry value; a removed-cell partition ordinal when the entry count is below the trailing value.
     pub(crate) ordinal: u64,
     /// Byte offset of the serialized entry ordinal.
     pub(crate) ordinal_offset: u64,
@@ -131,15 +131,7 @@ pub(crate) struct DesignSurfaceTrimOperation {
     pub(crate) id: String,
     /// Owning `SurfaceTrim` parameter-scope record index.
     pub(crate) scope_record_index: u32,
-    /// Indexed entity-selection record that starts the trimming tool chain.
-    pub(crate) selection_record_index: u32,
-    /// Byte offset of the entity-selection record.
-    selection_byte_offset: u64,
-    /// Indexed record immediately following the entity-selection frame.
-    pub(crate) selection_next_record_index: u32,
-    /// Byte offset of the record immediately following the entity-selection frame.
-    selection_next_byte_offset: u64,
-    /// Two indexed records between the entity selection and the cell table.
+    /// The scope's record-timestamp table and the indexed record that follows it.
     pub(crate) chain_records: [DesignSurfaceTrimChainRecord; 2],
     /// Indexed record carrying the counted BRep-cell table.
     pub(crate) cell_table_record_index: u32,
@@ -157,7 +149,7 @@ pub(crate) struct DesignSurfaceTrimOperation {
     cell_count_offset: u64,
     /// Ordered cell-table entries.
     cell_entries: NonEmptyVec<DesignSurfaceTrimCellEntry>,
-    /// Total number of cells in the operation's partition.
+    /// Trailing value that bounds every entry value.
     pub(crate) trailing_value: u32,
     /// Byte offset of `trailing_value`.
     pub(crate) trailing_value_offset: u64,
@@ -177,10 +169,6 @@ impl Clone for DesignSurfaceTrimOperation {
         Self {
             id: self.id.clone(),
             scope_record_index: self.scope_record_index,
-            selection_record_index: self.selection_record_index,
-            selection_byte_offset: self.selection_byte_offset,
-            selection_next_record_index: self.selection_next_record_index,
-            selection_next_byte_offset: self.selection_next_byte_offset,
             chain_records: self.chain_records.clone(),
             cell_table_record_index: self.cell_table_record_index,
             cell_table_byte_offset: self.cell_table_byte_offset,
@@ -201,10 +189,6 @@ impl Clone for DesignSurfaceTrimOperation {
 struct DesignSurfaceTrimOperationRef<'a> {
     id: &'a str,
     scope_record_index: u32,
-    selection_record_index: u32,
-    selection_byte_offset: u64,
-    selection_next_record_index: u32,
-    selection_next_byte_offset: u64,
     chain_records: &'a [DesignSurfaceTrimChainRecord; 2],
     cell_table_record_index: u32,
     cell_table_byte_offset: u64,
@@ -224,10 +208,6 @@ impl Serialize for DesignSurfaceTrimOperation {
         DesignSurfaceTrimOperationRef {
             id: &self.id,
             scope_record_index: self.scope_record_index,
-            selection_record_index: self.selection_record_index,
-            selection_byte_offset: self.selection_byte_offset,
-            selection_next_record_index: self.selection_next_record_index,
-            selection_next_byte_offset: self.selection_next_byte_offset,
             chain_records: &self.chain_records,
             cell_table_record_index: self.cell_table_record_index,
             cell_table_byte_offset: self.cell_table_byte_offset,
@@ -251,15 +231,7 @@ pub(crate) struct DesignSurfaceTrimOperationWire {
     pub(crate) id: String,
     /// Owning `SurfaceTrim` parameter-scope record index.
     pub(crate) scope_record_index: u32,
-    /// Indexed entity-selection record that starts the trimming tool chain.
-    pub(crate) selection_record_index: u32,
-    /// Byte offset of the entity-selection record.
-    pub(crate) selection_byte_offset: u64,
-    /// Indexed record immediately following the entity-selection frame.
-    pub(crate) selection_next_record_index: u32,
-    /// Byte offset of the record immediately following the entity-selection frame.
-    pub(crate) selection_next_byte_offset: u64,
-    /// Two indexed records between the entity selection and the cell table.
+    /// The scope's record-timestamp table and the indexed record that follows it.
     pub(crate) chain_records: [DesignSurfaceTrimChainRecord; 2],
     /// Indexed record carrying the counted BRep-cell table.
     pub(crate) cell_table_record_index: u32,
@@ -277,7 +249,7 @@ pub(crate) struct DesignSurfaceTrimOperationWire {
     pub(crate) cell_count_offset: u64,
     /// Ordered cell-table entries.
     pub(crate) cell_entries: Vec<DesignSurfaceTrimCellEntry>,
-    /// Total number of cells in the operation's partition.
+    /// Trailing value that bounds every entry value.
     pub(crate) trailing_value: u32,
     /// Byte offset of `trailing_value`.
     pub(crate) trailing_value_offset: u64,
@@ -293,10 +265,6 @@ impl TryFrom<DesignSurfaceTrimOperationWire> for DesignSurfaceTrimOperation {
         Ok(Self {
             id: wire.id,
             scope_record_index: wire.scope_record_index,
-            selection_record_index: wire.selection_record_index,
-            selection_byte_offset: wire.selection_byte_offset,
-            selection_next_record_index: wire.selection_next_record_index,
-            selection_next_byte_offset: wire.selection_next_byte_offset,
             chain_records: wire.chain_records,
             cell_table_record_index: wire.cell_table_record_index,
             cell_table_byte_offset: wire.cell_table_byte_offset,
@@ -319,10 +287,6 @@ impl From<DesignSurfaceTrimOperation> for DesignSurfaceTrimOperationWire {
         Self {
             id: value.id,
             scope_record_index: value.scope_record_index,
-            selection_record_index: value.selection_record_index,
-            selection_byte_offset: value.selection_byte_offset,
-            selection_next_record_index: value.selection_next_record_index,
-            selection_next_byte_offset: value.selection_next_byte_offset,
             chain_records: value.chain_records,
             cell_table_record_index: value.cell_table_record_index,
             cell_table_byte_offset: value.cell_table_byte_offset,
@@ -478,10 +442,6 @@ mod tests {
         DesignSurfaceTrimOperation::try_from(DesignSurfaceTrimOperationWire {
             id: "f3d:native:surface-trim-operation#0".into(),
             scope_record_index: 1,
-            selection_record_index: 2,
-            selection_byte_offset: 20,
-            selection_next_record_index: 3,
-            selection_next_byte_offset: 30,
             chain_records: std::array::from_fn(|index| DesignSurfaceTrimChainRecord {
                 record_index: 4 + u32::try_from(index).unwrap(),
                 byte_offset: 40 + u64::try_from(index).unwrap() * 10,

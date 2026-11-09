@@ -85,7 +85,7 @@ fn dimension_annotation_metadata_refuses_mutations_and_truncation() {
             assert!(parse(&bytes[..end]).is_none(), "truncation at {end}");
         }
         for (at, value) in [
-            (69, 0),
+            (69, 2),
             (70, 2),
             (40, 0xff),
             (paired + 7, 0xff),
@@ -109,4 +109,31 @@ fn dimension_annotation_metadata_refuses_mutations_and_truncation() {
             assert!(parse(&populated).is_none());
         }
     }
+}
+
+/// The frame of `annotation_bytes(None)` with its empty metadata block
+/// replaced by the single absent byte.
+fn absent_metadata_bytes() -> (Vec<u8>, usize) {
+    let (mut bytes, paired) = annotation_bytes(None);
+    bytes.drain(70..74);
+    bytes[69] = 0;
+    (bytes, paired - 4)
+}
+
+#[test]
+fn dimension_annotation_absent_metadata_starts_its_payload_after_one_byte() {
+    let (bytes, paired) = absent_metadata_bytes();
+    let frame = parse(&bytes).expect("absent metadata frame");
+    assert_eq!(frame.entity_genesis(), None);
+    assert_eq!(frame.annotation_byte_offset(), 70);
+    assert_eq!(frame.paired_byte_offset(), u64::try_from(paired).unwrap());
+    assert_eq!(frame.governing_owner_record_index, 390);
+    assert_eq!(frame.into_draft().annotation_bytes, [0xaa, 0xbb, 0xcc]);
+}
+
+#[test]
+fn dimension_annotation_absent_metadata_refuses_another_marker() {
+    let (mut bytes, _) = absent_metadata_bytes();
+    bytes[69] = 2;
+    assert!(parse(&bytes).is_none());
 }

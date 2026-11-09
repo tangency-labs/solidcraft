@@ -1333,6 +1333,8 @@ mod tests {
                 .try_into()
                 .unwrap(),
             context_id_offset: 120,
+            serialization_form:
+                crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
             recipe_record_index: 8,
             recipe_record_byte_offset: 130,
             recipe_id: "Recipe:1".into(),

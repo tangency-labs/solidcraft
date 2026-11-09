@@ -111,6 +111,7 @@ mod paramesh;
 mod records;
 mod report;
 mod repro;
+mod scene;
 mod tsm;
 mod validate;
 mod writer;

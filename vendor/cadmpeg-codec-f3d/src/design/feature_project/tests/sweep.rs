@@ -72,6 +72,79 @@ fn sweep_with_body_group_is_not_projected() {
     );
 }
 
+#[test]
+fn boolean_sweep_takes_a_leading_body_group_of_its_ordinal_role() {
+    let (mut scope, [profile, path]) = sweep_input();
+    let set_operation = |scope: &mut crate::records::feature::scope::DesignParameterScope,
+                         operation: DesignExtrudeOperation| {
+        if let crate::records::feature::scope::DesignScopePayloadMut::Sweep(Some(sweep)) =
+            scope.payload_mut()
+        {
+            sweep.construction.as_mut().unwrap().operation = operation;
+        }
+    };
+    set_operation(&mut scope, DesignExtrudeOperation::Cut);
+    let body = |record_index: u32, ordinal: u32, role: DesignOperandRole| {
+        let mut body = profile_group(record_index, ordinal);
+        body.operand_role = DesignConstructionOperandRole::Other(role);
+        body
+    };
+    let after = |ordinal: u32| {
+        let mut profile = profile.clone();
+        let mut path = path.clone();
+        profile.scope_reference_ordinal = ordinal + 2;
+        path.scope_reference_ordinal = ordinal + 4;
+        [profile, path]
+    };
+    let projected = |scope: &crate::records::feature::scope::DesignParameterScope,
+                     groups: &[crate::records::topology::construction::DesignConstructionOperandGroup]| {
+        crate::test_support::with_decode_context(|decode_ctx| project(decode_ctx, scope, groups))
+            .unwrap()
+    };
+    for (role, ordinal) in [
+        (DesignOperandRole::BODIES_A, 0),
+        (DesignOperandRole::BODIES_B, 7),
+    ] {
+        let [profile, path] = after(ordinal);
+        let groups = [body(102, ordinal, role), profile, path];
+        assert!(
+            matches!(
+                projected(&scope, &groups),
+                Some(FeatureDefinition::Operation(FeatureOperation::Sweep { .. }))
+            ),
+            "{role:?}"
+        );
+    }
+    for (role, ordinal) in [
+        (DesignOperandRole::BODIES_A, 7),
+        (DesignOperandRole::BODIES_B, 0),
+    ] {
+        let [profile, path] = after(ordinal);
+        let groups = [body(102, ordinal, role), profile, path];
+        assert!(
+            projected(&scope, &groups).is_none(),
+            "{role:?} at {ordinal}"
+        );
+    }
+    let [profile_7, path_7] = after(7);
+    let trailing_body = [
+        profile_7.clone(),
+        path_7.clone(),
+        body(102, 13, DesignOperandRole::BODIES_B),
+    ];
+    assert!(projected(&scope, &trailing_body).is_none());
+    let two_bodies = [
+        body(102, 7, DesignOperandRole::BODIES_B),
+        body(103, 8, DesignOperandRole::BODIES_B),
+        profile_7.clone(),
+        path_7.clone(),
+    ];
+    assert!(projected(&scope, &two_bodies).is_none());
+    set_operation(&mut scope, DesignExtrudeOperation::NewBody);
+    let groups = [body(102, 7, DesignOperandRole::BODIES_B), profile_7, path_7];
+    assert!(projected(&scope, &groups).is_none());
+}
+
 fn guide_surface_input() -> (
     crate::records::feature::scope::DesignParameterScope,
     Vec<crate::records::topology::construction::DesignConstructionOperandGroup>,
@@ -107,6 +180,7 @@ fn guide_surface_input() -> (
             asset_id_offset: 32_040,
             entity_id: "0_2718".to_owned().try_into().unwrap(),
             entity_reference_offset: 32_080,
+            compact_tail_flags: None,
             region_selection: None,
             paired_class_tag: "258".to_owned().try_into().unwrap(),
             paired_byte_offset: 32_180,
@@ -137,6 +211,8 @@ fn guide_surface_input() -> (
                     .try_into()
                     .unwrap(),
                 context_id_offset: 31_080,
+                serialization_form:
+                    crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
                 identity_record_index: 2791,
                 identity_record_offset: 31_180,
                 primary_identity: 2718,
@@ -217,4 +293,77 @@ fn two_lane_sweep_projects_with_along_and_against_extents() {
             ..
         }) if along_fraction.get() == 1.0 && against_fraction.get() == 0.0
     ));
+}
+
+#[test]
+fn sweep_profile_of_resolved_body_faces_projects_historical_faces() {
+    use crate::records::topology::face::{DesignFaceOperand, DesignFaceOperandDraft};
+    use cadmpeg_ir::features::{PlanarProfileRef, SweepSection, SweepShape};
+
+    let (mut scope, groups) = sweep_input();
+    scope
+        .try_edit(|draft| {
+            draft.history_state_id = Some(8);
+            draft.previous_history_state_id = Some(7);
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    let face = DesignFaceOperand::try_new(DesignFaceOperandDraft {
+        id: "f3d:Design/BulkStream.dat:face-operand#200".into(),
+        scope_record_index: scope.record_index,
+        scope_reference_ordinal: 0,
+        group: Some(crate::records::topology::body_recipe::DesignOperandGroup {
+            group_record_index: groups[0].record_index,
+            group_member_ordinal: 0,
+        }),
+        record_index: groups[0].members()[0].value,
+        byte_offset: 10,
+        class_tag: "378".to_owned().try_into().unwrap(),
+        paired_byte_offset: 30,
+        paired_class_tag: "258".to_owned().try_into().unwrap(),
+        recipe_record_index: 203,
+        recipe_record_byte_offset: 40,
+        recipe_id: "f3d:Design/BulkStream.dat:construction-recipe#203".into(),
+        recipe_prefix_offset: 51,
+        recipe_prefix_bytes: Vec::new(),
+        recipe_references: Vec::new(),
+        recipe_kind: crate::records::recipes::ConstructionRecipeKind::BoundedFace,
+        recipe_program_offset: 60,
+        recipe_program: vec![0, -1],
+        recipe_nodes: Vec::new(),
+        candidate_faces: Vec::new(),
+        unreferenced_candidate_faces: Vec::new(),
+        alternate_selector_candidate_faces: Vec::new(),
+        preceding_candidate_faces: Vec::new(),
+        changed_candidate_faces: Vec::new(),
+        historical_support_contexts: Vec::new(),
+        resolved_face_slots: vec![42],
+        resolved_active_face: None,
+        next_record_index: 220,
+        next_byte_offset: 70,
+    })
+    .unwrap();
+    let section = |faces: &[DesignFaceOperand]| {
+        let projected = crate::test_support::with_decode_context(|decode_ctx| {
+            project_fixed_sweep(&scope, &groups, &[], &[], &[], faces, decode_ctx)
+        })
+        .unwrap();
+        let Some(FeatureDefinition::Operation(FeatureOperation::Sweep {
+            shape:
+                SweepShape::Solid {
+                    section: SweepSection::Profile(profile),
+                    ..
+                },
+            ..
+        })) = projected
+        else {
+            panic!("a solid Sweep");
+        };
+        profile
+    };
+    assert!(matches!(
+        section(std::slice::from_ref(&face)),
+        PlanarProfileRef::HistoricalFaces { faces, .. } if faces.len() == 1
+    ));
+    assert!(matches!(section(&[]), PlanarProfileRef::Native(_)));
 }

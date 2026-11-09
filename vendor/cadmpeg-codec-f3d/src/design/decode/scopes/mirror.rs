@@ -222,6 +222,27 @@ fn exact_legacy_mirror_scope_tolerance(
     ))
 }
 
+/// The seed group among the construction groups of one Mirror scope.
+fn mirror_seed_group<'a>(
+    kind: &crate::records::feature::scope::DesignFeatureKind,
+    scope_groups: &[&'a crate::records::topology::construction::DesignConstructionOperandGroup],
+) -> UniqueMatch<&'a crate::records::topology::construction::DesignConstructionOperandGroup> {
+    match unique_match(scope_groups.iter().copied().filter(|group| {
+        matches!(
+            group.role(),
+            DesignOperandRole::BODIES_A | DesignOperandRole::BODIES_B
+        ) && !group.members().is_empty()
+    })) {
+        UniqueMatch::Zero => unique_match(
+            scope_groups
+                .iter()
+                .copied()
+                .filter(|group| crate::design::is_pattern_face_seed_group(kind, group)),
+        ),
+        role_groups => role_groups,
+    }
+}
+
 /// Count matching records without retaining the input-sized run.
 enum UniqueMatch<T> {
     Zero,
@@ -271,20 +292,14 @@ pub(crate) fn bind_mirror_constructions(
         };
         let bytes = scan.entry_bytes(&entry.name)?;
         let scope_record_index = scopes[index].record_index;
-        let seed_groups = unique_match(
-            groups
-                .iter()
-                .filter(|group| {
-                    native_stream(&group.id) == Some(stream.as_str())
-                        && group.scope_record_index == scope_record_index
-                })
-                .filter(|group| {
-                    matches!(
-                        group.role(),
-                        DesignOperandRole::BODIES_A | DesignOperandRole::BODIES_B
-                    )
-                }),
-        );
+        let scope_groups = || {
+            groups.iter().filter(|group| {
+                native_stream(&group.id) == Some(stream.as_str())
+                    && group.scope_record_index == scope_record_index
+            })
+        };
+        let seed_groups =
+            mirror_seed_group(&scopes[index].kind(), &scope_groups().collect::<Vec<_>>());
         let plane_groups = unique_match(groups.iter().filter(|group| {
             native_stream(&group.id) == Some(stream.as_str())
                 && group.scope_record_index == scope_record_index
@@ -322,6 +337,14 @@ pub(crate) fn bind_mirror_constructions(
         );
         let face_recipe = {
             let records = cached_owned_record_offsets(&mut record_offset_index, &stream, bytes);
+            let next_byte_offset = scopes[index]
+                .reference_members()
+                .values()
+                .position(|candidate| candidate == plane_member)
+                .and_then(|ordinal| scopes[index].reference_members().values().nth(ordinal + 1))
+                .and_then(|record_index| headers_by_record.get(&(stream.as_str(), *record_index)))
+                .map(|next| next.byte_offset)
+                .filter(|next| *next > plane_header.byte_offset);
             parse_face_operand(
                 ctx,
                 bytes,
@@ -330,7 +353,7 @@ pub(crate) fn bind_mirror_constructions(
                     scope: &scopes[index],
                     scope_reference_ordinal: plane_group.scope_reference_ordinal,
                     group_ownership: Some((plane_group.record_index, 0)),
-                    next_byte_offset: None,
+                    next_byte_offset,
                     header: plane_header,
                 },
                 recipes,
@@ -443,10 +466,9 @@ pub(crate) fn bind_mirror_constructions(
                 plane_scope_record_index,
                 plane_selection_record_index,
                 plane: None,
+                assumed_plane_scope: None,
             });
-            if let scope::DesignScopePayloadMut::Mirror(slot)
-            | scope::DesignScopePayloadMut::SymetrieMiroir(slot) = scopes[index].payload_mut()
-            {
+            if let scope::DesignScopePayloadMut::Mirror(slot) = scopes[index].payload_mut() {
                 *slot = construction;
             }
         }

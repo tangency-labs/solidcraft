@@ -163,7 +163,20 @@ pub(crate) enum DesignBaseFeatureConstruction {
         owner_record: u32,
         /// Byte offset of the object's reference to this scope.
         owner_reference_offset: u64,
+        /// Source body of each pasted copy, parallel to `bodies`, when the
+        /// owner is a paste object that keeps its sources and each source
+        /// GUID names one browser node; otherwise empty.
+        copy_sources: Vec<DesignPasteSource>,
     },
+}
+
+/// Source body of one pasted copy, joined through its browser-node GUID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DesignPasteSource {
+    /// Design entity suffix that the source browser node names.
+    pub(crate) entity_suffix: u64,
+    /// Byte offset of the first code unit of the source browser-node GUID.
+    pub(crate) node_guid_offset: u64,
 }
 
 #[cfg(test)]
@@ -243,11 +256,13 @@ impl Clone for DesignBaseFeatureConstruction {
                 bodies,
                 owner_record,
                 owner_reference_offset,
+                copy_sources,
             } => Self::TimelineOwnedBodies {
                 parameter_bodies: parameter_bodies.clone(),
                 bodies: bodies.clone(),
                 owner_record: *owner_record,
                 owner_reference_offset: *owner_reference_offset,
+                copy_sources: copy_sources.clone(),
             },
         }
     }
@@ -361,6 +376,10 @@ impl Serialize for DesignBaseFeatureConstruction {
                     SliceColumn<'a, DesignBaseFeatureEntry<u64>, NativeBytes<[u8; 6]>>,
                 owner_record: u32,
                 owner_reference_offset: u64,
+                #[serde(skip_serializing_if = "SliceColumn::is_empty")]
+                copy_source_entity_suffixes: SliceColumn<'a, DesignPasteSource, u64>,
+                #[serde(skip_serializing_if = "SliceColumn::is_empty")]
+                copy_source_node_guid_offsets: SliceColumn<'a, DesignPasteSource, u64>,
             },
         }
         let wire = match self {
@@ -508,6 +527,7 @@ impl Serialize for DesignBaseFeatureConstruction {
                 bodies,
                 owner_record,
                 owner_reference_offset,
+                copy_sources,
             } => BorrowedWire::TimelineOwnedBodies {
                 parameter_body_records: SliceColumn::new(parameter_bodies, |row| row.value),
                 parameter_body_record_offsets: SliceColumn::new(parameter_bodies, |row| row.offset),
@@ -517,6 +537,12 @@ impl Serialize for DesignBaseFeatureConstruction {
                 body_entity_fields: SliceColumn::new(bodies, |row| row.field.into()),
                 owner_record: *owner_record,
                 owner_reference_offset: *owner_reference_offset,
+                copy_source_entity_suffixes: SliceColumn::new(copy_sources, |row| {
+                    row.entity_suffix
+                }),
+                copy_source_node_guid_offsets: SliceColumn::new(copy_sources, |row| {
+                    row.node_guid_offset
+                }),
             },
         };
         wire.serialize(serializer)
@@ -716,6 +742,13 @@ enum DesignBaseFeatureConstructionWire {
         owner_record: u32,
         /// Byte offset of the object's reference to this scope.
         owner_reference_offset: u64,
+        /// Source body entity suffixes of a copy, parallel to `body_entity_suffixes`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy_source_entity_suffixes: Vec<u64>,
+        /// Byte offsets of the source browser-node GUIDs, parallel to
+        /// `copy_source_entity_suffixes`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        copy_source_node_guid_offsets: Vec<u64>,
     },
 }
 
@@ -1015,12 +1048,31 @@ impl TryFrom<DesignBaseFeatureConstructionWire> for DesignBaseFeatureConstructio
                 body_entity_fields,
                 owner_record,
                 owner_reference_offset,
+                copy_source_entity_suffixes,
+                copy_source_node_guid_offsets,
             } => {
                 if parameter_body_records.len() != body_entity_suffixes.len() {
                     return Err(
                         "parameter_body_records and body_entity_suffixes must be parallel".into(),
                     );
                 }
+                if copy_source_entity_suffixes.len() != copy_source_node_guid_offsets.len()
+                    || !(copy_source_entity_suffixes.is_empty()
+                        || copy_source_entity_suffixes.len() == body_entity_suffixes.len())
+                {
+                    return Err(
+                        "copy source columns must be empty or parallel to body_entity_suffixes"
+                            .into(),
+                    );
+                }
+                let copy_sources = copy_source_entity_suffixes
+                    .into_iter()
+                    .zip(copy_source_node_guid_offsets)
+                    .map(|(entity_suffix, node_guid_offset)| DesignPasteSource {
+                        entity_suffix,
+                        node_guid_offset,
+                    })
+                    .collect();
                 Self::TimelineOwnedBodies {
                     parameter_bodies: entry_rows(
                         parameter_body_records,
@@ -1034,6 +1086,7 @@ impl TryFrom<DesignBaseFeatureConstructionWire> for DesignBaseFeatureConstructio
                     )?,
                     owner_record,
                     owner_reference_offset,
+                    copy_sources,
                 }
             }
         })
@@ -1221,6 +1274,7 @@ impl From<DesignBaseFeatureConstruction> for DesignBaseFeatureConstructionWire {
                 bodies,
                 owner_record,
                 owner_reference_offset,
+                copy_sources,
             } => Self::TimelineOwnedBodies {
                 parameter_body_records: parameter_bodies.iter().map(|row| row.value).collect(),
                 parameter_body_record_offsets: parameter_bodies
@@ -1236,6 +1290,14 @@ impl From<DesignBaseFeatureConstruction> for DesignBaseFeatureConstructionWire {
                 body_entity_fields: bodies.iter().map(|row| row.field.into()).collect(),
                 owner_record,
                 owner_reference_offset,
+                copy_source_entity_suffixes: copy_sources
+                    .iter()
+                    .map(|row| row.entity_suffix)
+                    .collect(),
+                copy_source_node_guid_offsets: copy_sources
+                    .iter()
+                    .map(|row| row.node_guid_offset)
+                    .collect(),
             },
         }
     }
@@ -1248,6 +1310,15 @@ impl DesignBaseFeatureConstruction {
             Self::TimelineOwnedBodies { owner_record, .. } => Some(*owner_record),
             _ => None,
         }
+    }
+
+    /// Source body suffix of each pasted copy, parallel to the body suffixes.
+    pub(crate) fn copy_source_suffixes(&self) -> impl ExactSizeIterator<Item = u64> + '_ {
+        let sources = match self {
+            Self::TimelineOwnedBodies { copy_sources, .. } => copy_sources.as_slice(),
+            _ => &[],
+        };
+        sources.iter().map(|source| source.entity_suffix)
     }
 
     /// Return the body suffixes in source order for any Base Feature form.

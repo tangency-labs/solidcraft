@@ -57,7 +57,16 @@ fn archive_session_member_result_outlives_source_and_releases_archive_ownership(
         &decoded.source_fidelity,
     ))
     .unwrap();
-    let expected = u64::try_from(payload.len() + "root.f3d".len()).unwrap()
+    let expected = u64::try_from(
+        payload.len()
+            + "root.f3d".len()
+            + member
+                .scene_sources
+                .keys()
+                .map(|key| key.len() + 16)
+                .sum::<usize>(),
+    )
+    .unwrap()
         + member.trace.retained_bytes_estimate();
     assert_eq!(member.retained_bytes_estimate().unwrap(), expected);
 }

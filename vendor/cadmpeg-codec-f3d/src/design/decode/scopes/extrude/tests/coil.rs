@@ -2,6 +2,7 @@
 use cadmpeg_core::decode::u64_from_index;
 
 use crate::design::decode::scopes::parameter_scope::parse_parameter_scope;
+use crate::design::decode::scopes::parameter_scope::parse_parameter_scope_with_type_guid;
 use crate::records::decal::DesignRecordHeader;
 use crate::records::feature::extrude::DesignExtrudeExtent;
 use crate::records::feature::extrude::DesignExtrudeOperation;
@@ -157,12 +158,13 @@ fn extrude_scope_discriminators_follow_optional_indexed_reference() {
                 .unwrap(),
             byte_offset: 0,
         };
-        parse_parameter_scope(
+        parse_parameter_scope_with_type_guid(
             &bytes,
             &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
             header.record_index,
             &header.class_tag,
             header.byte_offset,
+            Some("DD405BC2-D673-44F0-8833-5CB2A1C186C7"),
         )
         .unwrap()
         .unwrap()
@@ -191,6 +193,7 @@ fn extrude_scope_discriminators_follow_optional_indexed_reference() {
             side_extent_discriminators: [1, 0],
             side_extent_discriminator_offsets: [77, 90],
             first_side_target_ordinal: None,
+            distance_tail: None,
             extent: DesignExtrudeExtent::OneSidedDistance,
             direction_face_extend_offsets: [32, 36],
             direction_reversed: false,
@@ -231,6 +234,14 @@ fn extrude_scope_discriminators_follow_optional_indexed_reference() {
             side_extent_discriminators: [1, 1],
             side_extent_discriminator_offsets: [87, 100],
             first_side_target_ordinal: None,
+            distance_tail: Some(
+                crate::records::feature::extrude::DesignExtrudeDistanceTail {
+                    target_option: 0,
+                    target_option_offset: 96,
+                    measurement: crate::records::feature::extrude::DesignExtrudeMeasurement::Sided,
+                    measurement_offset: 112,
+                }
+            ),
             extent: DesignExtrudeExtent::TwoSidedDistance,
             direction_face_extend_offsets: [42, 46],
             direction_reversed: false,
@@ -323,8 +334,9 @@ fn extrude_scope_discriminators_follow_optional_indexed_reference() {
     );
     assert_eq!(
         to_face.kind(),
-        crate::records::feature::scope::DesignFeatureKind::Extrusion
+        crate::records::feature::scope::DesignFeatureKind::Extrude
     );
+    assert_eq!(to_face.source_kind.as_deref(), Some("Extrusion"));
     let Some(prologue) = to_face.extrude_prologue() else {
         panic!("to-face Extrude prologue");
     };
@@ -1180,6 +1192,7 @@ fn legacy_class_415_symmetric_distance_scope_decodes_both_frame_lengths() {
                     u64_from_index(layout::SECOND_SIDE_EXTENT),
                 ],
                 first_side_target_ordinal: None,
+                distance_tail: None,
                 extent: DesignExtrudeExtent::SymmetricDistance,
                 direction_face_extend_offsets: [
                     u64_from_index(layout::DIRECTION),

@@ -60,11 +60,15 @@ fn member_edge(
             first.face_reference_ordinals,
             second.face_reference_ordinals,
         )?;
-        let edge_reference = operand.recipe_references.get(edge_ordinal)?;
+        let lanes = crate::records::dimensions::reference_lanes(&operand.recipe_references);
+        let edge_lane = lanes.get(edge_ordinal)?;
         let boundary_edges = support_edges(operand, face_ordinal, boundaries)?;
-        let mut candidates = edge_reference.candidate_edges.iter().filter(|edge| {
-            super::stable_edge_slot(edge).is_some_and(|slot| boundary_edges.contains(&slot))
-        });
+        let mut candidates = edge_lane
+            .iter()
+            .flat_map(|reference| &reference.candidate_edges)
+            .filter(|edge| {
+                super::stable_edge_slot(edge).is_some_and(|slot| boundary_edges.contains(&slot))
+            });
         let edge = candidates.next()?;
         return candidates.next().is_none().then(|| edge.clone());
     }
@@ -73,27 +77,33 @@ fn member_edge(
     if usize::try_from(structure.root).ok()? != structure.sides.len() {
         return None;
     }
+    let lanes = crate::records::dimensions::reference_lanes(&operand.recipe_references);
     let mut ordinals = HashSet::new();
     for field in std::iter::once(first.header_value).chain(first.scalars.iter().copied()) {
         if field == 0 {
             continue;
         }
         let ordinal = usize::try_from(field.checked_sub(1)?).ok()?;
-        operand.recipe_references.get(ordinal)?;
+        lanes.get(ordinal)?;
         ordinals.insert(ordinal);
     }
     let mut targets = ordinals.into_iter().filter_map(|ordinal| {
-        let reference = &operand.recipe_references[ordinal];
-        (!reference.candidate_edges.is_empty()).then_some(reference)
+        let mut edges: Vec<&EdgeId> = lanes[ordinal]
+            .iter()
+            .flat_map(|reference| &reference.candidate_edges)
+            .collect();
+        edges.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        edges.dedup();
+        (!edges.is_empty()).then_some(edges)
     });
     let target = targets.next()?;
     if targets.next().is_some() {
         return None;
     }
-    let [edge] = target.candidate_edges.as_slice() else {
+    let [edge] = target.as_slice() else {
         return None;
     };
-    Some(edge.clone())
+    Some((*edge).clone())
 }
 
 fn common_reference(left: [u32; 2], right: [u32; 2]) -> Option<usize> {
@@ -110,16 +120,24 @@ fn support_edges(
     face_ordinal: usize,
     boundaries: &HashMap<&str, Option<&AsmFaceBoundary>>,
 ) -> Option<HashSet<i64>> {
-    let reference = operand.recipe_references.get(face_ordinal)?;
-    if reference.candidate_faces.is_empty() {
+    let lane = *crate::records::dimensions::reference_lanes(&operand.recipe_references)
+        .get(face_ordinal)?;
+    if lane
+        .iter()
+        .all(|reference| reference.candidate_faces.is_empty())
+    {
         return None;
     }
     let mut faces = HashSet::new();
-    for face in &reference.candidate_faces {
-        let slot = face.as_str().rsplit_once('#')?.1.parse::<i64>().ok()?;
-        if !faces.insert(slot) {
-            return None;
+    for reference in lane {
+        let mut named = HashSet::new();
+        for face in &reference.candidate_faces {
+            let slot = face.as_str().rsplit_once('#')?.1.parse::<i64>().ok()?;
+            if !named.insert(slot) {
+                return None;
+            }
         }
+        faces.extend(named);
     }
     let mut contexts = operand
         .recipe_reference_contexts

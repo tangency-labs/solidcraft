@@ -207,6 +207,18 @@ fn configuration_root_outside_its_form_reports_an_unbound_active_row() {
 }
 
 #[test]
+fn a_bodyless_design_reports_its_configuration_losses() {
+    let mut malformed = root_record(*b"256", ROOT_RECORD, "1", "large");
+    malformed[53] = 2;
+    let decoded = decode(with_root_segment(archive(&width_table(), 5), malformed));
+    assert!(decoded
+        .report()
+        .losses
+        .iter()
+        .any(|loss| loss.code == crate::loss::F3dLossCode::ConfigurationActiveRowUnbound.kind()));
+}
+
+#[test]
 fn configuration_parameter_refusal_reports_unparsed_record() {
     let decoded = decode(archive(b"{}", 9));
     assert_eq!(decoded.ir().model.parameters.len(), 1);

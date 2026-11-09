@@ -9,9 +9,10 @@
 use cadmpeg_core::decode::index_from_u32;
 
 use super::{
-    distinct_form_cage_ids, form_cage_objects, form_cage_serializers, form_cage_surface,
-    form_cage_surfaces, form_class_325_cage_objects, form_class_325_cage_surface,
-    form_class_328_envelope, FormCageSerializers,
+    distinct_form_cage_ids, form_body_cage_surfaces, form_body_record_cages, form_body_references,
+    form_cage_objects, form_cage_serializers, form_cage_surface, form_cage_surfaces,
+    form_class_325_cage_objects, form_class_325_cage_surface, form_class_328_envelope,
+    form_selection_group_is_empty, form_typed_serializers, FormCageSerializers, FormRecordTypes,
 };
 
 fn parsed_serializers(
@@ -614,4 +615,393 @@ fn class_328_form_metadata_rejects_each_duplicate_member_without_heap_growth() {
             "duplicate metadata member {ordinal}"
         );
     }
+}
+
+fn push_lp_utf16(out: &mut Vec<u8>, text: &str) {
+    out.extend_from_slice(
+        &u32::try_from(text.encode_utf16().count())
+            .unwrap()
+            .to_le_bytes(),
+    );
+    for unit in text.encode_utf16() {
+        out.extend_from_slice(&unit.to_le_bytes());
+    }
+}
+
+fn push_marked(out: &mut Vec<u8>, record_index: u32) {
+    out.push(1);
+    out.extend_from_slice(&u64::from(record_index).to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+}
+
+fn push_material_envelope(out: &mut Vec<u8>, token: &str) {
+    push_lp_utf16(out, "00000000-0000-4000-8000-000000000001");
+    push_lp_utf16(out, "C1EEA57C-3F56-45FC-B8CB-A9EC46A9994C");
+    out.extend_from_slice(&0u32.to_le_bytes());
+    push_lp_utf16(out, token);
+}
+
+fn form_body_frame(
+    body: u32,
+    prefix: usize,
+    references: [u32; 4],
+    second_run: Option<[u32; 4]>,
+) -> Vec<u8> {
+    let mut frame = indexed_frame(b"274", body, 11);
+    frame.extend(std::iter::repeat_n(0xa5, prefix));
+    push_material_envelope(&mut frame, "PrismMaterial-018");
+    for reference in references {
+        push_marked(&mut frame, reference);
+    }
+    push_material_envelope(&mut frame, "PrismMaterial-018_physmat_aspects:Prism-256");
+    match second_run {
+        Some(run) => {
+            for reference in run {
+                push_marked(&mut frame, reference);
+            }
+        }
+        None => frame.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0x80, 0x3f]),
+    }
+    frame.extend_from_slice(&indexed_frame(b"258", body, 30));
+    frame
+}
+
+fn form_serializer_frame(serializer: u32, surface: u32, uuid: &str) -> Vec<u8> {
+    let mut frame = indexed_frame(b"377", serializer, 21);
+    push_lp_utf16(&mut frame, &format!("TSpline.{uuid}.tsm"));
+    push_marked(&mut frame, surface);
+    frame
+}
+
+fn form_selection_group_frame(group: u32, owner: u32, member_count: u32) -> Vec<u8> {
+    let mut frame = indexed_frame(b"429", group, 89);
+    frame[21] = 1;
+    frame[22..30].copy_from_slice(&u64::from(owner).to_le_bytes());
+    frame[32..36].copy_from_slice(&member_count.to_le_bytes());
+    frame.extend_from_slice(&indexed_frame(b"264", group, 30));
+    frame
+}
+
+fn form_meta(rows: &[(&str, u32, &[u32])]) -> crate::metastream::MetaStream {
+    crate::metastream::MetaStream {
+        types: rows
+            .iter()
+            .map(
+                |&(type_guid, version, entities)| crate::records::entity_header::SegmentTypeData {
+                    byte_offset: 0,
+                    type_guid: type_guid.to_owned().try_into().unwrap(),
+                    type_guid_offset: 0,
+                    base_type_guid: crate::records::entity_header::BaseTypeGuid::Absent,
+                    version,
+                    version_offset: 0,
+                    module: "Fusion".to_owned(),
+                    entities: crate::records::identity::ReferenceRun::unlocated(
+                        entities.iter().map(|entity| u64::from(*entity)).collect(),
+                    ),
+                },
+            )
+            .collect(),
+        records: Vec::new(),
+        secondary_records: Vec::new(),
+    }
+}
+
+fn form_scope(
+    record_index: u32,
+    references: Vec<u32>,
+) -> crate::records::feature::scope::DesignParameterScope {
+    let mut scope = crate::records::feature::scope::DesignParameterScope::empty(
+        &format!("f3d:FusionAssetName[Active]/Design1/BulkStream.dat:scope#{record_index}"),
+        crate::records::feature::scope::DesignFeatureKind::Form,
+        record_index,
+    );
+    scope
+        .try_edit(|draft| {
+            draft.reference_members = crate::records::identity::ReferenceRun::unlocated(references);
+            draft.layout_fixture_references();
+            draft.paired_byte_offset = draft.paired_byte_offset.max(draft.kind_offset + 96);
+            draft.frame_length = draft.paired_byte_offset - draft.byte_offset;
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    scope
+}
+
+fn neutral_form_cage(id: &str, uuid: &str) -> cadmpeg_ir::SubdSurface {
+    cadmpeg_ir::SubdSurface {
+        id: cadmpeg_ir::ids::SubdId::mint(id).expect("identity grammar"),
+        scheme: cadmpeg_ir::subd::SubdScheme::CatmullClark,
+        source_object: Some(cadmpeg_ir::SourceObjectAssociation {
+            geometry_role: None,
+            format: cadmpeg_ir::CodecFormat::F3d,
+            object_id: cadmpeg_core::text::NonBlankString::new(format!(
+                "FusionAssetName[Active]/TSplines.BlobParts/TSpline.{uuid}.tsm"
+            ))
+            .unwrap(),
+            name: None,
+            color: None,
+            visible: None,
+            layer: None,
+            instance_path: Vec::new(),
+        }),
+        cage: cadmpeg_ir::subd::SubdCage::default(),
+    }
+}
+
+const FIRST_CAGE_UUID: &str = "11111111-1111-4111-8111-111111111111";
+const SECOND_CAGE_UUID: &str = "22222222-2222-4222-8222-222222222222";
+
+fn two_body_form_meta() -> crate::metastream::MetaStream {
+    form_meta(&[
+        ("FA1F0081-C9A1-4E14-8F25-D12DD868ED90", 11, &[500, 300]),
+        ("830A2A2B-0AA9-4D6A-ACA1-F7A2B2A06571", 0, &[299, 499]),
+        ("22709494-9149-4A70-A829-7D748A7B5DB1", 0, &[296, 496]),
+        ("E079B079-016A-43C2-ACC7-9627B32A8960", 0, &[207]),
+        ("CD57BC48-50EC-47DC-975A-FB6DEA72F4DA", 4, &[22]),
+        ("702b9cd2-537c-429e-8cc4-22beeeb98c37", 1, &[301, 501]),
+    ])
+}
+
+fn two_body_form_stream() -> Vec<u8> {
+    [
+        form_selection_group_frame(207, 201, 1),
+        form_serializer_frame(299, 296, FIRST_CAGE_UUID),
+        form_body_frame(300, 7, [201, 22, 296, 301], None),
+        form_serializer_frame(499, 496, SECOND_CAGE_UUID),
+        form_body_frame(500, 23, [201, 22, 496, 501], None),
+    ]
+    .concat()
+}
+
+#[test]
+fn form_body_record_reference_run_follows_its_first_material_envelope() {
+    for prefix in [0, 1, 18] {
+        let bytes = form_body_frame(1300, prefix, [1200, 23, 1297, 1301], None);
+        let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+        assert_eq!(
+            form_body_references(&bytes, &records, 1300),
+            Some([1200, 23, 1297, 1301]),
+            "prefix {prefix}"
+        );
+    }
+}
+
+#[test]
+fn form_body_record_with_two_reference_runs_is_refused() {
+    let bytes = form_body_frame(
+        1300,
+        0,
+        [1200, 23, 1297, 1301],
+        Some([1200, 23, 1297, 1301]),
+    );
+    let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+    assert_eq!(form_body_references(&bytes, &records, 1300), None);
+}
+
+#[test]
+fn form_body_surfaces_follow_body_record_order_for_the_owning_scope() {
+    let bytes = [
+        form_body_frame(300, 0, [201, 22, 296, 305], None),
+        form_body_frame(400, 0, [999, 22, 396, 401], None),
+        form_body_frame(500, 0, [201, 22, 496, 501], None),
+    ]
+    .concat();
+    let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+    let meta = form_meta(&[
+        ("FA1F0081-C9A1-4E14-8F25-D12DD868ED90", 10, &[500, 400, 300]),
+        ("22709494-9149-4A70-A829-7D748A7B5DB1", 0, &[296, 396, 496]),
+        ("CD57BC48-50EC-47DC-975A-FB6DEA72F4DA", 4, &[22]),
+        ("702b9cd2-537c-429e-8cc4-22beeeb98c37", 1, &[305, 401, 501]),
+    ]);
+    let types = FormRecordTypes::of(&meta);
+    assert_eq!(
+        form_body_cage_surfaces(&bytes, &records, &types, 201),
+        Some(vec![296, 496])
+    );
+    assert_eq!(
+        form_body_cage_surfaces(&bytes, &records, &types, 999),
+        Some(vec![396])
+    );
+    assert_eq!(
+        form_body_cage_surfaces(&bytes, &records, &types, 777),
+        Some(Vec::new())
+    );
+}
+
+#[test]
+fn form_body_surfaces_require_a_typed_container_and_scene_node() {
+    for (references, scenes) in [([201, 23, 296, 301], [301]), ([201, 22, 296, 301], [999])] {
+        let bytes = form_body_frame(300, 0, references, None);
+        let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+        let meta = form_meta(&[
+            ("FA1F0081-C9A1-4E14-8F25-D12DD868ED90", 10, &[300]),
+            ("22709494-9149-4A70-A829-7D748A7B5DB1", 0, &[296]),
+            ("CD57BC48-50EC-47DC-975A-FB6DEA72F4DA", 4, &[22]),
+            ("702b9cd2-537c-429e-8cc4-22beeeb98c37", 1, &scenes),
+        ]);
+        assert_eq!(
+            form_body_cage_surfaces(&bytes, &records, &FormRecordTypes::of(&meta), 201),
+            None,
+            "{references:?}"
+        );
+    }
+}
+
+#[test]
+fn form_body_records_of_other_versions_are_not_form_bodies() {
+    let meta = form_meta(&[("FA1F0081-C9A1-4E14-8F25-D12DD868ED90", 9, &[300])]);
+    let types = FormRecordTypes::of(&meta);
+    assert!(types.bodies.is_empty());
+    assert_eq!(
+        form_body_cage_surfaces(
+            &[],
+            &crate::design::decode::sketch::IndexedRecordOffsets::build(&[]),
+            &types,
+            201
+        ),
+        None
+    );
+}
+
+#[test]
+fn typed_form_serializer_joins_its_surface_under_any_class_tag() {
+    let bytes = two_body_form_stream();
+    let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+    let arena = cadmpeg_core::decode::DecodeArena::new();
+    let (ctx, _) = cadmpeg_core::decode::DecodeContext::from_root_bytes(
+        &[],
+        &arena,
+        &cadmpeg_core::decode::DecodePolicy::default(),
+    )
+    .unwrap();
+    let typed = form_typed_serializers(
+        &ctx,
+        &bytes,
+        &records,
+        &FormRecordTypes::of(&two_body_form_meta()),
+    )
+    .unwrap();
+    assert_eq!(
+        typed.entry_name(296),
+        Some(format!("TSpline.{FIRST_CAGE_UUID}.tsm").as_str())
+    );
+    assert_eq!(
+        typed.entry_name(496),
+        Some(format!("TSpline.{SECOND_CAGE_UUID}.tsm").as_str())
+    );
+    assert_eq!(parsed_serializers(&bytes, &records).entry_name(296), None);
+}
+
+#[test]
+fn form_body_records_bind_the_owning_scope_cages_in_body_record_order() {
+    let bytes = two_body_form_stream();
+    let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+    let cages = [
+        neutral_form_cage("f3d:model:subd#2", SECOND_CAGE_UUID),
+        neutral_form_cage("f3d:model:subd#1", FIRST_CAGE_UUID),
+    ];
+    let arena = cadmpeg_core::decode::DecodeArena::new();
+    let (ctx, _) = cadmpeg_core::decode::DecodeContext::from_root_bytes(
+        &[],
+        &arena,
+        &cadmpeg_core::decode::DecodePolicy::default(),
+    )
+    .unwrap();
+    let resolved = form_body_record_cages(
+        &ctx,
+        &bytes,
+        &records,
+        &two_body_form_meta(),
+        &form_scope(201, vec![205, 207]),
+        &cages,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        resolved
+            .iter()
+            .map(cadmpeg_ir::ids::SubdId::as_str)
+            .collect::<Vec<_>>(),
+        ["f3d:model:subd#1", "f3d:model:subd#2"]
+    );
+    assert_eq!(
+        form_body_record_cages(
+            &ctx,
+            &bytes,
+            &records,
+            &two_body_form_meta(),
+            &form_scope(201, vec![205, 207]),
+            &cages[..1],
+        )
+        .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn form_scope_without_body_records_owns_zero_cages_only_with_an_empty_selection() {
+    let bytes = [
+        form_selection_group_frame(226, 220, 0),
+        form_selection_group_frame(235, 229, 1),
+        form_selection_group_frame(245, 999, 0),
+    ]
+    .concat();
+    let records = crate::design::test_support::indexed_record_offsets_for_test(&bytes);
+    let meta = form_meta(&[("E079B079-016A-43C2-ACC7-9627B32A8960", 0, &[226, 235, 245])]);
+    let types = FormRecordTypes::of(&meta);
+    assert!(form_selection_group_is_empty(
+        &bytes,
+        &records,
+        &types,
+        &form_scope(220, vec![224, 226])
+    ));
+    assert!(!form_selection_group_is_empty(
+        &bytes,
+        &records,
+        &types,
+        &form_scope(229, vec![233, 235])
+    ));
+    assert!(!form_selection_group_is_empty(
+        &bytes,
+        &records,
+        &types,
+        &form_scope(240, vec![244, 245])
+    ));
+    assert!(!form_selection_group_is_empty(
+        &bytes,
+        &records,
+        &types,
+        &form_scope(220, vec![224])
+    ));
+    let arena = cadmpeg_core::decode::DecodeArena::new();
+    let (ctx, _) = cadmpeg_core::decode::DecodeContext::from_root_bytes(
+        &[],
+        &arena,
+        &cadmpeg_core::decode::DecodePolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        form_body_record_cages(
+            &ctx,
+            &bytes,
+            &records,
+            &meta,
+            &form_scope(220, vec![224, 226]),
+            &[],
+        )
+        .unwrap(),
+        Some(Vec::new())
+    );
+    assert_eq!(
+        form_body_record_cages(
+            &ctx,
+            &bytes,
+            &records,
+            &meta,
+            &form_scope(229, vec![233, 235]),
+            &[],
+        )
+        .unwrap(),
+        None
+    );
 }

@@ -873,7 +873,8 @@ fn loft_edge_profile_face_slot(
     let mut evidence = None;
     for operand in operands {
         let (candidate, slot, count) = (|| {
-            if operand.recipe_references.len() != operand.recipe_reference_contexts.len()
+            if crate::records::dimensions::reference_lanes(&operand.recipe_references).len()
+                != operand.recipe_reference_contexts.len()
                 || operand.candidate_faces.is_empty()
                 || operand.preceding_candidate_faces.is_empty()
                 || operand.result_candidate_faces.is_empty()
@@ -1000,7 +1001,7 @@ fn historical_face_selection_in_state(
     historical_face_selection_with_native(scope, previous_state_id, faces, native)
 }
 
-fn historical_face_selection_with_native(
+pub(crate) fn historical_face_selection_with_native(
     scope: &DesignParameterScope,
     previous_state_id: i64,
     faces: Vec<i64>,
@@ -2892,6 +2893,7 @@ mod tests {
             candidate_edges: Vec::new(),
             alternate_selector_faces: Vec::new(),
             alternate_selector_edges: Vec::new(),
+            operand_offset: None,
         }
     }
 

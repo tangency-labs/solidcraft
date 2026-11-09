@@ -4,6 +4,7 @@
 use crate::container::ContainerScan;
 use crate::design::decode::sketch::{next_indexed_record_offset, IndexedRecordOffsets};
 use crate::ids::{self, native_stream};
+use crate::layout::compact_selection_envelope_prefix as selection_prefix;
 use crate::layout::{
     form_class_325_cage_entry, form_class_325_cage_table, form_class_328_cage_group,
     form_class_328_metadata_group, form_class_328_reference_entry, form_class_328_scope,
@@ -43,8 +44,9 @@ pub(crate) fn bind_form_cages(
     scopes: &[DesignParameterScope],
     features: &mut [cadmpeg_ir::features::Feature],
     cages: &[cadmpeg_ir::subd::SubdSurface],
+    losses: &mut Vec<cadmpeg_ir::report::loss::LossNote>,
 ) -> Result<(), CodecError> {
-    'scope: for scope in scopes
+    for scope in scopes
         .iter()
         .filter(|scope| scope.kind() == crate::records::feature::scope::DesignFeatureKind::Form)
     {
@@ -176,46 +178,41 @@ pub(crate) fn bind_form_cages(
             }
             continue;
         }
-        let [cage_objects] = cage_lists.as_slice() else {
-            continue;
-        };
-        let Some(surfaces) = form_cage_surfaces(bytes, &records, cage_objects, scope.record_index)
-        else {
-            continue;
-        };
-        let serializers = form_cage_serializers(ctx, bytes, &records)?;
-        let mut resolved = Vec::new();
-        for surface in &surfaces {
-            let Some(entry_name) = serializers.entry_name(*surface) else {
-                continue 'scope;
-            };
-            let mut matches = cages.iter().filter(|cage| {
-                cage.source_object
-                    .as_ref()
-                    .and_then(|source| source.object_id.as_str().rsplit('/').next())
-                    == Some(entry_name)
-            });
-            let Some(cage) = matches.next() else {
-                continue 'scope;
-            };
-            if matches.next().is_some() {
-                continue 'scope;
+        let resolved = match form_cage_list_cages(ctx, bytes, &records, scope, &cage_lists, cages)?
+        {
+            Some(resolved) => resolved,
+            None => {
+                let Some(meta) =
+                    crate::design::decode::meta::metadata_for_bulk_stream(scan, stream)?
+                else {
+                    continue;
+                };
+                let Some(resolved) =
+                    form_body_record_cages(ctx, bytes, &records, &meta, scope, cages)?
+                else {
+                    continue;
+                };
+                if resolved.len() > 1 && native_form_feature(features, scope).is_some() {
+                    losses.push(crate::loss::F3dLossCode::FeatureFormCageOrderAssumed.note(
+                        format!(
+                            "Form scope {} orders its {} cages by body-record index.",
+                            scope.id,
+                            resolved.len()
+                        ),
+                    ));
+                }
+                if resolved.is_empty() && native_form_feature(features, scope).is_some() {
+                    losses.push(crate::loss::F3dLossCode::FeatureFormEmptyCagesAssumed.note(
+                        format!(
+                            "Form scope {} has an empty selection and no body records.",
+                            scope.id
+                        ),
+                    ));
+                }
+                resolved
             }
-            push_form_cage_id(&mut resolved, &cage.id);
-        }
-        if !distinct_form_cage_ids(&resolved) {
-            continue;
-        }
-        let feature_id = crate::ids::neutral_feature_id(scope);
-        let Some(feature) = features.iter_mut().find(|feature| feature.id == feature_id) else {
-            continue;
         };
-        if matches!(
-            feature.evaluation.definition(),
-            cadmpeg_ir::features::FeatureDefinition::Operation(
-                cadmpeg_ir::features::FeatureOperation::Native { .. }
-            )
-        ) {
+        if let Some(feature) = native_form_feature(features, scope) {
             feature
                 .evaluation
                 .set_definition(cadmpeg_ir::features::FeatureDefinition::Operation(
@@ -224,6 +221,260 @@ pub(crate) fn bind_form_cages(
         }
     }
     Ok(())
+}
+
+fn native_form_feature<'a>(
+    features: &'a mut [cadmpeg_ir::features::Feature],
+    scope: &DesignParameterScope,
+) -> Option<&'a mut cadmpeg_ir::features::Feature> {
+    let feature_id = crate::ids::neutral_feature_id(scope);
+    features.iter_mut().find(|feature| {
+        feature.id == feature_id
+            && matches!(
+                feature.evaluation.definition(),
+                cadmpeg_ir::features::FeatureDefinition::Operation(
+                    cadmpeg_ir::features::FeatureOperation::Native { .. }
+                )
+            )
+    })
+}
+
+fn unique_neutral_cage<'a>(
+    cages: &'a [cadmpeg_ir::subd::SubdSurface],
+    entry_name: &str,
+) -> Option<&'a cadmpeg_ir::ids::SubdId> {
+    let mut matches = cages.iter().filter(|cage| {
+        cage.source_object
+            .as_ref()
+            .and_then(|source| source.object_id.as_str().rsplit('/').next())
+            == Some(entry_name)
+    });
+    match (matches.next(), matches.next()) {
+        (Some(cage), None) => Some(&cage.id),
+        _ => None,
+    }
+}
+
+fn form_cage_list_cages(
+    ctx: &DecodeContext<'_>,
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    scope: &DesignParameterScope,
+    cage_lists: &[Vec<u32>],
+    cages: &[cadmpeg_ir::subd::SubdSurface],
+) -> Result<Option<Vec<cadmpeg_ir::ids::SubdId>>, CodecError> {
+    let [cage_objects] = cage_lists else {
+        return Ok(None);
+    };
+    let Some(surfaces) = form_cage_surfaces(bytes, records, cage_objects, scope.record_index)
+    else {
+        return Ok(None);
+    };
+    let serializers = form_cage_serializers(ctx, bytes, records)?;
+    Ok(resolve_form_cage_surfaces(&serializers, &surfaces, cages))
+}
+
+fn resolve_form_cage_surfaces(
+    serializers: &FormCageSerializers,
+    surfaces: &[u32],
+    cages: &[cadmpeg_ir::subd::SubdSurface],
+) -> Option<Vec<cadmpeg_ir::ids::SubdId>> {
+    let mut resolved = Vec::new();
+    for surface in surfaces {
+        let cage = unique_neutral_cage(cages, serializers.entry_name(*surface)?)?;
+        push_form_cage_id(&mut resolved, cage);
+    }
+    distinct_form_cage_ids(&resolved).then_some(resolved)
+}
+
+fn form_body_record_cages(
+    ctx: &DecodeContext<'_>,
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    meta: &crate::metastream::MetaStream,
+    scope: &DesignParameterScope,
+    cages: &[cadmpeg_ir::subd::SubdSurface],
+) -> Result<Option<Vec<cadmpeg_ir::ids::SubdId>>, CodecError> {
+    let types = FormRecordTypes::of(meta);
+    let Some(surfaces) = form_body_cage_surfaces(bytes, records, &types, scope.record_index) else {
+        return Ok(None);
+    };
+    if surfaces.is_empty() {
+        return Ok(form_selection_group_is_empty(bytes, records, &types, scope).then(Vec::new));
+    }
+    let serializers = form_typed_serializers(ctx, bytes, records, &types)?;
+    Ok(resolve_form_cage_surfaces(&serializers, &surfaces, cages))
+}
+
+const FORM_BODY_TYPE_GUID: &str = "FA1F0081-C9A1-4E14-8F25-D12DD868ED90";
+const FORM_BODY_TYPE_VERSIONS: [u32; 2] = [10, 11];
+const FORM_SERIALIZER_TYPE_GUID: &str = "830A2A2B-0AA9-4D6A-ACA1-F7A2B2A06571";
+const FORM_SURFACE_TYPE_GUID: &str = "22709494-9149-4A70-A829-7D748A7B5DB1";
+const FORM_SELECTION_GROUP_TYPE_GUID: &str = "E079B079-016A-43C2-ACC7-9627B32A8960";
+const FORM_BODY_REFERENCE_COUNT: usize = 4;
+const FORM_BODY_TOKEN_MAX_UNITS: u32 = 256;
+
+#[derive(Default)]
+struct FormRecordTypes {
+    bodies: Vec<u32>,
+    unsupported_bodies: bool,
+    serializers: Vec<u32>,
+    surfaces: HashSet<u32>,
+    selection_groups: HashSet<u32>,
+    body_containers: HashSet<u32>,
+    scene_nodes: HashSet<u32>,
+}
+
+impl FormRecordTypes {
+    fn of(meta: &crate::metastream::MetaStream) -> Self {
+        use crate::design::presentation::{BODY_SCENE_NODE_TYPE_GUID, BREP_CONTAINER_TYPE_GUID};
+        let mut types = Self::default();
+        for design_type in &meta.types {
+            let guid = design_type.type_guid.as_str();
+            let version = design_type.version;
+            let entities = design_type
+                .entities
+                .values()
+                .filter_map(|entity| u32::try_from(*entity).ok());
+            if guid.eq_ignore_ascii_case(FORM_BODY_TYPE_GUID) {
+                if FORM_BODY_TYPE_VERSIONS.contains(&version) {
+                    types.bodies.extend(entities);
+                } else if entities.count() != 0 {
+                    types.unsupported_bodies = true;
+                }
+            } else if guid.eq_ignore_ascii_case(FORM_SERIALIZER_TYPE_GUID) && version == 0 {
+                types.serializers.extend(entities);
+            } else if guid.eq_ignore_ascii_case(FORM_SURFACE_TYPE_GUID) {
+                types.surfaces.extend(entities);
+            } else if guid.eq_ignore_ascii_case(FORM_SELECTION_GROUP_TYPE_GUID) && version == 0 {
+                types.selection_groups.extend(entities);
+            } else if guid.eq_ignore_ascii_case(BREP_CONTAINER_TYPE_GUID) {
+                types.body_containers.extend(entities);
+            } else if guid.eq_ignore_ascii_case(BODY_SCENE_NODE_TYPE_GUID) {
+                types.scene_nodes.extend(entities);
+            }
+        }
+        types.bodies.sort_unstable();
+        types.serializers.sort_unstable();
+        types
+    }
+}
+
+fn form_body_cage_surfaces(
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    types: &FormRecordTypes,
+    scope_record_index: u32,
+) -> Option<Vec<u32>> {
+    if types.unsupported_bodies {
+        return None;
+    }
+    let mut surfaces = Vec::new();
+    for body in &types.bodies {
+        let [owner, container, surface, scene] = form_body_references(bytes, records, *body)?;
+        if !types.body_containers.contains(&container)
+            || !types.surfaces.contains(&surface)
+            || !types.scene_nodes.contains(&scene)
+        {
+            return None;
+        }
+        if owner == scope_record_index {
+            surfaces.push(surface);
+        }
+    }
+    Some(surfaces)
+}
+
+fn form_body_references(
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    body: u32,
+) -> Option<[u32; FORM_BODY_REFERENCE_COUNT]> {
+    let (start, paired) = one_indexed_frame(records, body)?;
+    let frame = bytes.get(start..paired)?;
+    let mut library = Vec::new();
+    library.extend_from_slice(
+        &u32::try_from(crate::design::presentation::PHYSICAL_MATERIAL_LIBRARY_ID.len())
+            .ok()?
+            .to_le_bytes(),
+    );
+    for unit in crate::design::presentation::PHYSICAL_MATERIAL_LIBRARY_ID.encode_utf16() {
+        library.extend_from_slice(&unit.to_le_bytes());
+    }
+    let mut found = None;
+    for library_at in memchr::memmem::find_iter(frame, &library) {
+        let Some(references) = form_body_envelope_references(frame, library_at + library.len())
+        else {
+            continue;
+        };
+        if found.replace(references).is_some() {
+            return None;
+        }
+    }
+    found
+}
+
+fn form_body_envelope_references(
+    frame: &[u8],
+    after_library: usize,
+) -> Option<[u32; FORM_BODY_REFERENCE_COUNT]> {
+    if View::u32_le_at(frame, after_library)? != 0 {
+        return None;
+    }
+    let token_units = View::u32_le_at(frame, after_library.checked_add(4)?)?;
+    if !(1..=FORM_BODY_TOKEN_MAX_UNITS).contains(&token_units) {
+        return None;
+    }
+    let mut cursor = after_library
+        .checked_add(8)?
+        .checked_add(usize::try_from(token_units).ok()?.checked_mul(2)?)?;
+    let mut references = [0; FORM_BODY_REFERENCE_COUNT];
+    for reference in &mut references {
+        if frame.get(cursor) != Some(&form_class_328_reference_entry::MARKER_VALUE)
+            || frame.get(
+                cursor + form_class_328_reference_entry::ZERO_TAIL
+                    ..cursor + form_class_328_reference_entry::LEN,
+            ) != Some(&[0; 2])
+        {
+            return None;
+        }
+        *reference = u32::try_from(View::u64_le_at(
+            frame,
+            cursor + form_class_328_reference_entry::RECORD_INDEX,
+        )?)
+        .ok()?;
+        cursor = cursor.checked_add(form_class_328_reference_entry::LEN)?;
+    }
+    Some(references)
+}
+
+fn form_selection_group_is_empty(
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    types: &FormRecordTypes,
+    scope: &DesignParameterScope,
+) -> bool {
+    let mut groups = scope
+        .reference_members()
+        .values()
+        .copied()
+        .filter(|member| types.selection_groups.contains(member));
+    let (Some(group), None) = (groups.next(), groups.next()) else {
+        return false;
+    };
+    let Some((start, paired)) = one_indexed_frame(records, group) else {
+        return false;
+    };
+    let Some(frame) = bytes.get(start..paired) else {
+        return false;
+    };
+    frame.get(selection_prefix::ZERO_RUN_10..selection_prefix::OWNER_MARKER) == Some(&[0; 10])
+        && frame.get(selection_prefix::OWNER_MARKER) == Some(&selection_prefix::OWNER_MARKER_VALUE)
+        && View::u64_le_at(frame, selection_prefix::OWNER_SCOPE_RECORD_INDEX)
+            == Some(u64::from(scope.record_index))
+        && frame.get(selection_prefix::OWNER_ZERO_TAIL..selection_prefix::MEMBER_COUNT)
+            == Some(&[0; 2])
+        && View::u32_le_at(frame, selection_prefix::MEMBER_COUNT) == Some(0)
 }
 
 fn form_class_328_envelope(
@@ -838,82 +1089,60 @@ fn form_cage_serializers(
         }
     }
     offsets.sort_unstable_by(Ord::cmp);
+    let mut frames = Vec::new();
+    for offset in offsets {
+        let frame = match bytes.get(offset + 4..offset + 7) {
+            Some(b"335") => FormSerializerFrame::PairedClass331,
+            Some(b"315" | b"349" | b"360" | b"431" | b"446") => FormSerializerFrame::Ordinary,
+            _ => continue,
+        };
+        frames.push((offset, frame));
+    }
+    collect_form_cage_serializers(ctx, bytes, records, frames)
+}
+
+fn form_typed_serializers(
+    ctx: &DecodeContext<'_>,
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    types: &FormRecordTypes,
+) -> Result<FormCageSerializers, CodecError> {
+    let mut offsets = types
+        .serializers
+        .iter()
+        .filter_map(|serializer| records.offsets(*serializer).first().copied())
+        .collect::<Vec<_>>();
+    offsets.sort_unstable();
+    collect_form_cage_serializers(
+        ctx,
+        bytes,
+        records,
+        offsets
+            .into_iter()
+            .map(|offset| (offset, FormSerializerFrame::Ordinary)),
+    )
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FormSerializerFrame {
+    Ordinary,
+    PairedClass331,
+}
+
+fn collect_form_cage_serializers(
+    ctx: &DecodeContext<'_>,
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    frames: impl IntoIterator<Item = (usize, FormSerializerFrame)>,
+) -> Result<FormCageSerializers, CodecError> {
     let mut ordered = Vec::new();
     let mut entries = HashMap::new();
-    for offset in offsets {
-        let is_class_335 = bytes.get(offset + 4..offset + 7) == Some(b"335");
-        if !matches!(
-            bytes.get(offset + 4..offset + 7),
-            Some(b"315" | b"335" | b"349" | b"360" | b"431" | b"446")
-        ) || bytes.get(
-            offset + form_serializer_frame_132::ZERO_RUN_10
-                ..offset + form_serializer_frame_132::ENTRY_NAME_LENGTH,
-        ) != Some(&[0; 10])
-        {
-            continue;
-        }
-        let Some(next) = next_indexed_record_offset(bytes, offset + 1) else {
-            continue;
-        };
-        if next != offset + form_serializer_frame_132::LEN
-            || (is_class_335 && bytes.get(next + 4..next + 7) != Some(b"331"))
-        {
-            continue;
-        }
-        let name_at = offset + form_serializer_frame_132::ENTRY_NAME_LENGTH;
-        let Some(name_units) = View::u32_le_at(bytes, name_at)
-            .filter(|count| (1..=256).contains(count))
-            .and_then(|count| usize::try_from(count).ok())
+    for (offset, frame) in frames {
+        let Some((surface, entry_name)) =
+            form_serializer_entry(ctx, bytes, records, offset, frame)?
         else {
             continue;
         };
-        let Some(after_name) = name_at.checked_add(4).and_then(|start| {
-            name_units
-                .checked_mul(2)
-                .and_then(|length| start.checked_add(length))
-        }) else {
-            continue;
-        };
-        let Some(raw_name) = bytes.get(name_at + 4..after_name) else {
-            continue;
-        };
-        let entry_name = match ctx.utf16le_text(
-            raw_name,
-            name_units,
-            false,
-            "f3d form serializer name materialization",
-        ) {
-            Ok(text) => text,
-            Err(CodecError::Malformed(_)) => continue,
-            Err(error) => return Err(error),
-        };
-        if !entry_name.starts_with("TSpline.")
-            || !std::path::Path::new(&entry_name)
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("tsm"))
-            || bytes.get(after_name) != Some(&1)
-            || bytes.get(after_name + 9..after_name + 11) != Some(&[0, 0])
-        {
-            continue;
-        }
-        let Some(surface) =
-            View::u64_le_at(bytes, after_name + 1).and_then(|surface| u32::try_from(surface).ok())
-        else {
-            continue;
-        };
-        if is_class_335
-            && (bytes
-                .get(after_name + 11..offset + form_serializer_frame_132::LEN)
-                .is_none_or(|tail| tail.iter().any(|byte| *byte != 0))
-                || !records.offsets(surface).iter().any(|surface_offset| {
-                    bytes.get(*surface_offset + 4..*surface_offset + 7) == Some(b"358")
-                }))
-        {
-            continue;
-        }
-        if !is_class_335 && after_name + 11 != offset + form_serializer_frame_132::LEN {
-            continue;
-        }
         if let Some(entry) = entries.get_mut(&surface) {
             *entry = FormCageEntry::Duplicate;
         } else {
@@ -922,6 +1151,86 @@ fn form_cage_serializers(
         }
     }
     Ok(FormCageSerializers { ordered, entries })
+}
+
+fn form_serializer_entry(
+    ctx: &DecodeContext<'_>,
+    bytes: &[u8],
+    records: &IndexedRecordOffsets,
+    offset: usize,
+    frame: FormSerializerFrame,
+) -> Result<Option<(u32, String)>, CodecError> {
+    let is_class_335 = frame == FormSerializerFrame::PairedClass331;
+    if bytes.get(
+        offset + form_serializer_frame_132::ZERO_RUN_10
+            ..offset + form_serializer_frame_132::ENTRY_NAME_LENGTH,
+    ) != Some(&[0; 10])
+    {
+        return Ok(None);
+    }
+    let Some(next) = next_indexed_record_offset(bytes, offset + 1) else {
+        return Ok(None);
+    };
+    if next != offset + form_serializer_frame_132::LEN
+        || (is_class_335 && bytes.get(next + 4..next + 7) != Some(b"331"))
+    {
+        return Ok(None);
+    }
+    let name_at = offset + form_serializer_frame_132::ENTRY_NAME_LENGTH;
+    let Some(name_units) = View::u32_le_at(bytes, name_at)
+        .filter(|count| (1..=256).contains(count))
+        .and_then(|count| usize::try_from(count).ok())
+    else {
+        return Ok(None);
+    };
+    let Some(after_name) = name_at.checked_add(4).and_then(|start| {
+        name_units
+            .checked_mul(2)
+            .and_then(|length| start.checked_add(length))
+    }) else {
+        return Ok(None);
+    };
+    let Some(raw_name) = bytes.get(name_at + 4..after_name) else {
+        return Ok(None);
+    };
+    let entry_name = match ctx.utf16le_text(
+        raw_name,
+        name_units,
+        false,
+        "f3d form serializer name materialization",
+    ) {
+        Ok(text) => text,
+        Err(CodecError::Malformed(_)) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    if !entry_name.starts_with("TSpline.")
+        || !std::path::Path::new(&entry_name)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("tsm"))
+        || bytes.get(after_name) != Some(&1)
+        || bytes.get(after_name + 9..after_name + 11) != Some(&[0, 0])
+    {
+        return Ok(None);
+    }
+    let Some(surface) =
+        View::u64_le_at(bytes, after_name + 1).and_then(|surface| u32::try_from(surface).ok())
+    else {
+        return Ok(None);
+    };
+    if is_class_335
+        && (bytes
+            .get(after_name + 11..offset + form_serializer_frame_132::LEN)
+            .is_none_or(|tail| tail.iter().any(|byte| *byte != 0))
+            || !records.offsets(surface).iter().any(|surface_offset| {
+                bytes.get(*surface_offset + 4..*surface_offset + 7) == Some(b"358")
+            }))
+    {
+        return Ok(None);
+    }
+    if !is_class_335 && after_name + 11 != offset + form_serializer_frame_132::LEN {
+        return Ok(None);
+    }
+    Ok(Some((surface, entry_name)))
 }
 
 #[cfg(test)]

@@ -329,3 +329,49 @@ fn mirror_unique_match_preserves_zero_one_and_many() {
         super::UniqueMatch::Many
     ));
 }
+
+#[test]
+fn a_mirror_without_a_body_or_face_group_takes_its_ordinal_one_role_0x10_group_as_seed() {
+    let group = |record_index: u32, ordinal: u32, role: u64, members: &[u32]| {
+        serde_json::from_value::<
+            crate::records::topology::construction::DesignConstructionOperandGroup,
+        >(serde_json::json!({
+            "id": format!("f3d:Design/BulkStream.dat:group#{record_index}"),
+            "scope_record_index": 10, "scope_reference_ordinal": ordinal,
+            "record_index": record_index, "byte_offset": 0, "class_tag": "282",
+            "members": members, "member_offsets": vec![0; members.len()],
+            "frame": {"member_count_offset": 0, "opaque_index": 1,
+                "opaque_index_offset": 18, "opaque_scalar": 0.0,
+                "opaque_scalar_offset": 22, "variant": false},
+            "role": role, "role_offset": 0,
+            "paired_class_tag": "261", "paired_byte_offset": 0
+        }))
+        .expect("construction group")
+    };
+    let faces = 0x4_u64 << 32;
+    let selection_run = 0x10_u64 << 32;
+    let seed =
+        |groups: &[crate::records::topology::construction::DesignConstructionOperandGroup]| {
+            match super::mirror_seed_group(
+                &crate::records::feature::scope::DesignFeatureKind::Mirror,
+                &groups.iter().collect::<Vec<_>>(),
+            ) {
+                super::UniqueMatch::Zero => None,
+                super::UniqueMatch::One(group) => Some(group.record_index),
+                super::UniqueMatch::Many => Some(u32::MAX),
+            }
+        };
+    assert_eq!(seed(&[group(20, 1, selection_run, &[21])]), Some(20));
+    assert_eq!(
+        seed(&[group(30, 0, faces, &[]), group(20, 1, selection_run, &[21])]),
+        Some(20)
+    );
+    assert_eq!(
+        seed(&[
+            group(30, 0, faces, &[31]),
+            group(20, 1, selection_run, &[21])
+        ]),
+        Some(30)
+    );
+    assert_eq!(seed(&[group(20, 0, selection_run, &[21])]), None);
+}

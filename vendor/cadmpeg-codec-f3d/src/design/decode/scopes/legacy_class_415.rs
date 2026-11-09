@@ -222,6 +222,7 @@ pub(super) fn exact_one_sided_extrude_prologue(
             u64::try_from(second_side_extent_offset).ok()?,
         ],
         first_side_target_ordinal: None,
+        distance_tail: None,
         extent,
         direction_face_extend_offsets: [
             u64::try_from(direction_offset).ok()?,

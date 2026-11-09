@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-use super::hole_support_faces;
+use super::{entries_lie_on_no_face, hole_support_faces};
 use crate::history_records::{
-    AsmHistoricalCarrierBinding, AsmHistoricalEntityDelta, AsmHistoricalPlane,
-    AsmHistoricalTopology, AsmHistoricalTopologyDelta, AsmHistoricalTransition,
+    AsmHistoricalCarrierBinding, AsmHistoricalCylinder, AsmHistoricalEntityDelta,
+    AsmHistoricalPlane, AsmHistoricalTopology, AsmHistoricalTopologyDelta, AsmHistoricalTransition,
 };
 use crate::records::feature::hole::DesignHoleConstruction;
 use cadmpeg_ir::math::{Point3, Vector3};
@@ -411,4 +411,98 @@ fn support_needs_an_admitted_placement() {
         ),
         None
     );
+}
+
+/// A 40 by 30 by 20 millimetre box with one corner at the origin.
+fn box_faces() -> AsmHistoricalTopology {
+    preceding(&[
+        (1, [0.0, 0.0, 0.0], [0.0, 0.0, -1.0]),
+        (2, [0.0, 0.0, 20.0], UP),
+        (3, [0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]),
+        (4, [40.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+        (5, [0.0, 0.0, 0.0], [0.0, -1.0, 0.0]),
+        (6, [0.0, 30.0, 0.0], [0.0, 1.0, 0.0]),
+    ])
+}
+
+/// The box with face 7 on a cylinder of radius 5 mm about the z axis
+/// through (20, 15).
+fn box_with_boss() -> AsmHistoricalTopology {
+    let mut topology = box_faces();
+    topology.faces.push(7);
+    topology.face_surfaces.push(AsmHistoricalCarrierBinding {
+        entity: 7,
+        carrier: 107,
+    });
+    topology.surface_cylinders.push(AsmHistoricalCylinder {
+        surface: 107,
+        origin: Point3::new(20.0, 15.0, -3.0),
+        axis: Vector3::new(0.0, 0.0, 1.0),
+        radius: 5.0,
+    });
+    topology
+}
+
+#[test]
+fn an_entry_point_inside_the_input_solid_lies_on_no_face() {
+    let inside = sketch_carrier(&[[1.0, 1.5, 1.0], [3.0, 1.5, 1.0]], UP);
+    assert!(entries_lie_on_no_face(&inside, &box_faces()));
+    assert!(entries_lie_on_no_face(&inside, &box_with_boss()));
+}
+
+#[test]
+fn an_entry_point_on_any_face_carrier_can_lie_on_that_face() {
+    for entry in [
+        [1.0, 1.5, 2.0],
+        [9.0, 1.5, 2.0],
+        [1.0, 1.5, 0.0],
+        [4.0, 1.5, 1.0],
+    ] {
+        let carrier = sketch_carrier(&[[3.0, 1.5, 1.0], entry], UP);
+        assert!(!entries_lie_on_no_face(&carrier, &box_faces()), "{entry:?}");
+    }
+    let on_boss = sketch_carrier(&[[2.5, 1.5, 1.0]], UP);
+    assert!(entries_lie_on_no_face(&on_boss, &box_faces()));
+    assert!(!entries_lie_on_no_face(&on_boss, &box_with_boss()));
+}
+
+#[test]
+fn a_face_without_one_plane_or_cylinder_carrier_leaves_the_face_open() {
+    let inside = sketch_carrier(&[[1.0, 1.5, 1.0]], UP);
+    let mut unbound = box_faces();
+    unbound.face_surfaces.retain(|binding| binding.entity != 2);
+    assert!(!entries_lie_on_no_face(&inside, &unbound));
+    let mut twice_bound = box_faces();
+    twice_bound.face_surfaces.push(AsmHistoricalCarrierBinding {
+        entity: 2,
+        carrier: 101,
+    });
+    assert!(!entries_lie_on_no_face(&inside, &twice_bound));
+    let mut other_surface = box_faces();
+    other_surface
+        .surface_planes
+        .retain(|plane| plane.surface != 102);
+    assert!(!entries_lie_on_no_face(&inside, &other_surface));
+    let mut plane_and_cylinder = box_with_boss();
+    plane_and_cylinder.surface_planes.push(AsmHistoricalPlane {
+        surface: 107,
+        origin: Point3::new(0.0, 0.0, 50.0),
+        normal: Vector3::new(0.0, 0.0, 1.0),
+    });
+    assert!(!entries_lie_on_no_face(&inside, &plane_and_cylinder));
+    let mut degenerate = box_faces();
+    degenerate.surface_planes[1].normal = Vector3::new(0.0, 0.0, 0.0);
+    assert!(!entries_lie_on_no_face(&inside, &degenerate));
+}
+
+#[test]
+fn entries_lie_on_no_face_needs_entry_points_and_input_faces() {
+    let inside = sketch_carrier(&[[1.0, 1.5, 1.0]], UP);
+    assert!(!entries_lie_on_no_face(
+        &inside,
+        &AsmHistoricalTopology::default()
+    ));
+    let mut other_form = inside.clone();
+    other_form.reference_type = 14;
+    assert!(!entries_lie_on_no_face(&other_form, &box_faces()));
 }

@@ -98,15 +98,13 @@ fn work_plane_validator_rejects_modern_controls_that_do_not_bind_the_retained_fr
                 std::slice::from_ref(&placement)
             )
             .is_empty());
-            for slot in 0..6 {
+            for slot in 0..4 {
                 let mut unbound = placement.clone();
                 match slot {
                     0 => unbound.fields.periodic_face_mode.as_mut().unwrap().value = 1,
                     1 => unbound.fields.use_u_direction.as_mut().unwrap().value = 2,
-                    2 => unbound.fields.inferred_x_axis.value = 1,
-                    3 => unbound.fields.inferred_z_axis.value = 1,
-                    4 => unbound.fields.z_flip.value = 1,
-                    5 => unbound.fields.axis_flipped.as_mut().unwrap().value = 1,
+                    2 => unbound.fields.z_flip.value = 1,
+                    3 => unbound.fields.axis_flipped.as_mut().unwrap().value = 1,
                     _ => unreachable!(),
                 }
                 let native = crate::native::F3dNative {

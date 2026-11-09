@@ -3,6 +3,8 @@
 
 use cadmpeg_core::decode::u64_from_index;
 
+pub(crate) mod through_all;
+
 use super::legacy_class_397;
 use super::legacy_class_415;
 use super::shared_frames::extrude_operation_at;
@@ -40,6 +42,7 @@ use crate::records::feature::extrude::DesignExtrudePrologue;
 use crate::records::feature::extrude::DesignExtrudePrologueReference;
 use crate::records::feature::extrude::DesignExtrudeStart;
 use crate::records::feature::extrude::DesignExtrudeTargetOrdinal;
+use crate::records::feature::extrude::{DesignExtrudeDistanceTail, DesignExtrudeMeasurement};
 use crate::records::feature::scope::DesignParameterScope;
 use cadmpeg_core::decode::View;
 
@@ -102,7 +105,7 @@ pub(super) fn exact_extrude_prologue(
             reference_members,
         );
     }
-    exact_current_extrude_prologue(
+    let current = exact_current_extrude_prologue(
         bytes,
         start,
         reference_count_at,
@@ -116,18 +119,34 @@ pub(super) fn exact_extrude_prologue(
             reference_count_at,
             reference_members,
         )
-    })
-    .or_else(|| {
-        legacy_class_397::exact_symmetric_extrude_prologue(
-            bytes,
-            start,
-            paired_at,
-            class_tag,
-            paired_class_tag,
-            reference_count_at,
-            reference_members,
-        )
-    })
+    });
+    if current.is_some() {
+        return current;
+    }
+    if paired_at
+        .checked_sub(start)
+        .zip(reference_count_at.checked_sub(start))
+        .is_some_and(|(length, count_offset)| {
+            through_all::matches_frame(
+                class_tag,
+                paired_class_tag,
+                u64_from_index(length),
+                u64_from_index(count_offset),
+                reference_members.len(),
+            )
+        })
+    {
+        return through_all::exact(bytes, start, reference_members);
+    }
+    legacy_class_397::exact_symmetric_extrude_prologue(
+        bytes,
+        start,
+        paired_at,
+        class_tag,
+        paired_class_tag,
+        reference_count_at,
+        reference_members,
+    )
     .or_else(|| {
         exact_class_338_two_sided_distance_extrude_prologue(
             bytes,
@@ -1231,7 +1250,10 @@ fn exact_current_extrude_prologue_with(
     } else {
         let second_side_extent_offset =
             first_side_extent_offset.checked_add(extrude_extent_pair::SECOND_SIDE_EXTENT)?;
-        if bytes.get(first_side_extent_offset.checked_add(4)?..second_side_extent_offset)? != [0; 9]
+        if bytes.get(
+            first_side_extent_offset.checked_add(extrude_extent_pair::ZERO_RUN_5)?
+                ..first_side_extent_offset.checked_add(extrude_extent_pair::TARGET_OPTION)?,
+        )? != [0; 5]
         {
             return None;
         }
@@ -1246,6 +1268,30 @@ fn exact_current_extrude_prologue_with(
         first_side_extent,
         View::u32_le_at(bytes, second_side_extent_offset)?,
     ];
+    let distance_tail = if first_side_extent == 2 {
+        None
+    } else {
+        let target_option_offset =
+            first_side_extent_offset.checked_add(extrude_extent_pair::TARGET_OPTION)?;
+        let target_option = View::u32_le_at(bytes, target_option_offset)?;
+        let tail = (!typed && matches!(direction_face_extend_values[0], 2 | 3))
+            .then(|| {
+                extrude_distance_tail(
+                    bytes,
+                    (target_option, target_option_offset),
+                    second_side_extent_offset,
+                    reference_count_at,
+                    reference_members,
+                    direction_face_extend_values[0],
+                )
+            })
+            .flatten();
+        match (target_option, tail) {
+            (0, tail) => tail,
+            (1, Some(tail)) => Some(tail),
+            _ => return None,
+        }
+    };
     if legacy_class_415_symmetric_distance
         && (extent_cursor != start.checked_add(class_415::FIRST_SIDE_EXTENT)?
             || first_side_extent_offset != start.checked_add(class_415::FIRST_SIDE_EXTENT)?
@@ -1280,6 +1326,7 @@ fn exact_current_extrude_prologue_with(
             u64_from_index(second_side_extent_offset),
         ],
         first_side_target_ordinal,
+        distance_tail,
         extent,
         direction_face_extend_offsets: [
             u64_from_index(direction_offset),
@@ -1291,6 +1338,52 @@ fn exact_current_extrude_prologue_with(
         solid_operation_offset: u64_from_index(solid_operation_offset),
         start: start_support,
         start_offset: u64_from_index(start_offset),
+    })
+}
+
+/// The fields after the second-side value of a two-sided or symmetric
+/// distance first side: six zero bytes, the nullable side-two taper slot, one
+/// zero byte, and the measurement word.
+fn extrude_distance_tail(
+    bytes: &[u8],
+    (target_option, target_option_offset): (u32, usize),
+    second_side_extent_offset: usize,
+    reference_count_at: usize,
+    reference_members: &[u32],
+    direction: u32,
+) -> Option<DesignExtrudeDistanceTail> {
+    let gap = second_side_extent_offset.checked_add(4)?;
+    let mut at = gap.checked_add(6)?;
+    if bytes.get(gap..at)? != [0; 6] {
+        return None;
+    }
+    match bytes.get(at)? {
+        0 => at = at.checked_add(1)?,
+        1 => {
+            if !reference_members.contains(&marked_record_reference(bytes, at)?) {
+                return None;
+            }
+            at = at.checked_add(11)?;
+        }
+        _ => return None,
+    }
+    if bytes.get(at) != Some(&0) {
+        return None;
+    }
+    let measurement_offset = at.checked_add(1)?;
+    if measurement_offset.checked_add(4)? > reference_count_at {
+        return None;
+    }
+    let measurement =
+        DesignExtrudeMeasurement::from_raw(View::u32_le_at(bytes, measurement_offset)?)?;
+    if (direction == 3) == (measurement == DesignExtrudeMeasurement::Sided) {
+        return None;
+    }
+    Some(DesignExtrudeDistanceTail {
+        target_option,
+        target_option_offset: u64_from_index(target_option_offset),
+        measurement,
+        measurement_offset: u64_from_index(measurement_offset),
     })
 }
 

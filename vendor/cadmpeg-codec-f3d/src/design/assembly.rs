@@ -886,6 +886,7 @@ pub(crate) fn project_assembly_joints_with_paths(
     let mut resting_joints = 0_usize;
     let mut malformed_rest_joints = 0_usize;
     let mut native_angular_limits = 0_usize;
+    let mut assumed_active = 0_usize;
     for scope in scopes {
         let Some(stream) = native_stream(&scope.id) else {
             continue;
@@ -912,7 +913,7 @@ pub(crate) fn project_assembly_joints_with_paths(
                     .is_some_and(|paths| {
                         paths
                             .iter()
-                            .any(|path| !path.paired_occurrence_keys().is_empty())
+                            .any(|path| !path.occurrence_lists().is_empty())
                     });
                 if paired {
                     paired_joints += 1;
@@ -941,6 +942,9 @@ pub(crate) fn project_assembly_joints_with_paths(
                 joints.entry(joint.id.as_str().to_owned()).or_insert(joint);
                 let members =
                     rigid_group_member_joints(scope, stream, &occurrences, scopes, inserts, paths);
+                if scope.kind() == crate::records::feature::scope::DesignFeatureKind::Assemble {
+                    assumed_active += 1 + members.joints.len();
+                }
                 paired_joints += members.paired;
                 unprojected_members += members.unprojected;
                 for member in members.joints {
@@ -991,7 +995,7 @@ pub(crate) fn project_assembly_joints_with_paths(
     }
     if paired_joints != 0 {
         losses.push(F3dLossCode::AssemblyOperandPathPairsNative.note(format!(
-            "{paired_joints} projected Design assembly joint(s) have operand paths with occurrence identity pairs whose effect on the joint is not known; the pairs are retained natively."
+            "{paired_joints} projected Design assembly joint(s) have operand paths with occurrence identity lists whose effect on the joint is not known; the lists are retained natively."
         )));
     }
     if unprojected != 0 {
@@ -1002,6 +1006,11 @@ pub(crate) fn project_assembly_joints_with_paths(
     if unprojected_members != 0 {
         losses.push(F3dLossCode::AssemblyJointUnprojected.note(format!(
             "{unprojected_members} rigid group member(s) after their group's first two were retained natively: their operands or connector frames do not project. Each group's joint between its first two members projects."
+        )));
+    }
+    if assumed_active != 0 {
+        losses.push(F3dLossCode::AssemblyJointActivationAssumed.note(format!(
+            "{assumed_active} projected Design assembly joint(s) are assumed active: the activation meaning of their scope-tail booleans is unknown."
         )));
     }
     AssemblyJointProjection {
@@ -1287,7 +1296,7 @@ fn project_assembly_joint(
 }
 
 /// The fixed joints of a rigid group's members after its first two, with the
-/// number of those joints whose operand paths carry occurrence identity pairs
+/// number of those joints whose operand paths carry occurrence identity lists
 /// and the number of members that do not project.
 #[derive(Default)]
 struct RigidGroupMemberJoints {
@@ -1331,7 +1340,7 @@ fn rigid_group_member_joints(
     let first_paired = first
         .qualifier
         .occurrence_path()
-        .is_some_and(|path| !path.paired_occurrence_keys().is_empty());
+        .is_some_and(|path| !path.occurrence_lists().is_empty());
     for (ordinal, member) in alignment.additional_members.iter().enumerate() {
         let operands = project_qualified_operands(
             [&first.qualifier, &member.qualifier],
@@ -1376,7 +1385,7 @@ fn rigid_group_member_joints(
             || member
                 .qualifier
                 .occurrence_path()
-                .is_some_and(|path| !path.paired_occurrence_keys().is_empty())
+                .is_some_and(|path| !path.occurrence_lists().is_empty())
         {
             projected.paired += 1;
         }
@@ -1895,7 +1904,7 @@ mod tests {
                 let mut path = path(index, typed).unwrap();
                 if paired {
                     path = path
-                        .with_paired_occurrence_keys(vec![
+                        .with_occurrence_lists(vec![vec![
                             crate::records::identity::Located {
                                 value: "43".to_owned().try_into().unwrap(),
                                 offset: 400,
@@ -1907,7 +1916,7 @@ mod tests {
                                     .unwrap(),
                                 offset: 410,
                             },
-                        ])
+                        ]])
                         .unwrap();
                 }
                 DesignAssemblyOperandQualifier::OccurrencePath { path }
@@ -1935,7 +1944,10 @@ mod tests {
         let inserts = crate::design::components::ComponentInserts::default();
         let projection = super::project_assembly_joints(&scopes(true, false), &[], &inserts, &[]);
         assert_eq!(projection.joints.len(), 1);
-        assert!(projection.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&projection.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
 
         let mut reference: crate::records::xref::XrefReference =
             serde_json::from_value(serde_json::json!({
@@ -2032,7 +2044,10 @@ mod tests {
                 &bindings,
             );
             assert_eq!(bound.joints.len(), 1);
-            assert!(bound.losses.is_empty());
+            assert_eq!(
+                crate::test_support::loss_codes(&bound.losses),
+                [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+            );
             assert!(bound.joints[0].connectors().all(|connector| {
                 matches!(&connector.operand.container,
                     cadmpeg_ir::products::OperandContainer::Occurrence { occurrence, .. }
@@ -2047,7 +2062,10 @@ mod tests {
             &bindings,
         );
         assert_eq!(bound.joints.len(), 1);
-        assert!(bound.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&bound.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
         assert!(bound.joints[0].connectors().all(|connector| {
             matches!(&connector.operand.container,
                 cadmpeg_ir::products::OperandContainer::Occurrence { occurrence, .. }
@@ -2080,7 +2098,10 @@ mod tests {
             &kept_bindings,
         );
         assert_eq!(kept_joint.joints.len(), 1);
-        assert!(kept_joint.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&kept_joint.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
         let bindings = super::super::components::paths::LocalOccurrencePaths::new(
             &[],
             &restored.xref_references,
@@ -2163,7 +2184,10 @@ mod tests {
             &other_bindings,
         );
         assert_eq!(independent.joints.len(), 1);
-        assert!(independent.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&independent.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
         let validation =
             cadmpeg_ir::validate_neutral(&cadmpeg_ir::CadIr::empty(), refused.losses).unwrap();
         assert!(validation.is_ok(), "{validation:#?}");
@@ -2260,7 +2284,10 @@ mod tests {
                 .iter()
                 .map(|loss| loss.code.clone())
                 .collect::<Vec<_>>(),
-            [crate::loss::F3dLossCode::AssemblyOperandPathPairsNative.kind()]
+            [
+                crate::loss::F3dLossCode::AssemblyOperandPathPairsNative.kind(),
+                crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind(),
+            ]
         );
 
         // A stored frame sense is the neutral joint's frame sense.
@@ -2279,7 +2306,10 @@ mod tests {
             projection.joints[0].frame_sense(),
             Some(cadmpeg_ir::products::PlaneSense::Opposed)
         );
-        assert!(projection.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&projection.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
 
         // A rigid group's members after its first two each tie to its first
         // member, and every joint names the group's scope.
@@ -2320,20 +2350,28 @@ mod tests {
             .iter()
             .all(|joint| joint.native_ref.as_deref() == Some(group[0].id.as_str())));
         assert_ne!(projection.joints[0].id, projection.joints[1].id);
-        assert!(projection.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&projection.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
 
         // The pairs loss counts each projected joint whose paths carry pairs.
         let projection =
             super::project_assembly_joints(&grouped(true, vec![third()]), &[], &inserts, &[]);
         assert_eq!(projection.joints.len(), 2);
-        let [loss] = projection.losses.as_slice() else {
-            panic!("one pairs loss");
+        let [loss, activation] = projection.losses.as_slice() else {
+            panic!("one pairs loss and one activation loss");
         };
         assert_eq!(
             loss.code,
             crate::loss::F3dLossCode::AssemblyOperandPathPairsNative.kind()
         );
         assert!(loss.message.starts_with("2 projected"));
+        assert_eq!(
+            activation.code,
+            crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()
+        );
+        assert!(activation.message.starts_with("2 projected"));
 
         // A member whose operand does not project is counted on its own, and
         // the group's other joints still project.
@@ -2351,14 +2389,19 @@ mod tests {
             &[],
         );
         assert_eq!(projection.joints.len(), 2);
-        let [loss] = projection.losses.as_slice() else {
-            panic!("one unprojected-member loss");
+        let [loss, activation] = projection.losses.as_slice() else {
+            panic!("one unprojected-member loss and one activation loss");
         };
         assert_eq!(
             loss.code,
             crate::loss::F3dLossCode::AssemblyJointUnprojected.kind()
         );
         assert!(loss.message.starts_with("1 rigid group member(s)"));
+        assert_eq!(
+            activation.code,
+            crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()
+        );
+        assert!(activation.message.starts_with("2 projected"));
 
         let mut null_member = third();
         null_member.frame.reference_record_index = 30;
@@ -2673,7 +2716,10 @@ mod tests {
         let revolute = project(&[motion(&[2], [1, 1])]);
         assert_eq!(kind(&revolute)["kind"], "revolute");
         assert_eq!(kind(&revolute)["angular_limits"]["minimum"], -0.25);
-        assert!(revolute.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&revolute.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
 
         for code in [1, 2, 8] {
             let mut zero_lane = motion(&[code], [1, 1]);
@@ -2688,7 +2734,10 @@ mod tests {
             if code == 8 {
                 assert_eq!(kind(&projected)["kind"], "slider");
                 assert_eq!(kind(&projected)["linear_limits"]["minimum"], -2.5);
-                assert!(projected.losses.is_empty());
+                assert_eq!(
+                    crate::test_support::loss_codes(&projected.losses),
+                    [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+                );
             } else {
                 assert_eq!(kind(&projected)["kind"], "revolute");
                 assert!(kind(&projected)["angular_limits"].is_null());
@@ -2698,7 +2747,10 @@ mod tests {
                         .iter()
                         .map(|loss| loss.code.clone())
                         .collect::<Vec<_>>(),
-                    [crate::loss::F3dLossCode::AssemblyJointAngularLimitsNative.kind()]
+                    [
+                        crate::loss::F3dLossCode::AssemblyJointAngularLimitsNative.kind(),
+                        crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind(),
+                    ]
                 );
             }
         }
@@ -2718,7 +2770,10 @@ mod tests {
         assert_eq!(kind(&limited)["kind"], "slider");
         assert_eq!(kind(&limited)["linear_limits"]["minimum"], -2.5);
         assert_eq!(kind(&limited)["linear_limits"]["maximum"], 5.0);
-        assert!(limited.losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&limited.losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
 
         // An enabled rest position is retained natively with a loss; a rest
         // value without the flag is not reported.
@@ -2740,9 +2795,15 @@ mod tests {
                 .iter()
                 .map(|loss| loss.code.clone())
                 .collect::<Vec<_>>(),
-            [crate::loss::F3dLossCode::AssemblyJointRestUnprojected.kind()]
+            [
+                crate::loss::F3dLossCode::AssemblyJointRestUnprojected.kind(),
+                crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind(),
+            ]
         );
-        assert!(resting(0).losses.is_empty());
+        assert_eq!(
+            crate::test_support::loss_codes(&resting(0).losses),
+            [crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()]
+        );
 
         // A rigid group is fixed: one whose joint record states a freedom is
         // left unprojected.
@@ -2822,7 +2883,10 @@ mod tests {
                     .iter()
                     .map(|loss| loss.code.clone())
                     .collect::<Vec<_>>(),
-                [crate::loss::F3dLossCode::AssemblyJointMotionUndecoded.kind()]
+                [
+                    crate::loss::F3dLossCode::AssemblyJointMotionUndecoded.kind(),
+                    crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind(),
+                ]
             );
         }
     }

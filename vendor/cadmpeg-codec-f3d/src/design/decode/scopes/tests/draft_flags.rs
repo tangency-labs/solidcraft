@@ -3,7 +3,9 @@
 use crate::design::decode::scopes::draft::exact_draft_operation_with_owners;
 use crate::design::decode::scopes::parameter_scope::parse_parameter_scope_with_type_guid;
 use crate::design::DesignFeatureFamily;
-use crate::records::feature::direct_face::{DesignDraftFlags, DesignDraftOperation};
+use crate::records::feature::direct_face::{
+    DesignDraftFlags, DesignDraftOperation, DesignDraftTwoSided,
+};
 use crate::records::references::DesignClassTag;
 use crate::test_support::{indexed_header, lp_utf16};
 
@@ -127,6 +129,7 @@ fn the_prologue_reads_flip_and_tangent_chain_apart() {
             Some(DesignDraftFlags {
                 flipped: flipped == 1,
                 tangent_chain: tangent_chain == 1,
+                two_sided: None,
             })
         );
     }
@@ -139,19 +142,56 @@ fn the_prologue_reads_flip_and_tangent_chain_apart() {
 }
 
 #[test]
-fn only_the_single_angle_mode_has_an_operation() {
-    for mode in [0, 2, 3, 4] {
+fn the_mode_selects_a_single_angle_two_angles_or_a_symmetric_draft() {
+    let single = Fixture::new().decode().unwrap();
+    assert_eq!(single.flags.unwrap().two_sided, None);
+    assert_eq!(single.opposite_angle, None);
+
+    for second in [0.1, 0.0] {
+        let mut fixture = Fixture::new();
+        fixture.mode = 2;
+        fixture.opposite_value = second;
+        let two = fixture.decode().unwrap();
+        assert_eq!(
+            two.flags.unwrap().two_sided,
+            Some(DesignDraftTwoSided::TwoAngles)
+        );
+        assert_eq!(
+            two.opposite_angle.map(cadmpeg_ir::scalar::Angle::get),
+            Some(second)
+        );
+    }
+
+    let mut fixture = Fixture::new();
+    fixture.mode = 3;
+    fixture.opposite_value = 0.25;
+    let symmetric = fixture.decode().unwrap();
+    assert_eq!(
+        symmetric.flags.unwrap().two_sided,
+        Some(DesignDraftTwoSided::Symmetric)
+    );
+    assert_eq!(
+        symmetric.opposite_angle.map(cadmpeg_ir::scalar::Angle::get),
+        Some(0.25)
+    );
+}
+
+#[test]
+fn lanes_that_contradict_the_mode_have_no_operation() {
+    for mode in [0, 4] {
         let mut fixture = Fixture::new();
         fixture.mode = mode;
         assert!(fixture.decode().is_none(), "mode {mode}");
     }
-    let mut two_with_angle = Fixture::new();
-    two_with_angle.mode = 2;
-    two_with_angle.opposite_value = 0.1;
-    assert!(two_with_angle.decode().is_none());
     let mut single_with_second_angle = Fixture::new();
     single_with_second_angle.opposite_value = 0.1;
     assert!(single_with_second_angle.decode().is_none());
+    for second in [0.1, 0.0] {
+        let mut symmetric = Fixture::new();
+        symmetric.mode = 3;
+        symmetric.opposite_value = second;
+        assert!(symmetric.decode().is_none(), "second lane {second}");
+    }
 }
 
 #[test]

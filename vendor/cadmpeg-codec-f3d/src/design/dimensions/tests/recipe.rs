@@ -265,6 +265,7 @@ fn recipe_backed_dimension_projects_disjoint_mixed_repeated_distance() {
             id: format!("{stream}:sketch-point#50"),
             record_index: 50,
             owner_reference: Some(100),
+            geometry_group: None,
             class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned())
                 .unwrap(),
             byte_offset: 0,
@@ -286,6 +287,7 @@ fn recipe_backed_dimension_projects_disjoint_mixed_repeated_distance() {
         id: format!("{stream}:sketch-curve#51"),
         record_index: 51,
         owner_reference: Some(100),
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned()).unwrap(),
         byte_offset: 0,
         geometry_offset: 0,
@@ -384,6 +386,7 @@ fn recipe_backed_dimension_projects_disjoint_mixed_repeated_distance() {
         id: format!("{stream}:sketch-curve#{record_index}"),
         record_index,
         owner_reference: Some(100),
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned()).unwrap(),
         byte_offset: 0,
         geometry_offset: 0,

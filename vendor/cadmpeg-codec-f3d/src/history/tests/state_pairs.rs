@@ -897,6 +897,7 @@ fn terminal_edge_recipe_faces_use_exact_then_alternate_references() {
             candidate_edges: Vec::new(),
             alternate_selector_faces,
             alternate_selector_edges: Vec::new(),
+            operand_offset: None,
         }
     };
     assert_eq!(
@@ -1513,6 +1514,7 @@ fn historical_topology_retains_ordered_ownership_and_incidence() {
         candidate_edges: Vec::new(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     };
     let boundary_state = |state_id: i64, byte_offset: u64| AsmDeltaState {
         id: format!("f3d:test:asm-delta-state#{byte_offset:010}"),
@@ -1524,7 +1526,7 @@ fn historical_topology_retains_ordered_ownership_and_incidence() {
     let mut face_boundaries = FaceBoundaryArena::default();
     let context = edge_recipe_reference_context(
         2,
-        &reference,
+        std::slice::from_ref(&reference),
         EdgeBoundaryContext {
             state: &result_state,
             topology: &topology,
@@ -1589,7 +1591,7 @@ fn historical_topology_retains_ordered_ownership_and_incidence() {
     reference.alternate_selector_faces = vec![FaceId::mint(id(4)).expect("identity grammar")];
     let alternate_context = edge_recipe_reference_context(
         2,
-        &reference,
+        std::slice::from_ref(&reference),
         EdgeBoundaryContext {
             state: &result_state,
             topology: &topology,
@@ -1615,7 +1617,7 @@ fn historical_topology_retains_ordered_ownership_and_incidence() {
     assert_eq!(alternate_context.changed_reference_edge_slots, [7]);
     let support_only_context = edge_recipe_reference_context(
         2,
-        &reference,
+        std::slice::from_ref(&reference),
         EdgeBoundaryContext {
             state: &result_state,
             topology: &topology,

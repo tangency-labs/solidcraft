@@ -68,7 +68,10 @@ fn other_contents_are_refused() {
         (b"", "x.3dm"),
         (b"700 0 1 0\n", "x.sat"),
         (b"ASM BinaryFile4", "x.smb"),
+        #[cfg(not(feature = "f3d"))]
         (fcstd, "x.f3d"),
+        #[cfg(feature = "f3d")]
+        (step.as_bytes(), "x.f3d"),
         (fcstd, "x.sldprt"),
     ];
     for (bytes, name) in cases {

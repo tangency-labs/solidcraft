@@ -314,6 +314,7 @@ fn run_pattern_constructions_fixture() {
             kind_offset: 0,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: Some(2),
 
             previous_history_state_id: Some(1),
@@ -334,6 +335,7 @@ fn run_pattern_constructions_fixture() {
                 .try_into()
                 .unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: crate::records::references::DesignClassTag::try_from(
                 "258".to_owned(),
             )
@@ -1237,6 +1239,7 @@ fn numerical_ranges_rectangular_pattern_accepts_finite_large_extent() {
             kind_offset: 0,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: Some(2),
 
             previous_history_state_id: Some(1),
@@ -1252,6 +1255,7 @@ fn numerical_ranges_rectangular_pattern_accepts_finite_large_extent() {
                 .try_into()
                 .unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: crate::records::references::DesignClassTag::try_from(
                 "258".to_owned(),
             )
@@ -1314,6 +1318,7 @@ fn circular_pattern_historical_wrappers_resolve_an_edge_axis() {
             kind_offset: 0,
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: None,
             previous_history_state_id: None,
             previous_history_state_id_offset: None,
@@ -1326,6 +1331,7 @@ fn circular_pattern_historical_wrappers_resolve_an_edge_axis() {
             .unwrap(),
             payload: DesignFeatureKind::CPattern.try_into().unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: "258".to_owned().try_into().unwrap(),
             paired_byte_offset: 329,
         }

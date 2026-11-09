@@ -812,13 +812,41 @@ pub(crate) struct DesignFaceRecipeStructure {
     pub(crate) postlude_value: Option<i32>,
 }
 
+/// The zero-based prefix-operand ordinal of each recipe reference, or `None`
+/// when a packed-token reference has no preceding operand to extend.
+pub(crate) fn prefix_operand_ordinals(references: &[DesignRecipeReference]) -> Option<Vec<usize>> {
+    let mut fields = Vec::<((u64, u64), usize)>::new();
+    let mut ordinals = Vec::new();
+    let mut operand_count = 0;
+    for reference in references {
+        // The names of one counted operand share its ordinal.
+        let field = reference.operand_offset.map_or(
+            (reference.selector_offset, reference.token_offset),
+            |offset| (offset, offset),
+        );
+        let ordinal = if let Some((_, ordinal)) = fields.iter().find(|(other, _)| *other == field) {
+            *ordinal
+        } else {
+            let ordinal = if reference.has_packed_token() {
+                *ordinals.last()?
+            } else {
+                operand_count += 1;
+                operand_count - 1
+            };
+            fields.push((field, ordinal));
+            ordinal
+        };
+        ordinals.push(ordinal);
+    }
+    Some(ordinals)
+}
+
 impl DesignFaceRecipeStructure {
     pub(crate) fn has_valid_operand_ordinals(&self, references: &[DesignRecipeReference]) -> bool {
-        let operand_count = references
-            .iter()
-            .map(|reference| (reference.selector_offset, reference.token_offset))
-            .collect::<std::collections::HashSet<_>>()
-            .len();
+        let Some(ordinals) = prefix_operand_ordinals(references) else {
+            return false;
+        };
+        let operand_count = ordinals.iter().max().map_or(0, |ordinal| ordinal + 1);
         let in_range =
             |value: i32| usize::try_from(value).is_ok_and(|ordinal| ordinal < operand_count);
         self.prelude[1] == 2

@@ -3,8 +3,9 @@
 
 use super::{
     DesignAxis, DesignCircularPatternAxis, DesignCircularPatternConstruction,
-    DesignPatternAxisWrapper, DesignPatternComponentInstance, DesignPatternInstance, DesignPlane,
-    DesignRectangularPatternConstruction, DesignRectangularPatternInstances,
+    DesignPathPatternSettings, DesignPatternAxisWrapper, DesignPatternComponentInstance,
+    DesignPatternInstance, DesignPlane, DesignRectangularPatternConstruction,
+    DesignRectangularPatternInstances,
 };
 
 rewrite_native_scalar!(DesignAxis);
@@ -13,6 +14,7 @@ rewrite_native_enum!(DesignCircularPatternAxis, []; {
     HistoricalEdge {wrappers, persistent_identity, resolved},
 });
 rewrite_native_record!(DesignCircularPatternConstruction, []; {count, count_record_index, count_offset, angle, angle_record_index, angle_offset, axis, axis_record_index, selection_record_index});
+rewrite_native_scalar!(DesignPathPatternSettings);
 rewrite_native_scalar!(DesignPatternAxisWrapper);
 rewrite_native_record!(DesignPatternComponentInstance, []; {instance, occurrence_guid});
 rewrite_native_scalar!(DesignPatternInstance);

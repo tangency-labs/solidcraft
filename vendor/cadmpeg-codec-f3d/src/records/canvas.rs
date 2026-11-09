@@ -224,14 +224,22 @@ impl DesignCanvasPrologue {
             | DesignCanvasGeometryLayout::TypedTransitional => {
                 bytes[..10] == [0; 10] && bytes[10..13] == [1, 0, 0]
             }
+            DesignCanvasGeometryLayout::Expanded
+            | DesignCanvasGeometryLayout::ExpandedPlaneless => {
+                bytes[..9] == [0; 9]
+                    && bytes[9..14] == [1, 0, 0, 0, 0]
+                    && matches!(bytes[14], 0 | 1)
+                    && bytes[15..18] == [0; 3]
+            }
             _ => bytes[..10] == [0; 10] && matches!(bytes[10], 0 | 1) && bytes[11..14] == [0; 3],
         };
         if !valid {
             return Err("geometry_prologue must contain its fixed bytes and Boolean flags".into());
         }
+        let first_flag_at = if layout.expanded() { 14 } else { 10 };
         Ok(Self {
             layout,
-            first_flag: bytes[10] != 0,
+            first_flag: bytes[first_flag_at] != 0,
             visible: bytes[length - 1] != 0,
         })
     }
@@ -247,6 +255,13 @@ impl DesignCanvasPrologue {
             | DesignCanvasGeometryLayout::TypedTransitional => {
                 let mut bytes = vec![0; 14];
                 bytes[10] = 1;
+                bytes
+            }
+            DesignCanvasGeometryLayout::Expanded
+            | DesignCanvasGeometryLayout::ExpandedPlaneless => {
+                let mut bytes = vec![0; 19];
+                bytes[9] = 1;
+                bytes[14] = u8::from(self.first_flag);
                 bytes
             }
             _ => {
@@ -274,6 +289,7 @@ pub(crate) struct DesignCanvasGeometry {
     pub(crate) prologue: DesignCanvasPrologue,
     /// Authored image boundaries and their orientation.
     pub(crate) boundary: DesignCanvasBounds,
+    pub(crate) second_boundary_flag: bool,
     /// Opacity and source-space image frame.
     pub(crate) payload: DesignCanvasGeometryPayload,
 }
@@ -312,8 +328,16 @@ impl DesignCanvasGeometry {
             label,
             prologue,
             boundary,
+            second_boundary_flag: prologue.layout != DesignCanvasGeometryLayout::Legacy,
             payload,
         })
+    }
+    pub(crate) fn with_second_boundary_flag(mut self, flag: bool) -> Result<Self, String> {
+        if flag && self.prologue.layout == DesignCanvasGeometryLayout::Legacy {
+            return Err("second_boundary_flag must be false in the legacy layout".into());
+        }
+        self.second_boundary_flag = flag;
+        Ok(self)
     }
     pub(crate) fn record_index(&self) -> u32 {
         self.record_index
@@ -350,11 +374,20 @@ impl DesignCanvasGeometry {
             .map(|relative| self.byte_offset + u64_from_index(relative))
         }
     }
-    fn second_boundary_present_offset(&self) -> u64 {
+    fn second_boundary_flag_offset(&self) -> u64 {
         self.byte_offset + u64_from_index(self.prologue.layout.offsets().state)
     }
     fn plane_reference_offset(&self) -> u64 {
-        self.byte_offset + u64_from_index(self.prologue.layout.offsets().plane + 1)
+        let marker = u64_from_index(self.prologue.layout.offsets().plane);
+        let value = if self.prologue.layout == DesignCanvasGeometryLayout::ExpandedPlaneless {
+            marker
+        } else {
+            marker + 1
+        };
+        self.byte_offset + value
+    }
+    pub(crate) fn flag_assumed(&self) -> bool {
+        !self.second_boundary_flag && self.prologue.layout != DesignCanvasGeometryLayout::Legacy
     }
     fn component_reference_offset(&self) -> u64 {
         self.byte_offset + u64_from_index(self.prologue.layout.offsets().component + 1)
@@ -420,7 +453,7 @@ pub(crate) struct DesignCanvasImage {
     /// Owning Canvas scope.
     pub(crate) scope_record_index: u32,
     /// Supporting construction-plane entity.
-    pub(crate) plane_entity_suffix: u32,
+    pub(crate) plane_entity_suffix: Option<u32>,
     /// Component entity owning the Canvas.
     pub(crate) component_entity_suffix: u32,
     geometry: DesignCanvasGeometry,
@@ -455,9 +488,14 @@ impl DesignCanvasImage {
         geometry_reference_offset: u64,
         geometry: DesignCanvasGeometry,
         asset: DesignCanvasAsset,
-        plane_entity_suffix: u32,
+        plane_entity_suffix: Option<u32>,
         component_entity_suffix: u32,
     ) -> Result<Self, String> {
+        if plane_entity_suffix.is_none()
+            != (geometry.prologue.layout == DesignCanvasGeometryLayout::ExpandedPlaneless)
+        {
+            return Err("plane_entity_suffix must be null exactly in the planeless layout".into());
+        }
         if geometry.record_index == asset.record_index {
             return Err("asset_record_index must differ from geometry_record_index".into());
         }
@@ -539,11 +577,11 @@ struct DesignCanvasImageWire {
     boundary_segments: [[Point2; 2]; 2],
     /// Byte offsets of the eight boundary-coordinate f64 values.
     boundary_coordinate_offsets: [u64; 8],
-    /// Byte offset of the presence marker preceding the second boundary segment.
-    second_boundary_present_offset: u64,
+    second_boundary_flag: bool,
+    second_boundary_flag_offset: u64,
     /// Design entity suffix of the supporting construction plane.
-    plane_entity_suffix: u32,
-    /// Byte offset of the marked construction-plane reference.
+    plane_entity_suffix: Option<u32>,
+    /// Byte offset of the construction-plane reference value, or of its null marker.
     plane_reference_offset: u64,
     /// Design entity suffix of the component owning the Canvas.
     component_entity_suffix: u32,
@@ -595,8 +633,9 @@ struct DesignCanvasImageWireRef<'a> {
     paired_component_reference_offset: u64,
     boundary_segments: [[Point2; 2]; 2],
     boundary_coordinate_offsets: [u64; 8],
-    second_boundary_present_offset: u64,
-    plane_entity_suffix: u32,
+    second_boundary_flag: bool,
+    second_boundary_flag_offset: u64,
+    plane_entity_suffix: Option<u32>,
     plane_reference_offset: u64,
     component_entity_suffix: u32,
     component_reference_offset: u64,
@@ -637,7 +676,8 @@ impl Serialize for DesignCanvasImage {
             paired_component_reference_offset: self.geometry.paired_component_reference_offset(),
             boundary_segments: self.geometry.boundary.segments(),
             boundary_coordinate_offsets: self.geometry.boundary_coordinate_offsets(),
-            second_boundary_present_offset: self.geometry.second_boundary_present_offset(),
+            second_boundary_flag: self.geometry.second_boundary_flag,
+            second_boundary_flag_offset: self.geometry.second_boundary_flag_offset(),
             plane_entity_suffix: self.plane_entity_suffix,
             plane_reference_offset: self.geometry.plane_reference_offset(),
             component_entity_suffix: self.component_entity_suffix,
@@ -719,7 +759,8 @@ impl TryFrom<DesignCanvasImageWire> for DesignCanvasImage {
             geometry_prologue,
             DesignCanvasBounds::try_from(wire.boundary_segments)?,
             geometry_payload,
-        )?;
+        )?
+        .with_second_boundary_flag(wire.second_boundary_flag)?;
         let asset = DesignCanvasAsset::new(
             DesignClassTag::try_from(wire.asset_class_tag)
                 .map_err(|error| format!("asset_class_tag: {error}"))?,
@@ -762,9 +803,9 @@ impl TryFrom<DesignCanvasImageWire> for DesignCanvasImage {
                 image.geometry.paired_component_reference_offset(),
             ),
             (
-                "second_boundary_present_offset",
-                wire.second_boundary_present_offset,
-                image.geometry.second_boundary_present_offset(),
+                "second_boundary_flag_offset",
+                wire.second_boundary_flag_offset,
+                image.geometry.second_boundary_flag_offset(),
             ),
             (
                 "plane_reference_offset",
@@ -824,7 +865,8 @@ impl From<DesignCanvasImage> for DesignCanvasImageWire {
         let paired_component_reference_offset = value.geometry.paired_component_reference_offset();
         let boundary_segments = value.geometry.boundary.segments();
         let boundary_coordinate_offsets = value.geometry.boundary_coordinate_offsets();
-        let second_boundary_present_offset = value.geometry.second_boundary_present_offset();
+        let second_boundary_flag = value.geometry.second_boundary_flag;
+        let second_boundary_flag_offset = value.geometry.second_boundary_flag_offset();
         let plane_reference_offset = value.geometry.plane_reference_offset();
         let component_reference_offset = value.geometry.component_reference_offset();
         let asset_record_index = value.asset.record_index;
@@ -851,7 +893,8 @@ impl From<DesignCanvasImage> for DesignCanvasImageWire {
             paired_component_reference_offset,
             boundary_segments,
             boundary_coordinate_offsets,
-            second_boundary_present_offset,
+            second_boundary_flag,
+            second_boundary_flag_offset,
             plane_entity_suffix: value.plane_entity_suffix,
             plane_reference_offset,
             component_entity_suffix: value.component_entity_suffix,

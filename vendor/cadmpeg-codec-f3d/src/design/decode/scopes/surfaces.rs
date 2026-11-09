@@ -14,6 +14,7 @@ use crate::design::decode::sketch::IndexedRecordOffsets;
 use crate::design::decode::text::fixed_relaxed_guid_text;
 use crate::design::design_feature_family;
 use crate::design::DesignFeatureFamily;
+use crate::ids::native_stream;
 use crate::records::feature::scope::DesignParameterScope;
 use crate::records::feature::surface_ops::DesignRuledSurfaceCorner;
 use crate::records::feature::surface_ops::DesignRuledSurfaceMethod;
@@ -23,6 +24,8 @@ use crate::records::feature::surface_ops::DesignSurfaceExtendOperation;
 use crate::records::feature::surface_ops::DesignSurfaceOffsetOperation;
 use crate::records::feature::surface_ops::DesignSurfaceOffsetSupport;
 use crate::records::feature::surface_ops::DesignSurfaceStitchOperation;
+use crate::records::recipes::ConstructionRecipe;
+use crate::records::recipes::ConstructionRecipeKind;
 use crate::records::topology::extrude_selection::DesignOperandRole;
 use cadmpeg_core::decode::View;
 use cadmpeg_core::CodecError;
@@ -64,12 +67,32 @@ pub(super) fn exact_surface_extend_operation(
     })
 }
 
+/// Ordinal that the boundary carrier stores at tail bytes 35 and 47.
+const BOUNDARY_CARRIER_ORDINAL: u32 = 210;
+
 pub(super) fn exact_surface_offset_operation(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     scope: &DesignParameterScope,
+    recipes: &[ConstructionRecipe],
+    losses: &mut Vec<cadmpeg_ir::report::loss::LossNote>,
 ) -> Result<Option<DesignSurfaceOffsetOperation>, CodecError> {
-    if let Some(operation) = exact_surface_offset_face_groups(bytes, records, scope)? {
+    if let Some((operation, ordinals)) =
+        exact_surface_offset_face_groups(bytes, records, scope, recipes)?
+    {
+        if ordinals.iter().any(|ordinal| *ordinal != ordinals[0]) {
+            losses.push(
+                crate::loss::F3dLossCode::FeatureSurfaceOffsetGroupOrdinalsAssumed.note(format!(
+                    "{} reads support groups with ordinals {} as one support-face selection.",
+                    scope.id,
+                    ordinals
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )),
+            );
+        }
         return Ok(Some(operation));
     }
     let Some(operation) = exact_surface_boundary_operation(
@@ -98,15 +121,18 @@ pub(super) fn exact_surface_offset_operation(
     )
 }
 
+/// The grouped support form and the ordinal of each of its groups.
 fn exact_surface_offset_face_groups(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     scope: &DesignParameterScope,
-) -> Result<Option<DesignSurfaceOffsetOperation>, CodecError> {
+    recipes: &[ConstructionRecipe],
+) -> Result<Option<(DesignSurfaceOffsetOperation, Vec<std::num::NonZeroU32>)>, CodecError> {
     let parsed = (|| {
         if design_feature_family(&scope.kind()) != Some(DesignFeatureFamily::SurfaceOffset) {
             return None;
         }
+        let stream = native_stream(&scope.id)?;
         let distance_record_index = scope.reference_members().values().next()?;
         let support_reference_count = scope.reference_members().len() - 1;
         if support_reference_count == 0 {
@@ -119,6 +145,7 @@ fn exact_surface_offset_face_groups(
 
         let mut group_record_indices = Vec::new();
         let mut covered_references = HashSet::new();
+        let mut ordinals = Vec::new();
         for (scope_reference_ordinal, record_index) in scope
             .reference_members()
             .values()
@@ -141,7 +168,6 @@ fn exact_surface_offset_face_groups(
                 Err(error) => return Some(Err(error)),
             };
             if group.role() != DesignOperandRole::PROFILE
-                || group.frame.opaque_index.get() != 252
                 || group.members().is_empty()
                 || covered_references.contains(&group.record_index)
             {
@@ -157,6 +183,7 @@ fn exact_surface_offset_face_groups(
                         .skip(1)
                         .any(|value| value == member)
                     || covered_references.contains(member)
+                    || !bounded_face_member(records, recipes, stream, *member)
                 {
                     return None;
                 }
@@ -165,21 +192,57 @@ fn exact_surface_offset_face_groups(
             }
 
             group_record_indices.push(group.record_index);
+            ordinals.push(group.frame.opaque_index);
         }
         if group_record_indices.is_empty() || covered_references.len() != support_reference_count {
             return None;
         }
 
-        Some(Ok(DesignSurfaceOffsetOperation {
-            distance: scalar.value,
-            distance_offset: scalar.value_offset,
-            distance_record_index: *distance_record_index,
-            support: DesignSurfaceOffsetSupport::FaceGroups {
-                group_record_indices,
+        Some(Ok((
+            DesignSurfaceOffsetOperation {
+                distance: scalar.value,
+                distance_offset: scalar.value_offset,
+                distance_record_index: *distance_record_index,
+                support: DesignSurfaceOffsetSupport::FaceGroups {
+                    group_record_indices,
+                },
             },
-        }))
+            ordinals,
+        )))
     })();
     parsed.transpose()
+}
+
+fn bounded_face_member(
+    records: &IndexedRecordOffsets,
+    recipes: &[ConstructionRecipe],
+    stream: &str,
+    member: u32,
+) -> bool {
+    let Some(recipe_start) = (0..4).try_fold(0, |position, delta| {
+        records
+            .first_at_or_after(position, member.checked_add(delta)?)
+            .and_then(|offset| offset.checked_add(11))
+    }) else {
+        return false;
+    };
+    let recipe_end = member
+        .checked_add(4)
+        .and_then(|next| records.first_at_or_after(recipe_start, next))
+        .map(u64::try_from);
+    let Ok(recipe_start) = u64::try_from(recipe_start) else {
+        return false;
+    };
+    recipes
+        .iter()
+        .filter(|recipe| {
+            native_stream(&recipe.id) == Some(stream) && recipe.byte_offset >= recipe_start
+        })
+        .min_by_key(|recipe| recipe.byte_offset)
+        .is_some_and(|recipe| {
+            recipe.kind == ConstructionRecipeKind::BoundedFace
+                && recipe_end.is_none_or(|end| end.is_ok_and(|end| recipe.byte_offset < end))
+        })
 }
 
 fn exact_construction_operand_group(
@@ -255,7 +318,7 @@ fn exact_surface_boundary_operation(
                 .frames(*distance_record_index)
                 .filter(|(start, end)| {
                     end.checked_sub(*start) == Some(104)
-                        && lp_ascii_filtered_view(bytes, *start, 0..=2000, u8::is_ascii_graphic)
+                        && lp_ascii_filtered_view(bytes, *start, 3..=3, u8::is_ascii_digit)
                             .is_some_and(|(class_tag, after_tag)| {
                                 after_tag == *start + 7
                                     && class_tag.len() == 3
@@ -292,7 +355,7 @@ fn exact_surface_boundary_operation(
                 let tail = start.checked_add(25)?.checked_add(member_bytes)?;
                 (end.checked_sub(start)? == 113usize.checked_add(member_bytes)?).then_some(())?;
                 let (class_tag, after_tag) =
-                    lp_ascii_filtered_view(bytes, start, 0..=2000, u8::is_ascii_graphic)?;
+                    lp_ascii_filtered_view(bytes, start, 3..=3, u8::is_ascii_digit)?;
                 if after_tag != start + 7
                     || class_tag.len() != 3
                     || !class_tag.bytes().all(|byte| byte.is_ascii_digit())
@@ -310,8 +373,8 @@ fn exact_surface_boundary_operation(
                     || bytes.get(tail + 11..tail + 21)? != [0; 10]
                     || View::u32_le_at(bytes, tail + 21)? != boundary_kind
                     || bytes.get(tail + 25..tail + 35)? != [0; 10]
-                    || View::u32_le_at(bytes, tail + 35)? != 210
-                    || View::u32_le_at(bytes, tail + 47)? != 210
+                    || View::u32_le_at(bytes, tail + 35)? != BOUNDARY_CARRIER_ORDINAL
+                    || View::u32_le_at(bytes, tail + 47)? != BOUNDARY_CARRIER_ORDINAL
                     || marked_record_reference(bytes, tail + 51)
                         != boundary_record_index.checked_add(2)
                     || bytes.get(tail + 56..tail + 62)? != [0; 6]

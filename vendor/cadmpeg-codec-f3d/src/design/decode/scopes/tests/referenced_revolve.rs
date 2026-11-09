@@ -30,6 +30,7 @@ struct Fixture {
     zero_flags: [u8; 3],
     angle_marker: u8,
     angle: f64,
+    label: Option<&'static str>,
 }
 
 impl Fixture {
@@ -48,6 +49,7 @@ impl Fixture {
             zero_flags: [0; 3],
             angle_marker: 1,
             angle: 1.5,
+            label: None,
         }
     }
 
@@ -62,7 +64,7 @@ impl Fixture {
 
     /// The scope frame and its angle owner's scalar frame. The kind is the
     /// localized `Révolution`, and zero padding brings the token-independent
-    /// frame to 351 bytes for the marked form or 369 for the unmarked form.
+    /// frame to 351 or 373 bytes for the marked form or 369 for the unmarked form.
     fn bytes(&self) -> Vec<u8> {
         fn marked(bytes: &mut Vec<u8>, marker: u8, record: u32) {
             bytes.push(marker);
@@ -87,7 +89,13 @@ impl Fixture {
         bytes.push(self.solid);
         bytes.extend_from_slice(&self.zero_flags);
         marked(&mut bytes, self.angle_marker, ANGLE);
-        let payload = if self.unmarked { 369 } else { 351 };
+        let payload = if self.unmarked {
+            369
+        } else if self.references == 8 {
+            373
+        } else {
+            351
+        };
         let table = [81_u32, 82, 91, 92, 93, 94, ANGLE, 96];
         let table = &table[table.len() - self.references..];
         let padding = payload - bytes.len() - 90 - 11 * table.len();
@@ -98,10 +106,29 @@ impl Fixture {
         }
         bytes.extend_from_slice(&17_u32.to_le_bytes());
         lp_utf16(&mut bytes, "Révolution");
-        let mut tail = [0; 78];
-        tail[0..4].copy_from_slice(&2_u32.to_le_bytes());
-        tail[31..35].copy_from_slice(&16_u32.to_le_bytes());
-        bytes.extend_from_slice(&tail);
+        if let Some(label) = self.label {
+            bytes.extend_from_slice(&2u32.to_le_bytes());
+            bytes.extend_from_slice(&0u32.to_le_bytes());
+            lp_utf16(&mut bytes, label);
+            bytes.extend_from_slice(&[0; 7]);
+            bytes.extend_from_slice(&[1, 15]);
+            bytes.extend_from_slice(&1u64.to_le_bytes());
+            bytes.extend_from_slice(&[0; 2]);
+            bytes.extend_from_slice(&9u32.to_le_bytes());
+            bytes.extend_from_slice(&252u32.to_le_bytes());
+            bytes.extend_from_slice(&0.25f64.to_le_bytes());
+            bytes.extend_from_slice(&252u32.to_le_bytes());
+            bytes.extend_from_slice(&[1, 14]);
+            bytes.extend_from_slice(&1u64.to_le_bytes());
+            bytes.extend_from_slice(&[0, 1, 0, 0, 1, 13]);
+            bytes.extend_from_slice(&1u64.to_le_bytes());
+            bytes.extend_from_slice(&[0; 3]);
+        } else {
+            let mut tail = [0; 78];
+            tail[0..4].copy_from_slice(&2_u32.to_le_bytes());
+            tail[31..35].copy_from_slice(&16_u32.to_le_bytes());
+            bytes.extend_from_slice(&tail);
+        }
         indexed_header(&mut bytes, *b"258", SCOPE);
         bytes
     }
@@ -260,4 +287,34 @@ fn a_negative_angle_states_its_magnitude_and_a_reversed_turn() {
         zero.angle = 0.0;
         assert!(zero.decode().is_none());
     }
+}
+
+#[test]
+fn marked_form_matches_operation_to_frame_and_reference_count() {
+    let mut labelled = Fixture::marked();
+    labelled.label = Some("Angle 😀");
+    assert_eq!(
+        labelled.decode().unwrap().operation,
+        DesignExtrudeOperation::NewBody
+    );
+
+    let mut boolean = Fixture::marked();
+    boolean.references = 8;
+    for (operation, expected) in [
+        (1, DesignExtrudeOperation::Join),
+        (2, DesignExtrudeOperation::Cut),
+        (3, DesignExtrudeOperation::Intersect),
+    ] {
+        boolean.operation = operation;
+        assert_eq!(boolean.decode().unwrap().operation, expected);
+    }
+    boolean.operation = 4;
+    assert!(boolean.decode().is_none());
+
+    let mut wrong_operation = Fixture::marked();
+    wrong_operation.operation = 1;
+    assert!(wrong_operation.decode().is_none());
+    wrong_operation.project_axis = 1;
+    wrong_operation.solid = 0;
+    assert!(wrong_operation.decode().is_none());
 }

@@ -13,6 +13,7 @@ use zip::CompressionMethod;
 use super::{
     decode_parameters, parse_design_parameter_record, parse_legacy_parameter_owner_68,
     parse_legacy_parameter_owner_88, parse_parameter_companion, parse_parameter_owner,
+    parse_text_parameter_owner, wide_parameter_comment,
 };
 use crate::design::test_support::{parameter_owner_frame, parameter_record};
 use crate::records::{
@@ -23,10 +24,19 @@ use crate::test_support::lp_utf16;
 use crate::test_support::manifest_test::write_synthetic_manifests;
 use crate::test_support::zip_test::with_scan;
 
+mod comment_field;
 mod expression_flags;
 mod registered_tail;
 mod tail_forms;
+mod text_owner;
 mod unparsed_frames;
+
+/// The text scalar envelope of a text parameter's owner: `00` + LP-UTF16 `text`.
+fn text_envelope(text: &str) -> Vec<u8> {
+    let mut envelope = vec![0];
+    lp_utf16(&mut envelope, text);
+    envelope
+}
 
 #[test]
 fn discriminated_user_parameter_preserves_length_expression_and_unit() {
@@ -1161,6 +1171,44 @@ fn parameter_owner_uses_the_paired_same_index_header_as_its_boundary() {
     assert_eq!(owner.frame_length(), 104);
     assert!(owners.unparsed.is_empty());
     assert_eq!(owner.evaluated_value_offset(), 40);
+
+    // The owner of a text parameter stores the text in its scalar envelope.
+    let text = parameter
+        .clone()
+        .with_text_value(Some(crate::records::identity::RecordedValue {
+            value: "AB".into(),
+            offset: 270,
+        }))
+        .unwrap();
+    let owners = with_scan(&archive(stream, &exact), |scan| {
+        crate::design::decode::parameters::decode_parameter_owners(
+            scan,
+            std::slice::from_ref(&text),
+            std::slice::from_ref(&header),
+        )
+    })
+    .expect("text parameter owner");
+    assert!(owners.owners.is_empty());
+    assert_eq!(owners.unparsed, [text.id.clone()]);
+
+    let mut text_frame = parameter_owner_frame();
+    text_frame.splice(39..48, text_envelope("AB"));
+    text_frame.extend_from_slice(&paired_header());
+    let owners = with_scan(&archive(stream, &text_frame), |scan| {
+        crate::design::decode::parameters::decode_parameter_owners(
+            scan,
+            std::slice::from_ref(&text),
+            std::slice::from_ref(&header),
+        )
+    })
+    .expect("text owner frame");
+    let [owner] = owners.owners.as_slice() else {
+        panic!("expected the text parameter owner");
+    };
+    assert!(owners.unparsed.is_empty());
+    assert_eq!(owner.scope_record_index(), 12);
+    assert_eq!(owner.text_value(), Some("AB"));
+    assert_eq!(owner.evaluated_value_offset(), 320);
 
     let mut compact = without_variant_padding(parameter_owner_frame());
     compact.extend_from_slice(&paired_header());

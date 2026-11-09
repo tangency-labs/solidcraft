@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-use super::moved_face_selection;
+use super::{agreed_selection, moved_face_selection, recipe_face_selection};
 use crate::history_records::{
     AsmHistoricalCarrierBinding, AsmHistoricalCylinder, AsmHistoricalPlane, AsmHistoricalTopology,
 };
+use crate::records::topology::face::DesignFaceOperand;
 use cadmpeg_ir::features::{FaceMotion, FeatureDirection3};
 use cadmpeg_ir::math::{Point3, Vector3};
 use cadmpeg_ir::scalar::Length;
@@ -365,4 +366,70 @@ fn a_plane_row_that_moves_against_its_normal_follows_an_offset() {
             Some(vec![10])
         );
     }
+}
+
+fn member(record_index: u32, kind: &str, slots: &[i64]) -> DesignFaceOperand {
+    let mut operand: DesignFaceOperand = serde_json::from_value(serde_json::json!({
+        "id": format!("f3d:test:face-operand#{record_index}"), "scope_record_index": 5,
+        "scope_reference_ordinal": 1, "group_record_index": 6, "group_member_ordinal": 0,
+        "record_index": record_index, "byte_offset": 0, "class_tag": "282",
+        "paired_byte_offset": 12, "paired_class_tag": "259",
+        "recipe_record_index": record_index + 3, "recipe_record_byte_offset": 24,
+        "recipe_id": "f3d:test:recipe#22", "recipe_prefix_offset": 35, "recipe_prefix_bytes": "",
+        "recipe_references": [], "recipe_kind": kind, "recipe_program_offset": 0,
+        "recipe_program": [0, -1, 3], "recipe_node_offsets": [], "recipe_nodes": [],
+        "next_record_index": record_index + 2, "next_byte_offset": 36
+    }))
+    .unwrap();
+    operand.resolved_face_slots = slots.to_vec();
+    operand
+}
+
+fn select_by_recipes(members: &[u32], operands: &[DesignFaceOperand]) -> Option<Vec<i64>> {
+    let operands: Vec<_> = operands.iter().collect();
+    recipe_face_selection(members, &operands, &input())
+}
+
+#[test]
+fn each_member_recipe_selects_one_distinct_input_face() {
+    let operands = [
+        member(1, "bounded_face", &[20]),
+        member(2, "bounded_face", &[10]),
+    ];
+    assert_eq!(select_by_recipes(&[1, 2], &operands), Some(vec![10, 20]));
+    assert_eq!(select_by_recipes(&[2, 1], &operands), Some(vec![10, 20]));
+    assert_eq!(select_by_recipes(&[1, 1], &operands), Some(vec![20]));
+}
+
+#[test]
+fn a_member_recipe_without_one_input_face_states_no_selection() {
+    let resolved = member(1, "bounded_face", &[10]);
+    for operands in [
+        vec![resolved.clone()],
+        vec![resolved.clone(), member(2, "bounded_face", &[])],
+        vec![resolved.clone(), member(2, "bounded_face", &[20, 30])],
+        vec![resolved.clone(), member(2, "bounded_face", &[99])],
+        vec![resolved.clone(), member(2, "bounded_face", &[10])],
+        vec![resolved.clone(), member(2, "face", &[20])],
+        vec![
+            resolved.clone(),
+            member(2, "bounded_face", &[20]),
+            member(2, "bounded_face", &[20]),
+        ],
+    ] {
+        assert_eq!(select_by_recipes(&[1, 2], &operands), None);
+    }
+    assert_eq!(select_by_recipes(&[], &[resolved]), None);
+}
+
+#[test]
+fn the_transitions_and_the_member_recipes_agree_or_state_no_selection() {
+    assert_eq!(
+        agreed_selection(Some(vec![10]), Some(vec![10])),
+        Some(vec![10])
+    );
+    assert_eq!(agreed_selection(Some(vec![10]), Some(vec![20])), None);
+    assert_eq!(agreed_selection(Some(vec![10]), None), Some(vec![10]));
+    assert_eq!(agreed_selection(None, Some(vec![20])), Some(vec![20]));
+    assert_eq!(agreed_selection(None, None), None);
 }

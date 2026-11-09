@@ -444,6 +444,7 @@ fn exact_legacy_as_built_face_selection(
                 asset_id_offset: prefix.asset_id_offset,
                 context_id: prefix.context_id.try_into().ok()?,
                 context_id_offset: prefix.context_id_offset,
+                serialization_form: prefix.serialization_form,
                 recipe_record_index: operand.recipe_record_index(),
                 recipe_record_byte_offset: operand.recipe_record_byte_offset(),
                 recipe_id: operand.recipe_id,

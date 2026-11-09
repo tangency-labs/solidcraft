@@ -13,7 +13,7 @@ use crate::design::decode::parameters::parse_design_parameter_record;
 use crate::design::decode::sketch::bind_sketch_graph;
 use crate::design::sketch_project::{project_sketch_design, SketchProjectInputs};
 use crate::design::test_support::parameter_record;
-use crate::design::{design_feature_family, is_localized_edge_treatment_kind, DesignFeatureFamily};
+use crate::design::{design_feature_family, is_localized_edge_treatment, DesignFeatureFamily};
 use crate::ids::feature_input_topology_id;
 use crate::ids::{
     neutral_dimension_constraint_id, neutral_feature_id_parts, neutral_parameter_id_parts,
@@ -29,77 +29,49 @@ use cadmpeg_ir::math::Point2;
 use std::collections::HashSet;
 
 #[test]
-fn feature_family_tokens_are_localized() {
-    use crate::records::feature::scope::DesignFeatureKind;
+fn feature_family_tokens_select_canonical_families() {
+    use crate::records::feature::scope::{DesignFeatureKind, DesignParameterScope};
     let family = |token: &str| {
         design_feature_family(
             &DesignFeatureKind::try_from(token.to_owned()).expect("nonempty family name"),
         )
     };
-    let treatment = |token: &str| {
-        has_typed_edge_treatment_group(
-            &DesignFeatureKind::try_from(token.to_owned()).expect("nonempty family name"),
-        )
-    };
-    let localized = |token: &str| {
-        is_localized_edge_treatment_kind(
-            &DesignFeatureKind::try_from(token.to_owned()).expect("nonempty family name"),
-        )
+    let localized = |kind: DesignFeatureKind, stored: Option<&str>| {
+        let mut scope = DesignParameterScope::empty("f3d:Design/BulkStream.dat:scope#1", kind, 1);
+        scope.source_kind = stored.map(str::to_owned);
+        is_localized_edge_treatment(&scope)
     };
     assert_eq!(family("As-built"), Some(DesignFeatureFamily::Assemble));
-    assert_eq!(family("Esquisse"), Some(DesignFeatureFamily::Sketch));
-    assert_eq!(family("Extrusion"), Some(DesignFeatureFamily::Extrude));
-    assert_eq!(family("Extrusão"), Some(DesignFeatureFamily::Extrude));
-    for token in ["Skizze", "Esboço", "Boceto", "スケッチ"] {
-        assert_eq!(family(token), Some(DesignFeatureFamily::Sketch));
-    }
-    assert_eq!(family("Congé"), Some(DesignFeatureFamily::Fillet));
-    for token in ["Abrundung", "Arredondamento", "Empalme", "フィレット"] {
-        assert_eq!(family(token), Some(DesignFeatureFamily::Fillet));
-        assert!(treatment(token));
-    }
-    assert_eq!(family("Chanfrein"), Some(DesignFeatureFamily::Chamfer));
-    for token in ["Chaflán", "面取り"] {
-        assert_eq!(family(token), Some(DesignFeatureFamily::Chamfer));
-        assert!(treatment(token));
-    }
-    for token in ["Extruir", "押し出し"] {
-        assert_eq!(family(token), Some(DesignFeatureFamily::Extrude));
-    }
-    assert_eq!(family("Escala"), Some(DesignFeatureFamily::Scale));
-    assert_eq!(family("Solevación"), Some(DesignFeatureFamily::Loft));
-    assert_eq!(family("Vaciado"), Some(DesignFeatureFamily::Shell));
-    assert_eq!(family("PlanoDeObra"), None);
-    assert_eq!(family("Lienzo"), None);
-    assert_eq!(family("EsferaPrimitiva"), None);
-    for token in [
+    assert_eq!(family("Fillet"), Some(DesignFeatureFamily::Fillet));
+    assert_eq!(family("Chamfer"), Some(DesignFeatureFamily::Chamfer));
+    assert!(has_typed_edge_treatment_group(&DesignFeatureKind::Fillet));
+    assert!(has_typed_edge_treatment_group(&DesignFeatureKind::Chamfer));
+    for stored in [
         "Congé",
         "Abrundung",
         "Arredondamento",
-        "Chanfrein",
         "Empalme",
         "フィレット",
-        "Chaflán",
-        "面取り",
     ] {
-        assert!(localized(token));
+        assert!(localized(DesignFeatureKind::Fillet, Some(stored)));
     }
-    for token in ["Fillet", "Chamfer", "Extrusion", "unknown"] {
-        assert!(!localized(token));
+    for stored in ["Chanfrein", "Chaflán", "面取り"] {
+        assert!(localized(DesignFeatureKind::Chamfer, Some(stored)));
     }
-    for token in ["C-Pattern", "Réseau C"] {
-        assert_eq!(family(token), Some(DesignFeatureFamily::CircularPattern));
-    }
-    assert_eq!(family("Symétrie miroir"), Some(DesignFeatureFamily::Mirror));
+    assert!(!localized(DesignFeatureKind::Fillet, None));
+    assert!(!localized(DesignFeatureKind::Chamfer, None));
+    assert!(!localized(
+        DesignFeatureKind::try_from("unknown".to_owned()).expect("native family name"),
+        None
+    ));
     assert_eq!(
-        family("DécalerLesFaces"),
-        Some(DesignFeatureFamily::OffsetFaces)
+        family("C-Pattern"),
+        Some(DesignFeatureFamily::CircularPattern)
     );
     assert_eq!(
         family("ReplaceFace"),
         Some(DesignFeatureFamily::ReplaceFace)
     );
-    assert_eq!(family("Schale"), Some(DesignFeatureFamily::Shell));
     assert_eq!(family("SpirePrimitive"), Some(DesignFeatureFamily::Coil));
     assert_eq!(family("Hem"), Some(DesignFeatureFamily::SheetMetalHem));
     assert!(crate::design::decode::operands::has_edge_recipe_operands(
@@ -294,6 +266,7 @@ fn design_streams_scope_sketch_graphs_identities_and_parameter_names() {
             id: format!("f3d:{stream}:sketch-point#0"),
             record_index: 20,
             owner_reference: None,
+            geometry_group: None,
             class_tag: crate::records::references::DesignClassTag::try_from("301".to_owned())
                 .unwrap(),
             byte_offset: 0,

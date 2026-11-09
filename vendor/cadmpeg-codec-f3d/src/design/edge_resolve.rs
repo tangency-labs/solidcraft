@@ -1986,7 +1986,8 @@ fn deleted_boundary_edge_group_candidates(operands: &[&DesignEdgeOperand]) -> Op
     for operand in operands {
         if operand.recipe_structure.is_none()
             || operand.recipe_references.is_empty()
-            || operand.recipe_references.len() != operand.recipe_reference_contexts.len()
+            || crate::records::dimensions::reference_lanes(&operand.recipe_references).len()
+                != operand.recipe_reference_contexts.len()
             || operand.recipe_reference_contexts.is_empty()
             || operand.deleted_boundary_edge_slots.is_empty()
             || operand.deleted_boundary_edge_slots.iter().any(|edge| {
@@ -2044,7 +2045,8 @@ fn contextual_deleted_edge_group_candidates(
     for operand in operands {
         if operand.recipe_structure.is_none()
             || operand.recipe_references.is_empty()
-            || operand.recipe_references.len() != operand.recipe_reference_contexts.len()
+            || crate::records::dimensions::reference_lanes(&operand.recipe_references).len()
+                != operand.recipe_reference_contexts.len()
             || operand.recipe_reference_contexts.is_empty()
         {
             return Ok(None);
@@ -2111,7 +2113,8 @@ fn result_boundary_reference_edge_group_candidates(
             side.scalars.len() != 2 || side.payload_prefix != [0] || !side.entries.is_empty()
         })
         || operand.recipe_references.is_empty()
-        || operand.recipe_references.len() != operand.recipe_reference_contexts.len()
+        || crate::records::dimensions::reference_lanes(&operand.recipe_references).len()
+            != operand.recipe_reference_contexts.len()
         || operand.recipe_reference_contexts.is_empty()
         || !operand.changed_boundary_edge_slots.is_empty()
         || !operand.deleted_boundary_edge_slots.is_empty()

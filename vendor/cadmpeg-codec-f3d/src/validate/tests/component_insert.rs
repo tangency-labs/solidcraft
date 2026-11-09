@@ -2,6 +2,94 @@
 use crate::test_support::native_test::f3d_native_mut;
 
 #[test]
+fn validation_accepts_transformed_insert_frames_with_other_paired_tags() {
+    use crate::records::{
+        decal::DesignRecordHeader,
+        feature::{
+            assembly_features::{DesignComponentInsertConstruction, DesignComponentInsertMatrix},
+            scope::DesignParameterScope,
+        },
+        identity::Located,
+        sketch_placement::SketchPlacementMatrix,
+    };
+
+    let stream = "f3d:Design/BulkStream.dat";
+    let scope_id = format!("{stream}:design-parameter-scope#100");
+    for (frame_length, paired_tag, transform_delta) in
+        [(399, "260", 50), (381, "262", 49), (395, "259", 46)]
+    {
+        let mut scope = DesignParameterScope::empty(
+            &scope_id,
+            crate::records::feature::scope::DesignFeatureKind::ComponentInsert,
+            169,
+        );
+        scope
+            .try_edit(|draft| {
+                draft.byte_offset = 100;
+                draft.class_tag = "451".to_owned().try_into().unwrap();
+                draft.frame_length = frame_length;
+                draft.reference_count_offset = 229;
+                draft.reference_members = crate::records::identity::ReferenceRun::from_columns(
+                    vec![167],
+                    vec![234],
+                    "reference_members",
+                )
+                .unwrap();
+                draft.kind_offset = 252;
+                draft.paired_class_tag = paired_tag.to_owned().try_into().unwrap();
+                draft.paired_byte_offset = 100 + frame_length;
+                draft.feature_ordinal = std::num::NonZeroU32::MIN;
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        if let crate::records::feature::scope::DesignScopePayloadMut::ComponentInsert(slot) =
+            scope.payload_mut()
+        {
+            *slot = Some(DesignComponentInsertConstruction {
+                relation_record_index: 167,
+                carrier_record_index: 166,
+                occurrence_identity: Some(17),
+                neutron_role: "cccccccc-dddd-eeee-ffff-000000000000".into(),
+                neutron_role_offset: 10,
+                placement: Some(DesignComponentInsertMatrix {
+                    scope: Located {
+                        value: SketchPlacementMatrix::IDENTITY,
+                        offset: 100 + transform_delta,
+                    },
+                    carrier_offset: Some(30),
+                }),
+            });
+        }
+        let mut ir = cadmpeg_ir::examples::unit_cube().unwrap();
+        {
+            let mut native = f3d_native_mut(&mut ir);
+            native.design_record_headers.extend([
+                DesignRecordHeader {
+                    id: format!("{stream}:design-record-header#167"),
+                    record_index: 167,
+                    class_tag: "310".to_owned().try_into().unwrap(),
+                    byte_offset: 80,
+                },
+                DesignRecordHeader {
+                    id: format!("{stream}:design-record-header#169"),
+                    record_index: 169,
+                    class_tag: "451".to_owned().try_into().unwrap(),
+                    byte_offset: 100,
+                },
+            ]);
+            native.design_parameter_scopes.push(scope);
+        }
+        let findings = crate::test_support::with_decode_context(|ctx| {
+            crate::validate::validate_native(ctx, &ir).unwrap()
+        });
+        assert!(!findings.iter().any(|finding| {
+            finding.entity.as_deref() == Some(scope_id.as_str())
+                && finding.message == "Fusion Design parameter scope has an invalid paired frame"
+        }));
+    }
+}
+
+#[test]
 fn validation_accepts_identity_insert_frame_and_rejects_wrong_pair() {
     use crate::records::{
         decal::DesignRecordHeader,

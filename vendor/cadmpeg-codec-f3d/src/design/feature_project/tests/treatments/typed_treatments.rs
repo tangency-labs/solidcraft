@@ -86,6 +86,7 @@ fn edge_treatments_and_holes_project_typed_dimensions_and_native_selections() {
                 kind_offset: byte_offset + 100,
                 feature_ordinal: std::num::NonZeroU32::MIN,
                 feature_ordinal_offset: 0,
+                label: None,
                 history_state_id: None,
 
                 previous_history_state_id: None,
@@ -102,6 +103,7 @@ fn edge_treatments_and_holes_project_typed_dimensions_and_native_selections() {
                     .try_into()
                     .unwrap(),
                 unclosed_construction_operand_groups: Vec::new(),
+                deleted_members: None,
                 paired_class_tag: DesignClassTag::try_from("261".to_owned()).unwrap(),
                 paired_byte_offset: byte_offset + 200,
             }
@@ -123,6 +125,7 @@ fn edge_treatments_and_holes_project_typed_dimensions_and_native_selections() {
                 value: 0,
                 offset: 9,
             }),
+            standard: None,
         });
         slot.point = Some(DesignHoleConstruction {
             point_record_index: 378,

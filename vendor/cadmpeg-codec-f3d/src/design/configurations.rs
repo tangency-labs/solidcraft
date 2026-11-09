@@ -328,6 +328,69 @@ fn project_row(
     Ok(configuration)
 }
 
+/// Make the active configurations and the current feature states agree where
+/// the source leaves one of them silent. A table lists only the features it
+/// toggles, so a suppressed feature with no row keeps that state in the active
+/// row. A Sketch scope's state identities do not decide its suppression, and a
+/// feature can have no stored state, so the active row supplies it. A row with
+/// a suppression column that names no feature could name the feature that
+/// gained a row, so that row records the assumption in a property.
+pub(crate) fn reconcile_active_configurations(
+    features: &mut [cadmpeg_ir::features::Feature],
+    configurations: &mut [cadmpeg_ir::features::DesignConfiguration],
+) -> Result<(), CodecError> {
+    use cadmpeg_ir::features::{FeatureDefinition, FeatureOperation};
+
+    for configuration in configurations.iter_mut().filter(|row| row.active) {
+        let unresolved_column = configuration
+            .properties
+            .keys()
+            .any(|key| key.as_str().starts_with("suppressed:"));
+        for feature in features.iter_mut() {
+            match configuration.feature_states.get(&feature.id) {
+                Some(state) if state.evaluation.is_suppressed() => {
+                    let undecided = feature.suppressed.is_none()
+                        || matches!(
+                            feature.evaluation.definition(),
+                            FeatureDefinition::Operation(FeatureOperation::Sketch { .. })
+                        );
+                    if undecided {
+                        feature.suppressed = Some(true);
+                    }
+                }
+                Some(_) => {}
+                None => {
+                    if feature.suppressed == Some(true) {
+                        configuration
+                            .feature_states
+                            .insert(feature.id.clone(), feature.configuration_state());
+                        if unresolved_column {
+                            let key = configuration_property_key(
+                                "suppression_inferred:",
+                                feature.id.as_str(),
+                            )?;
+                            configuration.properties.insert(key, "true".to_owned());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Suppressed states of the active configuration inferred from the current
+/// feature state while a suppression column of that row names no feature.
+pub(crate) fn inferred_configuration_suppression_count(
+    projected: &[cadmpeg_ir::features::DesignConfiguration],
+) -> usize {
+    projected
+        .iter()
+        .flat_map(|configuration| configuration.properties.keys())
+        .filter(|key| key.as_str().starts_with("suppression_inferred:"))
+        .count()
+}
+
 pub(crate) fn unresolved_configuration_parameter_override_count(
     projected: &[cadmpeg_ir::features::DesignConfiguration],
 ) -> usize {

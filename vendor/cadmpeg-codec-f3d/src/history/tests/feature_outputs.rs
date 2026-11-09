@@ -169,6 +169,7 @@ fn split_outputs_bind_across_complete_transition_chains() {
         &mut [history.clone()],
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(complete.evaluation.outputs(), &[body.id.clone()]);
@@ -183,6 +184,7 @@ fn split_outputs_bind_across_complete_transition_chains() {
         &mut [incomplete],
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(feature.evaluation.outputs().is_empty());
@@ -195,6 +197,7 @@ fn split_outputs_bind_across_complete_transition_chains() {
         &mut [history.clone(), history],
         &[body],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(feature.evaluation.outputs().is_empty());
@@ -307,6 +310,7 @@ fn feature_outputs_name_the_bodies_a_state_deletes_from_its_previous_state() {
             &mut [chain()],
             &bodies,
             &Default::default(),
+            None,
         )
         .unwrap();
         check(&feature, case);
@@ -321,6 +325,7 @@ fn feature_outputs_name_the_bodies_a_state_deletes_from_its_previous_state() {
         &mut [chain()],
         &bodies,
         &Default::default(),
+        None,
     )
     .unwrap();
     for (feature, case) in features.iter().zip(&expected) {
@@ -338,6 +343,7 @@ fn feature_output_binding_preserves_base_feature_selection() {
         &mut [history],
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(feature.evaluation.outputs().len(), 1);
@@ -377,6 +383,7 @@ fn stored_body_scope_uses_unique_complete_history_outputs() {
         &mut [history],
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(matches!(feature.evaluation.definition(),
@@ -415,6 +422,7 @@ fn stored_body_scope_refuses_missing_bodies_and_ambiguous_states() {
             &mut histories,
             &bodies,
             &Default::default(),
+            None,
         )
         .unwrap();
         assert!(matches!(
@@ -451,6 +459,7 @@ fn stored_body_scope_keeps_proven_empty_history_as_no_op() {
         &mut [history],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(matches!(feature.evaluation.definition(),
@@ -478,7 +487,7 @@ fn stored_body_scope_does_not_type_box_from_outputs() {
     );
     feature.native_ref = Some(scope.id.clone());
     let active = [body];
-    let index = super::super::stored_bodies::ActiveBodies::new(&active);
+    let index = super::super::stored_bodies::ActiveBodies::new(&active, None);
     assert!(!super::super::stored_bodies::bind_history_outputs(
         &mut feature,
         &scope,
@@ -509,6 +518,7 @@ fn stored_body_scope_reports_recipe_absence_from_snapshot_kind() {
         &mut [history],
         &[body],
         &Default::default(),
+        None,
     )
     .unwrap();
     let losses = super::super::stored_bodies::losses(
@@ -555,6 +565,7 @@ fn stored_body_scope_without_any_proof_keeps_native_definition() {
         &mut [],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(matches!(feature.evaluation.definition(),
@@ -595,6 +606,7 @@ fn stored_body_scope_qualifies_body_slots_by_history_blob() {
                 &mut [history_in_source(source, &[1])],
                 &bodies,
                 &Default::default(),
+                None,
             )
             .unwrap();
             assert_eq!(feature.evaluation.outputs(), &[expected.id.clone()]);
@@ -618,6 +630,7 @@ fn stored_body_scope_refuses_a_body_from_another_history_blob() {
         &mut [history_in_source("selected.smbh", &[1])],
         &[body],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(matches!(
@@ -658,6 +671,7 @@ fn stored_body_scope_refuses_a_declared_body_count_mismatch() {
         &mut [history_in_source("selected.smbh", &[])],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(matches!(
@@ -694,6 +708,7 @@ fn stored_body_scope_binds_explicit_body_members_without_history() {
         &mut [],
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(feature.evaluation.outputs(), &[body.id]);
@@ -758,6 +773,7 @@ fn derived_base_scope_with_proven_bodies_is_a_stored_snapshot() {
             &mut [history],
             std::slice::from_ref(&body),
             &Default::default(),
+            None,
         )
         .unwrap();
         assert!(
@@ -814,6 +830,7 @@ fn derived_base_scope_without_proven_bodies_stays_native() {
                 &mut histories,
                 &bodies,
                 &Default::default(),
+                None,
             )
             .unwrap();
             assert!(
@@ -858,6 +875,7 @@ fn derived_base_scope_with_proven_empty_transition_is_a_typed_no_op() {
             &mut [history],
             &[],
             &Default::default(),
+            None,
         )
         .unwrap();
         assert!(
@@ -1102,6 +1120,7 @@ fn historical_partial_and_native_edge_selections_test() {
         &mut [history.clone()],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1127,6 +1146,7 @@ fn historical_partial_and_native_edge_selections_test() {
         &mut [history],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1231,6 +1251,7 @@ fn historical_body_bounds_unresolved_test() {
         &mut [history],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1278,6 +1299,7 @@ fn body_measurement_covers_only_the_states_feature_outputs_read() {
         &mut [history],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1427,6 +1449,7 @@ fn stored_false_shell_retained_on_bbox_growth() {
         &mut [history],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1496,6 +1519,7 @@ fn combine_join_to_cut_deleting_vs_non_deleting() {
         &mut [history_non_deleting],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1528,6 +1552,7 @@ fn combine_join_to_cut_deleting_vs_non_deleting() {
         &mut [history_deleting],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
 
@@ -1625,6 +1650,7 @@ fn only_the_operand_list_form_keeps_a_stored_join_with_kept_tools() {
             &mut [history],
             &[],
             &Default::default(),
+            None,
         )
         .unwrap();
         let FeatureDefinition::Operation(FeatureOperation::Combine { op, .. }) =
@@ -1645,137 +1671,6 @@ fn only_the_operand_list_form_keeps_a_stored_join_with_kept_tools() {
         assert_eq!(resolved(form, &[1]), expected, "{form:?}");
         assert_eq!(resolved(form, &[1, 2]), BooleanKind::Join, "{form:?}");
     }
-}
-
-#[test]
-fn split_plane_only_emitted_for_split_body() {
-    use crate::history_records::{
-        AsmHistoricalCarrierBinding, AsmHistoricalPlane, AsmHistoricalTopology,
-    };
-    use cadmpeg_ir::features::{
-        DistinctMembers, Feature, FeatureDefinition, FeatureEvaluation, FeatureId, FeatureOperation,
-    };
-    use cadmpeg_ir::math::{Point3, Vector3};
-
-    let scope = scope_between(1, 0);
-
-    let state1_topo = AsmHistoricalTopology {
-        faces: vec![10],
-        face_surfaces: vec![AsmHistoricalCarrierBinding {
-            entity: 10,
-            carrier: 20,
-        }],
-        surface_planes: vec![AsmHistoricalPlane {
-            surface: 20,
-            origin: Point3::new(1.0, 2.0, 3.0),
-            normal: Vector3::new(0.0, 0.0, 1.0),
-        }],
-        ..AsmHistoricalTopology::default()
-    };
-
-    let history = crate::test_support::history::history(
-        "f3d:asm-history#1".into(),
-        0,
-        None,
-        false,
-        vec![
-            state(1, 1, Some(0), state1_topo),
-            state(0, 0, None, AsmHistoricalTopology::default()),
-        ],
-    );
-
-    // 1. SplitBody: emits split_plane
-    let mut feature_split = Feature {
-        id: FeatureId::mint("test:model:feature#split").unwrap(),
-        ordinal: 0,
-        name: None,
-        suppressed: None,
-        dependencies: Default::default(),
-        source_properties: Default::default(),
-        source_tag: Some("Split Body".into()),
-        source_text: None,
-        source_content: Default::default(),
-        evaluation: FeatureEvaluation::new(
-            FeatureDefinition::Operation(FeatureOperation::SplitBody {
-                targets: cadmpeg_ir::features::BodySelection::Unresolved,
-                tool: cadmpeg_ir::features::SplitBodyTool::Faces(
-                    cadmpeg_ir::features::FaceSelection::Faces(vec![]),
-                ),
-            }),
-            DistinctMembers::try_from(vec![]).unwrap(),
-        ),
-        native_ref: Some(scope.id.clone()),
-        product_definition: None,
-    };
-
-    super::super::bind_feature_outputs(
-        std::slice::from_mut(&mut feature_split),
-        std::slice::from_ref(&scope),
-        &mut [history.clone()],
-        &[],
-        &Default::default(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        feature_split
-            .source_properties
-            .get(&cadmpeg_core::nonblank_literal!("split_plane")),
-        Some(&"1,2,3;0,0,1".to_string())
-    );
-
-    // 2. Extrude: does NOT emit split_plane
-    let mut feature_extrude = Feature {
-        id: FeatureId::mint("test:model:feature#extrude").unwrap(),
-        ordinal: 0,
-        name: None,
-        suppressed: None,
-        dependencies: Default::default(),
-        source_properties: Default::default(),
-        source_tag: Some("Extrude".into()),
-        source_text: None,
-        source_content: Default::default(),
-        evaluation: FeatureEvaluation::new(
-            FeatureDefinition::Operation(FeatureOperation::Extrude {
-                profile: cadmpeg_ir::features::ProfileRef::Planar(
-                    cadmpeg_ir::features::PlanarProfileRef::Native("scope".into()),
-                ),
-                direction: cadmpeg_ir::features::ExtrudeDirection::default(),
-                start: cadmpeg_ir::features::ExtrudeStart::ProfilePlane {},
-                extent: cadmpeg_ir::features::ExtrudeExtent::OneSided {
-                    side: cadmpeg_ir::features::ExtrudeSide {
-                        termination: cadmpeg_ir::features::LinearTermination::ThroughAll {},
-                        draft: None,
-                    },
-                },
-                op: cadmpeg_ir::features::BooleanOp::NewBody,
-                solid: None,
-                face_maker: None,
-                inner_wire_taper: None,
-                length_along_profile_normal: Some(false),
-                allow_multi_profile_faces: Some(false),
-            }),
-            DistinctMembers::try_from(vec![]).unwrap(),
-        ),
-        native_ref: Some(scope.id.clone()),
-        product_definition: None,
-    };
-
-    super::super::bind_feature_outputs(
-        std::slice::from_mut(&mut feature_extrude),
-        std::slice::from_ref(&scope),
-        &mut [history],
-        &[],
-        &Default::default(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        feature_extrude
-            .source_properties
-            .get(&cadmpeg_core::nonblank_literal!("split_plane")),
-        None
-    );
 }
 
 #[test]
@@ -1801,6 +1696,7 @@ fn feature_outputs_include_bodies_changed_before_the_terminal_scope_state() {
         &mut histories,
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(feature.evaluation.outputs().as_slice(), [body.id]);
@@ -1830,6 +1726,7 @@ fn feature_output_interval_refusal_has_a_loss() {
             &mut histories,
             &[body],
             &Default::default(),
+            None,
         )
         .unwrap();
         assert!(feature.evaluation.outputs().is_empty());
@@ -1876,6 +1773,7 @@ fn feature_outputs_follow_bound_history_when_numeric_states_repeat() {
                 &mut histories,
                 &bodies,
                 &bindings,
+                None,
             )
             .unwrap();
             assert_eq!(feature.evaluation.outputs(), &[expected.id.clone()]);
@@ -1897,6 +1795,7 @@ fn feature_output_body_namespace_refusal_has_a_loss() {
         &mut [history_in_source("selected.smbh", &[1])],
         &[body],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(feature.evaluation.outputs().is_empty());
@@ -1924,6 +1823,7 @@ fn stored_body_scope_keeps_equal_state_without_a_stored_body_proof_native() {
         &mut [history],
         &[],
         &Default::default(),
+        None,
     )
     .unwrap();
     assert!(feature.evaluation.outputs().is_empty());
@@ -1956,9 +1856,13 @@ fn feature_output_equal_endpoints_preserve_an_existing_output_proof() {
         &mut [history],
         std::slice::from_ref(&body),
         &Default::default(),
+        None,
     )
     .unwrap();
     assert_eq!(feature.evaluation.outputs(), &[body.id]);
 }
 
 mod edge_midpoints;
+mod saved_edges;
+mod split_plane;
+mod stored_results;

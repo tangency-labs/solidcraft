@@ -6,6 +6,7 @@ use crate::records::identity::{DesignSecondaryIdentity, Located};
 use crate::records::mesh::DesignRelaxedGuidText;
 use crate::records::references::DesignClassTag;
 use crate::records::topology::entity_selection::DesignEntitySelectionFaceCandidate;
+use crate::records::topology::entity_selection::SelectionSerializationForm;
 use cadmpeg_ir::scalar::FiniteReal;
 use serde::{ser::SerializeSeq, Deserialize, Serialize};
 
@@ -66,6 +67,19 @@ cadmpeg_core::named_optional_field!(
     Located<u8>,
     "direction_control"
 );
+cadmpeg_core::named_optional_field!(deserialize_standard, DesignHoleStandard, "standard");
+
+/// Standard sizing names that a type-version-5 or -7 Hole stores after its
+/// extent controls when its standard flag is `1`, in source order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct DesignHoleStandard {
+    /// Byte offset of the first name's length word.
+    pub(crate) offset: u64,
+    pub(crate) standard: String,
+    pub(crate) fit: String,
+    pub(crate) size: String,
+    pub(crate) fastener: String,
+}
 
 pub(crate) fn valid_hole_extent_control(control: u8) -> bool {
     matches!(control, 0 | 1)
@@ -75,12 +89,22 @@ pub(crate) fn valid_hole_direction_control(control: u8) -> bool {
     matches!(control, 0 | 1)
 }
 
+/// Hole type word after the standard sizing names: `0` simple, `1`
+/// counterbore, `2` countersink.
+pub(crate) fn valid_hole_type(hole_type: u32) -> bool {
+    matches!(hole_type, 0..=2)
+}
+
 /// Carrier `refType` of a Hole placed by its sketch-point records.
 const HOLE_CARRIER_SKETCH_POINTS: u32 = 13;
 /// Carrier `refType` of a Hole placed at one point on its support face.
 const HOLE_CARRIER_FACE_POINT: u32 = 19;
+/// Carrier `refType` of a Hole placed at one point on a construction plane.
+const HOLE_CARRIER_PLANE_POINT: u32 = 14;
 /// Point-data `refType` of a sketch-point record.
 const POINT_DATA_SKETCH_POINT: u32 = 10;
+/// Point-data `refType` of a point on a construction plane.
+const POINT_DATA_PLANE_POINT: u32 = 12;
 /// Accepted difference, in source centimetres, between a carrier position and
 /// the value that the placement form requires.
 const EPS_HOLE_CARRIER_POSITION_CM: f64 = 1.0e-9;
@@ -126,6 +150,8 @@ pub(crate) struct DesignHoleExtent {
     /// carrier normal and `1` travels along it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) direction_control: Option<Located<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) standard: Option<DesignHoleStandard>,
 }
 
 #[derive(Deserialize)]
@@ -138,6 +164,8 @@ struct DesignHoleExtentWire {
     saved_non_distance_depth: Option<Located<FiniteReal>>,
     #[serde(default, deserialize_with = "deserialize_direction_control")]
     direction_control: Option<Located<u8>>,
+    #[serde(default, deserialize_with = "deserialize_standard")]
+    standard: Option<DesignHoleStandard>,
 }
 
 impl TryFrom<DesignHoleExtentWire> for DesignHoleExtent {
@@ -161,6 +189,7 @@ impl TryFrom<DesignHoleExtentWire> for DesignHoleExtent {
             extent_control: wire.extent_control,
             saved_non_distance_depth: wire.saved_non_distance_depth,
             direction_control: wire.direction_control,
+            standard: wire.standard,
         })
     }
 }
@@ -246,6 +275,15 @@ impl DesignHoleConstruction {
                     hole_position_matches(&self.position, &location.position.map(FiniteReal::get))
                 })
                 .then(|| vec![self.position]),
+            HOLE_CARRIER_PLANE_POINT => match self.locations.as_slice() {
+                [location]
+                    if hole_position_matches(&self.position, &[0.0; 3])
+                        && location.reference_type == POINT_DATA_PLANE_POINT =>
+                {
+                    Some(vec![location.position])
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -253,6 +291,10 @@ impl DesignHoleConstruction {
     /// Whether the carrier states that sketch-point records place the Hole.
     pub(crate) fn placed_by_sketch_points(&self) -> bool {
         self.reference_type == HOLE_CARRIER_SKETCH_POINTS
+    }
+
+    pub(crate) fn placed_at_face_point(&self) -> bool {
+        self.reference_type == HOLE_CARRIER_FACE_POINT
     }
 
     /// Drilling vector in model space under the scope's direction control.
@@ -453,6 +495,7 @@ pub(crate) struct DesignHoleFaceSelection {
     pub(crate) context_id: DesignRelaxedGuidText,
     /// Byte offset of the context UUID's UTF-16LE code units.
     pub(crate) context_id_offset: u64,
+    pub(crate) serialization_form: SelectionSerializationForm,
     /// Nested indexed record carrying the persistent identity.
     pub(crate) identity_record_index: u32,
     /// Byte offset of the nested identity record.
@@ -488,6 +531,8 @@ struct DesignHoleFaceSelectionWire {
     context_id: DesignRelaxedGuidText,
     /// Byte offset of the context UUID's UTF-16LE code units.
     context_id_offset: u64,
+    #[serde(default, skip_serializing_if = "crate::history_records::is_default")]
+    serialization_form: SelectionSerializationForm,
     /// Nested indexed record carrying the persistent identity.
     identity_record_index: u32,
     /// Byte offset of the nested identity record.
@@ -544,6 +589,7 @@ impl TryFrom<DesignHoleFaceSelectionWire> for DesignHoleFaceSelection {
             asset_id_offset: wire.asset_id_offset,
             context_id: wire.context_id,
             context_id_offset: wire.context_id_offset,
+            serialization_form: wire.serialization_form,
             identity_record_index: wire.identity_record_index,
             identity_record_offset: wire.identity_record_offset,
             primary_identity: wire.primary_identity,
@@ -576,6 +622,8 @@ struct HoleFaceSelectionView<'a> {
     asset_id_offset: u64,
     context_id: &'a DesignRelaxedGuidText,
     context_id_offset: u64,
+    #[serde(skip_serializing_if = "crate::history_records::is_default")]
+    serialization_form: SelectionSerializationForm,
     identity_record_index: u32,
     identity_record_offset: u64,
     primary_identity: u64,
@@ -606,6 +654,7 @@ impl Serialize for DesignHoleFaceSelection {
             asset_id_offset: self.asset_id_offset,
             context_id: &self.context_id,
             context_id_offset: self.context_id_offset,
+            serialization_form: self.serialization_form,
             identity_record_index: self.identity_record_index,
             identity_record_offset: self.identity_record_offset,
             primary_identity: self.primary_identity,
@@ -747,6 +796,16 @@ mod tests {
         assert_eq!(entry_points(&carrier(19, A, &[(6, A), (5, B)])), None);
         assert_eq!(entry_points(&carrier(19, A, &[(6, B), (5, A)])), None);
         assert_eq!(entry_points(&carrier(19, A, &[(6, B), (5, B)])), None);
+    }
+
+    #[test]
+    fn plane_point_carrier_places_one_hole_at_its_point_record() {
+        assert_eq!(entry_points(&carrier(14, ZERO, &[(12, A)])), Some(vec![A]));
+        assert_eq!(entry_points(&carrier(14, ZERO, &[(12, B)])), Some(vec![B]));
+        assert_eq!(entry_points(&carrier(14, A, &[(12, A)])), None);
+        assert_eq!(entry_points(&carrier(14, ZERO, &[(10, A)])), None);
+        assert_eq!(entry_points(&carrier(14, ZERO, &[(12, A), (12, B)])), None);
+        assert_eq!(entry_points(&carrier(14, ZERO, &[])), None);
     }
 
     #[test]

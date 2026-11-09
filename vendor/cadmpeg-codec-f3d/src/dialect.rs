@@ -185,9 +185,11 @@ pub(crate) fn classify_layers(
     let mut layers = DialectLayers::of(primary);
     let mut losses = Vec::new();
     let mut add_layer = |layer: DialectMatch| {
-        if let Err(cadmpeg_core::dialect::DialectLayerError::Duplicate(rejected)) =
-            layers.insert(layer)
-        {
+        if let Err(error) = layers.insert(layer) {
+            let rejected = match &error {
+                cadmpeg_core::dialect::DialectLayerError::Duplicate(rejected)
+                | cadmpeg_core::dialect::DialectLayerError::MissingInstance(rejected) => rejected,
+            };
             let format = rejected.format();
             let instance = rejected.instance().unwrap_or("unidentified");
             losses.push(F3dLossCode::DialectLayerCollision.note(

@@ -300,3 +300,55 @@ fn face_recipe_ordinals_keep_zero_and_group_design_references() {
     assert!(!invalid.has_valid_operand_ordinals(&references));
     assert!(!structure.has_valid_operand_ordinals(&[]));
 }
+
+fn recipe_reference(
+    selector_offset: u64,
+    token_offset: u64,
+) -> crate::records::dimensions::DesignRecipeReference {
+    serde_json::from_value(serde_json::json!({
+        "selector": 1, "selector_offset": selector_offset, "token": "2",
+        "token_offset": token_offset, "design_reference": 418,
+        "design_reference_offset": selector_offset + 17
+    }))
+    .unwrap()
+}
+
+fn recipe_structure(root: i32) -> super::DesignFaceRecipeStructure {
+    let side = |fan: [i32; 3]| super::DesignTopologyRecipeSide {
+        header_value: fan[0],
+        scalars: fan[1..].to_vec(),
+        payload_prefix: vec![0],
+        entries: Vec::new(),
+    };
+    super::DesignFaceRecipeStructure {
+        root,
+        prelude: [0, 2],
+        sides: [side([0, 0, 0]), side([0, 0, 0])],
+        postlude_value: None,
+    }
+}
+
+#[test]
+fn a_packed_token_reference_extends_the_preceding_prefix_operand() {
+    let references = [
+        recipe_reference(100, 108),
+        recipe_reference(100, 108),
+        recipe_reference(125, 129),
+        recipe_reference(150, 154),
+        recipe_reference(175, 183),
+        recipe_reference(200, 204),
+    ];
+    assert_eq!(
+        super::prefix_operand_ordinals(&references),
+        Some(vec![0, 0, 0, 0, 1, 1])
+    );
+    assert!(recipe_structure(1).has_valid_operand_ordinals(&references));
+    assert!(!recipe_structure(2).has_valid_operand_ordinals(&references));
+}
+
+#[test]
+fn a_leading_packed_token_reference_states_no_prefix_operands() {
+    let references = [recipe_reference(100, 104), recipe_reference(125, 133)];
+    assert_eq!(super::prefix_operand_ordinals(&references), None);
+    assert!(!recipe_structure(0).has_valid_operand_ordinals(&references));
+}

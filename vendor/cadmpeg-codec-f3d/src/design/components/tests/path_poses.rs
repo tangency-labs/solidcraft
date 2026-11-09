@@ -1105,7 +1105,7 @@ fn versioned_joint_relations_preserve_saved_occurrence_poses() {
         )
         .unwrap();
         let parent = instance(&carriers, &[100]);
-        let expected = if matches!(version, 3 | 5) && facing.is_some() && !legacy_five {
+        let expected = if matches!(version, 3..=5) && facing.is_some() && !legacy_five {
             millimetres(saved)
         } else {
             millimetres(carriers[0].transform().unwrap().value.into())

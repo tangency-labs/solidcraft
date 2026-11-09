@@ -216,10 +216,13 @@ fn sketch_profile_with_an_83_byte_tail_omits_the_third_reference() {
     };
     let profile = parse(&build(&|_| {})).expect("83-byte sketch-profile operand");
     assert_eq!(profile.entity_id.suffix(), 172);
+    // The second u32 of the tail is zero or one.
+    let zero_second_word = parse(&build(&|tail| tail[4] = 0)).expect("zero second u32");
+    assert_eq!(zero_second_word.entity_id.suffix(), 172);
     // Each fixed field of the tail is required.
     let edits: [TailEdit<'_>; 7] = [
         &|tail| tail[0] = 2,
-        &|tail| tail[4] = 0,
+        &|tail| tail[4] = 2,
         &|tail| tail[9] = 1,
         &|tail| tail[16] = 0x42,
         &|tail| tail[47] = 0,
@@ -658,6 +661,7 @@ fn nested_entity_selection_member_retains_compact_and_expanded_identities() {
     lp_utf16(&mut bytes, "53aa8ab4-194a-434b-bd52-8c6d761dc147");
     lp_utf16(&mut bytes, "8e685642-4d68-4909-96d0-0dd4437491b6");
     bytes.extend_from_slice(&2u32.to_le_bytes());
+    let serialization_form_at = bytes.len();
     bytes.extend_from_slice(&[0; 4]);
     bytes.extend_from_slice(&[1, 0, 0]);
     indexed_header(&mut bytes, *b"265", 100);
@@ -673,6 +677,18 @@ fn nested_entity_selection_member_retains_compact_and_expanded_identities() {
 
     let operand = parse_entity_selection_operand(&bytes, &group, 0, &record)
         .expect("nested entity-selection frame");
+    let wire = serde_json::to_value(&operand).unwrap();
+    assert!(wire.get("serialization_form").is_none());
+    let mut form_one = bytes.clone();
+    form_one[serialization_form_at..serialization_form_at + 4].copy_from_slice(&1u32.to_le_bytes());
+    let form_one_operand = parse_entity_selection_operand(&form_one, &group, 0, &record).unwrap();
+    let wire = serde_json::to_value(&form_one_operand).unwrap();
+    assert_eq!(wire["serialization_form"], 1);
+    let restored: crate::records::topology::entity_selection::DesignEntitySelectionOperand =
+        serde_json::from_value(wire).unwrap();
+    assert_eq!(restored, form_one_operand);
+    form_one[serialization_form_at..serialization_form_at + 4].copy_from_slice(&2u32.to_le_bytes());
+    assert!(parse_entity_selection_operand(&form_one, &group, 0, &record).is_none());
     assert_eq!(operand.primary_identity, 1331);
     assert_eq!(
         operand
@@ -685,6 +701,43 @@ fn nested_entity_selection_member_retains_compact_and_expanded_identities() {
         u64_from_index(identity_at)
     );
     assert_eq!(operand.next_byte_offset(), u64_from_index(next_at));
+
+    let mut later_recipe = bytes.clone();
+    let recipe_name_at = later_recipe.len() + 4;
+    later_recipe.extend_from_slice(&16u32.to_le_bytes());
+    later_recipe.extend_from_slice(b"edge_recipe_data");
+    for value in [-1i32, -1, 2, 0, -1, 1, -1, 7] {
+        later_recipe.extend_from_slice(&value.to_le_bytes());
+    }
+    indexed_header(&mut later_recipe, *b"311", 105);
+    let recipe = crate::records::recipes::ConstructionRecipe {
+        id: "f3d:Design/BulkStream.dat:construction-recipe#1".into(),
+        byte_offset: u64_from_index(recipe_name_at),
+        kind: crate::records::recipes::ConstructionRecipeKind::Edge,
+        design: None,
+        recipe_index: 7,
+        record_index: None,
+    };
+    assert!(parse_entity_selection_operand(&later_recipe, &group, 0, &record).is_some());
+    let arena = cadmpeg_core::decode::DecodeArena::new();
+    let policy = cadmpeg_core::decode::DecodePolicy::default();
+    let (ctx, _) =
+        cadmpeg_core::decode::DecodeContext::from_root_bytes(&[], &arena, &policy).unwrap();
+    let scope = crate::records::feature::scope::DesignParameterScope::empty(
+        "f3d:Design/BulkStream.dat:scope#80",
+        crate::records::feature::scope::DesignFeatureKind::Fillet,
+        80,
+    );
+    assert!(crate::design::decode::operands::parse_edge_operand(
+        &ctx,
+        &later_recipe,
+        &crate::design::test_support::indexed_record_offsets_for_test(&later_recipe),
+        &scope,
+        (0, &record),
+        &[recipe],
+        Some(u64_from_index(later_recipe.len())),
+    )
+    .is_none());
 
     for successor in [99u32, 114, u32::MAX] {
         let mut independent_successor = bytes[..next_at].to_vec();
@@ -762,59 +815,57 @@ fn nested_entity_selection_member_retains_compact_and_expanded_identities() {
         u64_from_index(curve_next_at)
     );
 
-    let mut class_338_curve_identity = bytes[..identity_at].to_vec();
-    class_338_curve_identity[4..7].copy_from_slice(b"338");
-    indexed_header(&mut class_338_curve_identity, *b"361", 103);
-    class_338_curve_identity.extend_from_slice(&[0; 9]);
-    class_338_curve_identity.push(1);
-    class_338_curve_identity.extend_from_slice(&[0; 12]);
-    class_338_curve_identity.extend_from_slice(&949u32.to_le_bytes());
-    class_338_curve_identity.extend_from_slice(&0u32.to_le_bytes());
-    class_338_curve_identity.extend_from_slice(&249u32.to_le_bytes());
-    class_338_curve_identity.extend_from_slice(&0u32.to_le_bytes());
-    let class_338_next_at = class_338_curve_identity.len();
-    indexed_header(&mut class_338_curve_identity, *b"268", 104);
-    let class_338_record = DesignRecordHeader {
-        class_tag: crate::records::references::DesignClassTag::try_from("338".to_owned()).unwrap(),
+    let mut marked_curve_identity = bytes[..identity_at].to_vec();
+    marked_curve_identity[4..7].copy_from_slice(b"288");
+    indexed_header(&mut marked_curve_identity, *b"383", 103);
+    marked_curve_identity.extend_from_slice(&[0; 9]);
+    marked_curve_identity.push(1);
+    marked_curve_identity.extend_from_slice(&[0; 12]);
+    marked_curve_identity.extend_from_slice(&949u32.to_le_bytes());
+    marked_curve_identity.extend_from_slice(&0u32.to_le_bytes());
+    marked_curve_identity.extend_from_slice(&249u32.to_le_bytes());
+    marked_curve_identity.extend_from_slice(&0u32.to_le_bytes());
+    let marked_next_at = marked_curve_identity.len();
+    indexed_header(&mut marked_curve_identity, *b"268", 104);
+    let marked_record = DesignRecordHeader {
+        class_tag: crate::records::references::DesignClassTag::try_from("288".to_owned()).unwrap(),
         ..record
     };
-    let class_338_operand =
-        parse_entity_selection_operand(&class_338_curve_identity, &group, 0, &class_338_record)
-            .expect("class-338 Sketch-curve entity-selection frame");
-    assert_eq!(class_338_operand.primary_identity, 949);
+    let marked_operand =
+        parse_entity_selection_operand(&marked_curve_identity, &group, 0, &marked_record)
+            .expect("marked Sketch-curve entity-selection frame");
+    assert_eq!(marked_operand.primary_identity, 949);
     assert_eq!(
-        class_338_operand
+        marked_operand
             .secondary()
             .map(|secondary| secondary.identity.value),
         Some(249)
     );
     assert_eq!(
-        class_338_operand
+        marked_operand
             .secondary()
             .and_then(|secondary| secondary.curve_identity)
             .map(|identity| identity.value),
         None
     );
     assert_eq!(
-        class_338_operand.primary_identity_offset(),
+        marked_operand.primary_identity_offset(),
         u64_from_index(identity_at) + 33
     );
     assert_eq!(
-        class_338_operand
+        marked_operand
             .secondary()
             .map(|secondary| secondary.identity.offset),
         Some(u64_from_index(identity_at) + 41)
     );
     assert_eq!(
-        class_338_operand.next_byte_offset(),
-        u64_from_index(class_338_next_at)
+        marked_operand.next_byte_offset(),
+        u64_from_index(marked_next_at)
     );
 
-    let mut invalid_class_338 = class_338_curve_identity.clone();
-    invalid_class_338[identity_at + 20] = 0;
-    assert!(
-        parse_entity_selection_operand(&invalid_class_338, &group, 0, &class_338_record).is_none()
-    );
+    let mut invalid_marked = marked_curve_identity.clone();
+    invalid_marked[identity_at + 20] = 0;
+    assert!(parse_entity_selection_operand(&invalid_marked, &group, 0, &marked_record).is_none());
 }
 
 fn region_member(bytes: &mut Vec<u8>, curve_primary_id: u32, incidence: [u32; 3]) {
@@ -930,4 +981,204 @@ fn sketch_profile_region_selection_retains_partial_curve_incidence_words() {
         invalid[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes());
         assert!(parse_sketch_profile_region_selection(&invalid, 100, 0).is_none());
     }
+}
+
+/// A nested entity-selection member 100 whose `N+3` identity record carries
+/// `identity` after its indexed header.
+fn nested_selection_with_identity(identity: &[u8]) -> Vec<u8> {
+    use crate::test_support::{indexed_header, lp_utf16};
+    let record_index = 100;
+    let mut bytes = Vec::new();
+    indexed_header(&mut bytes, *b"369", record_index);
+    bytes.extend_from_slice(&[0; 10]);
+    bytes.push(1);
+    bytes.extend_from_slice(&(record_index + 3).to_le_bytes());
+    bytes.extend_from_slice(&[0; 6]);
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    lp_utf16(&mut bytes, "7b3dec6f-f69c-4bfa-a537-9274f341c66e");
+    lp_utf16(&mut bytes, "2b40eee7-408c-429b-9216-8b6f7e9a62c9");
+    bytes.extend_from_slice(&2u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 4]);
+    indexed_header(&mut bytes, *b"257", record_index);
+    indexed_header(&mut bytes, *b"306", record_index + 1);
+    indexed_header(&mut bytes, *b"359", record_index + 2);
+    indexed_header(&mut bytes, *b"360", record_index + 3);
+    bytes.extend_from_slice(identity);
+    indexed_header(&mut bytes, *b"400", record_index + 4);
+    bytes
+}
+
+fn compact_sketch_point_identity(sketch: u64, point: u64) -> Vec<u8> {
+    let mut identity = vec![0; 10];
+    identity.extend_from_slice(&sketch.to_le_bytes());
+    identity.extend_from_slice(&point.to_le_bytes());
+    identity
+}
+
+#[test]
+fn a_nested_selection_reads_the_compact_sketch_point_identity() {
+    let frame = super::super::parse_entity_selection_frame_with(
+        &nested_selection_with_identity(&compact_sketch_point_identity(265, 110)),
+        100,
+        0,
+        "369",
+        true,
+    )
+    .expect("compact sketch-point identity");
+    assert_eq!(frame.identity_record_offset, 229);
+    assert_eq!(frame.primary_identity, 265);
+    assert_eq!(frame.primary_identity_offset, 250);
+    let secondary = frame.secondary.expect("point identity");
+    assert_eq!(secondary.identity.value, 110);
+    assert_eq!(secondary.identity.offset, 258);
+    assert!(secondary.curve_identity.is_none());
+    assert_eq!(frame.next_record_index, 104);
+    assert_eq!(frame.next_byte_offset, 266);
+
+    let mut nonzero_prefix = compact_sketch_point_identity(265, 110);
+    nonzero_prefix[9] = 1;
+    let mut short = compact_sketch_point_identity(265, 110);
+    short.truncate(22);
+    for identity in [nonzero_prefix, short] {
+        assert!(super::super::parse_entity_selection_frame_with(
+            &nested_selection_with_identity(&identity),
+            100,
+            0,
+            "369",
+            true,
+        )
+        .is_none());
+    }
+}
+
+#[test]
+fn a_compact_sketch_point_identity_round_trips_through_the_operand_record() {
+    use crate::records::topology::entity_selection::{
+        DesignEntitySelectionOperand, DesignEntitySelectionOperandDraft,
+    };
+    let frame = super::super::parse_entity_selection_frame_with(
+        &nested_selection_with_identity(&compact_sketch_point_identity(265, 110)),
+        100,
+        0,
+        "369",
+        true,
+    )
+    .expect("compact sketch-point identity");
+    let draft = DesignEntitySelectionOperandDraft {
+        id: "f3d:Design/BulkStream.dat:design-entity-selection-operand#0".to_owned(),
+        scope_record_index: 12,
+        group_record_index: 50,
+        group_member_ordinal: 0,
+        record_index: frame.record_index,
+        byte_offset: frame.byte_offset,
+        class_tag: "369".to_owned().try_into().unwrap(),
+        serialization_form: frame.serialization_form,
+        asset_id: frame.asset_id.clone().try_into().unwrap(),
+        asset_id_offset: frame.asset_id_offset,
+        context_id: frame.context_id.clone().try_into().unwrap(),
+        context_id_offset: frame.context_id_offset,
+        identity_record_index: frame.identity_record_index,
+        identity_record_offset: frame.identity_record_offset,
+        primary_identity: frame.primary_identity,
+        primary_identity_offset: frame.primary_identity_offset,
+        secondary: frame.secondary,
+        historical_edge_candidates: Vec::new(),
+        historical_face_candidates: Vec::new(),
+        resolved_edge_slot: None,
+        next_record_index: frame.next_record_index,
+        next_byte_offset: frame.next_byte_offset,
+    };
+    let operand = DesignEntitySelectionOperand::try_new(draft).expect("admitted operand");
+    assert_eq!(operand.primary_identity_offset(), 250);
+    assert_eq!(operand.secondary(), frame.secondary);
+    assert_eq!(operand.next_record_index(), 104);
+    assert_eq!(operand.next_byte_offset(), 266);
+    let wire = serde_json::to_value(&operand).unwrap();
+    let reloaded: DesignEntitySelectionOperand = serde_json::from_value(wire).unwrap();
+    assert_eq!(reloaded, operand);
+}
+
+#[test]
+fn only_a_loft_point_member_admits_the_compact_sketch_point_identity() {
+    assert!(super::super::parse_entity_selection_frame(
+        &nested_selection_with_identity(&compact_sketch_point_identity(265, 110)),
+        100,
+        0,
+        "369",
+    )
+    .is_none());
+}
+
+#[test]
+fn a_sketch_point_frame_matches_no_curve_and_names_no_topology_identity() {
+    use crate::records::topology::entity_selection::{
+        DesignEntitySelectionOperand, DesignEntitySelectionOperandDraft,
+    };
+    let operand = |primary_offset: u64, secondary_offset: u64, class_tag: &str| {
+        DesignEntitySelectionOperand::try_new(DesignEntitySelectionOperandDraft {
+            id: "f3d:Design/BulkStream.dat:design-entity-selection-operand#0".to_owned(),
+            scope_record_index: 12,
+            group_record_index: 50,
+            group_member_ordinal: 0,
+            record_index: 100,
+            byte_offset: 0,
+            class_tag: class_tag.to_owned().try_into().unwrap(),
+            serialization_form: Default::default(),
+            asset_id: "7b3dec6f-f69c-4bfa-a537-9274f341c66e"
+                .to_owned()
+                .try_into()
+                .unwrap(),
+            asset_id_offset: 0,
+            context_id: "2b40eee7-408c-429b-9216-8b6f7e9a62c9"
+                .to_owned()
+                .try_into()
+                .unwrap(),
+            context_id_offset: 0,
+            identity_record_index: 103,
+            identity_record_offset: 0,
+            primary_identity: 265,
+            primary_identity_offset: primary_offset,
+            secondary: Some(crate::records::identity::DesignSecondaryIdentity {
+                identity: crate::records::identity::Located {
+                    value: 110,
+                    offset: secondary_offset,
+                },
+                curve_identity: None,
+            }),
+            historical_edge_candidates: Vec::new(),
+            historical_face_candidates: Vec::new(),
+            resolved_edge_slot: None,
+            next_record_index: 104,
+            next_byte_offset: if class_tag == "338" {
+                49
+            } else {
+                primary_offset + 16
+            },
+        })
+        .unwrap()
+    };
+    let point = operand(21, 29, "369");
+    let pair = operand(29, 37, "369");
+    assert_eq!(point.sketch_point(), Some((265, 110)));
+    assert_eq!(pair.sketch_point(), None);
+    assert_eq!(point.topology_identities(), None);
+    assert_eq!(pair.topology_identities(), Some((265, Some(110))));
+    let curve = crate::records::sketch_geometry::SketchCurveIdentity {
+        id: "f3d:Design/BulkStream.dat:sketch-curve#400".into(),
+        record_index: 400,
+        owner_reference: Some(265),
+        geometry_group: None,
+        class_tag: "270".to_owned().try_into().unwrap(),
+        byte_offset: 4000,
+        geometry_offset: 100,
+        entity_genesis: None,
+        primary_id: std::num::NonZeroU64::new(110).unwrap(),
+        secondary_id: 0,
+        geometry: None,
+        planar_z_noise: None,
+    };
+    assert!(!super::super::entity_selection_matches_curve(
+        &point, &curve
+    ));
+    assert!(super::super::entity_selection_matches_curve(&pair, &curve));
 }

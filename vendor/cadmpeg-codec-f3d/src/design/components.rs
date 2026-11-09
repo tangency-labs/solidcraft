@@ -1537,6 +1537,73 @@ pub(crate) fn project_derived_instance_features(
     }
 }
 
+/// Project the copied carrier of a `CopyPaste` occurrence transfer into an
+/// `InsertComponent` feature.
+pub(crate) fn project_copy_paste_transfer_features(
+    features: &mut [Feature],
+    scopes: &[DesignParameterScope],
+    occurrences: &[DesignComponentOccurrence],
+    projected: &[Occurrence],
+) {
+    for scope in scopes {
+        let Some(transfer) = scope.occurrence_transfer.as_ref() else {
+            continue;
+        };
+        if !matches!(
+            transfer.source,
+            crate::records::feature::occurrence_transfer::DesignOccurrenceTransferSource::Copy { .. }
+        ) {
+            continue;
+        }
+        let Some(stream) = crate::ids::native_stream(&scope.id) else {
+            continue;
+        };
+        let carriers = || {
+            occurrences
+                .iter()
+                .filter(|occurrence| crate::ids::native_stream(&occurrence.id) == Some(stream))
+        };
+        let mut named = carriers()
+            .filter(|occurrence| occurrence.record_index == transfer.occurrence_record_index);
+        let (Some(copied), None) = (named.next(), named.next()) else {
+            continue;
+        };
+        let placement = copied.transform().map_or(
+            crate::records::sketch_placement::SketchPlacementMatrix::IDENTITY,
+            |frame| frame.value,
+        );
+        let occurrence = crate::ids::neutral_component_occurrence_id(&copied.occurrence_guid);
+        if placement != transfer.target_transform
+            || copied.component_record_index != transfer.component_record_index
+            || !projected.iter().any(|candidate| candidate.id == occurrence)
+            || !carriers().any(|source| {
+                source.byte_offset() < copied.byte_offset()
+                    && source.occurrence_ordinal() == 1
+                    && source.component_record_index == copied.component_record_index
+            })
+        {
+            continue;
+        }
+        let Some(feature) = features
+            .iter_mut()
+            .find(|feature| feature.native_ref.as_deref() == Some(scope.id.as_str()))
+        else {
+            continue;
+        };
+        if !matches!(
+            feature.evaluation.definition(),
+            FeatureDefinition::Operation(FeatureOperation::Native { .. })
+        ) {
+            continue;
+        }
+        feature
+            .evaluation
+            .set_definition(FeatureDefinition::Operation(
+                FeatureOperation::InsertComponent { occurrence },
+            ));
+    }
+}
+
 /// The occurrence of every top-level `Component Insert`.
 ///
 /// The timeline item run names the top-level inserts. An unlisted scope is an
@@ -1788,6 +1855,7 @@ pub(crate) fn neutral_transform(
 
 #[cfg(test)]
 mod tests {
+    mod copy_paste;
     mod owners;
     mod path_poses;
 

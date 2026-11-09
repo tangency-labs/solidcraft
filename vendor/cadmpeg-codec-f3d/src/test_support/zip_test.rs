@@ -245,6 +245,35 @@ pub(crate) fn f3d_with_smbh_and_protein_with_generated_remove_body(smbh: &[u8]) 
     )
 }
 
+/// The generated `RemoveBody` design whose construction group's identity
+/// wrapper is followed by an entity-tracking path at an unrelated record index,
+/// with both tracking records registered in the Design type table.
+pub(crate) fn f3d_with_smbh_and_remove_body_tracking_path(smbh: &[u8]) -> Vec<u8> {
+    let properties = vec![generated_instance_properties_for(
+        "11111111-2222-3333-4444-555555555555",
+    )];
+    let mut types = generated_design_types(GeneratedDesignMetastreamVariant::RemoveBody);
+    let (design_bulk, design_records, tracking_types) =
+        crate::test_support::lost_edge_test::remove_body_tracking_path_bulkstream(types.len());
+    let wrapper = [u64::from(
+        crate::test_support::lost_edge_test::TRACKING_WRAPPER,
+    )];
+    let carrier = [u64::from(
+        crate::test_support::lost_edge_test::TRACKING_WRAPPER + 1,
+    )];
+    let entities: [&[u64]; 2] = [&wrapper, &carrier];
+    for ((guid, base, version), entities) in tracking_types.into_iter().zip(entities) {
+        types.push((guid, base, version, "EntityTracking", entities));
+    }
+    let design_metastream = design_metastream_with_records(&types, &design_records);
+    f3d_with_smbh_and_instance_properties_and_design_with_metastream(
+        smbh,
+        &properties,
+        &design_bulk,
+        &design_metastream,
+    )
+}
+
 /// The generated `RemoveBody` design whose two-operand construction group ends
 /// an unresolved edge run of `run` records.
 pub(crate) fn f3d_with_smbh_and_remove_body_lost_edge_run(smbh: &[u8], run: u32) -> Vec<u8> {

@@ -90,7 +90,7 @@ fn body_recipe_operand_decodes_counted_and_empty_reference_tables() {
     lp_utf16(&mut bytes, "53aa8ab4-194a-434b-bd52-8c6d761dc147");
     lp_utf16(&mut bytes, "8e685642-4d68-4909-96d0-0dd4437491b6");
     bytes.extend_from_slice(&2u32.to_le_bytes());
-    bytes.extend_from_slice(&[7, 0, 0, 0]);
+    bytes.extend_from_slice(&[1, 0, 0, 0]);
     indexed_header(&mut bytes, *b"259", 100);
     indexed_header(&mut bytes, *b"283", 101);
     indexed_header(&mut bytes, *b"463", 102);
@@ -138,7 +138,7 @@ fn body_recipe_operand_decodes_counted_and_empty_reference_tables() {
             .into_draft()
             .selector_tail
             .map(|tail| tail.value),
-        Some([7, 0, 0, 0])
+        Some([1, 0, 0, 0])
     );
     assert_eq!(
         operand
@@ -394,7 +394,7 @@ fn class_367_body_recipe_operand_decodes_scale_member_frame() {
         },
     )
     .unwrap();
-    let record = DesignRecordHeader {
+    let mut record = DesignRecordHeader {
         id: "f3d:Design/BulkStream.dat:record#100".into(),
         byte_offset: 0,
         class_tag: crate::records::references::DesignClassTag::try_from("367".to_owned()).unwrap(),
@@ -444,6 +444,28 @@ fn class_367_body_recipe_operand_decodes_scale_member_frame() {
     );
     assert_eq!(operand.nested_record_index(), 103);
     assert_eq!(operand.next_byte_offset(), u64_from_index(next_at));
+
+    for class_tag in ["365", "367", "387"] {
+        bytes[4..7].copy_from_slice(class_tag.as_bytes());
+        record.class_tag = class_tag.to_owned().try_into().unwrap();
+        for form in [0u32, 1, 2, 7] {
+            bytes[208..212].copy_from_slice(&form.to_le_bytes());
+            let decoded = parse_body_recipe_operand(&bytes, &group, 0, &record, &recipe)
+                .unwrap_or_else(|| panic!("class {class_tag}, form {form}"));
+            assert_eq!(decoded.serialization_form(), Some(form));
+            assert_eq!(decoded.references()[0].design_reference, 301);
+            assert_eq!(decoded.nested_record_index(), 103);
+            let losses =
+                super::super::body_recipe_serialization_form_losses(std::slice::from_ref(&decoded));
+            let codes: Vec<_> = losses.iter().map(|loss| loss.code.local_code()).collect();
+            let expected: &[&str] = if form > 1 {
+                &["body-recipe.serialization-form-assumed"]
+            } else {
+                &[]
+            };
+            assert_eq!(codes, expected, "class {class_tag}, form {form}");
+        }
+    }
 }
 
 #[test]

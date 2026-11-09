@@ -30,6 +30,24 @@ fn add_dimension(
     scope_record_index: u32,
     local_ordinal: u32,
 ) {
+    add_dimension_with(ir, owner_index, scope_record_index, local_ordinal, None);
+}
+
+/// The texts of a text parameter and its owner, and the owner's evaluated
+/// value offset relative to the record base.
+struct TextLink<'a> {
+    parameter: &'a str,
+    owner: &'a str,
+    owner_evaluated_offset: u64,
+}
+
+fn add_dimension_with(
+    ir: &mut cadmpeg_ir::document::CadIr,
+    owner_index: u32,
+    scope_record_index: u32,
+    local_ordinal: u32,
+    text: Option<TextLink<'_>>,
+) {
     let base = u64::from(owner_index) * 1_000;
     let parameter = DesignParameter::try_from(DesignParameterDraft {
         id: crate::ids::native_design_parameter_id(DESIGN_STREAM, owner_index + 1),
@@ -51,8 +69,16 @@ fn add_dimension(
         evaluated_value: 0.3,
         evaluated_value_offset: base + 270,
     })
+    .unwrap()
+    .with_text_value(
+        text.as_ref()
+            .map(|text| crate::records::identity::RecordedValue {
+                value: text.parameter.to_owned(),
+                offset: base + 240,
+            }),
+    )
     .unwrap();
-    let owner = DesignParameterOwner::try_from(DesignParameterOwnerWire {
+    let wire = DesignParameterOwnerWire {
         id: crate::ids::native_design_parameter_owner_id(DESIGN_STREAM, base),
         byte_offset: base,
         frame_length: 104,
@@ -60,13 +86,27 @@ fn add_dimension(
         record_index: owner_index,
         scope_record_index,
         local_ordinal,
-        evaluated_value: 0.3,
+        evaluated_value: cadmpeg_ir::scalar::FiniteReal::try_from(0.3).unwrap(),
         evaluated_value_offset: base + 40,
         parameter_record_index: owner_index + 1,
         owned_ordinal: owner_index,
         variant: Some(0),
         companion_record_index: owner_index + 2,
-    })
+    };
+    let owner = match text {
+        Some(text) => DesignParameterOwner::from_text_parts(
+            DesignParameterOwnerWire {
+                frame_length: 104 + 2 * u64::try_from(text.owner.len()).unwrap() - 4,
+                evaluated_value_offset: base + text.owner_evaluated_offset,
+                ..wire
+            },
+            crate::records::identity::RecordedValue {
+                value: text.owner.to_owned(),
+                offset: base + 44,
+            },
+        ),
+        None => DesignParameterOwner::from_parts(wire),
+    }
     .unwrap();
     let companion = DesignParameterCompanion::unbound(
         format!(
@@ -156,5 +196,45 @@ fn named_owners_keep_unique_local_ordinals() {
     let mut ir = sketch_naming(&[20, 30]);
     add_dimension(&mut ir, 20, SCOPE, 4);
     add_dimension(&mut ir, 30, SCOPE, 4);
+    assert_eq!(owner_findings(&ir).len(), 1);
+}
+
+#[test]
+fn text_owner_stores_the_text_and_evaluated_offset_of_its_parameter() {
+    let text = |parameter, owner, owner_evaluated_offset| TextLink {
+        parameter,
+        owner,
+        owner_evaluated_offset,
+    };
+    let mut matched = sketch_naming(&[20]);
+    add_dimension_with(&mut matched, 20, SCOPE, 0, Some(text("AB", "AB", 270)));
+    assert_eq!(owner_findings(&matched), Vec::<String>::new());
+
+    for link in [
+        text("CD", "AB", 270),
+        text("AB", "AB", 271),
+        text("ABC", "AB", 270),
+    ] {
+        let mut ir = sketch_naming(&[20]);
+        add_dimension_with(&mut ir, 20, SCOPE, 0, Some(link));
+        assert_eq!(owner_findings(&ir).len(), 1);
+    }
+}
+
+#[test]
+fn numeric_owner_of_a_text_parameter_is_invalid() {
+    let mut ir = sketch_naming(&[20]);
+    add_dimension(&mut ir, 20, SCOPE, 0);
+    let mut native = f3d_native_mut(&mut ir);
+    let parameter = native.design_parameters.pop().unwrap();
+    native.design_parameters.push(
+        parameter
+            .with_text_value(Some(crate::records::identity::RecordedValue {
+                value: "AB".into(),
+                offset: 20_240,
+            }))
+            .unwrap(),
+    );
+    drop(native);
     assert_eq!(owner_findings(&ir).len(), 1);
 }

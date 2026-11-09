@@ -90,3 +90,48 @@ fn collection_ownership_assigns_a_component_and_reports_an_unresolved_link() {
         .iter()
         .any(|loss| loss.code == F3dLossCode::SketchOwnerUnresolved.kind()));
 }
+
+fn visibility(collection: u64) -> crate::records::sketch_placement::DesignSketchVisibility {
+    let mut visibility = crate::records::sketch_placement::DesignSketchVisibility::new(
+        std::num::NonZeroU32::new(1).unwrap(),
+        0,
+        true,
+    )
+    .unwrap();
+    visibility.ordinal_collection = std::num::NonZeroU64::new(collection);
+    visibility
+}
+
+#[test]
+fn unlisted_and_folder_sketches_use_collection_owner() {
+    let product = ProductDefinitionId::mint("test:model:product#part").unwrap();
+    let collection_owners = [(300, Some(product.clone()))].into_iter().collect();
+    let entities = std::collections::BTreeMap::new();
+    for sketch in [201, 202] {
+        let owner =
+            super::placement_owner(Some(visibility(300)), sketch, &collection_owners, &entities);
+        assert_eq!(owner, Some(&Some(product.clone())));
+    }
+}
+
+#[test]
+fn direct_collection_takes_precedence_over_conflicting_member_run() {
+    let first = ProductDefinitionId::mint("test:model:product#first").unwrap();
+    let second = ProductDefinitionId::mint("test:model:product#second").unwrap();
+    let collections = [(300, Some(first.clone())), (400, Some(second.clone()))]
+        .into_iter()
+        .collect();
+    let members = [(201, Some(first.clone()))].into_iter().collect();
+    assert_eq!(
+        super::placement_owner(Some(visibility(400)), 201, &collections, &members),
+        Some(&Some(second))
+    );
+    assert_eq!(
+        super::placement_owner(Some(visibility(0)), 201, &collections, &members),
+        None
+    );
+    assert_eq!(
+        super::placement_owner(None, 201, &collections, &members),
+        Some(&Some(first))
+    );
+}

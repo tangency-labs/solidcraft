@@ -13,6 +13,11 @@ cadmpeg_core::named_optional_field!(
     u64,
     "operation_prefix_marker_offset"
 );
+cadmpeg_core::named_optional_field!(
+    deserialize_distance_tail,
+    DesignExtrudeDistanceTail,
+    "distance_tail"
+);
 /// Boolean result operation stored by an Extrude parameter scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,6 +44,8 @@ pub(crate) enum DesignExtrudeExtent {
     TwoSidedToFaces,
     /// Travel independent fixed distances on both sides of the profile.
     TwoSidedDistance,
+    /// Travel through all material on each side of the profile plane.
+    TwoSidedThroughAll,
     /// Travel a fixed distance on the first side and to a selected face on the second side.
     TwoSidedDistanceToFace,
     /// Travel one fixed total distance symmetrically around the profile plane.
@@ -141,6 +148,43 @@ pub(crate) struct DesignExtrudeTargetOrdinal {
     pub(crate) scope_reference_ordinal_offset: u64,
 }
 
+/// Fields after a distance first side in the current reference-aware layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DesignExtrudeDistanceTail {
+    /// Target option at first-side offset 9.
+    pub(crate) target_option: u32,
+    /// Byte offset of `target_option`.
+    pub(crate) target_option_offset: u64,
+    /// Measurement word after the side-two taper slot.
+    pub(crate) measurement: DesignExtrudeMeasurement,
+    /// Byte offset of `measurement`.
+    pub(crate) measurement_offset: u64,
+}
+
+/// Travel form stated by the measurement word of a distance Extrude.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DesignExtrudeMeasurement {
+    /// `0`: a one-sided or two-sided direction.
+    Sided,
+    /// `1`: the stored distance is the whole symmetric travel.
+    WholeTravel,
+    /// `2`: the stored distance is the travel on each side.
+    EachSide,
+}
+
+impl DesignExtrudeMeasurement {
+    /// The measurement stored as `value`.
+    pub(crate) fn from_raw(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Sided),
+            1 => Some(Self::WholeTravel),
+            2 => Some(Self::EachSide),
+            _ => None,
+        }
+    }
+}
+
 /// Fixed fields preceding an Extrude parameter scope's reference table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -188,6 +232,13 @@ pub(crate) enum DesignExtrudePrologue {
         /// Repeated target-group ordinal in the whole-body target form.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         first_side_target_ordinal: Option<DesignExtrudeTargetOrdinal>,
+        /// Target option and measurement of a distance first side.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_distance_tail"
+        )]
+        distance_tail: Option<DesignExtrudeDistanceTail>,
         /// Decoded extent form.
         extent: DesignExtrudeExtent,
         /// Byte offsets parallel to `direction_face_extend_values`.
@@ -325,6 +376,13 @@ enum DesignExtrudePrologueWire {
         /// Repeated target-group ordinal in the whole-body target form.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         first_side_target_ordinal: Option<DesignExtrudeTargetOrdinal>,
+        /// Target option and measurement of a distance first side.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_distance_tail"
+        )]
+        distance_tail: Option<DesignExtrudeDistanceTail>,
         /// Decoded extent form.
         extent: DesignExtrudeExtent,
         /// Byte offsets parallel to `direction_face_extend_values`.
@@ -438,7 +496,13 @@ impl TryFrom<DesignExtrudePrologueWire> for DesignExtrudePrologue {
                 };
                 Self::LegacyDistance { prefix_zero_offset, operation, operation_offset, extent_kind_offset, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset: geometry_kind_offset }
             },
-            DesignExtrudePrologueWire::ReferenceAware { reference, operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, first_side_target_ordinal, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset } => Self::ReferenceAware { reference, operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, first_side_target_ordinal, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset },
+            DesignExtrudePrologueWire::ReferenceAware { reference, operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, first_side_target_ordinal, distance_tail, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset } => {
+                let symmetric = matches!(extent, DesignExtrudeExtent::SymmetricDistance | DesignExtrudeExtent::SymmetricThroughAll);
+                if distance_tail.is_some_and(|tail| symmetric == (tail.measurement == DesignExtrudeMeasurement::Sided)) {
+                    return Err("an Extrude measurement word disagrees with its extent".into());
+                }
+                Self::ReferenceAware { reference, operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, first_side_target_ordinal, distance_tail, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset }
+            }
             DesignExtrudePrologueWire::ShiftedReferenceAware { operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset } => Self::ShiftedReferenceAware { operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset },
             DesignExtrudePrologueWire::LegacyShifted { operation_prefix_marker, operation_prefix_marker_offset, operation, operation_offset, direction_face_extend_values, side_extent_discriminators, side_extent_discriminator_offsets, extent, direction_face_extend_offsets, direction_reversed, direction_reversed_offset, solid_operation, solid_operation_offset, start, start_offset } => Self::LegacyShifted { operation_prefix_marker_offset: match (operation_prefix_marker, operation_prefix_marker_offset) {
                 (None, None) => None,
@@ -481,6 +545,7 @@ impl From<DesignExtrudePrologue> for DesignExtrudePrologueWire {
                 side_extent_discriminators,
                 side_extent_discriminator_offsets,
                 first_side_target_ordinal,
+                distance_tail,
                 extent,
                 direction_face_extend_offsets,
                 direction_reversed,
@@ -497,6 +562,7 @@ impl From<DesignExtrudePrologue> for DesignExtrudePrologueWire {
                 side_extent_discriminators,
                 side_extent_discriminator_offsets,
                 first_side_target_ordinal,
+                distance_tail,
                 extent,
                 direction_face_extend_offsets,
                 direction_reversed,
@@ -589,6 +655,16 @@ impl DesignExtrudePrologue {
             Self::ReferenceAware { extent, .. } => Some(extent),
             Self::ShiftedReferenceAware { extent, .. } => Some(extent),
             Self::LegacyShifted { extent, .. } => extent,
+        }
+    }
+
+    /// Target option and measurement of a distance first side.
+    pub(crate) fn distance_tail(self) -> Option<DesignExtrudeDistanceTail> {
+        match self {
+            Self::ReferenceAware { distance_tail, .. } => distance_tail,
+            Self::LegacyDistance { .. }
+            | Self::ShiftedReferenceAware { .. }
+            | Self::LegacyShifted { .. } => None,
         }
     }
 

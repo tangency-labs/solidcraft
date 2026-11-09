@@ -67,11 +67,13 @@ pub struct F3zDecodedMember {
     origin: Arc<()>,
     pub(super) decoded: Option<Result<Decoded, CodecError>>,
     operation_poses: OperationPoses,
+    scene_sources: crate::scene::Sources,
     trace: DecodeTrace,
 }
 
 /// Definition-local operation poses collected from one member document.
 pub(super) type OperationPoses = BTreeMap<String, crate::xref::operation_pose::OperationPose>;
+type MemberDecoded = (Decoded, OperationPoses, crate::scene::Sources);
 
 impl F3zDecodedMember {
     /// The stable archive member path.
@@ -82,7 +84,7 @@ impl F3zDecodedMember {
     ///
     /// This is the compact JSON length of `(ir, (transfer, coverage, losses,
     /// notes, transfer_ledger), source_fidelity)`, plus the UTF-8 member ID
-    /// length and compact trace storage on this target. A failed
+    /// length, carrier-path lookup keys and 16 bytes per pair, and compact trace storage on this target. A failed
     /// result uses its error text length; a skipped result has no payload.
     /// It is an estimate of retained storage, not an RSS limit.
     pub fn retained_bytes_estimate(&self) -> Result<u64, CodecError> {
@@ -92,6 +94,10 @@ impl F3zDecodedMember {
                 Ok(decoded) => memory::count_decoded(&mut bytes, decoded)?,
                 Err(error) => bytes.add(error.to_string().len())?,
             }
+        }
+        for key in self.scene_sources.keys() {
+            bytes.add(key.len())?;
+            bytes.add(16)?;
         }
         bytes.add(self.id.len())?;
         bytes.add_u64(self.trace.retained_bytes_estimate())?;
@@ -254,13 +260,15 @@ impl<'a> F3zSession<'a> {
         let arena = DecodeArena::new();
         let ctx = self.checkpoint.resume(&arena);
         let mut operation_poses = OperationPoses::new();
+        let mut scene_sources = crate::scene::Sources::new();
         let decoded = match self.archive.members.get(id) {
-            Some(ClassifiedMember::Scanned { .. }) => {
-                Some(self.decode_in_context(&ctx, id).map(|(decoded, poses)| {
+            Some(ClassifiedMember::Scanned { .. }) => Some(self.decode_in_context(&ctx, id).map(
+                |(decoded, poses, sources)| {
+                    scene_sources = sources;
                     operation_poses = poses;
                     decoded
-                }))
-            }
+                },
+            )),
             _ => None,
         };
         Ok(F3zDecodedMember {
@@ -268,6 +276,7 @@ impl<'a> F3zSession<'a> {
             origin: Arc::clone(&self.origin),
             decoded,
             operation_poses,
+            scene_sources,
             trace: ctx.take_trace(),
         })
     }
@@ -321,7 +330,7 @@ impl<'a> F3zSession<'a> {
         ctx: &DecodeContext<'_>,
         id: &str,
         results: &mut BTreeMap<String, F3zDecodedMember>,
-    ) -> Result<(Decoded, OperationPoses), CodecError> {
+    ) -> Result<MemberDecoded, CodecError> {
         if let Some(result) = results.remove(id) {
             if let Some(mut decoded) = result.decoded {
                 if ctx.accept_trace_rebinding(&result.trace, |spaces| {
@@ -334,7 +343,8 @@ impl<'a> F3zSession<'a> {
                     }
                     rebinding::rebind_member(&mut decoded, spaces)
                 }) {
-                    return decoded.map(|decoded| (decoded, result.operation_poses));
+                    return decoded
+                        .map(|decoded| (decoded, result.operation_poses, result.scene_sources));
                 }
             }
         }
@@ -348,7 +358,7 @@ impl<'a> F3zSession<'a> {
         &self,
         ctx: &DecodeContext<'_>,
         id: &str,
-    ) -> Result<(Decoded, OperationPoses), CodecError> {
+    ) -> Result<MemberDecoded, CodecError> {
         super::observer::observed(id, || self.decode_member_scan(ctx, id))
     }
 
@@ -356,16 +366,32 @@ impl<'a> F3zSession<'a> {
         &self,
         ctx: &DecodeContext<'_>,
         id: &str,
-    ) -> Result<(Decoded, OperationPoses), CodecError> {
+    ) -> Result<MemberDecoded, CodecError> {
         self.archive.with_member_scan(&self.scan, id, |scan| {
             let arena = DecodeArena::new();
             ctx.with_arena(&arena, |local| {
-                crate::decode::decode_archive_member(local, scan, &self.archive.layers).map(
-                    |mut decoded| {
-                        let poses = std::mem::take(&mut decoded.operation_poses);
-                        (decoded.into_decoded(), poses)
-                    },
-                )
+                let mut decoded =
+                    crate::decode::decode_archive_member(local, scan, &self.archive.layers)?;
+                if id == self.model_root {
+                    crate::scene::collect(local, scan, &mut decoded.ir, &mut decoded.body.losses)?;
+                    decoded.ir.finalize();
+                    let hash = cadmpeg_ir::hash::document_local_sha256(
+                        local,
+                        &decoded.ir,
+                        Some(&decoded.source),
+                        "f3d",
+                        crate::ids::FILE_SOURCE_IMAGE_ID,
+                    )?;
+                    decoded.source.attributes.insert(
+                        cadmpeg_core::nonblank_const!(
+                            cadmpeg_ir::hash::DOCUMENT_LOCAL_DIGEST_ATTRIBUTE
+                        ),
+                        hash,
+                    );
+                }
+                let poses = std::mem::take(&mut decoded.operation_poses);
+                let sources = std::mem::take(&mut decoded.scene_sources);
+                Ok((decoded.into_decoded(), poses, sources))
             })
         })
     }

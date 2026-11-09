@@ -64,14 +64,12 @@ fn work_plane_refuses_missing_foreign_ambiguous_and_overflowing_placements_with_
 fn work_plane_refuses_nonzero_axis_states_and_direction_controls() {
     use crate::test_support::work_plane::{placements, scope};
     let placement = placements().remove(0);
-    for slot in 0..5 {
+    for slot in 0..3 {
         let mut candidate = placement.clone();
         match slot {
-            0 => candidate.fields.inferred_x_axis.value = 1,
-            1 => candidate.fields.inferred_z_axis.value = 1,
-            2 => candidate.fields.z_flip.value = 1,
-            3 => candidate.fields.axis_flipped.as_mut().unwrap().value = 1,
-            4 => candidate.fields.use_u_direction.as_mut().unwrap().value = 1,
+            0 => candidate.fields.z_flip.value = 1,
+            1 => candidate.fields.axis_flipped.as_mut().unwrap().value = 1,
+            2 => candidate.fields.use_u_direction.as_mut().unwrap().value = 2,
             _ => unreachable!(),
         }
         let mut scope = scope(&placement);
@@ -94,15 +92,13 @@ fn work_plane_modern_frames_refuse_unchecked_periodic_and_direction_modes_with_l
         .into_iter()
         .filter(|p| p.type_version == 16)
     {
-        for slot in 0..6 {
+        for slot in 0..4 {
             let mut candidate = placement.clone();
             match slot {
                 0 => candidate.fields.periodic_face_mode.as_mut().unwrap().value = 1,
                 1 => candidate.fields.use_u_direction.as_mut().unwrap().value = 2,
-                2 => candidate.fields.inferred_x_axis.value = 1,
-                3 => candidate.fields.inferred_z_axis.value = 1,
-                4 => candidate.fields.z_flip.value = 1,
-                5 => candidate.fields.axis_flipped.as_mut().unwrap().value = 1,
+                2 => candidate.fields.z_flip.value = 1,
+                3 => candidate.fields.axis_flipped.as_mut().unwrap().value = 1,
                 _ => unreachable!(),
             }
             let mut scope = crate::test_support::work_plane::scope(&candidate);
@@ -140,10 +136,14 @@ fn work_plane_modern_join_uses_member_identity_independent_of_table_position_and
 }
 
 #[test]
-fn work_plane_modern_frames_admit_both_checked_direction_values() {
-    for placement in crate::test_support::placement_construction::modern_placements()
+fn work_plane_frames_check_direction_values() {
+    let legacy = crate::test_support::work_plane::placements().remove(0);
+    assert_eq!(legacy.type_version, 14);
+    let mut version_12 = legacy.clone();
+    version_12.type_version = 12;
+    for placement in [legacy, version_12]
         .into_iter()
-        .filter(|placement| placement.type_version == 16)
+        .chain(crate::test_support::placement_construction::modern_placements())
     {
         for direction in [0, 1] {
             let mut candidate = placement.clone();
@@ -158,5 +158,125 @@ fn work_plane_modern_frames_admit_both_checked_direction_values() {
                 ))
             );
         }
+        let mut candidate = placement.clone();
+        candidate.fields.use_u_direction.as_mut().unwrap().value = 2;
+        let mut scope = crate::test_support::work_plane::scope(&candidate);
+        let losses = super::bind(std::slice::from_mut(&mut scope), &[candidate]);
+        assert!(scope.work_plane_frame().is_none());
+        assert_eq!(losses.len(), 1);
+        assert_eq!(
+            losses[0].code,
+            crate::loss::F3dLossCode::WorkPlaneFrameUnbound
+                .note("")
+                .code
+        );
     }
+}
+
+#[test]
+fn work_plane_binds_stored_matrix_with_nonzero_inferred_axis_bytes_and_reports_assumption() {
+    use crate::test_support::work_plane::{placements, scope};
+    for placement in placements()
+        .into_iter()
+        .chain(crate::test_support::placement_construction::modern_placements())
+    {
+        let expected = placement.fields.matrix.as_ref().map_or(
+            crate::records::sketch_placement::SketchPlacementMatrix::IDENTITY,
+            |matrix| matrix.value,
+        );
+        for (inferred_x_axis, inferred_z_axis) in [(1, 0), (0, 1), (155, 220)] {
+            let mut candidate = placement.clone();
+            candidate.fields.inferred_x_axis.value = inferred_x_axis;
+            candidate.fields.inferred_z_axis.value = inferred_z_axis;
+            let mut scope = scope(&candidate);
+            let losses = super::bind(std::slice::from_mut(&mut scope), &[candidate]);
+            assert_eq!(scope.work_plane_transform(), Some(expected));
+            assert_eq!(losses.len(), 1);
+            assert_eq!(
+                losses[0].code,
+                crate::loss::F3dLossCode::WorkPlaneInferredAxisAssumed
+                    .note("")
+                    .code
+            );
+        }
+    }
+}
+
+#[test]
+fn work_plane_binds_version_seven_and_ten_grammar_frames() {
+    use crate::test_support::placement_construction::{grammar_placement, GRAMMAR_FRAME_ROWS};
+    for (version, use_u_direction) in [(7, 0), (10, 0), (10, 1)] {
+        let placement = grammar_placement(version, use_u_direction);
+        let mut scope =
+            crate::test_support::work_plane::scope_referencing(&[38, 39, placement.record_index]);
+        assert!(super::bind(std::slice::from_mut(&mut scope), &[placement]).is_empty());
+        let transform = scope.work_plane_transform().unwrap();
+        assert_eq!(transform.rows(), GRAMMAR_FRAME_ROWS);
+        let frame =
+            crate::design::feature_project::work_plane_datum_frame(transform.rows()).unwrap();
+        assert_eq!(
+            frame.origin().get(),
+            cadmpeg_ir::math::Point3::new(-35.0, 2.5, 0.0)
+        );
+        assert_eq!(
+            frame.normal().get(),
+            cadmpeg_ir::math::Vector3::new(1.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            frame.u_axis().get(),
+            cadmpeg_ir::math::Vector3::new(0.0, 1.0, 0.0)
+        );
+    }
+}
+
+#[test]
+fn class_pair_frame_with_nonzero_inferred_axis_bytes_keeps_matrix_and_reports_assumption() {
+    use crate::records::sketch_placement::SketchPlacementMatrix;
+    use crate::test_support::work_plane::{placements, scope, scope_referencing};
+    let transform = SketchPlacementMatrix::try_from([
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 2.5],
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
+    .unwrap();
+    let mut class_pair = scope_referencing(&[73]);
+    class_pair.with_work_plane_transform(transform);
+    let inferred_axes =
+        std::collections::HashMap::from([(class_pair.id.clone(), (0, [0x4d, 0x90]))]);
+    let losses = super::class_pair_inferred_axis_losses(
+        std::slice::from_ref(&class_pair),
+        &[],
+        &inferred_axes,
+    );
+    assert_eq!(class_pair.work_plane_transform(), Some(transform));
+    assert_eq!(losses.len(), 1);
+    assert_eq!(
+        losses[0].code,
+        crate::loss::F3dLossCode::WorkPlaneInferredAxisAssumed
+            .note("")
+            .code
+    );
+    assert!(losses[0]
+        .message
+        .contains("isInferredXAxis byte is 77 and isInferredZAxis byte is 144"));
+
+    let replaced = std::collections::HashMap::from([(class_pair.id.clone(), (49, [1, 1]))]);
+    assert!(super::class_pair_inferred_axis_losses(
+        std::slice::from_ref(&class_pair),
+        &[],
+        &replaced
+    )
+    .is_empty());
+
+    let placement = placements().remove(0);
+    let mut registered = scope(&placement);
+    registered.with_work_plane_transform(transform);
+    let registered_axes = std::collections::HashMap::from([(registered.id.clone(), (0, [1, 1]))]);
+    assert!(super::class_pair_inferred_axis_losses(
+        std::slice::from_ref(&registered),
+        &[placement],
+        &registered_axes
+    )
+    .is_empty());
 }

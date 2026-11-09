@@ -10,6 +10,7 @@ use crate::ids::native_stream;
 use crate::layout::draft_operation_prefix as prefix;
 use crate::records::feature::direct_face::DesignDraftFlags;
 use crate::records::feature::direct_face::DesignDraftOperation;
+use crate::records::feature::direct_face::DesignDraftTwoSided;
 use crate::records::feature::scope::DesignParameterScope;
 use crate::records::parameters::DesignParameterOwner;
 use cadmpeg_core::decode::View;
@@ -72,7 +73,7 @@ pub(super) fn exact_draft_operation_with_owners(
     }
     let (angle_record_index, angle_ordinal, angle, angle_offset) = first;
     let (opposite_angle_record_index, opposite_ordinal, opposite, opposite_offset) = second;
-    if angle_ordinal != 0 || opposite_ordinal != 1 || opposite.get() != 0.0 {
+    if angle_ordinal != 0 || opposite_ordinal != 1 {
         return None;
     }
     let flags = draft_flags(
@@ -82,18 +83,25 @@ pub(super) fn exact_draft_operation_with_owners(
         opposite_angle_record_index,
     )
     .ok()?;
+    let opposite_angle = match flags.and_then(|flags| flags.two_sided) {
+        None if opposite.get() == 0.0 => None,
+        Some(DesignDraftTwoSided::TwoAngles) => Some(opposite),
+        Some(DesignDraftTwoSided::Symmetric) if opposite == angle => Some(opposite),
+        _ => return None,
+    };
     Some(DesignDraftOperation {
         angle: cadmpeg_ir::scalar::Angle::from_assigned_real(angle),
         angle_record_index,
         angle_offset,
         opposite_angle_record_index,
         opposite_angle_offset: opposite_offset,
+        opposite_angle: opposite_angle.map(cadmpeg_ir::scalar::Angle::from_assigned_real),
         flags,
     })
 }
 
 /// Read the prologue that names both angle lanes. A frame without this prologue
-/// states no flags; a frame with it admits only the single-angle mode.
+/// states no flags and has the single-angle mode.
 fn draft_flags(
     bytes: &[u8],
     scope: &DesignParameterScope,
@@ -118,12 +126,14 @@ fn draft_flags(
     };
     let flipped = flag(prefix::FLIPPED)?;
     let tangent_chain = flag(prefix::TANGENT_CHAIN)?;
-    if View::u32_le_at(bytes, at(prefix::MODE)) != Some(MODE_SINGLE_ANGLE) {
-        return Err(());
-    }
+    let two_sided = match View::u32_le_at(bytes, at(prefix::MODE)).ok_or(())? {
+        MODE_SINGLE_ANGLE => None,
+        mode => Some(DesignDraftTwoSided::try_from(mode).map_err(|_| ())?),
+    };
     Ok(Some(DesignDraftFlags {
         flipped,
         tangent_chain,
+        two_sided,
     }))
 }
 

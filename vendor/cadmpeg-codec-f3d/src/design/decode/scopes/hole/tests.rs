@@ -551,6 +551,29 @@ const WORDED: super::ExtentLayout = super::ExtentLayout {
     control: true,
 };
 
+/// The block after the extent controls of type versions 5 and 7: u32 `1`,
+/// four counted UTF-16 names, and the u32 hole type.
+fn standard_block(names: [&str; 4], hole_type: u32) -> Vec<u8> {
+    let mut bytes = 1_u32.to_le_bytes().to_vec();
+    for name in names {
+        let units: Vec<u16> = name.encode_utf16().collect();
+        bytes.extend_from_slice(&u32::try_from(units.len()).unwrap().to_le_bytes());
+        for unit in units {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+    }
+    bytes.extend_from_slice(&hole_type.to_le_bytes());
+    bytes
+}
+
+const NO_NAMES: [&str; 4] = ["", "", "", ""];
+const M3: [&str; 4] = [
+    "Ansi Metric M Profile",
+    "Normal",
+    "M3",
+    "Flat Head Machine Screw",
+];
+
 fn extent_payload(controls: &[u8], saved: bool) -> Vec<u8> {
     let mut bytes = vec![0, 1];
     bytes.extend_from_slice(&u32::from(saved).to_le_bytes());
@@ -630,7 +653,7 @@ fn hole_extent_refuses_other_control_spellings_and_truncation() {
         [0, 0, 0, 0, 1, 0, 0, 0],
         [0, 0, 0, 0, 0, 1, 0, 0],
         [0, 0, 0, 0, 1, 1, 2, 0],
-        [0, 0, 0, 0, 1, 1, 1, 1],
+        [0, 0, 0, 0, 1, 1, 1, 2],
     ] {
         assert!(super::hole_extent_payload(&extent_payload(&controls, true), 0, WORDED).is_none());
     }
@@ -644,7 +667,8 @@ fn hole_extent_refuses_other_control_spellings_and_truncation() {
 fn hole_direction_control_reads_after_the_controls_of_a_worded_extent() {
     for control in [0, 1] {
         let mut controls = vec![0, 0, 0, 0, 1, 1, 0, 0];
-        controls.extend_from_slice(&[0; 24]);
+        controls.extend_from_slice(&standard_block(NO_NAMES, 0));
+        assert_eq!(controls.len(), 4 + 28);
         controls.push(control);
         let bytes = extent_payload(&controls, false);
         let extent = super::hole_extent_payload(&bytes, 0, WORDED).unwrap();
@@ -657,7 +681,7 @@ fn hole_direction_control_reads_after_the_controls_of_a_worded_extent() {
 #[test]
 fn hole_direction_control_is_absent_when_it_is_not_stored_or_not_valid() {
     let mut controls = vec![0, 0, 0, 0, 1, 1, 0, 0];
-    controls.extend_from_slice(&[0; 24]);
+    controls.extend_from_slice(&standard_block(NO_NAMES, 0));
     let short = extent_payload(&controls, false);
     let extent = super::hole_extent_payload(&short, 0, WORDED).unwrap();
     assert_eq!(extent.direction_control, None);
@@ -729,4 +753,97 @@ fn hole_extent_uses_the_admitted_scope_frame_without_a_point_carrier() {
             expected
         );
     }
+}
+
+#[test]
+fn a_standard_hole_reads_its_sizing_names_and_the_direction_after_them() {
+    let mut controls = vec![1, 0, 0, 0, 1, 1, 0, 1];
+    controls.extend_from_slice(&standard_block(M3, 2));
+    controls.push(1);
+    let bytes = extent_payload(&controls, false);
+    let extent = super::hole_extent_payload(&bytes, 0, WORDED).unwrap();
+    assert_eq!(extent.extent_control, Some(0));
+    let read = extent.direction_control.unwrap();
+    assert_eq!(
+        (read.value, usize::try_from(read.offset).unwrap()),
+        (1, bytes.len() - 1)
+    );
+    let standard = extent.standard.unwrap();
+    assert_eq!(
+        [
+            standard.standard.as_str(),
+            standard.fit.as_str(),
+            standard.size.as_str(),
+            standard.fastener.as_str()
+        ],
+        M3
+    );
+    let names_length = 4 * 4 + 2 * M3.iter().map(|name| name.len()).sum::<usize>();
+    assert_eq!(
+        usize::try_from(standard.offset).unwrap(),
+        bytes.len() - 1 - 4 - names_length
+    );
+}
+
+#[test]
+fn the_standard_flag_must_agree_with_the_sizing_names() {
+    for (flag, names) in [(0, M3), (1, NO_NAMES), (1, ["", "Normal", "M3", "Screw"])] {
+        let mut controls = vec![0, 0, 0, 0, 1, 1, 0, flag];
+        controls.extend_from_slice(&standard_block(names, 2));
+        controls.push(1);
+        let extent =
+            super::hole_extent_payload(&extent_payload(&controls, false), 0, WORDED).unwrap();
+        assert_eq!(extent.extent_control, Some(0), "flag {flag}");
+        assert_eq!(extent.direction_control, None, "flag {flag}");
+        assert_eq!(extent.standard, None, "flag {flag}");
+    }
+}
+
+#[test]
+fn a_block_without_its_one_word_or_with_another_hole_type_reads_no_direction() {
+    for (one, hole_type) in [(0_u32, 0_u32), (2, 0), (1, 3)] {
+        let mut block = standard_block(NO_NAMES, hole_type);
+        block[..4].copy_from_slice(&one.to_le_bytes());
+        let mut controls = vec![0, 0, 0, 0, 1, 1, 0, 0];
+        controls.extend_from_slice(&block);
+        controls.push(1);
+        let extent =
+            super::hole_extent_payload(&extent_payload(&controls, false), 0, WORDED).unwrap();
+        assert_eq!(
+            extent.direction_control, None,
+            "one {one}, hole type {hole_type}"
+        );
+    }
+    for hole_type in 0..=2 {
+        let mut controls = vec![0, 0, 0, 0, 1, 1, 0, 0];
+        controls.extend_from_slice(&standard_block(NO_NAMES, hole_type));
+        controls.push(1);
+        let extent =
+            super::hole_extent_payload(&extent_payload(&controls, false), 0, WORDED).unwrap();
+        assert!(extent.direction_control.is_some(), "hole type {hole_type}");
+    }
+}
+
+#[test]
+fn a_sizing_name_longer_than_the_bound_reads_no_direction() {
+    let long = "M".repeat(super::MAX_HOLE_STANDARD_NAME + 1);
+    for (names, read) in [
+        (["Ansi", "Normal", &long[1..], "Screw"], true),
+        (["Ansi", "Normal", long.as_str(), "Screw"], false),
+    ] {
+        let mut controls = vec![0, 0, 0, 0, 1, 1, 0, 1];
+        controls.extend_from_slice(&standard_block(names, 0));
+        controls.push(1);
+        let extent =
+            super::hole_extent_payload(&extent_payload(&controls, false), 0, WORDED).unwrap();
+        assert_eq!(extent.direction_control.is_some(), read);
+    }
+}
+
+#[test]
+fn the_standard_flag_is_refused_without_the_leading_word() {
+    let mut controls = vec![1, 1, 0, 1];
+    controls.extend_from_slice(&standard_block(M3, 2));
+    controls.push(1);
+    assert!(super::hole_extent_payload(&extent_payload(&controls, false), 0, BARE).is_none());
 }

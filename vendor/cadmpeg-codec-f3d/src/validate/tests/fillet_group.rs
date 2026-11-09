@@ -272,3 +272,27 @@ fn fixed_fillet_unassigned_group_laws_retain_native_validation() {
         assert!(findings.is_empty());
     });
 }
+
+/// DR-321: a sole face-role group with no owner and no fixed lane.
+#[test]
+fn a_sole_face_group_without_a_stored_radius_has_no_finding() {
+    use crate::records::topology::construction::DesignConstructionOperandRole;
+    use crate::records::topology::extrude_selection::DesignOperandRole;
+    let finding_count = |role: DesignOperandRole| {
+        let mut native = super::operand_group_carrier::native_with_identity();
+        native.design_parameter_scopes = self::native().design_parameter_scopes;
+        native.design_parameter_owners.clear();
+        native.design_construction_operand_groups.truncate(1);
+        native.design_construction_operand_groups[0].operand_role =
+            DesignConstructionOperandRole::Other(role);
+        crate::test_support::with_decode_context(|decode| {
+            let ir = cadmpeg_ir::examples::unit_cube().unwrap();
+            let ctx = super::super::Ctx::new(&ir, &native, decode);
+            let mut findings = Vec::new();
+            super::super::validate_fillet_operand_groups(&ctx, &mut findings, &Default::default());
+            findings.len()
+        })
+    };
+    assert_eq!(finding_count(DesignOperandRole::ROLE_0X10), 0);
+    assert_eq!(finding_count(DesignOperandRole::BODIES_B), 1);
+}

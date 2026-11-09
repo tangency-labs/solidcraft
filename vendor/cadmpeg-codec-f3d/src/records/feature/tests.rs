@@ -1660,7 +1660,7 @@ fn feature_kind_classifies_nonempty_native_names_at_construction() {
         assert_eq!(decoded, kind);
         assert_eq!(
             matches!(kind, DesignFeatureKind::Native(_)),
-            matches!(name, "Unsupported" | "fillet" | " ")
+            matches!(name, "Esboço" | "Extrusão" | "Unsupported" | "fillet" | " ")
         );
     }
     assert!(DesignFeatureKind::try_from(String::new()).is_err());
@@ -1801,8 +1801,6 @@ fn surface_trim_sidecar_requires_a_nonempty_cell_table() {
     let entry = serde_json::json!({"record_index": 4, "record_reference_offset": 0,
         "ordinal": 1, "ordinal_offset": 0});
     let mut wire = serde_json::json!({"id": "trim", "scope_record_index": 1,
-        "selection_record_index": 2, "selection_byte_offset": 0,
-        "selection_next_record_index": 3, "selection_next_byte_offset": 0,
         "chain_records": [
             {"record_index": 3, "byte_offset": 0, "class_tag": "288", "frame_length": 11},
             {"record_index": 6, "byte_offset": 11, "class_tag": "271", "frame_length": 11}
@@ -1840,6 +1838,8 @@ mod copied_bodies;
 mod admitted_scalars;
 
 mod revolve_targets;
+
+mod extrude_distance_tail;
 
 #[test]
 fn required_surface_operations_reject_absence() {
@@ -1964,3 +1964,35 @@ fn vertex_frame_rejects_displaced_indices_and_recipe_prefix() {
 mod three_point_planes;
 
 mod work_points;
+
+#[test]
+fn a_path_pattern_scope_keeps_its_kind_through_serialization() {
+    use crate::records::feature::scope::{DesignFeatureKind, DesignParameterScope};
+
+    let scope = |kind: DesignFeatureKind, source_kind: Option<&str>| {
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:design-parameter-scope#10",
+            kind,
+            10,
+        );
+        scope
+            .try_edit(|draft| {
+                draft.paired_byte_offset = draft.kind_offset + 22 + 72;
+                draft.frame_length = draft.paired_byte_offset - draft.byte_offset;
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        scope.source_kind = source_kind.map(str::to_owned);
+        scope
+    };
+    for (kind, source_kind) in [
+        (DesignFeatureKind::native("PathPattern"), None),
+        (DesignFeatureKind::PathPattern, Some("PathPattern")),
+    ] {
+        let original = scope(kind.clone(), source_kind);
+        let reloaded: DesignParameterScope =
+            serde_json::from_value(serde_json::to_value(&original).unwrap()).unwrap();
+        assert_eq!(reloaded.kind(), kind);
+        assert_eq!(reloaded.source_kind.as_deref(), source_kind);
+    }
+}

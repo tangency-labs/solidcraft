@@ -65,47 +65,30 @@ pub(crate) enum DesignFeatureFamily {
     SheetMetalHem,
 }
 
-/// Return the canonical operation family while preserving `kind` verbatim on
-/// the native scope. Fusion serializes this field through its UI localization.
+/// Return the canonical operation family for a selected feature kind.
 pub(crate) fn design_feature_family(
     kind: &crate::records::feature::scope::DesignFeatureKind,
 ) -> Option<DesignFeatureFamily> {
     use crate::records::feature::scope::DesignFeatureKind as Kind;
     match kind {
-        Kind::Sketch
-        | Kind::Esquisse
-        | Kind::Skizze
-        | Kind::Esboco
-        | Kind::Boceto
-        | Kind::SketchJa => Some(DesignFeatureFamily::Sketch),
+        Kind::Sketch => Some(DesignFeatureFamily::Sketch),
         Kind::Assemble | Kind::AsBuilt => Some(DesignFeatureFamily::Assemble),
-        Kind::Extrude | Kind::Extrusion | Kind::Extrusao | Kind::Extruir | Kind::ExtrudeJa => {
-            Some(DesignFeatureFamily::Extrude)
-        }
-        Kind::Fillet
-        | Kind::Conge
-        | Kind::Abrundung
-        | Kind::Arredondamento
-        | Kind::Empalme
-        | Kind::FilletJa => Some(DesignFeatureFamily::Fillet),
-        Kind::Chamfer | Kind::Chanfrein | Kind::Chaflan | Kind::ChamferJa => {
-            Some(DesignFeatureFamily::Chamfer)
-        }
+        Kind::Extrude => Some(DesignFeatureFamily::Extrude),
+        Kind::Fillet => Some(DesignFeatureFamily::Fillet),
+        Kind::Chamfer => Some(DesignFeatureFamily::Chamfer),
         Kind::Combine => Some(DesignFeatureFamily::Combine),
         Kind::Draft => Some(DesignFeatureFamily::Draft),
         Kind::ReplaceFace => Some(DesignFeatureFamily::ReplaceFace),
-        Kind::CPattern | Kind::CircularPattern | Kind::ReseauC => {
-            Some(DesignFeatureFamily::CircularPattern)
-        }
+        Kind::CPattern | Kind::CircularPattern => Some(DesignFeatureFamily::CircularPattern),
         Kind::RPattern | Kind::RectangularPattern => Some(DesignFeatureFamily::RectangularPattern),
-        Kind::Mirror | Kind::SymetrieMiroir => Some(DesignFeatureFamily::Mirror),
+        Kind::Mirror => Some(DesignFeatureFamily::Mirror),
         Kind::Move => Some(DesignFeatureFamily::Move),
-        Kind::OffsetFaces | Kind::DecalerLesFaces => Some(DesignFeatureFamily::OffsetFaces),
+        Kind::OffsetFaces => Some(DesignFeatureFamily::OffsetFaces),
         Kind::Revolve => Some(DesignFeatureFamily::Revolve),
-        Kind::Shell | Kind::Schale | Kind::Vaciado => Some(DesignFeatureFamily::Shell),
+        Kind::Shell => Some(DesignFeatureFamily::Shell),
         Kind::Thicken => Some(DesignFeatureFamily::Thicken),
         Kind::SpirePrimitive | Kind::CoilPrimitive => Some(DesignFeatureFamily::Coil),
-        Kind::Loft | Kind::Solevacion => Some(DesignFeatureFamily::Loft),
+        Kind::Loft => Some(DesignFeatureFamily::Loft),
         Kind::Sweep => Some(DesignFeatureFamily::Sweep),
         Kind::Pipe => Some(DesignFeatureFamily::Pipe),
         Kind::SurfacePatch => Some(DesignFeatureFamily::SurfacePatch),
@@ -116,12 +99,11 @@ pub(crate) fn design_feature_family(
         Kind::BoundaryFill => Some(DesignFeatureFamily::BoundaryFill),
         Kind::Hole => Some(DesignFeatureFamily::Hole),
         Kind::Split => Some(DesignFeatureFamily::Split),
-        Kind::Scale | Kind::Massstab | Kind::Escala => Some(DesignFeatureFamily::Scale),
+        Kind::Scale => Some(DesignFeatureFamily::Scale),
         Kind::Thread => Some(DesignFeatureFamily::Thread),
         Kind::EdgeFlange => Some(DesignFeatureFamily::SheetMetalEdgeFlange),
         Kind::Hem => Some(DesignFeatureFamily::SheetMetalHem),
         Kind::SpherePrimitive
-        | Kind::EsferaPrimitiva
         | Kind::TorusPrimitive
         | Kind::BoxPrimitive
         | Kind::CylinderPrimitive
@@ -129,11 +111,9 @@ pub(crate) fn design_feature_family(
         | Kind::Align
         | Kind::Native(_)
         | Kind::Canvas
-        | Kind::Lienzo
         | Kind::Decal
         | Kind::BaseMeshFeature
         | Kind::WorkPlane
-        | Kind::PlanoDeObra
         | Kind::WorkAxis
         | Kind::WorkPoint
         | Kind::DerivedInstance
@@ -147,27 +127,45 @@ pub(crate) fn design_feature_family(
         | Kind::JointOrigin
         | Kind::BaseFlange
         | Kind::SplitFace
+        | Kind::PathPattern
         | Kind::MoveFace
-        | Kind::DeplacerFace
         | Kind::DeleteFace
         | Kind::SurfaceDeleteFace
         | Kind::RemoveBody
+        | Kind::ReverseNormal
         | Kind::Face => None,
     }
 }
 
-/// Return whether `kind` is a localized spelling of an edge-treatment family.
-///
-/// Canonical Fillet and Chamfer scopes require every selection to use a
-/// counted construction-operand group. Their localized spellings do not.
-fn is_localized_edge_treatment_kind(
+/// Return whether `group` is the face seed group of a rectangular, circular,
+/// or Mirror pattern scope: role `0x0000001000000000` at scope-reference
+/// ordinal one.
+pub(crate) fn is_pattern_face_seed_group(
     kind: &crate::records::feature::scope::DesignFeatureKind,
+    group: &crate::records::topology::construction::DesignConstructionOperandGroup,
 ) -> bool {
-    use crate::records::feature::scope::DesignFeatureKind as Kind;
     matches!(
         design_feature_family(kind),
+        Some(
+            DesignFeatureFamily::RectangularPattern
+                | DesignFeatureFamily::CircularPattern
+                | DesignFeatureFamily::Mirror
+        )
+    ) && group.role() == crate::records::topology::extrude_selection::DesignOperandRole::ROLE_0X10
+        && group.scope_reference_ordinal == 1
+}
+
+/// Return whether a Fillet or Chamfer scope stores a localized family name.
+///
+/// Canonical Fillet and Chamfer scopes require every selection to use a
+/// counted construction-operand group. Localized ones do not.
+fn is_localized_edge_treatment(
+    scope: &crate::records::feature::scope::DesignParameterScope,
+) -> bool {
+    matches!(
+        design_feature_family(&scope.kind()),
         Some(DesignFeatureFamily::Fillet | DesignFeatureFamily::Chamfer)
-    ) && !matches!(kind, Kind::Fillet | Kind::Chamfer)
+    ) && scope.source_kind_name() != scope.kind_name()
 }
 
 const RECIPES: &[(&[u8], ConstructionRecipeKind)] = &[

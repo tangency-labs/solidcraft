@@ -260,3 +260,32 @@ fn placement_modern_registration_uses_the_same_version_gate_as_native_validation
         }
     }
 }
+
+#[test]
+fn placement_versions_seven_and_ten_decode_their_member_grammar() {
+    use crate::test_support::placement_construction::{grammar_placement, GRAMMAR_FRAME_ROWS};
+    for (version, use_u_direction, identity_offset) in [(7, None, 49), (10, Some(1), 55)] {
+        let record = grammar_placement(version, use_u_direction.unwrap_or(0));
+        assert_eq!(record.record_index, 41);
+        assert_eq!(record.type_version, version);
+        assert_eq!(
+            record.fields.use_u_direction.map(|value| value.value),
+            use_u_direction
+        );
+        assert_eq!(record.fields.axis_flipped.is_some(), version == 10);
+        assert_eq!(record.fields.global_parameters.is_some(), version == 10);
+        assert!(record.fields.extra_offset.is_none());
+        let identity = record.fields.identity.unwrap();
+        assert_eq!((identity.offset, identity.value), (identity_offset, false));
+        let matrix = record.fields.matrix.unwrap();
+        assert_eq!(matrix.offset, identity_offset + 1);
+        assert_eq!(matrix.value.rows(), GRAMMAR_FRAME_ROWS);
+        let old_rotation = record.fields.old_rotation.unwrap();
+        assert_eq!(old_rotation.offset, identity_offset + 129);
+        assert_eq!(old_rotation.value.get(), std::f64::consts::FRAC_PI_2);
+        assert_eq!(record.fields.ref_type.value, 3);
+        assert_eq!(record.fields.values.count.value, 1);
+        assert_eq!(record.fields.values.members[0].local_target(), Some(38));
+        assert!(record.base_level.value.is_empty());
+    }
+}

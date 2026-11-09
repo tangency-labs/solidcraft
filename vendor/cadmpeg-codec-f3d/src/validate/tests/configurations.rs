@@ -55,3 +55,50 @@ fn configuration_documents_with_rows_in_two_tables_have_no_single_order() {
         );
     }
 }
+
+fn scoped_document(scope: &str, name: &str, rows: bool) -> DesignConfiguration {
+    let mut value = serde_json::to_value(document(name, rows)).unwrap();
+    value["id"] = serde_json::json!(format!(
+        "f3d:xref/role-{scope}/reference-0/occurrence-0/configuration:entry#{name}"
+    ));
+    serde_json::from_value(value).unwrap()
+}
+
+fn configuration_messages(documents: Vec<DesignConfiguration>) -> Vec<String> {
+    let ir = cadmpeg_ir::examples::unit_cube().unwrap();
+    let native = crate::native::F3dNative {
+        design_configurations: documents,
+        ..Default::default()
+    };
+    crate::test_support::with_decode_context(|decode| {
+        let ctx = super::super::Ctx::new(&ir, &native, decode);
+        let mut findings = Vec::new();
+        super::super::validate_configurations(&ctx, &mut findings);
+        findings
+            .into_iter()
+            .map(|finding| finding.message)
+            .collect()
+    })
+}
+
+#[test]
+fn configuration_names_and_table_order_keep_their_member_document_scope() {
+    let separate = configuration_messages(vec![
+        scoped_document("a", "same.dsgcfg", true),
+        scoped_document("b", "same.dsgcfg", true),
+    ]);
+    assert!(separate.is_empty(), "{separate:?}");
+    let duplicate = configuration_messages(vec![
+        scoped_document("a", "same.dsgcfg", false),
+        scoped_document("a", "same.dsgcfg", false),
+    ]);
+    assert_eq!(
+        duplicate,
+        ["Fusion Design configuration entry name is duplicated"]
+    );
+    let two_orders = configuration_messages(vec![
+        scoped_document("a", "first.dsgcfg", true),
+        scoped_document("a", "second.dsgcfg", true),
+    ]);
+    assert_eq!(two_orders, [FINDING]);
+}

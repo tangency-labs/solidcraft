@@ -22,9 +22,7 @@ const BASE_GUID: &str = "2CA5A1CD-C99B-4C9B-91AF-57989148E841";
 pub(super) fn checked_solved_frame(
     placement: &DesignPlacementConstruction,
 ) -> Option<Located<crate::records::sketch_placement::SketchPlacementMatrix>> {
-    if placement.fields.inferred_x_axis.value != 0
-        || placement.fields.inferred_z_axis.value != 0
-        || placement.fields.z_flip.value != 0
+    if placement.fields.z_flip.value != 0
         || placement
             .fields
             .axis_flipped
@@ -34,9 +32,7 @@ pub(super) fn checked_solved_frame(
             .fields
             .use_u_direction
             .as_ref()
-            .is_some_and(|value| {
-                value.value != 0 && !(placement.type_version == 16 && value.value == 1)
-            })
+            .is_some_and(|value| value.value > 1)
         || placement
             .fields
             .periodic_face_mode

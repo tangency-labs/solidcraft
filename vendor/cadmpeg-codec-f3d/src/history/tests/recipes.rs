@@ -100,6 +100,7 @@ fn work_point_vertex_recipe_resolves_common_historical_vertex() {
         candidate_edges: Vec::new(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     };
     let recipe = DesignVertexRecipe::try_new(
         crate::records::feature::work_geometry::DesignVertexRecipeDraft {
@@ -449,6 +450,7 @@ fn surface_patch_recipe_uses_the_unique_common_boundary_edge() {
         candidate_edges,
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     };
     let references = vec![
         reference(

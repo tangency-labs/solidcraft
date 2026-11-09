@@ -276,22 +276,16 @@ fn two_sketch_placements(
 }
 
 #[test]
-fn sketch_geometry_ordinals_use_collections_independently_of_components() {
+fn sketch_geometry_ordinals_are_admitted_in_separate_and_shared_collections() {
     crate::test_support::with_decode_context(|service_ctx| {
         let ir = cadmpeg_ir::examples::unit_cube().unwrap();
-        let native = two_sketch_placements(true, [1, 1]);
-        let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
-        let mut findings = Vec::new();
-        super::super::validate_sketch_placements(&ctx, &mut findings);
-        assert!(findings.is_empty(), "{findings:?}");
-        let native = two_sketch_placements(false, [1, 1]);
-        let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
-        super::super::validate_sketch_placements(&ctx, &mut findings);
-        assert_eq!(findings.len(), 1);
-        assert_eq!(
-            findings[0].message,
-            "Fusion Design sketch placement has an invalid frame or scope link"
-        );
+        for separate_collections in [true, false] {
+            let native = two_sketch_placements(separate_collections, [1, 1]);
+            let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
+            let mut findings = Vec::new();
+            super::super::validate_sketch_placements(&ctx, &mut findings);
+            assert!(findings.is_empty(), "{findings:?}");
+        }
     })
 }
 
@@ -314,51 +308,36 @@ fn sketch_geometry_ordinals_may_skip_values_and_decrease_with_entity_order() {
 }
 
 #[test]
-fn sketch_geometry_decreasing_ordinals_keep_duplicate_refusal() {
+fn sketch_geometry_ordinals_may_repeat_within_one_collection() {
     crate::test_support::with_decode_context(|service_ctx| {
         let ir = cadmpeg_ir::examples::unit_cube().unwrap();
         let mut native = two_sketch_placements(false, [8, 3]);
-        let mut findings = Vec::new();
-        let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
-        super::super::validate_sketch_placements(&ctx, &mut findings);
-        assert!(findings.is_empty(), "{findings:?}");
         native.design_sketch_placements[1]
             .visibility
             .as_mut()
             .unwrap()
             .stream_ordinal = std::num::NonZeroU32::new(8).unwrap();
         let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
+        let mut findings = Vec::new();
         super::super::validate_sketch_placements(&ctx, &mut findings);
-        assert_eq!(findings.len(), 1, "{findings:?}");
-        assert_eq!(
-            findings[0].message,
-            "Fusion Design sketch placement has an invalid frame or scope link"
-        );
+        assert!(findings.is_empty(), "{findings:?}");
     });
 }
 
 #[test]
-fn sketch_visibility_ordinals_are_unique_within_explicit_collections() {
+fn sketch_visibility_collection_must_be_registered() {
     crate::test_support::with_decode_context(|service_ctx| {
         let ir = cadmpeg_ir::examples::unit_cube().unwrap();
-        let mut native = two_sketch_placements(false, [2, 2]);
-        for (placement, collection) in native.design_sketch_placements.iter_mut().zip([100, 200]) {
-            placement.visibility.as_mut().unwrap().ordinal_collection =
-                std::num::NonZeroU64::new(collection);
-        }
-        let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
-        let mut findings = Vec::new();
-        super::super::validate_sketch_placements(&ctx, &mut findings);
-        assert!(findings.is_empty(), "{findings:?}");
-        findings.clear();
+        let mut native = two_sketch_placements(false, [2, 3]);
         native.design_sketch_placements[1]
             .visibility
             .as_mut()
             .unwrap()
-            .ordinal_collection = std::num::NonZeroU64::new(100);
+            .ordinal_collection = std::num::NonZeroU64::new(999);
         let ctx = super::super::Ctx::new(&ir, &native, service_ctx);
+        let mut findings = Vec::new();
         super::super::validate_sketch_placements(&ctx, &mut findings);
-        assert_eq!(findings.len(), 1);
+        assert_eq!(findings.len(), 1, "{findings:?}");
         assert_eq!(
             findings[0].message,
             "Fusion Design sketch placement has an invalid frame or scope link"

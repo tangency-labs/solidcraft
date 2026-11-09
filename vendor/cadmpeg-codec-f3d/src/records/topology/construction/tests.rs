@@ -90,6 +90,17 @@ fn construction_frame_rejects_invalid_scalars_offsets_and_trailing_arity() {
 }
 
 #[test]
+fn construction_frame_accepts_a_set_closing_flag() {
+    let mut wire = frame_wire();
+    wire.closing_flag = true;
+    let frame = DesignConstructionOperandGroupFrame::try_from(wire.clone()).unwrap();
+    assert!(frame.closing_flag);
+    let decoded: DesignConstructionOperandGroupFrame =
+        serde_json::from_value(serde_json::to_value(wire).unwrap()).unwrap();
+    assert!(decoded.closing_flag);
+}
+
+#[test]
 fn construction_frame_collections_reject_duplicates_and_keep_failed_edits_atomic() {
     let frame = DesignConstructionOperandGroupFrame::try_from(frame_wire()).unwrap();
     macro_rules! check_collection {
@@ -181,6 +192,31 @@ fn construction_group_borrowed_wire_matches_owned_wire_bytes() {
             serde_json::to_vec(&owned).unwrap()
         );
     }
+}
+
+#[test]
+fn construction_group_retains_sketch_profile_flags() {
+    let wire = json!({
+        "id":"f3d:native:construction-group#0", "scope_record_index":7,
+        "scope_reference_ordinal":0, "record_index":9,"byte_offset":0,
+        "class_tag":"277", "members":[10],"member_offsets":[26],
+        "frame":frame_wire(), "role":0,"role_offset":100,
+        "paired_class_tag":"278","paired_byte_offset":200,
+        "sketch_profile": {
+            "scope_reference_ordinal":0, "record_index":10, "byte_offset":0,
+            "class_tag":"300", "paired_class_tag":"301", "paired_byte_offset":160,
+            "asset_id":"0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "asset_id_offset":32,
+            "entity_id":"Sketch_1", "entity_suffix":1, "entity_reference_offset":80,
+            "compact_tail_flags":[true,false]
+        }
+    });
+    let group: DesignConstructionOperandGroup = serde_json::from_value(wire).unwrap();
+    let serialized = serde_json::to_value(group).unwrap();
+    let decoded: DesignConstructionOperandGroup = serde_json::from_value(serialized).unwrap();
+    assert_eq!(
+        decoded.sketch_profile.unwrap().compact_tail_flags,
+        Some([true, false])
+    );
 }
 
 #[test]

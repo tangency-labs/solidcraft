@@ -1,5 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::records::{
+    decal::DesignRecordHeader,
+    feature::{
+        deleted_members::{DesignDeletedMembers, DesignRecordTimestamp},
+        scope::{DesignFeatureKind, DesignParameterScope},
+    },
+    identity::{Located, ReferenceRun},
+};
+
 fn native() -> crate::native::F3dNative {
     use crate::records::feature::scope::{DesignFeatureKind, DesignParameterScope};
     crate::native::F3dNative {
@@ -113,7 +122,7 @@ fn operand_list_combine_requires_its_own_offsets() {
     };
     use crate::records::identity::ReferenceRun;
 
-    let findings = |operation_offset: u64, keep_tools_offset: u64| {
+    let findings = |operation_offset: u64, keep_tools_offset: u64, keep_tools: bool| {
         let mut scope = DesignParameterScope::empty(
             "f3d:Design/BulkStream.dat:design-parameter-scope#17",
             DesignFeatureKind::Combine,
@@ -134,7 +143,7 @@ fn operand_list_combine_requires_its_own_offsets() {
                 form: DesignCombineForm::OperandLists,
                 operation: cadmpeg_ir::features::BooleanKind::Join,
                 operation_offset,
-                keep_tools: false,
+                keep_tools,
                 keep_tools_offset,
                 target_record_index: 304,
                 target_body_node: None,
@@ -166,9 +175,27 @@ fn operand_list_combine_requires_its_own_offsets() {
             findings.len()
         })
     };
-    assert_eq!(findings(21, 29), 0);
-    assert_eq!(findings(20, 29), 1);
-    assert_eq!(findings(21, 25), 1);
+    assert_eq!(findings(21, 29, false), 0);
+    assert_eq!(findings(20, 29, false), 1);
+    assert_eq!(findings(21, 25, false), 1);
+    for (operation_offset, keep_tools_offset) in [(25, 33), (21, 40), (25, 44), (21, 51)] {
+        assert_eq!(
+            findings(operation_offset, keep_tools_offset, false),
+            0,
+            "{operation_offset} {keep_tools_offset}"
+        );
+    }
+    for (operation_offset, keep_tools_offset) in [(23, 31), (29, 37), (21, 35), (25, 39)] {
+        assert_eq!(
+            findings(operation_offset, keep_tools_offset, false),
+            1,
+            "{operation_offset} {keep_tools_offset}"
+        );
+    }
+    assert_eq!(findings(21, 29, true), 0);
+    assert_eq!(findings(25, 33, true), 0);
+    assert_eq!(findings(21, 40, true), 1);
+    assert_eq!(findings(25, 44, true), 1);
 }
 
 #[test]
@@ -402,4 +429,157 @@ fn corner_flange_scope_round_trip_and_layout_validation() {
         operation.bend_position = crate::records::feature::sheet_metal::DesignBendPosition::Outside;
     }
     assert!(!findings(invalid).is_empty());
+}
+
+#[test]
+fn scope_admits_only_its_deleted_absent_members() {
+    for kind in [
+        DesignFeatureKind::Sketch,
+        DesignFeatureKind::try_from("Skizze".to_owned()).unwrap(),
+    ] {
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:design-parameter-scope#17",
+            kind,
+            17,
+        );
+        scope
+            .try_edit(|draft| {
+                draft.reference_members = ReferenceRun::unlocated(vec![301, 302]);
+                draft.reference_count_offset = 126;
+                draft.layout_fixture_references();
+                draft.paired_byte_offset = draft.kind_offset + 22 + 78;
+                draft.frame_length = draft.paired_byte_offset;
+                draft.feature_ordinal_offset = draft.kind_offset + 22;
+            })
+            .unwrap();
+        let mut native = crate::native::F3dNative::default();
+        for record_index in [17, 301] {
+            native.design_record_headers.push(DesignRecordHeader {
+                id: format!("f3d:Design/BulkStream.dat:design-record-header#{record_index}"),
+                record_index,
+                class_tag: "256".to_owned().try_into().unwrap(),
+                byte_offset: u64::from(record_index),
+            });
+        }
+        native.design_parameter_scopes.push(scope);
+        let findings = |native: &crate::native::F3dNative| {
+            crate::test_support::with_decode_context(|service_ctx| {
+                let ir = cadmpeg_ir::examples::unit_cube().unwrap();
+                let ctx = super::super::Ctx::new(&ir, native, service_ctx);
+                let mut findings = Vec::new();
+                super::super::validate_parameter_scopes(&ctx, &mut findings).unwrap();
+                findings
+            })
+        };
+        native.design_record_headers.push(DesignRecordHeader {
+            id: "f3d:Design/BulkStream.dat:design-record-header#500".into(),
+            record_index: 18,
+            class_tag: "343".to_owned().try_into().unwrap(),
+            byte_offset: 500,
+        });
+        let entry = |ordinal: u64, record_index: u32| DesignRecordTimestamp {
+            record_index: Located {
+                value: record_index,
+                offset: 500 + 31 + 19 * ordinal + 1,
+            },
+            timestamp: 1_646_998_530_073_417,
+        };
+        let mut table_bytes = vec![3, 0, 0, 0];
+        table_bytes.extend_from_slice(b"343");
+        table_bytes.extend_from_slice(&18_u32.to_le_bytes());
+        table_bytes.extend_from_slice(&[0; 14]);
+        table_bytes.extend_from_slice(&[1, 1]);
+        table_bytes.extend_from_slice(&2_u32.to_le_bytes());
+        for record_index in [301_u32, 302, 17] {
+            table_bytes.push(1);
+            table_bytes.extend_from_slice(&record_index.to_le_bytes());
+            table_bytes.extend_from_slice(&[0; 6]);
+            table_bytes.extend_from_slice(&1_646_998_530_073_417_u64.to_le_bytes());
+        }
+        let evidence = DesignDeletedMembers {
+            table_record_index: 18,
+            table_byte_offset: 500,
+            table_class_tag: "343".to_owned().try_into().unwrap(),
+            table_bytes: table_bytes.into(),
+            entries: vec![entry(0, 301), entry(1, 302)],
+            owner: entry(2, 17),
+            members: vec![302],
+        };
+        let claim = |change: &dyn Fn(&mut crate::native::F3dNative)| {
+            let mut native = native.clone();
+            native.design_parameter_scopes[0].deleted_members = Some(evidence.clone());
+            change(&mut native);
+            findings(&native).len()
+        };
+        assert_eq!(findings(&native).len(), 1);
+        assert_eq!(claim(&|_| {}), 0);
+        let evidence_change = |change: &dyn Fn(&mut DesignDeletedMembers)| {
+            claim(&|native| {
+                change(
+                    native.design_parameter_scopes[0]
+                        .deleted_members
+                        .as_mut()
+                        .unwrap(),
+                )
+            })
+        };
+        assert_eq!(
+            evidence_change(&|evidence| evidence.entries[1].record_index.value = 303),
+            1
+        );
+        assert_eq!(
+            evidence_change(&|evidence| evidence.entries[1].record_index.offset += 1),
+            1
+        );
+        assert_eq!(
+            evidence_change(&|evidence| evidence.owner.record_index.value = 18),
+            1
+        );
+        assert_eq!(evidence_change(&|evidence| evidence.members = vec![303]), 1);
+        assert_eq!(
+            evidence_change(&|evidence| evidence.members = vec![302, 302]),
+            1
+        );
+        assert_eq!(evidence_change(&|evidence| evidence.members.clear()), 1);
+        assert_eq!(
+            evidence_change(&|evidence| evidence.table_bytes[31 + 19 + 1] = 0x2f),
+            1
+        );
+        assert_eq!(evidence_change(&|evidence| evidence.table_bytes[31] = 0), 1);
+        assert_eq!(
+            evidence_change(&|evidence| evidence.table_bytes[6] = b'4'),
+            1
+        );
+        assert_eq!(evidence_change(&|evidence| evidence.table_bytes.push(0)), 1);
+        assert_eq!(
+            evidence_change(&|evidence| {
+                evidence.table_bytes.pop();
+            }),
+            1
+        );
+        assert_eq!(
+            evidence_change(&|evidence| {
+                evidence.table_byte_offset = u64::MAX;
+                evidence.entries.clear();
+            }),
+            1
+        );
+        assert_eq!(
+            claim(&|native| {
+                native.design_record_headers.pop();
+            }),
+            1
+        );
+        assert_eq!(
+            claim(&|native| {
+                native.design_record_headers.push(DesignRecordHeader {
+                    id: "f3d:Design/BulkStream.dat:design-record-header#302".into(),
+                    record_index: 302,
+                    class_tag: "256".to_owned().try_into().unwrap(),
+                    byte_offset: 302,
+                });
+            }),
+            1
+        );
+    }
 }

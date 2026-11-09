@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::design::feature_project::{
-    project_circular_pattern, project_rectangular_pattern_scalars,
+    pattern_seeds::unprojected_pattern_seeds, project_circular_pattern,
+    project_rectangular_pattern_scalars,
 };
 use crate::records::{
     feature::{patterns::DesignRectangularPatternConstruction, scope::DesignParameterScope},
@@ -423,7 +424,7 @@ fn a_single_direction_record_must_agree_with_the_instance_run() {
     assert!(linear_direction(disagreeing).is_none());
 }
 
-fn seed_scope(record_index: u32, history_state_id: Option<i64>) -> DesignParameterScope {
+pub(super) fn seed_scope(record_index: u32, history_state_id: Option<i64>) -> DesignParameterScope {
     DesignParameterScope::try_new(crate::records::feature::scope::DesignParameterScopeDraft {
         id: format!("f3d:Design/BulkStream.dat:design-parameter-scope#{record_index}"),
         byte_offset: 0,
@@ -433,6 +434,7 @@ fn seed_scope(record_index: u32, history_state_id: Option<i64>) -> DesignParamet
         kind_offset: 32,
         feature_ordinal: std::num::NonZeroU32::MIN,
         feature_ordinal_offset: 48,
+        label: None,
         history_state_id,
         previous_history_state_id: None,
         previous_history_state_id_offset: None,
@@ -447,6 +449,7 @@ fn seed_scope(record_index: u32, history_state_id: Option<i64>) -> DesignParamet
             .try_into()
             .unwrap(),
         unclosed_construction_operand_groups: Vec::new(),
+        deleted_members: None,
         paired_class_tag: crate::records::references::DesignClassTag::try_from("263".to_owned())
             .unwrap(),
         paired_byte_offset: 128,
@@ -456,7 +459,7 @@ fn seed_scope(record_index: u32, history_state_id: Option<i64>) -> DesignParamet
 
 /// A compact entity selection: identity record `N + 3` stores one u64
 /// identity at offset 21, and the next header follows at offset 29.
-fn compact_entity_selection(
+pub(super) fn compact_entity_selection(
     group_record_index: u32,
     record_index: u32,
     identity: u64,
@@ -594,5 +597,162 @@ fn spacing_pattern_payload_projects_both_axes_and_feature_seed() {
         )
         .unwrap(),
         *record
+    );
+}
+
+fn seed_face_operand(
+    kind: crate::records::recipes::ConstructionRecipeKind,
+) -> crate::records::topology::face::DesignFaceOperand {
+    use crate::records::topology::{
+        body_recipe::DesignOperandGroup,
+        face::{DesignFaceOperand, DesignFaceOperandDraft},
+    };
+    DesignFaceOperand::try_new(DesignFaceOperandDraft {
+        id: "f3d:Design/BulkStream.dat:face-operand#31".to_owned(),
+        scope_record_index: 10,
+        scope_reference_ordinal: 1,
+        group: Some(DesignOperandGroup {
+            group_record_index: 30,
+            group_member_ordinal: 0,
+        }),
+        record_index: 31,
+        byte_offset: 10,
+        class_tag: "256".to_owned().try_into().unwrap(),
+        paired_byte_offset: 30,
+        paired_class_tag: "257".to_owned().try_into().unwrap(),
+        recipe_record_index: 34,
+        recipe_record_byte_offset: 40,
+        recipe_id: "f3d:Design/BulkStream.dat:construction-recipe#34".to_owned(),
+        recipe_prefix_offset: 51,
+        recipe_prefix_bytes: Vec::new(),
+        recipe_references: Vec::new(),
+        recipe_kind: kind,
+        recipe_program_offset: 60,
+        recipe_program: vec![0, -1],
+        recipe_nodes: Vec::new(),
+        candidate_faces: Vec::new(),
+        unreferenced_candidate_faces: Vec::new(),
+        alternate_selector_candidate_faces: Vec::new(),
+        preceding_candidate_faces: Vec::new(),
+        changed_candidate_faces: Vec::new(),
+        historical_support_contexts: Vec::new(),
+        resolved_face_slots: Vec::new(),
+        resolved_active_face: None,
+        next_record_index: 51,
+        next_byte_offset: 70,
+    })
+    .unwrap()
+}
+
+#[test]
+fn a_face_seed_group_supplies_face_seeds_without_a_body_or_face_role_group() {
+    use crate::records::recipes::ConstructionRecipeKind;
+
+    let faces = PatternSeed::Faces(FaceSelection::Native(
+        "f3d:Design/BulkStream.dat:design-construction-operand-group#30".into(),
+    ));
+    let bounded = [seed_face_operand(ConstructionRecipeKind::BoundedFace)];
+    let rectangular = project_rectangular_pattern_scalars(
+        &rectangular_scope(),
+        &[group(10, 30, DesignOperandRole::ROLE_0X10)],
+        &bounded,
+        &[],
+        &[],
+    )
+    .expect("rectangular pattern");
+    assert_linear_seed(rectangular, faces.clone());
+    let circular = project_circular_pattern(
+        &circular_scope(),
+        &[group(10, 30, DesignOperandRole::ROLE_0X10)],
+        &bounded,
+        &[],
+        &[],
+    )
+    .expect("circular pattern");
+    let FeatureDefinition::Operation(FeatureOperation::Pattern { seeds, .. }) = circular else {
+        panic!("circular pattern definition");
+    };
+    assert_eq!(seeds, vec![faces]);
+
+    let seeds = |groups: &[DesignConstructionOperandGroup], operands: &[_]| {
+        unprojected_pattern_seeds(&rectangular_scope(), groups, operands, &[], &[])
+    };
+    let face_group = || group(10, 30, DesignOperandRole::ROLE_0X10);
+    assert!(seeds(&[face_group()], &[]).is_empty());
+    assert!(seeds(
+        &[face_group()],
+        &[seed_face_operand(ConstructionRecipeKind::Face)]
+    )
+    .is_empty());
+    let mut later = face_group();
+    later.scope_reference_ordinal = 2;
+    assert!(seeds(&[later], &bounded).is_empty());
+    assert!(seeds(
+        &[
+            group(10, 20, DesignOperandRole::BODIES_B),
+            group(10, 21, DesignOperandRole::BODIES_A),
+            face_group(),
+        ],
+        &bounded,
+    )
+    .is_empty());
+    assert_eq!(
+        seeds(
+            &[group(10, 20, DesignOperandRole::BODIES_B), face_group()],
+            &bounded
+        ),
+        vec![PatternSeed::Bodies(BodySelection::Native(
+            "f3d:Design/BulkStream.dat:design-construction-operand-group#20".into(),
+        ))]
+    );
+}
+
+#[test]
+fn an_unprojected_pattern_keeps_its_seeds() {
+    use crate::records::recipes::ConstructionRecipeKind;
+
+    let mirror = |previous_state: Option<i64>| {
+        let mut scope = DesignParameterScope::empty(
+            "f3d:Design/BulkStream.dat:parameter-scope#10",
+            crate::records::feature::scope::DesignFeatureKind::Mirror,
+            10,
+        );
+        scope
+            .try_edit(|draft| {
+                draft.previous_history_state_id = previous_state;
+                draft.layout_fixture_tail();
+            })
+            .unwrap();
+        scope
+    };
+    let feature = seed_scope(5, Some(2));
+    let feature_seeds = |scope: DesignParameterScope| {
+        unprojected_pattern_seeds(
+            &scope,
+            &[group(10, 30, DesignOperandRole::BODIES_A)],
+            &[],
+            &[compact_entity_selection(30, 31, 5)],
+            &[scope.clone(), feature.clone()],
+        )
+    };
+    assert_eq!(
+        feature_seeds(mirror(Some(2))),
+        vec![PatternSeed::Feature(crate::ids::neutral_feature_id(
+            &feature
+        ))]
+    );
+    assert!(feature_seeds(mirror(Some(1))).is_empty());
+    assert!(feature_seeds(mirror(None)).is_empty());
+    assert_eq!(
+        unprojected_pattern_seeds(
+            &mirror(None),
+            &[group(10, 30, DesignOperandRole::ROLE_0X10)],
+            &[seed_face_operand(ConstructionRecipeKind::BoundedFace)],
+            &[],
+            &[],
+        ),
+        vec![PatternSeed::Faces(FaceSelection::Native(
+            "f3d:Design/BulkStream.dat:design-construction-operand-group#30".into(),
+        ))]
     );
 }

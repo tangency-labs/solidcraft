@@ -210,6 +210,7 @@ fn expr_has_undefined_references(expr: &str, defined: &HashSet<&str>) -> bool {
 
 #[derive(Clone, Debug)]
 struct IrProfileDescriptor {
+    entities: Vec<SketchEntityId>,
     curve_ids: Vec<String>,
     midpoints: Vec<Vec2>,
 }
@@ -319,6 +320,7 @@ fn resolve_planar_profile_sel(
     profile: &PlanarProfileRef,
     ir_profiles: &[IrProfileDescriptor],
     sc_profiles: &[Profile],
+    entity_curve_ids: Option<&HashMap<SketchEntityId, String>>,
     is_cut: bool,
 ) -> Option<ProfileSel> {
     match profile {
@@ -359,8 +361,47 @@ fn resolve_planar_profile_sel(
         PlanarProfileRef::SketchRegions { regions, .. } => {
             let mut indices = Vec::new();
             for reg in regions.as_slice() {
-                let SketchProfileRegion::Loops { loops } = reg else {
-                    continue;
+                let loops = match reg {
+                    SketchProfileRegion::Loops { loops } => loops,
+                    SketchProfileRegion::Trimmed { outer_boundary, .. } => {
+                        let direct_sc_idx = entity_curve_ids.and_then(|cmap| {
+                            let mut entities = Vec::new();
+                            let mut curve_ids = Vec::new();
+                            for u in outer_boundary.as_slice() {
+                                if !entities.contains(&u.entity) {
+                                    entities.push(u.entity.clone());
+                                }
+                                if let Some(cid) = cmap.get(&u.entity)
+                                    && !curve_ids.contains(cid)
+                                {
+                                    curve_ids.push(cid.clone());
+                                }
+                            }
+                            let desc = IrProfileDescriptor { entities, curve_ids, midpoints: Vec::new() };
+                            map_ir_profile_to_solidcraft(&desc, sc_profiles)
+                        });
+                        if let Some(sc_idx) = direct_sc_idx {
+                            if !indices.contains(&sc_idx) {
+                                indices.push(sc_idx);
+                            }
+                            continue;
+                        }
+                        let mut best_ir_idx: Option<(usize, usize)> = None;
+                        for (ir_idx, desc) in ir_profiles.iter().enumerate() {
+                            let hits = outer_boundary.as_slice().iter().filter(|e| desc.entities.contains(&e.entity)).count();
+                            if hits > 0 && best_ir_idx.is_none_or(|(_, best_hits)| hits > best_hits) {
+                                best_ir_idx = Some((ir_idx, hits));
+                            }
+                        }
+                        if let Some((idx, _)) = best_ir_idx
+                            && let Some(desc) = ir_profiles.get(idx)
+                            && let Some(sc_idx) = map_ir_profile_to_solidcraft(desc, sc_profiles)
+                            && !indices.contains(&sc_idx)
+                        {
+                            indices.push(sc_idx);
+                        }
+                        continue;
+                    }
                 };
                 let idx = loops.outer() as usize;
                 let resolved_outer = if let Some(desc) = ir_profiles.get(idx) {
@@ -964,6 +1005,7 @@ pub fn native_cad_to_document_with_model_validating(
 
     // Pre-scan features to identify which sketch profiles are referenced on each sketch
     let mut used_profiles_by_sketch: HashMap<IrSketchId, HashSet<usize>> = HashMap::new();
+    let mut used_entities_by_sketch: HashMap<IrSketchId, HashSet<SketchEntityId>> = HashMap::new();
     let mut whole_sketch_used: HashSet<IrSketchId> = HashSet::new();
     let mut seen_first_extrude = false;
     let mut sorted_feats: Vec<_> = ir.model.features.iter().collect();
@@ -1031,10 +1073,20 @@ pub fn native_cad_to_document_with_model_validating(
                 PlanarProfileRef::SketchRegions { sketch, regions } => {
                     let set = used_profiles_by_sketch.entry(sketch.clone()).or_default();
                     for reg in regions.as_slice() {
-                        if let SketchProfileRegion::Loops { loops } = reg {
-                            set.insert(loops.outer() as usize);
-                            for &h in loops.holes() {
-                                set.insert(h as usize);
+                        match reg {
+                            SketchProfileRegion::Loops { loops } => {
+                                set.insert(loops.outer() as usize);
+                                for &h in loops.holes() {
+                                    set.insert(h as usize);
+                                }
+                            }
+                            SketchProfileRegion::Trimmed { outer_boundary, hole_boundaries } => {
+                                let ent_set = used_entities_by_sketch.entry(sketch.clone()).or_default();
+                                for ring in std::iter::once(outer_boundary).chain(hole_boundaries.iter()) {
+                                    for use_ in ring.as_slice() {
+                                        ent_set.insert(use_.entity.clone());
+                                    }
+                                }
                             }
                         }
                     }
@@ -1053,11 +1105,20 @@ pub fn native_cad_to_document_with_model_validating(
     for sk in &ir.model.sketches {
         let mut active_profile_entities: HashSet<SketchEntityId> = HashSet::new();
         if !sk.profiles.is_empty() {
-            let specific_used = used_profiles_by_sketch.get(&sk.id).filter(|s| !s.is_empty() && !whole_sketch_used.contains(&sk.id));
+            let has_specific_entities = used_entities_by_sketch.get(&sk.id).is_some_and(|s| !s.is_empty());
+            let specific_used =
+                used_profiles_by_sketch.get(&sk.id).filter(|s| (!s.is_empty() || has_specific_entities) && !whole_sketch_used.contains(&sk.id));
+            if let Some(ent_set) = used_entities_by_sketch.get(&sk.id)
+                && !whole_sketch_used.contains(&sk.id)
+            {
+                active_profile_entities.extend(ent_set.iter().cloned());
+            }
             for (prof_idx, prof) in sk.profiles.iter().enumerate() {
-                if let Some(used_set) = specific_used
-                    && !used_set.contains(&prof_idx)
-                {
+                if let Some(used_set) = specific_used {
+                    if !used_set.contains(&prof_idx) {
+                        continue;
+                    }
+                } else if has_specific_entities && !whole_sketch_used.contains(&sk.id) {
                     continue;
                 }
                 for use_ in prof {
@@ -1212,9 +1273,13 @@ pub fn native_cad_to_document_with_model_validating(
         // Build IR profile descriptors (curve IDs + 2D boundary midpoints)
         let mut ir_profiles = Vec::with_capacity(sk.profiles.len());
         for prof in &sk.profiles {
+            let mut entities = Vec::new();
             let mut curve_ids = Vec::new();
             let mut midpoints = Vec::new();
             for use_ in prof {
+                if !entities.contains(&use_.entity) {
+                    entities.push(use_.entity.clone());
+                }
                 if prof.iter().filter(|u| u.entity == use_.entity).count() > 1 {
                     continue;
                 }
@@ -1236,7 +1301,7 @@ pub fn native_cad_to_document_with_model_validating(
                     }
                 }
             }
-            ir_profiles.push(IrProfileDescriptor { curve_ids, midpoints });
+            ir_profiles.push(IrProfileDescriptor { entities, curve_ids, midpoints });
         }
 
         let push_valid = |sketch: &mut Sketch, kind: ConstraintKind, param: Option<String>| -> bool {
@@ -1740,8 +1805,12 @@ pub fn native_cad_to_document_with_model_validating(
                 };
                 if doc.add_feature(kind, Some(fname)).is_ok() {
                     model.evaluate(&doc);
+                    let check_target_invalid = |m: &solidcraft_doc::Model| -> bool {
+                        validation != solidcraft_kernel::Validation::Off
+                            && m.state().body(&bname).is_some_and(|b| solidcraft_kernel::check_kept(&b.body).is_err())
+                    };
                     let feat_err = model.results.last().and_then(|res| res.error.as_ref());
-                    let lumps_err = model.state().bodies.iter().any(|b| b.body.lumps().is_err());
+                    let lumps_err = model.state().bodies.iter().any(|b| b.body.lumps().is_err()) || check_target_invalid(&model);
                     let mut bad = feat_err.is_some() || lumps_err;
                     let mut used_tangent_chain = true;
                     if bad {
@@ -1761,7 +1830,8 @@ pub fn native_cad_to_document_with_model_validating(
                         if doc.add_feature(no_chain_kind, Some(fname)).is_ok() {
                             model.evaluate(&doc);
                             let bad2 = model.results.last().and_then(|res| res.error.as_ref()).is_some()
-                                || model.state().bodies.iter().any(|b| b.body.lumps().is_err());
+                                || model.state().bodies.iter().any(|b| b.body.lumps().is_err())
+                                || check_target_invalid(&model);
                             if bad2 {
                                 pop_failed_feature(&mut doc, &mut model);
                             } else {
@@ -1797,7 +1867,8 @@ pub fn native_cad_to_document_with_model_validating(
                             if doc.add_feature(single_kind, Some(fname)).is_ok() {
                                 model.evaluate(&doc);
                                 let single_ok = model.results.last().and_then(|res| res.error.as_ref()).is_none()
-                                    && !model.state().bodies.iter().any(|b| b.body.lumps().is_err());
+                                    && !model.state().bodies.iter().any(|b| b.body.lumps().is_err())
+                                    && !check_target_invalid(&model);
                                 if single_ok {
                                     valid_edges = try_edges;
                                     has_feature_in_doc = true;
@@ -1811,7 +1882,7 @@ pub fn native_cad_to_document_with_model_validating(
                             let restore_kind = FeatureKind::Fillet {
                                 edges: valid_edges,
                                 radius: radius_expr,
-                                body: Some(bname.into()),
+                                body: Some(bname.clone().into()),
                                 style: solidcraft_doc::FilletStyle::Constant,
                                 fit: solidcraft_doc::FilletFit::Exact,
                                 corner: solidcraft_doc::FilletCorner::Rolling,
@@ -1823,6 +1894,7 @@ pub fn native_cad_to_document_with_model_validating(
                                 model.evaluate(&doc);
                                 if model.results.last().and_then(|res| res.error.as_ref()).is_some()
                                     || model.state().bodies.iter().any(|b| b.body.lumps().is_err())
+                                    || check_target_invalid(&model)
                                 {
                                     pop_failed_feature(&mut doc, &mut model);
                                 }
@@ -1904,8 +1976,13 @@ pub fn native_cad_to_document_with_model_validating(
                 };
                 if doc.add_feature(kind, Some(fname)).is_ok() {
                     model.evaluate(&doc);
+                    let check_target_invalid = |m: &solidcraft_doc::Model| -> bool {
+                        validation != solidcraft_kernel::Validation::Off
+                            && m.state().body(&bname).is_some_and(|b| solidcraft_kernel::check_kept(&b.body).is_err())
+                    };
                     let mut bad = model.results.last().and_then(|res| res.error.as_ref()).is_some()
-                        || model.state().bodies.iter().any(|b| b.body.lumps().is_err());
+                        || model.state().bodies.iter().any(|b| b.body.lumps().is_err())
+                        || check_target_invalid(&model);
                     let mut used_tangent_chain = true;
                     if bad {
                         let feat_err = model.results.last().and_then(|res| res.error.as_ref());
@@ -1923,7 +2000,8 @@ pub fn native_cad_to_document_with_model_validating(
                         if doc.add_feature(no_chain_kind, Some(fname)).is_ok() {
                             model.evaluate(&doc);
                             bad = model.results.last().and_then(|res| res.error.as_ref()).is_some()
-                                || model.state().bodies.iter().any(|b| b.body.lumps().is_err());
+                                || model.state().bodies.iter().any(|b| b.body.lumps().is_err())
+                                || check_target_invalid(&model);
                             if bad {
                                 pop_failed_feature(&mut doc, &mut model);
                             } else {
@@ -1951,7 +2029,8 @@ pub fn native_cad_to_document_with_model_validating(
                                 if doc.add_feature(sub_kind, Some(fname)).is_ok() {
                                     model.evaluate(&doc);
                                     let ok = model.results.last().and_then(|res| res.error.as_ref()).is_none()
-                                        && !model.state().bodies.iter().any(|b| b.body.lumps().is_err());
+                                        && !model.state().bodies.iter().any(|b| b.body.lumps().is_err())
+                                        && !check_target_invalid(&model);
                                     if ok {
                                         matched_end = Some(end);
                                         break;
@@ -1975,6 +2054,24 @@ pub fn native_cad_to_document_with_model_validating(
         // Shell feature
         if let FeatureOperation::Shell { removed_faces, thickness, outward, .. } = op_def {
             if let Some(t) = thickness {
+                let t_val = (t.get() * 1.0e9).round() / 1.0e9;
+                let thickness_expr: solidcraft_doc::Expr = ir
+                    .model
+                    .parameters
+                    .iter()
+                    .filter(|p| p.owner.as_ref() == Some(&f.id) && matches!(p.value, Some(ParameterValue::Length(_))))
+                    .find_map(|p| {
+                        let cand = p.expression.trim();
+                        if !cand.is_empty()
+                            && !expr_has_undefined_references(cand, &defined_names)
+                            && doc.eval(cand, solidcraft_doc::expr::Kind::Length).is_ok_and(|v| (v - t_val).abs() <= 1.0e-4)
+                        {
+                            Some(solidcraft_doc::Expr::from(cand))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| format!("{t_val}").into());
                 let dir = if outward.unwrap_or(false) { "outside".to_string() } else { "inside".to_string() };
                 let target_key = output_keys.iter().find(|k| entity_to_body.contains_key(*k)).cloned();
                 let target_name =
@@ -1987,7 +2084,7 @@ pub fn native_cad_to_document_with_model_validating(
                     if let Some(ref bname) = target_name {
                         let shell_kind = FeatureKind::Shell {
                             faces: Vec::new(),
-                            thickness: format!("{}", t.get()).into(),
+                            thickness: thickness_expr,
                             body: Some(bname.clone().into()),
                             direction: dir.clone(),
                             tangent_chain: false,
@@ -2005,7 +2102,7 @@ pub fn native_cad_to_document_with_model_validating(
                     }
                     if !applied_closed {
                         // Closed hollow shell fallback: deferred until SplitBody exposes the interior faces
-                        pending_shell = Some((fname.to_string(), t.get(), dir));
+                        pending_shell = Some((fname.to_string(), t_val, dir));
                     }
                 }
             }
@@ -2496,16 +2593,19 @@ pub fn native_cad_to_document_with_model_validating(
                     ProfileSel::All
                 } else {
                     let ir_profs = sketch_ir_profiles.get(ir_sk_id).map(Vec::as_slice).unwrap_or(&[]);
+                    let ent_curves = sketch_entity_curves.get(ir_sk_id);
                     let state = model.state();
                     let sc_profs = state.sketch(sk_fid).map(|s| s.profiles.as_slice()).unwrap_or(&[]);
-                    let resolved_opt = if matches!(planar_ref, PlanarProfileRef::HistoricalFaces { .. }) {
+                    let resolved_opt = if matches!(planar_ref, PlanarProfileRef::HistoricalFaces { .. } | PlanarProfileRef::SketchSelection { .. })
+                        && f.source_properties.contains_key(&cadmpeg_core::nonblank_literal!("historical_face_profiles"))
+                    {
                         let indices: Vec<u32> = f
                             .source_properties
                             .get(&cadmpeg_core::nonblank_literal!("historical_face_profiles"))
                             .map(|s| s.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).collect())
                             .unwrap_or_default();
                         if let Ok(synth_ref) = PlanarProfileRef::sketch_profiles(ir_sk_id.clone(), indices) {
-                            resolve_planar_profile_sel(&synth_ref, ir_profs, sc_profs, is_cut)
+                            resolve_planar_profile_sel(&synth_ref, ir_profs, sc_profs, ent_curves, is_cut)
                         } else {
                             None
                         }
@@ -2530,7 +2630,7 @@ pub fn native_cad_to_document_with_model_validating(
                                 };
                                 if other_sk == Some(ir_sk_id)
                                     && let Some(ProfileSel::Indices { indices }) =
-                                        resolve_planar_profile_sel(other_planar, ir_profs, sc_profs, is_cut)
+                                        resolve_planar_profile_sel(other_planar, ir_profs, sc_profs, ent_curves, is_cut)
                                 {
                                     for idx in indices {
                                         if idx < usage_counts.len() {
@@ -2554,7 +2654,7 @@ pub fn native_cad_to_document_with_model_validating(
                             Some(ProfileSel::Indices { indices: vec![min_idx] })
                         }
                     } else {
-                        resolve_planar_profile_sel(planar_ref, ir_profs, sc_profs, is_cut)
+                        resolve_planar_profile_sel(planar_ref, ir_profs, sc_profs, ent_curves, is_cut)
                     };
                     let Some(resolved_sel) = resolved_opt else {
                         continue;
@@ -2588,7 +2688,7 @@ pub fn native_cad_to_document_with_model_validating(
                         (length.get(), Direction::Positive, false, false)
                     }
                     ExtrudeExtent::Symmetric { side: ExtrudeSide { termination: LinearTermination::Blind { length }, .. } } => {
-                        (length.get() * 2.0, Direction::Symmetric, false, false)
+                        (length.get(), Direction::Symmetric, false, false)
                     }
                     ExtrudeExtent::OneSided {
                         side:
@@ -2650,7 +2750,9 @@ pub fn native_cad_to_document_with_model_validating(
                         Box::new(output_keys.iter())
                     };
                     for k in target_key_iter {
-                        if let Some(bname) = entity_to_body.get(k) {
+                        if let Some(bname) = entity_to_body.get(k)
+                            && model.state().bodies.iter().any(|b| b.name == *bname)
+                        {
                             let bn = solidcraft_doc::BodyName(bname.clone());
                             if !tgts.contains(&bn) {
                                 tgts.push(bn);
@@ -2958,10 +3060,12 @@ pub fn native_cad_to_document_with_model_validating(
                     continue;
                 };
                 let ir_profs = sketch_ir_profiles.get(prof_ir_sk).map(Vec::as_slice).unwrap_or(&[]);
+                let prof_ent_curves = sketch_entity_curves.get(prof_ir_sk);
                 let state = model.state();
                 let sc_profs = state.sketch(prof_fid).map(|s| s.profiles.as_slice()).unwrap_or(&[]);
                 let is_sweep_cut = matches!(shape.mode(), SweepMode::Solid { op: SolidSweepOperation::Cut });
-                let mut profiles = resolve_planar_profile_sel(planar_ref, ir_profs, sc_profs, is_sweep_cut).unwrap_or(ProfileSel::All);
+                let mut profiles =
+                    resolve_planar_profile_sel(planar_ref, ir_profs, sc_profs, prof_ent_curves, is_sweep_cut).unwrap_or(ProfileSel::All);
                 if matches!(profiles, ProfileSel::All) && sc_profs.len() > 1 && !sc_profs[0].region.holes.is_empty() {
                     let idx = sc_profs.iter().position(|p| p.region.holes.is_empty()).unwrap_or(0);
                     profiles = ProfileSel::Indices { indices: vec![idx] };
@@ -3020,9 +3124,10 @@ pub fn native_cad_to_document_with_model_validating(
                         continue;
                     };
                     let ir_profs = sketch_ir_profiles.get(ir_sk_id).map(Vec::as_slice).unwrap_or(&[]);
+                    let sec_ent_curves = sketch_entity_curves.get(ir_sk_id);
                     let state = model.state();
                     let sc_profs = state.sketch(sk_fid).map(|s| s.profiles.as_slice()).unwrap_or(&[]);
-                    let Some(profiles) = resolve_planar_profile_sel(planar_ref, ir_profs, sc_profs, is_cut) else {
+                    let Some(profiles) = resolve_planar_profile_sel(planar_ref, ir_profs, sc_profs, sec_ent_curves, is_cut) else {
                         continue;
                     };
                     sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sk_fid), profiles, point: None });
@@ -3391,6 +3496,9 @@ pub fn native_cad_to_document_with_model_validating(
     }
 
     // 4. Option B2: Evaluation and Fallback check
+    if doc.features.is_empty() {
+        return Ok(None);
+    }
     let eval_success = !model.state().bodies.is_empty() && !model.results.iter().any(|r| r.error.is_some());
     if eval_success {
         return Ok(Some((doc, model)));
@@ -3508,7 +3616,7 @@ mod tests {
     #[cfg(feature = "f3d")]
     fn test_f3d_features_trace() {
         let path = "/archive/Projects/Fusion360/1 Wire LED Controller Rev 1.0/1WireRGBWController.f3d";
-        if let Ok(bytes) = std::fs::read(path) {
+        if let Ok(bytes) = std::fs::read(path).or_else(|_| std::fs::read("tests/fixtures/1wire/1WireRGBWController.f3d")) {
             let (_format, ir, _report, _fidelity) = native_cad_decode_full(&bytes, path).unwrap();
             println!("Decoded {} features, {} bodies:", ir.model.features.len(), ir.model.bodies.len());
             for b in &ir.model.bodies {
@@ -3589,7 +3697,6 @@ mod tests {
                 Ok(None) => println!("native_cad_to_document_with_model returned None"),
                 Err(e) => println!("native_cad_to_document_with_model failed: {e}"),
             }
-            return;
         }
     }
 }

@@ -27,6 +27,7 @@ pub(crate) struct DesignSketchVisibility {
     stream_ordinal_offset: u64,
     /// Direct display visibility.
     pub(crate) visible: bool,
+    pub(crate) sketch_flag: bool,
     pub(crate) ordinal_collection: Option<std::num::NonZeroU64>,
 }
 
@@ -43,6 +44,7 @@ impl DesignSketchVisibility {
             stream_ordinal,
             stream_ordinal_offset,
             visible,
+            sketch_flag: false,
             ordinal_collection: None,
         })
     }
@@ -62,6 +64,8 @@ struct DesignSketchVisibilityWire {
     stream_ordinal_offset: u64,
     visible_offset: u64,
     visible: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    sketch_flag: bool,
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -79,6 +83,7 @@ impl TryFrom<DesignSketchVisibilityWire> for DesignSketchVisibility {
             wire.stream_ordinal_offset,
             wire.visible,
         )?;
+        value.sketch_flag = wire.sketch_flag;
         value.ordinal_collection = wire.ordinal_collection;
         if wire.visible_offset != value.visible_offset() {
             return Err("visible_offset must equal stream_ordinal_offset + 5".into());
@@ -94,6 +99,7 @@ impl From<DesignSketchVisibility> for DesignSketchVisibilityWire {
             stream_ordinal_offset: value.stream_ordinal_offset(),
             visible_offset: value.visible_offset(),
             visible: value.visible,
+            sketch_flag: value.sketch_flag,
             ordinal_collection: value.ordinal_collection,
         }
     }

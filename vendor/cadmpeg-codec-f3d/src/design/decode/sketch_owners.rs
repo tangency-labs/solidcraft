@@ -185,6 +185,7 @@ pub(crate) fn attach(
             "sketch owner collection",
         )?;
         let mut entities = BTreeMap::new();
+        let mut collection_owners = BTreeMap::new();
         for frame in frames {
             if ![3, 4].contains(&frame.design_type.version)
                 || frame.design_type.module != "Geometry"
@@ -220,6 +221,7 @@ pub(crate) fn attach(
                 .get(&stream)
                 .and_then(|stream| stream.roots.get(&owner))
                 .map(|owner| crate::ids::neutral_component_id(&owner.context_uuid));
+            collection_owners.insert(frame.entity_id, definition.clone());
             for member in collection.members {
                 match entities.entry(member) {
                     std::collections::btree_map::Entry::Vacant(entry) => {
@@ -237,7 +239,13 @@ pub(crate) fn attach(
             .filter(|placement| crate::ids::native_stream(&placement.id) == Some(stream.as_str()))
         {
             let id = crate::ids::neutral_sketch_id(placement);
-            if let Some(owner) = entities.get(&placement.entity_id.suffix()) {
+            let owner = placement_owner(
+                placement.visibility,
+                placement.entity_id.suffix(),
+                &collection_owners,
+                &entities,
+            );
+            if let Some(owner) = owner {
                 owners.insert(id, owner.clone());
             }
         }
@@ -254,6 +262,20 @@ pub(crate) fn attach(
         losses,
     );
     Ok(())
+}
+
+fn placement_owner<'a>(
+    visibility: Option<crate::records::sketch_placement::DesignSketchVisibility>,
+    entity: u64,
+    collection_owners: &'a BTreeMap<u64, Option<ProductDefinitionId>>,
+    entities: &'a BTreeMap<u64, Option<ProductDefinitionId>>,
+) -> Option<&'a Option<ProductDefinitionId>> {
+    match visibility {
+        Some(visibility) => visibility
+            .ordinal_collection
+            .and_then(|collection| collection_owners.get(&collection.get())),
+        None => entities.get(&entity),
+    }
 }
 
 fn assign(

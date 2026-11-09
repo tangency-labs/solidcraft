@@ -589,7 +589,7 @@ fn exact_assembly_operand_path(
         }
         let mut occurrence_guids = Vec::new();
         let mut identity_guids = Vec::new();
-        let mut paired_occurrence_keys = Vec::new();
+        let mut occurrence_lists = Vec::new();
         match class_tag {
             "294" | "299" | "307" if type_guid.is_none() => {
                 let end = next_indexed_record_offset(bytes, start + 1)?;
@@ -749,25 +749,28 @@ fn exact_assembly_operand_path(
                             return None;
                         }
                         position += 4;
-                        // A typed path can end in a zero word, a pair count, and
-                        // per pair the u32 2 and two occurrence identities; a zero
-                        // tail has no pairs, and only a typed path has pairs.
+                        // A typed path can end in a zero word, a list count, and
+                        // per list a key count and that many occurrence identities;
+                        // a zero tail has no lists, and only a typed path has them.
                         if !bytes.get(position..limit)?.iter().all(|byte| *byte == 0) {
                             if type_guid.is_none() || View::u32_le_at(bytes, position)? != 0 {
                                 return None;
                             }
-                            let pairs =
+                            let lists =
                                 usize::try_from(View::u32_le_at(bytes, position + 4)?).ok()?;
-                            if !(1..=64).contains(&pairs) {
+                            if !(1..=64).contains(&lists) {
                                 return None;
                             }
                             position += 8;
-                            for _ in 0..pairs {
-                                if View::u32_le_at(bytes, position)? != 2 {
+                            for _ in 0..lists {
+                                let keys =
+                                    usize::try_from(View::u32_le_at(bytes, position)?).ok()?;
+                                if !(2..=64).contains(&keys) {
                                     return None;
                                 }
                                 position += 4;
-                                for _ in 0..2 {
+                                let mut list = Vec::new();
+                                for _ in 0..keys {
                                     let (key, after_key) =
                                         match crate::design::decode::text::occurrence_key_text(
                                             bytes.get(..limit)?,
@@ -777,14 +780,13 @@ fn exact_assembly_operand_path(
                                             Ok(None) => return None,
                                             Err(error) => return Some(Err(error)),
                                         };
-                                    paired_occurrence_keys.push(
-                                        crate::records::identity::Located {
-                                            value: key,
-                                            offset: u64::try_from(position + 4).ok()?,
-                                        },
-                                    );
+                                    list.push(crate::records::identity::Located {
+                                        value: key,
+                                        offset: u64::try_from(position + 4).ok()?,
+                                    });
                                     position = after_key;
                                 }
+                                occurrence_lists.push(list);
                             }
                             if !bytes.get(position..limit)?.iter().all(|byte| *byte == 0) {
                                 return None;
@@ -808,7 +810,7 @@ fn exact_assembly_operand_path(
             occurrence_guids,
             identity_guids,
         )
-        .and_then(|path| path.with_paired_occurrence_keys(paired_occurrence_keys))
+        .and_then(|path| path.with_occurrence_lists(occurrence_lists))
         .ok()
         .map(Ok)
     })()

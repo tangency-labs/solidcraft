@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Whole-body operations: scale and copy-paste bodies.
+//! Whole-body operations: scale, copy-paste bodies, and reverse normal.
 
 use crate::records::identity::Located;
 use crate::records::references::DesignClassTag;
@@ -94,6 +94,12 @@ impl TryFrom<DesignScaleOperationWire> for DesignScaleOperation {
             uniform_factor_offset: value.uniform_factor_offset,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DesignReverseNormalOperation {
+    pub(crate) body_group: Located<u32>,
 }
 
 /// Source and copied Design body identities carried by `CopyPasteBodies`.

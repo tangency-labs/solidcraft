@@ -23,6 +23,10 @@ cadmpeg_core::named_optional_field!(deserialize_payload_byte_length, u64, "paylo
 cadmpeg_core::named_optional_field!(deserialize_payload_byte_offset, u64, "payload_byte_offset");
 cadmpeg_core::named_optional_field!(deserialize_unit, String, "unit");
 cadmpeg_core::named_optional_field!(deserialize_unit_offset, u64, "unit_offset");
+cadmpeg_core::named_optional_field!(deserialize_comment, String, "comment");
+cadmpeg_core::named_optional_field!(deserialize_comment_offset, u64, "comment_offset");
+cadmpeg_core::named_optional_field!(deserialize_text_value, String, "text_value");
+cadmpeg_core::named_optional_field!(deserialize_text_value_offset, u64, "text_value_offset");
 cadmpeg_core::named_optional_field!(deserialize_variant, u8, "variant");
 /// Semantic family of one Design parameter record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,8 +107,7 @@ pub(crate) fn is_document_source_kind(source_kind: &str) -> bool {
     DOCUMENT_PARAMETER_SOURCE_KINDS.contains(&source_kind)
 }
 
-/// An owned source family. Its nonempty name cannot identify a user parameter.
-/// A frame with a null owner reference has no owner record index.
+/// An owned source family. A null owner reference has no owner record index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OwnedDesignParameter {
     source_kind: NonBlankString,
@@ -113,16 +116,26 @@ pub(crate) struct OwnedDesignParameter {
 }
 
 impl DesignParameterSource {
+    #[cfg(test)]
     pub(crate) fn new(
         source_kind: String,
         owner_record_index: Option<u32>,
         family_discriminator: Option<Located<DesignParameterDiscriminator>>,
     ) -> Result<Self, String> {
+        Self::from_document_flag(source_kind, owner_record_index, family_discriminator, None)
+    }
+
+    pub(crate) fn from_document_flag(
+        source_kind: String,
+        owner_record_index: Option<u32>,
+        family_discriminator: Option<Located<DesignParameterDiscriminator>>,
+        document: Option<bool>,
+    ) -> Result<Self, String> {
         let Some(source_kind) = NonBlankString::new(source_kind) else {
             return Err("design parameter source_kind is empty".into());
         };
         match (
-            is_document_source_kind(source_kind.as_str()),
+            document.unwrap_or_else(|| is_document_source_kind(source_kind.as_str())),
             owner_record_index,
         ) {
             (true, None) => Ok(Self::User {
@@ -185,7 +198,11 @@ pub(crate) struct DesignParameter {
     evaluated_value: FiniteReal,
     /// Byte offset of `evaluated_value`.
     evaluated_value_offset: u64,
+    /// Nonempty parameter comment, when the frame stores one.
+    comment: Option<Located<String>>,
     flags: DesignParameterFlags,
+    /// Value of a text parameter, which can be empty.
+    text_value: Option<Located<String>>,
 }
 
 #[cfg(test)]
@@ -212,7 +229,9 @@ impl Clone for DesignParameter {
             name_offset: self.name_offset,
             evaluated_value: self.evaluated_value,
             evaluated_value_offset: self.evaluated_value_offset,
+            comment: self.comment.clone(),
             flags: self.flags,
+            text_value: self.text_value.clone(),
         }
     }
 }
@@ -283,7 +302,9 @@ impl TryFrom<DesignParameterDraft> for DesignParameter {
             name_offset: draft.name_offset,
             evaluated_value,
             evaluated_value_offset: draft.evaluated_value_offset,
+            comment: None,
             flags: DesignParameterFlags::default(),
+            text_value: None,
         })
     }
 }
@@ -317,6 +338,36 @@ impl DesignParameter {
         &self.source
     }
 
+    /// Checked replacement of the parameter comment, which lies between the
+    /// record header and the expression.
+    pub(crate) fn with_comment(
+        mut self,
+        comment: Option<RecordedValue<String>>,
+    ) -> Result<Self, String> {
+        self.comment = comment
+            .map(|comment| {
+                if !(self.byte_offset < comment.offset && comment.offset < self.expression_offset) {
+                    return Err(
+                        "comment_offset must lie between byte_offset and expression_offset",
+                    );
+                }
+                if comment.value.is_empty() {
+                    return Err("comment must not be empty");
+                }
+                Ok(Located {
+                    value: comment.value,
+                    offset: comment.offset,
+                })
+            })
+            .transpose()?;
+        Ok(self)
+    }
+
+    /// Nonempty parameter comment, when the frame stores one.
+    pub(crate) fn comment(&self) -> Option<&str> {
+        self.comment.as_ref().map(|field| field.value.as_str())
+    }
+
     /// Checked replacement of the expression-trailer flags.
     pub(crate) fn with_flags(mut self, flags: DesignParameterFlags) -> Result<Self, String> {
         if flags.driven && matches!(self.source, DesignParameterSource::User { .. }) {
@@ -335,6 +386,31 @@ impl DesignParameter {
     /// `Some(false)` for the parameter of a driven dimension.
     pub(crate) fn driving(&self) -> Option<bool> {
         self.flags.driven.then_some(false)
+    }
+
+    /// Checked replacement of the text value, which lies between the source
+    /// kind and the name.
+    pub(crate) fn with_text_value(
+        mut self,
+        text_value: Option<RecordedValue<String>>,
+    ) -> Result<Self, String> {
+        if let Some(text) = &text_value {
+            if !(self.source_kind_offset < text.offset && text.offset < self.name_offset) {
+                return Err(
+                    "text_value_offset must lie between source_kind_offset and name_offset".into(),
+                );
+            }
+        }
+        self.text_value = text_value.map(|text| Located {
+            value: text.value,
+            offset: text.offset,
+        });
+        Ok(self)
+    }
+
+    /// Value of a text parameter.
+    pub(crate) fn text_value(&self) -> Option<&str> {
+        self.text_value.as_ref().map(|field| field.value.as_str())
     }
 
     #[cfg(test)]
@@ -413,7 +489,10 @@ impl DesignParameter {
     }
 
     pub(crate) fn kind(&self) -> DesignParameterKind {
-        design_parameter_kind_from_source(self.source_kind_str())
+        match &self.source {
+            DesignParameterSource::User { .. } => DesignParameterKind::User,
+            DesignParameterSource::Owned(_) => design_owned_parameter_kind(self.source_kind_str()),
+        }
     }
 
     pub(crate) fn owner_record_index(&self) -> Option<u32> {
@@ -452,10 +531,18 @@ impl Serialize for DesignParameter {
             name_offset: u64,
             evaluated_value: f64,
             evaluated_value_offset: u64,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            comment: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            comment_offset: Option<u64>,
             #[serde(skip_serializing_if = "std::ops::Not::not")]
             driven: bool,
             #[serde(skip_serializing_if = "std::ops::Not::not")]
             favorite: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text_value: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text_value_offset: Option<u64>,
         }
         let family_discriminator = self.family_discriminator();
         WireRef {
@@ -478,17 +565,19 @@ impl Serialize for DesignParameter {
             name_offset: self.name_offset,
             evaluated_value: self.evaluated_value.get(),
             evaluated_value_offset: self.evaluated_value_offset,
+            comment: self.comment(),
+            comment_offset: self.comment.as_ref().map(|field| field.offset),
             driven: self.flags.driven,
             favorite: self.flags.favorite,
+            text_value: self.text_value(),
+            text_value_offset: self.text_value.as_ref().map(|field| field.offset),
         }
         .serialize(serializer)
     }
 }
 
-fn design_parameter_kind_from_source(source_kind: &str) -> DesignParameterKind {
-    if is_document_source_kind(source_kind) {
-        DesignParameterKind::User
-    } else if source_kind.contains("Dimension") {
+fn design_owned_parameter_kind(source_kind: &str) -> DesignParameterKind {
+    if source_kind.contains("Dimension") {
         DesignParameterKind::Dimension
     } else {
         DesignParameterKind::Feature
@@ -541,18 +630,43 @@ struct DesignParameterSerde {
     name_offset: u64,
     evaluated_value: f64,
     evaluated_value_offset: u64,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_comment"
+    )]
+    comment: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_comment_offset"
+    )]
+    comment_offset: Option<u64>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     driven: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     favorite: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_text_value"
+    )]
+    text_value: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_text_value_offset"
+    )]
+    text_value_offset: Option<u64>,
 }
 
 impl TryFrom<DesignParameterSerde> for DesignParameter {
     type Error = String;
 
     fn try_from(wire: DesignParameterSerde) -> Result<Self, Self::Error> {
-        let derived = design_parameter_kind_from_source(&wire.source_kind);
-        if wire.kind != derived {
+        if wire.kind != DesignParameterKind::User
+            && wire.kind != design_owned_parameter_kind(&wire.source_kind)
+        {
             return Err("design parameter kind disagrees with source_kind".into());
         }
         let family_discriminator = Located::from_wire(
@@ -567,10 +681,11 @@ impl TryFrom<DesignParameterSerde> for DesignParameter {
             })
         })
         .transpose()?;
-        let source = DesignParameterSource::new(
+        let source = DesignParameterSource::from_document_flag(
             wire.source_kind,
             wire.owner_record_index,
             family_discriminator,
+            Some(wire.kind == DesignParameterKind::User),
         )?;
         Self::try_from(DesignParameterDraft {
             id: wire.id,
@@ -588,10 +703,20 @@ impl TryFrom<DesignParameterSerde> for DesignParameter {
             evaluated_value: wire.evaluated_value,
             evaluated_value_offset: wire.evaluated_value_offset,
         })?
+        .with_comment(RecordedValue::from_wire(
+            wire.comment,
+            wire.comment_offset,
+            "comment",
+        )?)?
         .with_flags(DesignParameterFlags {
             driven: wire.driven,
             favorite: wire.favorite,
-        })
+        })?
+        .with_text_value(RecordedValue::from_wire(
+            wire.text_value,
+            wire.text_value_offset,
+            "text_value",
+        )?)
     }
 }
 
@@ -631,8 +756,12 @@ impl From<DesignParameter> for DesignParameterSerde {
             name_offset,
             evaluated_value,
             evaluated_value_offset,
+            comment_offset: parameter.comment.as_ref().map(|field| field.offset),
+            comment: parameter.comment.map(|field| field.value.clone()),
             driven: parameter.flags.driven,
             favorite: parameter.flags.favorite,
+            text_value_offset: parameter.text_value.as_ref().map(|field| field.offset),
+            text_value: parameter.text_value.map(|field| field.value),
         }
     }
 }
@@ -640,7 +769,7 @@ impl From<DesignParameter> for DesignParameterSerde {
 /// Indexed record that owns one Design parameter.
 #[derive(Debug, PartialEq, Deserialize)]
 #[cfg_attr(not(test), derive(Clone))]
-#[serde(try_from = "DesignParameterOwnerWire")]
+#[serde(try_from = "DesignParameterOwnerSerde")]
 pub(crate) struct DesignParameterOwner {
     id: String,
     byte_offset: u64,
@@ -652,6 +781,8 @@ pub(crate) struct DesignParameterOwner {
     evaluated_value_offset: u64,
     owned_ordinal: u32,
     variant: Option<u8>,
+    /// Text of a text parameter's owner, stored in place of the scalar.
+    text_value: Option<Located<String>>,
     base_index: u32,
     order: ParameterFrameOrder,
 }
@@ -676,6 +807,7 @@ impl Clone for DesignParameterOwner {
             evaluated_value_offset: self.evaluated_value_offset,
             owned_ordinal: self.owned_ordinal,
             variant: self.variant,
+            text_value: self.text_value.clone(),
             base_index: self.base_index,
             order: self.order,
         }
@@ -740,6 +872,10 @@ impl DesignParameterOwner {
                 ParameterFrameOrder::OwnerCompanionParameter => 2,
             }
     }
+    /// The text a text parameter's owner stores in place of its scalar.
+    pub(crate) fn text_value(&self) -> Option<&str> {
+        self.text_value.as_ref().map(|field| field.value.as_str())
+    }
     /// The companion record index value.
     pub(crate) fn companion_record_index(&self) -> u32 {
         self.base_index
@@ -769,6 +905,10 @@ impl Serialize for DesignParameterOwner {
             #[serde(skip_serializing_if = "Option::is_none")]
             variant: Option<u8>,
             companion_record_index: u32,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text_value: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            text_value_offset: Option<u64>,
         }
         WireRef {
             id: &self.id,
@@ -784,35 +924,109 @@ impl Serialize for DesignParameterOwner {
             owned_ordinal: self.owned_ordinal,
             variant: self.variant,
             companion_record_index: self.companion_record_index(),
+            text_value: self.text_value.as_ref().map(|field| field.value.as_str()),
+            text_value_offset: self.text_value.as_ref().map(|field| field.offset),
         }
         .serialize(serializer)
+    }
+}
+
+/// Serialized owner: the frame fields and, for a text parameter's owner, its text.
+#[derive(Deserialize)]
+struct DesignParameterOwnerSerde {
+    #[serde(flatten)]
+    wire: DesignParameterOwnerWire,
+    #[serde(default, deserialize_with = "deserialize_text_value")]
+    text_value: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_text_value_offset")]
+    text_value_offset: Option<u64>,
+}
+
+impl TryFrom<DesignParameterOwnerSerde> for DesignParameterOwner {
+    type Error = String;
+    fn try_from(serde: DesignParameterOwnerSerde) -> Result<Self, Self::Error> {
+        match RecordedValue::from_wire(serde.text_value, serde.text_value_offset, "text_value")? {
+            Some(text) => Self::from_text_parts(finite_owner_wire(serde.wire)?, text),
+            None => Self::try_from(serde.wire),
+        }
     }
 }
 
 impl TryFrom<DesignParameterOwnerWire> for DesignParameterOwner {
     type Error = String;
     fn try_from(wire: DesignParameterOwnerWire) -> Result<Self, Self::Error> {
-        let evaluated_value =
-            FiniteReal::new(wire.evaluated_value).ok_or("evaluated_value must be finite")?;
-        Self::from_parts(DesignParameterOwnerWire {
-            id: wire.id,
-            byte_offset: wire.byte_offset,
-            frame_length: wire.frame_length,
-            class_tag: wire.class_tag,
-            record_index: wire.record_index,
-            scope_record_index: wire.scope_record_index,
-            local_ordinal: wire.local_ordinal,
-            evaluated_value,
-            evaluated_value_offset: wire.evaluated_value_offset,
-            parameter_record_index: wire.parameter_record_index,
-            owned_ordinal: wire.owned_ordinal,
-            variant: wire.variant,
-            companion_record_index: wire.companion_record_index,
-        })
+        Self::from_parts(finite_owner_wire(wire)?)
     }
 }
 
+/// Owner wire fields with a finite evaluated value.
+fn finite_owner_wire(
+    wire: DesignParameterOwnerWire,
+) -> Result<DesignParameterOwnerWire<FiniteReal>, String> {
+    let evaluated_value =
+        FiniteReal::new(wire.evaluated_value).ok_or("evaluated_value must be finite")?;
+    Ok(DesignParameterOwnerWire {
+        id: wire.id,
+        byte_offset: wire.byte_offset,
+        frame_length: wire.frame_length,
+        class_tag: wire.class_tag,
+        record_index: wire.record_index,
+        scope_record_index: wire.scope_record_index,
+        local_ordinal: wire.local_ordinal,
+        evaluated_value,
+        evaluated_value_offset: wire.evaluated_value_offset,
+        parameter_record_index: wire.parameter_record_index,
+        owned_ordinal: wire.owned_ordinal,
+        variant: wire.variant,
+        companion_record_index: wire.companion_record_index,
+    })
+}
+
 impl DesignParameterOwner {
+    /// Validate the owner of a text parameter. Its scalar envelope is `00` +
+    /// LP-UTF16 text in place of `00 + f64`, and its evaluated scalar is the
+    /// parameter's.
+    pub(crate) fn from_text_parts(
+        wire: DesignParameterOwnerWire<FiniteReal>,
+        text: RecordedValue<String>,
+    ) -> Result<Self, String> {
+        let code_units = u64::try_from(text.value.encode_utf16().count())
+            .map_err(|_| "text_value has too many code units")?;
+        let envelope = code_units
+            .checked_mul(2)
+            .and_then(|bytes| bytes.checked_add(5))
+            .ok_or("text_value has too many code units")?;
+        let frame_length = wire.frame_length;
+        let evaluated_value_offset = wire.evaluated_value_offset;
+        // The frame has the fields of the `00 + f64` form whose f64 starts at
+        // the text's count.
+        let numeric = Self::from_parts(DesignParameterOwnerWire {
+            frame_length: frame_length
+                .checked_add(9)
+                .and_then(|length| length.checked_sub(envelope))
+                .ok_or("frame_length is shorter than its text envelope")?,
+            evaluated_value_offset: text
+                .offset
+                .checked_sub(4)
+                .ok_or("text_value_offset must follow its code-unit count")?,
+            ..wire
+        })?;
+        if !matches!(numeric.frame_length, 103 | 104 | 303 | 304) {
+            return Err(
+                "frame_length and text_value_offset must describe a text owner frame".into(),
+            );
+        }
+        Ok(Self {
+            frame_length,
+            evaluated_value_offset,
+            text_value: Some(Located {
+                value: text.value,
+                offset: text.offset,
+            }),
+            ..numeric
+        })
+    }
+
     pub(crate) fn from_parts(wire: DesignParameterOwnerWire<FiniteReal>) -> Result<Self, String> {
         let evaluated_value = wire.evaluated_value;
         let (base_index, order) = if wire.record_index.checked_add(1)
@@ -894,6 +1108,7 @@ impl DesignParameterOwner {
             evaluated_value_offset: wire.evaluated_value_offset,
             owned_ordinal: wire.owned_ordinal,
             variant: wire.variant,
+            text_value: None,
         })
     }
 }

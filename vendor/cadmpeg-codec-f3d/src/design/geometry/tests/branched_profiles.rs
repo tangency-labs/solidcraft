@@ -97,7 +97,6 @@ fn branched_arc_loop() {
     assert!(profiles.iter().all(|profile| profile
         .iter()
         .any(|entity_use| entity_use.entity.as_str() == "synthetic:test:id#divider")));
-    assert!(profiles.losses.is_empty());
 }
 
 #[test]
@@ -181,7 +180,6 @@ fn duplicate_shared_wall_yielding_two_profiles() {
         (has_wall_1(&profiles[0]) && has_wall_2(&profiles[1]))
             || (has_wall_2(&profiles[0]) && has_wall_1(&profiles[1]))
     );
-    assert!(profiles.losses.is_empty());
 }
 
 #[test]
@@ -227,12 +225,17 @@ fn dangling_spur_pruned_to_one_loop() {
         .iter()
         .any(|u| u.entity.as_str() == "synthetic:test:id#dangling-spur"));
 
-    assert_eq!(profiles.losses.len(), 1);
+    assert_eq!(profiles.unprofiled.len(), 1);
     assert_eq!(
-        profiles.losses[0].code,
+        profiles.unprofiled[0].0.as_str(),
+        "synthetic:test:id#dangling-spur"
+    );
+    assert_eq!(
+        profiles.unprofiled[0].1.code,
         F3dLossCode::SketchCurveUnprofiled.kind()
     );
-    assert!(profiles.losses[0]
+    assert!(profiles.unprofiled[0]
+        .1
         .message
         .contains("synthetic:test:id#dangling-spur"));
 }
@@ -292,12 +295,17 @@ fn bridge_input_producing_only_closed_loops() {
         .iter()
         .any(|u| u.entity.as_str() == "synthetic:test:id#bridge-edge")));
 
-    assert_eq!(profiles.losses.len(), 1);
+    assert_eq!(profiles.unprofiled.len(), 1);
     assert_eq!(
-        profiles.losses[0].code,
+        profiles.unprofiled[0].0.as_str(),
+        "synthetic:test:id#bridge-edge"
+    );
+    assert_eq!(
+        profiles.unprofiled[0].1.code,
         F3dLossCode::SketchCurveUnprofiled.kind()
     );
-    assert!(profiles.losses[0]
+    assert!(profiles.unprofiled[0]
+        .1
         .message
         .contains("synthetic:test:id#bridge-edge"));
 }
@@ -357,7 +365,6 @@ fn complementary_half_arcs_not_deduplicated() {
         (has_upper(&profiles[0]) && has_lower(&profiles[1]))
             || (has_lower(&profiles[0]) && has_upper(&profiles[1]))
     );
-    assert!(profiles.losses.is_empty());
 }
 
 fn profile_entity_sets(

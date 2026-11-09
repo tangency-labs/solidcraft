@@ -204,6 +204,7 @@ fn historical_recipe_join_unions_fragments_without_raw_selector_equality() {
         candidate_edges: Vec::new(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     };
 
     {
@@ -255,6 +256,7 @@ fn direct_face_recipe_selects_every_fragment_in_its_own_reference_lane() {
             candidate_edges: Vec::new(),
             alternate_selector_faces: Vec::new(),
             alternate_selector_edges: Vec::new(),
+            operand_offset: None,
         };
     let references = [reference(203, &[8, 7]), reference(199, &[9])];
 
@@ -338,6 +340,7 @@ fn corner_recipe_intersects_vertex_sets_across_fragment_unions() {
             candidate_edges: Vec::new(),
             alternate_selector_faces: Vec::new(),
             alternate_selector_edges: Vec::new(),
+            operand_offset: None,
         };
     let recipe = crate::records::feature::work_geometry::DesignVertexRecipe::try_new(
         crate::records::feature::work_geometry::DesignVertexRecipeDraft {

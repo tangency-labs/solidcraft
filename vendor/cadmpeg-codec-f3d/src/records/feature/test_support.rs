@@ -30,6 +30,7 @@ impl DesignParameterScopeDraft {
     }
 
     pub(crate) fn layout_fixture_tail(&mut self) {
+        self.label = None;
         let (tail_length, previous_delta) =
             match (self.payload.kind(), self.previous_history_state_id) {
                 (DesignFeatureKind::CopyPasteBodies, Some(_)) => (110, 53),

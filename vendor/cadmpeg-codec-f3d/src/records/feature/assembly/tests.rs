@@ -367,6 +367,8 @@ fn legacy_assembly_wire_derives_carrier_frames_and_checks_repeated_fields() {
                 .try_into()
                 .unwrap(),
             context_id_offset: 422,
+            serialization_form:
+                crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
             recipe_record_index: 50,
             recipe_record_byte_offset: 500,
             recipe_id: "recipe".into(),
@@ -1040,6 +1042,8 @@ fn native_legacy_alignment_wire_rewrite_matches_the_typed_selection_walk() {
                 .try_into()
                 .unwrap(),
             context_id_offset: 422,
+            serialization_form:
+                crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
             recipe_record_index: 50,
             recipe_record_byte_offset: 500,
             recipe_id: "recipe".into(),

@@ -20,6 +20,7 @@ fn curve(record_index: u32) -> SketchCurveIdentity {
         id: format!("{STREAM}:sketch-curve#{record_index}"),
         record_index,
         owner_reference: Some(100),
+        geometry_group: None,
         class_tag: class("300"),
         byte_offset: 0,
         geometry_offset: 0,

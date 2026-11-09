@@ -119,3 +119,63 @@ pub(crate) fn modern_placements(
     });
     result
 }
+
+pub(crate) const GRAMMAR_FRAME_ROWS: [[f64; 4]; 4] = [
+    [0.0, 0.0, 1.0, -3.5],
+    [1.0, 0.0, 0.0, 0.25],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+];
+
+fn grammar_frame(version: u32, use_u_direction: u8) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    super::indexed_header(&mut bytes, *b"328", 41);
+    bytes.extend_from_slice(&[0; 10]);
+    for value in [0.0_f64; 3] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    if version >= 8 {
+        bytes.push(0);
+    }
+    if version >= 10 {
+        bytes.push(use_u_direction);
+    }
+    bytes.push(0);
+    if version >= 9 {
+        bytes.extend_from_slice(&[0; 4]);
+    }
+    bytes.extend_from_slice(&[0; 4]);
+    for value in GRAMMAR_FRAME_ROWS.into_iter().flatten() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [std::f64::consts::FRAC_PI_2, 0.0, 0.0] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.push(0);
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 2]);
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.push(1);
+    bytes.extend_from_slice(&38u64.to_le_bytes());
+    bytes.extend_from_slice(&[0; 2]);
+    bytes
+}
+
+pub(crate) fn grammar_placement(
+    version: u32,
+    use_u_direction: u8,
+) -> crate::records::placement_construction::DesignPlacementConstruction {
+    let bytes = grammar_frame(version, use_u_direction);
+    crate::test_support::with_decode_context(|ctx| {
+        crate::design::decode::placement_construction::decode_frame(
+            ctx,
+            "f3d:Design/BulkStream.dat:design-placement-construction#0".into(),
+            cadmpeg_core::decode::View::over_retained(&bytes),
+            version,
+        )
+        .unwrap()
+        .unwrap()
+    })
+}

@@ -163,6 +163,7 @@ fn spatial_distance_projects_vertical_distance_and_skips_spatial_sketches() {
             id: format!("{stream}:sketch-point#{record_index}"),
             record_index,
             owner_reference: Some(100),
+            geometry_group: None,
             class_tag: crate::records::references::DesignClassTag::try_from("300".to_owned())
                 .unwrap(),
             byte_offset: 0,

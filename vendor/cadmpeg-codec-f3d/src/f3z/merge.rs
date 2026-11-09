@@ -6,6 +6,7 @@ use cadmpeg_core::CodecError;
 use cadmpeg_ir::annotations::{AnnotationBuilder, StreamHandle};
 use cadmpeg_ir::document::{EntityRewrite, Model};
 use cadmpeg_ir::ids::UnknownId;
+use cadmpeg_ir::schema::rewrite::typed::{IdentityMap, TextReplacements};
 use cadmpeg_ir::SourceFidelity;
 use cadmpeg_ir::{Native, NativeRecord};
 use serde::de::DeserializeOwned;
@@ -23,11 +24,12 @@ pub(super) fn merge_archive(
     ctx: &DecodeContext<'_>,
     session: &F3zSession<'_>,
     decoded: &mut std::collections::BTreeMap<String, F3zDecodedMember>,
-    operation_poses: super::session::OperationPoses,
+    placement: (super::session::OperationPoses, &mut crate::scene::Sources),
     ir: &mut cadmpeg_ir::CadIr,
     report: &mut cadmpeg_ir::codec::DecodeBody,
     fidelity: &mut cadmpeg_ir::SourceFidelity,
 ) -> Result<usize, CodecError> {
+    let (operation_poses, scene_sources) = placement;
     let scan = &session.scan;
     let table = xref_table_from_ir(ctx, ir)?;
 
@@ -42,6 +44,7 @@ pub(super) fn merge_archive(
         members: std::collections::BTreeMap::new(),
         failed: std::collections::BTreeMap::new(),
         operation_poses,
+        scene_sources,
         operation_protected: std::collections::BTreeSet::new(),
         component_path_tables: Vec::new(),
     }
@@ -189,6 +192,7 @@ struct MergeSession<'r, 'a> {
     /// member is decoded once; every later reference reports the same loss.
     failed: std::collections::BTreeMap<String, String>,
     operation_poses: std::collections::BTreeMap<String, crate::xref::operation_pose::OperationPose>,
+    scene_sources: &'r mut crate::scene::Sources,
     operation_protected: std::collections::BTreeSet<cadmpeg_ir::ids::OccurrenceId>,
     component_path_tables: Vec<(cadmpeg_ir::ids::OccurrenceId, XrefTable)>,
 }
@@ -217,6 +221,7 @@ impl MergeSession<'_, '_> {
             self.ctx,
             parent_ir,
             &member_roots,
+            JointRebind::All,
             &mut parent_report.losses,
         )?;
         let unplaced_members = self
@@ -396,7 +401,13 @@ impl MergeSession<'_, '_> {
                     reference.relative_path.as_str(),
                     self.decoded,
                 ) {
-                    Ok((component, component_poses)) => {
+                    Ok((component, component_poses, component_sources)) => {
+                        for (key, pair) in component_sources {
+                            let key = rescope(&key, &occurrence).ok_or_else(|| {
+                                CodecError::malformed("invalid F3Z scene source identity")
+                            })?;
+                            self.scene_sources.insert(key, pair);
+                        }
                         for (key, pose) in &component_poses {
                             let key = rescope(key, &occurrence).ok_or_else(|| {
                                 CodecError::malformed("invalid F3Z operation-pose identity")
@@ -427,7 +438,10 @@ impl MergeSession<'_, '_> {
                 scope_document_parameters(self.ctx, &mut component_ir.model)?;
                 let definition = define_member(self.ctx, &mut component_ir.model, label)?;
                 append_feature_history(&parent_ir.model, &mut component_ir.model)?;
+                let targets = native_record_targets(&component_ir.native, &occurrence);
+                let native_text = TextReplacements::build(targets.iter())?;
                 let mut scope = OccurrenceScope {
+                    native_text: &native_text,
                     ctx: self.ctx,
                     occurrence: &occurrence,
                 };
@@ -601,6 +615,35 @@ fn omit_unbound_member_joints(
     }
 }
 
+/// Which joints of a document `rebind_joint_descent` rewrites.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum JointRebind {
+    /// Every joint: complete scopes by their full occurrence path, others by
+    /// their leading descent keys.
+    All,
+    /// Only joints of complete scopes, which bind after decode. A standalone
+    /// document has no merged members, so other joints keep their operands.
+    CompleteScopes,
+}
+
+/// Complete the operand descent of the joints that bind after decode in a
+/// standalone document and bind their features. The document has no merged
+/// members, so a path that continues below an external placement does not
+/// complete: its joint keeps its decoded operand and its feature stays native.
+pub(crate) fn bind_standalone_joints(
+    ctx: &DecodeContext<'_>,
+    ir: &mut cadmpeg_ir::CadIr,
+    losses: &mut Vec<cadmpeg_ir::report::loss::LossNote>,
+) -> Result<(), CodecError> {
+    rebind_joint_descent(
+        ctx,
+        ir,
+        &std::collections::BTreeMap::new(),
+        JointRebind::CompleteScopes,
+        losses,
+    )
+}
+
 fn rebind_joint_descent(
     ctx: &DecodeContext<'_>,
     ir: &mut cadmpeg_ir::CadIr,
@@ -608,10 +651,11 @@ fn rebind_joint_descent(
         cadmpeg_ir::ids::OccurrenceId,
         cadmpeg_ir::ids::OccurrenceId,
     >,
+    mode: JointRebind,
     losses: &mut Vec<cadmpeg_ir::report::loss::LossNote>,
 ) -> Result<(), CodecError> {
     use crate::records::feature::assembly_features::DesignComponentOccurrence;
-    use cadmpeg_ir::products::{OccurrenceParent, OperandContainer};
+    use cadmpeg_ir::products::OccurrenceParent;
 
     if ir.model.assembly_joints.is_empty() {
         return Ok(());
@@ -707,23 +751,74 @@ fn rebind_joint_descent(
             complete_scopes.insert(scope.id);
         }
     }
-    let instances = ir
-        .model
+    rebind_joints(
+        &mut JointRows {
+            occurrences: &ir.model.occurrences,
+            joints: &mut ir.model.assembly_joints,
+            features: &mut ir.model.features,
+        },
+        &children,
+        &complete_children,
+        &complete_scopes,
+        mode,
+        losses,
+    );
+    Ok(())
+}
+
+/// The rows of a model that joint rebinding reads and rewrites.
+struct JointRows<'a> {
+    occurrences: &'a [cadmpeg_ir::products::Occurrence],
+    joints: &'a mut Vec<cadmpeg_ir::products::AssemblyJoint>,
+    features: &'a mut Vec<cadmpeg_ir::features::Feature>,
+}
+
+/// Complete the operand descent of the joints of `model` and bind the
+/// features of the joints that complete. A joint of a complete scope whose
+/// path does not complete is removed and reported.
+fn rebind_joints(
+    model: &mut JointRows<'_>,
+    children: &JointChildren<'_>,
+    complete_children: &JointChildren<'_>,
+    complete_scopes: &std::collections::BTreeSet<String>,
+    mode: JointRebind,
+    losses: &mut Vec<cadmpeg_ir::report::loss::LossNote>,
+) {
+    use cadmpeg_ir::products::OperandContainer;
+    let instances = model
         .occurrences
         .iter()
         .map(|occurrence| &occurrence.id)
         .collect::<std::collections::BTreeSet<_>>();
     let mut refused = std::collections::BTreeSet::new();
-    for joint in &mut ir.model.assembly_joints {
+    let mut unresolved_scopes = std::collections::BTreeSet::new();
+    for joint in model.joints.iter_mut() {
         let joint_id = joint.id.clone();
-        if joint
+        if let Some(scope) = joint
             .native_ref
-            .as_ref()
-            .is_some_and(|id| complete_scopes.contains(id))
+            .clone()
+            .filter(|id| complete_scopes.contains(id))
         {
-            if !retain_complete_joint(joint, &complete_children, &instances, losses) {
+            if mode == JointRebind::CompleteScopes {
+                // A standalone document keeps a readable joint whose descent
+                // continues below an unmerged placement, with its operand as
+                // decoded; its feature stays native.
+                let mut descended = joint.clone();
+                if complete_joint_descent(&mut descended, complete_children, &instances) {
+                    *joint = descended;
+                } else {
+                    losses.push(F3dLossCode::AssemblyOperandDescentUnresolved.note(format!(
+                        "joint {}: the complete occurrence path continues below an unmerged placement; the joint keeps its decoded operand and its feature stays native",
+                        joint.id
+                    )));
+                    unresolved_scopes.insert(scope);
+                }
+            } else if !retain_complete_joint(joint, complete_children, &instances, losses) {
                 refused.insert(joint_id.clone());
             }
+            continue;
+        }
+        if mode == JointRebind::CompleteScopes {
             continue;
         }
         for connector in joint.connectors_mut() {
@@ -768,15 +863,12 @@ fn rebind_joint_descent(
             }
         }
     }
-    ir.model
-        .assembly_joints
-        .retain(|joint| !refused.contains(&joint.id));
-    bind_retained_joint_features(
-        &mut ir.model.features,
-        &ir.model.assembly_joints,
-        &complete_scopes,
-    );
-    Ok(())
+    model.joints.retain(|joint| !refused.contains(&joint.id));
+    let bindable = complete_scopes
+        .difference(&unresolved_scopes)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    bind_retained_joint_features(model.features, model.joints, &bindable);
 }
 
 /// Bind the features of joints that survived complete descent. A refused joint
@@ -1851,8 +1943,23 @@ fn rescope(text: &str, occurrence: &str) -> Option<String> {
         .map(|rest| format!("f3d:xref/{occurrence}/{rest}"))
 }
 
+fn native_record_targets(
+    native: &Native,
+    occurrence: &str,
+) -> std::collections::BTreeMap<String, String> {
+    native
+        .namespace("f3d")
+        .into_iter()
+        .flat_map(|namespace| namespace.arenas().values().flatten())
+        .filter_map(|record| {
+            rescope(record.id(), occurrence).map(|target| (record.id().to_owned(), target))
+        })
+        .collect()
+}
+
 /// Rewrites every `f3d:` identity in one model entity into occurrence scope.
 struct OccurrenceScope<'r, 'a> {
+    native_text: &'r TextReplacements<'r>,
     ctx: &'r DecodeContext<'a>,
     occurrence: &'r str,
 }
@@ -1864,12 +1971,13 @@ impl EntityRewrite for OccurrenceScope<'_, '_> {
         &mut self,
         entity: T,
     ) -> Result<T, CodecError> {
-        cadmpeg_ir::schema::rewrite::identities(self.ctx, entity, |id: &str| {
-            match rescope(id, self.occurrence) {
-                Some(rewritten) => Ok(rewritten),
-                None => Ok(id.to_owned()),
-            }
+        let mut map = IdentityMap::new(|id: &str| {
+            Ok(rescope(id, self.occurrence).unwrap_or_else(|| id.to_owned()))
         })
+        .with_text_replacements(self.native_text);
+        let rewritten = entity.rewrite_identities(self.ctx, &mut map);
+        map.finish()?;
+        rewritten
     }
 }
 

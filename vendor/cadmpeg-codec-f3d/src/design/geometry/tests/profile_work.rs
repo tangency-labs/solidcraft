@@ -190,3 +190,37 @@ fn region_containing_points_skips_a_near_degenerate_nurbs_past_max_subdivisions(
     work.finish_selection();
     assert_one_densification_loss(&work);
 }
+
+#[test]
+fn island_assumptions_report_one_loss_per_selection() {
+    let work = super::local_profile_work();
+    work.note_island_absence_assumed();
+    work.note_polyline_side_assumed();
+    work.finish_selection();
+    work.note_polyline_side_assumed();
+    work.finish_selection();
+    work.finish_selection();
+    let losses = work
+        .losses()
+        .into_iter()
+        .map(|loss| {
+            (
+                loss.code,
+                loss.message.split(' ').next().unwrap_or("").to_owned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        losses,
+        [
+            (
+                F3dLossCode::FeatureProfileIslandAbsenceAssumed.kind(),
+                "1".to_owned()
+            ),
+            (
+                F3dLossCode::FeatureProfilePolylineSideAssumed.kind(),
+                "2".to_owned()
+            ),
+        ]
+    );
+}

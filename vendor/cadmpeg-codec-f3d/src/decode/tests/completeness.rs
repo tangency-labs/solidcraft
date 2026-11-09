@@ -211,6 +211,29 @@ fn remove_body_requires_resolved_bodies_and_a_retention_mode() {
 }
 
 #[test]
+fn reverse_shape_requires_resolved_bodies() {
+    use cadmpeg_ir::features::{BodySelection, FeatureDefinition, FeatureOperation};
+    use cadmpeg_ir::ids::BodyId;
+
+    assert!(!feature_definition_is_incomplete(
+        &FeatureDefinition::Operation(FeatureOperation::ReverseShape {
+            source: BodySelection::Bodies(
+                cadmpeg_ir::features::DistinctMembers::try_from(vec![BodyId::mint(
+                    "test:model:body#1"
+                )
+                .expect("identity grammar")])
+                .expect("distinct bodies"),
+            ),
+        })
+    ));
+    assert!(feature_definition_is_incomplete(
+        &FeatureDefinition::Operation(FeatureOperation::ReverseShape {
+            source: BodySelection::Native("native:reverse-normal".into()),
+        })
+    ));
+}
+
+#[test]
 fn product_feature_definitions_require_neutral_reference_ids() {
     use cadmpeg_ir::features::{FeatureDefinition, FeatureOperation};
     use cadmpeg_ir::ids::OccurrenceId;

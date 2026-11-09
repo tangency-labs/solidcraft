@@ -60,6 +60,7 @@ fn distance_extrude(extent: DesignExtrudeExtent, references: Vec<u32>) -> Design
                 side_extent_discriminators: [1, 1],
                 side_extent_discriminator_offsets: [77, 90],
                 first_side_target_ordinal: None,
+                distance_tail: None,
                 extent,
                 direction_face_extend_offsets: [32, 36],
                 direction_reversed: false,

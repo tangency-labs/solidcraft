@@ -14,9 +14,14 @@ use crate::records::topology::extrude_selection::DesignOperandRole;
 
 const PRECEDING_STATE: i64 = 2;
 
+const ORIGIN_FIRST: u64 = 40;
+
 fn scope() -> DesignParameterScope {
-    let mut scope =
-        DesignParameterScope::empty("f3d:test:scope#12", DesignFeatureKind::Revolve, 12);
+    let mut scope = DesignParameterScope::empty(
+        "f3d:Design/BulkStream.dat:scope#12",
+        DesignFeatureKind::Revolve,
+        12,
+    );
     scope
         .try_edit(|draft| {
             draft.payload = DesignPathFeatureConstruction::Revolve(DesignRevolveConstruction {
@@ -47,7 +52,7 @@ fn group(
     role: DesignOperandRole,
 ) -> DesignConstructionOperandGroup {
     serde_json::from_value(serde_json::json!({
-        "id": format!("f3d:test:group#{record_index}"),
+        "id": format!("f3d:Design/BulkStream.dat:group#{record_index}"),
         "scope_record_index": 12,
         "scope_reference_ordinal": record_index - 100,
         "record_index": record_index,
@@ -79,7 +84,7 @@ fn axis_selection(
     edge: bool,
 ) -> DesignEntitySelectionOperand {
     let mut selection = serde_json::from_value::<DesignEntitySelectionOperand>(serde_json::json!({
-        "id": "f3d:test:entity-selection#201", "scope_record_index": 12,
+        "id": "f3d:Design/BulkStream.dat:entity-selection#201", "scope_record_index": 12,
         "group_record_index": 101, "group_member_ordinal": 0,
         "record_index": 201, "byte_offset": 100, "class_tag": "307",
         "asset_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "asset_id_offset": 130,
@@ -129,6 +134,10 @@ fn construction_with(
         std::slice::from_ref(selection),
         &[],
         (placements, &[]),
+        &crate::test_support::origin_types::origin_design_types(
+            "f3d:Design/MetaStream.dat",
+            ORIGIN_FIRST,
+        ),
     )?
     else {
         panic!("expected a revolve");
@@ -151,21 +160,19 @@ fn an_origin_axis_identity_keeps_its_axis_when_an_asm_entity_shares_it() {
         ),
         reference: None,
     };
+    let y = ORIGIN_FIRST + 1;
     for (name, selection) in [
-        ("no candidate", axis_selection(40, &[], false)),
+        ("no candidate", axis_selection(y, &[], false)),
         (
             "face in the preceding state",
-            axis_selection(40, &[PRECEDING_STATE], false),
+            axis_selection(y, &[PRECEDING_STATE], false),
         ),
         (
             "face created later",
-            axis_selection(40, &[PRECEDING_STATE + 1], false),
+            axis_selection(y, &[PRECEDING_STATE + 1], false),
         ),
-        ("edge in the preceding state", axis_selection(40, &[], true)),
-        (
-            "edge and face",
-            axis_selection(40, &[PRECEDING_STATE], true),
-        ),
+        ("edge in the preceding state", axis_selection(y, &[], true)),
+        ("edge and face", axis_selection(y, &[PRECEDING_STATE], true)),
     ] {
         assert_eq!(
             construction(&selection).and_then(|construction| construction.axis().cloned()),
@@ -191,7 +198,7 @@ fn a_sketch_placement_that_owns_the_identity_refuses_the_origin_axis() {
             crate::records::sketch_placement::DesignSketchFrameForm::ScopeCompact,
         )
         .unwrap(),
-        id: "f3d:test:placement#40".into(),
+        id: "f3d:Design/BulkStream.dat:placement#40".into(),
         scope_record_index: None,
         entity_id: crate::records::identity::DesignEntityId::from_parts("Sketch", 40),
         visibility: None,
@@ -201,4 +208,33 @@ fn a_sketch_placement_that_owns_the_identity_refuses_the_origin_axis() {
             .unwrap(),
     };
     assert!(construction_with(&axis_selection(40, &[], false), &[placement]).is_none());
+}
+
+#[test]
+fn the_type_table_gives_each_origin_axis_its_direction() {
+    for (offset, direction) in [
+        (0, cadmpeg_ir::units::UnitVector3::X_AXIS),
+        (1, cadmpeg_ir::units::UnitVector3::Y_AXIS),
+        (2, cadmpeg_ir::units::UnitVector3::Z_AXIS),
+    ] {
+        let axis = construction(&axis_selection(ORIGIN_FIRST + offset, &[], false))
+            .and_then(|construction| construction.axis().cloned())
+            .expect("an origin axis");
+        assert_eq!(
+            axis.direction,
+            cadmpeg_ir::features::FeatureDirection3::from(direction)
+        );
+    }
+}
+
+#[test]
+fn an_identity_outside_the_origin_axes_is_no_origin_axis() {
+    for identity in [ORIGIN_FIRST - 1, ORIGIN_FIRST + 3, ORIGIN_FIRST + 6] {
+        assert_eq!(
+            construction(&axis_selection(identity, &[PRECEDING_STATE], false))
+                .expect("a historical face axis")
+                .axis(),
+            None
+        );
+    }
 }

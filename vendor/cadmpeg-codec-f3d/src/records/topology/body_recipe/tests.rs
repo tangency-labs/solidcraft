@@ -11,7 +11,7 @@ fn body_recipe_operand_borrowed_wire_matches_owned_wire_bytes() {
     let suffix = r#", "references":[],"nested_record_index":5,"nested_record_index_offset":26,"recipe_id":"recipe","next_record_index":6,"next_byte_offset":240}"#;
     for fields in [
         "",
-        ",\"selector_tail\":\"07000000\",\"selector_tail_offset\":220",
+        ",\"selector_tail\":\"01000000\",\"selector_tail_offset\":220",
     ] {
         let value: DesignBodyRecipeOperand =
             serde_json::from_str(&format!("{prefix}{fields}{suffix}")).unwrap();
@@ -50,7 +50,7 @@ fn body_recipe_selector_tail_preserves_wire_and_rejects_partial_locations() {
     let suffix = r#","references":[],"nested_record_index":5,"nested_record_index_offset":26,"recipe_id":"recipe","next_record_index":6,"next_byte_offset":240}"#;
     for fields in [
         "",
-        ",\"selector_tail\":\"07000000\",\"selector_tail_offset\":220",
+        ",\"selector_tail\":\"01000000\",\"selector_tail_offset\":220",
     ] {
         let wire = format!("{prefix}{fields}{suffix}");
         let value: super::DesignBodyRecipeOperand =
@@ -61,7 +61,7 @@ fn body_recipe_selector_tail_preserves_wire_and_rejects_partial_locations() {
         );
     }
     for fields in [
-        ",\"selector_tail\":\"07000000\"",
+        ",\"selector_tail\":\"01000000\"",
         ",\"selector_tail_offset\":220",
     ] {
         let error = serde_json::from_str::<super::DesignBodyRecipeOperand>(&format!(
@@ -80,6 +80,46 @@ fn body_recipe_selector_tail_preserves_wire_and_rejects_partial_locations() {
         .expect_err("non-GUID body recipe identity")
         .to_string();
         assert!(error.contains("GUID"), "{error}");
+    }
+}
+
+#[test]
+fn body_recipe_serialization_form_is_independent_of_class_tag() {
+    let wire = json!({
+        "id": "operand", "scope_record_index": 1, "scope_reference_ordinal": 0,
+        "record_index": 2, "byte_offset": 0, "class_tag": "365",
+        "asset_id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "asset_id_offset": 44,
+        "context_id": "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e", "context_id_offset": 150,
+        "selector_tail": "00000000", "selector_tail_offset": 220,
+        "references": [], "nested_record_index": 5, "nested_record_index_offset": 26,
+        "recipe_id": "recipe", "next_record_index": 6, "next_byte_offset": 240
+    });
+    for class_tag in ["365", "367", "387"] {
+        for (form, encoded) in [
+            (0u32, "00000000"),
+            (1, "01000000"),
+            (2, "02000000"),
+            (7, "07000000"),
+        ] {
+            let mut candidate = wire.clone();
+            candidate["class_tag"] = class_tag.into();
+            candidate["selector_tail"] = encoded.into();
+            let operand = serde_json::from_value::<DesignBodyRecipeOperand>(candidate)
+                .unwrap_or_else(|error| panic!("class {class_tag}, form {form}: {error}"));
+            assert_eq!(operand.serialization_form(), Some(form));
+            let mut draft = operand.into_draft();
+            draft.class_tag = class_tag.to_owned().try_into().unwrap();
+            draft.selector_tail = Some(crate::records::identity::Located {
+                value: form.to_le_bytes(),
+                offset: 220,
+            });
+            assert_eq!(
+                DesignBodyRecipeOperand::try_new(draft)
+                    .unwrap()
+                    .serialization_form(),
+                Some(form)
+            );
+        }
     }
 }
 

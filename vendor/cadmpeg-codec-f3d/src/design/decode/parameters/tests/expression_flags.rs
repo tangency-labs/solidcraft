@@ -113,3 +113,62 @@ fn compact_owned_trailer_states_the_driven_flag() {
         assert!(read(refused).is_none(), "{refused:?}");
     }
 }
+
+/// A wide discriminator-6 text parameter with the given trailer and text value.
+fn wide_text(owner: Option<u32>, trailer: [u8; 11], text: &str) -> Vec<u8> {
+    let kind = if owner.is_some() {
+        "Text1-Text"
+    } else {
+        "User Parameter"
+    };
+    let mut frame = parameter_record(owner, "'AB'", kind, Some("Text"), "tp", 0.0);
+    frame[22..30].copy_from_slice(&6u64.to_le_bytes());
+    frame.splice(22..22, [0; 4]);
+    let expression_end = if owner.is_some() { 50 } else { 40 } + 4 + 2 * "'AB'".len();
+    frame.splice(expression_end..expression_end + 9, trailer);
+    let text_at = expression_end + 11 + 4 + 2 * kind.len();
+    let mut field = Vec::new();
+    lp_utf16(&mut field, text);
+    frame.splice(text_at..text_at + 4, field);
+    frame
+}
+
+#[test]
+fn text_flag_admits_the_text_value_after_the_source_kind() {
+    let document = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    for text in ["AB", "", "Hello world 123"] {
+        let parameter =
+            parse_design_parameter_record(&wide_text(None, document, text)).expect("text");
+        assert_eq!(parameter.kind(), DesignParameterKind::User);
+        assert_eq!(parameter.text_value(), Some(text));
+        assert_eq!(
+            parameter.unit().map(|unit| unit.value.as_str()),
+            Some("Text")
+        );
+        assert_eq!(parameter.name(), "tp");
+    }
+    let owned = parse_design_parameter_record(&wide_text(
+        Some(0xf6),
+        [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "AB",
+    ))
+    .expect("owned text parameter");
+    assert_eq!(owned.text_value(), Some("AB"));
+    assert_eq!(owned.source_kind(), "Text1-Text");
+
+    // Without the text flag, the field after the source kind is empty.
+    let numeric = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    assert_eq!(
+        parse_design_parameter_record(&wide_text(None, numeric, ""))
+            .expect("numeric parameter")
+            .text_value(),
+        None
+    );
+    assert!(parse_design_parameter_record(&wide_text(None, numeric, "AB")).is_none());
+    assert!(parse_design_parameter_record(&wide_text(
+        None,
+        [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        "AB"
+    ))
+    .is_none());
+}

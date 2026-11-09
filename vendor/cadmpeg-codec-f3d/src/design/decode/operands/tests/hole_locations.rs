@@ -15,9 +15,9 @@ const INPUT: u32 = 100;
 const SKETCH: u32 = 1627;
 const POINT: u64 = 379;
 
-/// The direct sketch-point envelope of input `INPUT`, closed by its
-/// point-data record `INPUT + 4`.
-fn envelope() -> Vec<u8> {
+/// The direct sketch-point envelope of input `INPUT` with `identity` after the
+/// identity record header, closed by its point-data record `INPUT + 4`.
+fn envelope(identity: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     indexed_header(&mut bytes, *b"338", INPUT);
     bytes.extend_from_slice(&[0; 10]);
@@ -33,15 +33,27 @@ fn envelope() -> Vec<u8> {
     indexed_header(&mut bytes, *b"294", INPUT + 1);
     indexed_header(&mut bytes, *b"303", INPUT + 2);
     indexed_header(&mut bytes, *b"305", INPUT + 3);
-    bytes.extend_from_slice(&[0; 9]);
-    bytes.push(1);
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes.extend_from_slice(&SKETCH.to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes.extend_from_slice(&u32::try_from(POINT).unwrap().to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(identity);
     indexed_header(&mut bytes, *b"288", INPUT + 4);
     bytes
+}
+
+fn marked_identity() -> Vec<u8> {
+    let mut identity = vec![0; 9];
+    identity.push(1);
+    identity.extend_from_slice(&0u32.to_le_bytes());
+    identity.extend_from_slice(&SKETCH.to_le_bytes());
+    identity.extend_from_slice(&0u32.to_le_bytes());
+    identity.extend_from_slice(&u32::try_from(POINT).unwrap().to_le_bytes());
+    identity.extend_from_slice(&0u32.to_le_bytes());
+    identity
+}
+
+fn compact_identity() -> Vec<u8> {
+    let mut identity = vec![0; 10];
+    identity.extend_from_slice(&u64::from(SKETCH).to_le_bytes());
+    identity.extend_from_slice(&POINT.to_le_bytes());
+    identity
 }
 
 fn header() -> DesignRecordHeader {
@@ -58,6 +70,7 @@ fn sketch_point(stream: &str, record_index: u32, owner: u32, persistent_id: u64)
         id: format!("{stream}:sketch-point#{record_index}"),
         record_index,
         owner_reference: Some(owner),
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("256".to_owned()).unwrap(),
         byte_offset: u64::from(record_index),
         coordinate_offset: 141,
@@ -97,19 +110,21 @@ fn construction() -> DesignHoleConstruction {
 
 /// The native id of the sketch point bound to the location input, if any.
 fn bound_point(headers: &[DesignRecordHeader], sketch_points: &[SketchPoint]) -> Option<String> {
+    bound_point_in(&envelope(&marked_identity()), headers, sketch_points)
+}
+
+fn bound_point_in(
+    bytes: &[u8],
+    headers: &[DesignRecordHeader],
+    sketch_points: &[SketchPoint],
+) -> Option<String> {
     let headers: HashMap<_, _> = headers
         .iter()
         .map(|header| ((STREAM, header.record_index), header))
         .collect();
     let mut construction = construction();
-    bind_hole_construction_sketch_points(
-        &envelope(),
-        STREAM,
-        &mut construction,
-        &headers,
-        sketch_points,
-    )
-    .unwrap();
+    bind_hole_construction_sketch_points(bytes, STREAM, &mut construction, &headers, sketch_points)
+        .unwrap();
     match construction.locations[0].vertex_input.as_ref()?.carrier()? {
         DesignWorkPointInputCarrier::SketchPoint { selection } => {
             assert_eq!(selection.sketch_record_index, SKETCH);
@@ -151,4 +166,14 @@ fn a_hole_location_input_without_one_named_sketch_point_stays_unbound() {
     let mut displaced = header();
     displaced.byte_offset = 1;
     assert_eq!(bound_point(&[displaced], &[point]), None);
+}
+
+#[test]
+fn a_hole_location_input_binds_the_sketch_point_of_a_compact_identity() {
+    let point = sketch_point(STREAM, 7, SKETCH, POINT);
+    let points = [sketch_point(STREAM, 8, SKETCH, POINT + 1), point.clone()];
+    assert_eq!(
+        bound_point_in(&envelope(&compact_identity()), &[header()], &points),
+        Some(point.id)
+    );
 }

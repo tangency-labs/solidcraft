@@ -80,6 +80,7 @@ fn set_extent(scope: &mut DesignParameterScope, control: u8, saved: bool) {
                 value: 0,
                 offset: 6,
             }),
+            standard: None,
         });
     }
 }
@@ -553,6 +554,7 @@ fn hole_without_an_extent_control_is_distance_only_with_its_depth() {
             extent_control: None,
             saved_non_distance_depth: None,
             direction_control: None,
+            standard: None,
         });
     }
     let parameters = hole_parameters();
@@ -802,4 +804,150 @@ fn a_hole_depth_or_an_unsaved_depth_keeps_the_distance_extent() {
         ),
         None
     );
+}
+
+/// A Through All scope whose reference entries 2 to 7 are records 12 to 17.
+fn through_all_scope(reference_type: u32) -> DesignParameterScope {
+    let mut scope = DesignParameterScope::empty(
+        "f3d:Design/BulkStream.dat:scope#1",
+        DesignFeatureKind::Hole,
+        1,
+    );
+    scope
+        .try_edit(|draft| {
+            draft.reference_members = crate::records::identity::ReferenceRun::located(
+                (10..18)
+                    .map(|value| crate::records::identity::Located {
+                        value,
+                        offset: u64::from(value - 9),
+                    })
+                    .collect(),
+            );
+            draft.frame_length = 400;
+            draft.paired_byte_offset = 400;
+            draft.layout_fixture_references();
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    set_extent(&mut scope, 1, true);
+    set_carrier(
+        &mut scope,
+        reference_type,
+        [1.0, 1.5, 2.0],
+        &[(17, [1.0, 1.5, 2.0])],
+        false,
+    );
+    scope
+}
+
+fn through_all(
+    scope: &DesignParameterScope,
+    faces: &[crate::records::topology::face::DesignFaceOperand],
+) -> bool {
+    use cadmpeg_ir::features::LinearTermination;
+    let parameters = hole_parameters();
+    let indexed = [(1, &parameters[1]), (2, &parameters[2])];
+    matches!(
+        project_hole(scope, &indexed, &[], faces, &mut Vec::new()).unwrap(),
+        Some(FeatureDefinition::Operation(FeatureOperation::Hole {
+            extent: Some(LinearTermination::ThroughAll {}),
+            ..
+        }))
+    )
+}
+
+fn start_operands(ordinals: &[u32]) -> Vec<crate::records::topology::face::DesignFaceOperand> {
+    ordinals
+        .iter()
+        .map(|&ordinal| face_operand(10 + ordinal, ordinal))
+        .collect()
+}
+
+#[test]
+fn a_face_point_through_all_hole_admits_four_start_operands() {
+    use crate::records::recipes::ConstructionRecipeKind;
+    let scope = through_all_scope(19);
+    assert!(through_all(&scope, &start_operands(&[2, 3, 4, 5])));
+    let mut face_first = start_operands(&[2, 3, 4, 5]);
+    face_first[0].recipe_kind = ConstructionRecipeKind::Face;
+    assert!(through_all(&scope, &face_first));
+}
+
+#[test]
+fn four_start_operands_need_a_face_point_carrier_and_one_consecutive_run() {
+    use crate::records::recipes::ConstructionRecipeKind;
+    assert!(!through_all(
+        &through_all_scope(13),
+        &start_operands(&[2, 3, 4, 5])
+    ));
+    let scope = through_all_scope(19);
+    assert!(!through_all(&scope, &start_operands(&[2, 3, 4, 6])));
+    assert!(!through_all(&scope, &start_operands(&[2, 3, 4, 5, 6])));
+    assert!(!through_all(&scope, &start_operands(&[2, 3, 3, 4, 5])));
+    assert!(!through_all(&scope, &start_operands(&[2, 3, 4])));
+    let mut face_second = start_operands(&[2, 3, 4, 5]);
+    face_second[1].recipe_kind = ConstructionRecipeKind::Face;
+    assert!(!through_all(&scope, &face_second));
+    let mut unbound = start_operands(&[2, 3, 4, 5]);
+    unbound[3] = face_operand(30, 5);
+    assert!(!through_all(&scope, &unbound));
+}
+
+fn reference_dimension_hole(
+    dimensions: &[(&str, f64)],
+    edge_groups: usize,
+) -> (
+    Option<FeatureOperation>,
+    Vec<cadmpeg_ir::report::loss::LossNote>,
+) {
+    use crate::records::topology::extrude_selection::DesignOperandRole;
+    let mut parameters = hole_parameters().to_vec();
+    for (name, value) in dimensions {
+        parameters.push(named_parameter(name, *value, false));
+    }
+    let groups: Vec<_> = (0..edge_groups)
+        .map(|_| extent_group(DesignOperandRole::ROLE_0X21, &[7]))
+        .collect();
+    let indexed: Vec<_> = parameters
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (u32::try_from(i).unwrap(), p))
+        .collect();
+    let mut losses = Vec::new();
+    let operation = match project_hole(&hole_scope(), &indexed, &groups, &[], &mut losses).unwrap()
+    {
+        Some(FeatureDefinition::Operation(operation)) => Some(operation),
+        Some(FeatureDefinition::PostProcess { .. }) => panic!("expected an operation"),
+        None => None,
+    };
+    (operation, losses)
+}
+
+#[test]
+fn a_hole_placed_by_two_reference_dimensions_keeps_them_native() {
+    use cadmpeg_ir::features::LinearTermination;
+    let (operation, losses) = reference_dimension_hole(&[("RefDim1", 1.0), ("RefDim2", 1.0)], 2);
+    let Some(FeatureOperation::Hole { extent, .. }) = operation else {
+        panic!("expected a hole");
+    };
+    assert!(matches!(extent, Some(LinearTermination::Blind { .. })));
+    assert!(losses
+        .iter()
+        .any(|loss| loss.code == crate::loss::F3dLossCode::HoleReferenceDimensionsNative.kind()));
+}
+
+#[test]
+fn reference_dimensions_need_both_distances_and_two_edge_groups() {
+    for (dimensions, edge_groups) in [
+        (&[("RefDim1", 1.0)][..], 2),
+        (&[("RefDim1", 1.0), ("RefDim2", 1.0)][..], 1),
+        (&[("RefDim1", 1.0), ("RefDim2", 1.0)][..], 3),
+        (&[("RefDim1", 1.0), ("RefDim2", 0.0)][..], 2),
+    ] {
+        assert_eq!(reference_dimension_hole(dimensions, edge_groups).0, None);
+    }
+    let (_, losses) = reference_dimension_hole(&[], 2);
+    assert!(!losses
+        .iter()
+        .any(|loss| loss.code == crate::loss::F3dLossCode::HoleReferenceDimensionsNative.kind()));
 }

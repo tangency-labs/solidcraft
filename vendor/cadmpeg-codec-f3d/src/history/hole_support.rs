@@ -2,14 +2,16 @@
 //! Support faces of a Hole, from the transition that drills it.
 
 use super::same_axis_line;
-use crate::history_records::{AsmHistoricalPlane, AsmHistoricalTopology, AsmHistoricalTransition};
+use crate::history_records::{
+    AsmHistoricalCylinder, AsmHistoricalPlane, AsmHistoricalTopology, AsmHistoricalTransition,
+};
 use crate::records::feature::hole::DesignHoleConstruction;
 use cadmpeg_ir::math::{Point3, Vector3};
 use std::collections::HashSet;
 
 /// Relative tolerance for a support plane normal lying along the Hole axis.
 const HOLE_SUPPORT_NORMAL_TOLERANCE: f64 = 1.0e-9;
-/// Relative tolerance for a Hole entry point lying on its support plane.
+/// Relative tolerance for a Hole entry point lying on a face carrier.
 const HOLE_SUPPORT_POINT_TOLERANCE: f64 = 1.0e-8;
 /// Model millimetres per source centimetre.
 const MILLIMETRES_PER_SOURCE_UNIT: f64 = 10.0;
@@ -34,17 +36,7 @@ pub(super) fn hole_support_faces(
         construction.direction[2].get(),
     )
     .unit()?;
-    let entries: Vec<Point3> = construction
-        .entry_points()?
-        .into_iter()
-        .map(|point| {
-            Point3::new(
-                point[0].get() * MILLIMETRES_PER_SOURCE_UNIT,
-                point[1].get() * MILLIMETRES_PER_SOURCE_UNIT,
-                point[2].get() * MILLIMETRES_PER_SOURCE_UNIT,
-            )
-        })
-        .collect();
+    let entries = entry_points_mm(construction)?;
     let cylinders = inserted_cylinder_axes(transition)?;
     let coaxial =
         |entry: &Point3, cylinder: &(Point3, Vector3)| same_axis_line(*cylinder, (*entry, axis));
@@ -73,6 +65,81 @@ pub(super) fn hole_support_faces(
     faces.sort_unstable();
     faces.dedup();
     Some(faces)
+}
+
+/// Whether no face of the state before a Hole holds one of its entry points:
+/// every face of that state has one carrier, the carrier is one plane or one
+/// cylinder, and no entry point lies on it.
+pub(super) fn entries_lie_on_no_face(
+    construction: &DesignHoleConstruction,
+    preceding: &AsmHistoricalTopology,
+) -> bool {
+    let Some(entries) = entry_points_mm(construction) else {
+        return false;
+    };
+    !preceding.faces.is_empty()
+        && preceding.faces.iter().all(|face| {
+            let mut bindings = preceding
+                .face_surfaces
+                .iter()
+                .filter(|binding| binding.entity == *face);
+            let (Some(binding), None) = (bindings.next(), bindings.next()) else {
+                return false;
+            };
+            let mut planes = preceding
+                .surface_planes
+                .iter()
+                .filter(|plane| plane.surface == binding.carrier);
+            let mut cylinders = preceding
+                .surface_cylinders
+                .iter()
+                .filter(|cylinder| cylinder.surface == binding.carrier);
+            match (
+                planes.next(),
+                planes.next(),
+                cylinders.next(),
+                cylinders.next(),
+            ) {
+                (Some(plane), None, None, None) => entries
+                    .iter()
+                    .all(|entry| plane_misses_point(plane, *entry)),
+                (None, None, Some(cylinder), None) => entries
+                    .iter()
+                    .all(|entry| cylinder_misses_point(cylinder, *entry)),
+                _ => false,
+            }
+        })
+}
+
+fn entry_points_mm(construction: &DesignHoleConstruction) -> Option<Vec<Point3>> {
+    Some(
+        construction
+            .entry_points()?
+            .into_iter()
+            .map(|point| {
+                Point3::new(
+                    point[0].get() * MILLIMETRES_PER_SOURCE_UNIT,
+                    point[1].get() * MILLIMETRES_PER_SOURCE_UNIT,
+                    point[2].get() * MILLIMETRES_PER_SOURCE_UNIT,
+                )
+            })
+            .collect(),
+    )
+}
+
+fn plane_misses_point(plane: &AsmHistoricalPlane, point: Point3) -> bool {
+    plane.normal.unit().is_some_and(|normal| {
+        point.vector_from(plane.origin).dot(normal).abs()
+            > HOLE_SUPPORT_POINT_TOLERANCE * coordinate_scale(point, plane.origin)
+    })
+}
+
+fn cylinder_misses_point(cylinder: &AsmHistoricalCylinder, point: Point3) -> bool {
+    cylinder.axis.unit().is_some_and(|axis| {
+        let radial_distance = point.vector_from(cylinder.origin).cross(axis).norm();
+        (radial_distance - cylinder.radius).abs()
+            > HOLE_SUPPORT_POINT_TOLERANCE * coordinate_scale(point, cylinder.origin)
+    })
 }
 
 /// Unit axis lines of the cylinders on faces that the transition inserts.

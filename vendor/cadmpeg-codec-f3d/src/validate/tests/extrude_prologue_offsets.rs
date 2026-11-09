@@ -54,6 +54,7 @@ fn plain_one_sided_scope(operation_offset: u64) -> DesignParameterScope {
                     side_extent_discriminators: [1, 0],
                     side_extent_discriminator_offsets: [first_side, first_side + 13],
                     first_side_target_ordinal: None,
+                    distance_tail: None,
                     extent: DesignExtrudeExtent::OneSidedDistance,
                     direction_face_extend_offsets: [operation_offset + 4, operation_offset + 8],
                     direction_reversed: false,
@@ -74,11 +75,16 @@ fn has_invalid_frame(scope: DesignParameterScope) -> bool {
     let mut ir = cadmpeg_ir::examples::unit_cube().unwrap();
     {
         let mut native = f3d_native_mut(&mut ir);
-        for record_index in [11, 22, 33, 3970] {
+        for record_index in scope
+            .reference_members()
+            .values()
+            .copied()
+            .chain(std::iter::once(scope.record_index))
+        {
             native.design_record_headers.push(DesignRecordHeader {
                 id: format!("{STREAM}:design-record-header#{record_index}"),
                 record_index,
-                class_tag: "375".to_owned().try_into().unwrap(),
+                class_tag: scope.class_tag.clone(),
                 byte_offset: 0,
             });
         }
@@ -135,4 +141,46 @@ fn typed_slots_widen_the_span_by_fifty_bytes() {
     assert!(!extent_slot_expansion_valid(true, 400));
     assert!(!extent_slot_expansion_valid(true, 10));
     assert!(!extent_slot_expansion_valid(true, 149));
+}
+
+#[test]
+fn class_349_reference_aware_prefix_keeps_its_frame_rule() {
+    use crate::layout::class_349_two_sided_through_all_extrude_frame as layout;
+    use crate::records::feature::extrude::DesignExtrudePrologueReference;
+
+    let mut scope = plain_one_sided_scope(37);
+    scope.class_tag = "349".to_owned().try_into().unwrap();
+    scope.paired_class_tag = "262".to_owned().try_into().unwrap();
+    scope
+        .try_edit(|draft| {
+            draft.frame_length = cadmpeg_core::decode::u64_from_index(layout::LEN);
+            draft.paired_byte_offset = draft.frame_length;
+            draft.reference_count_offset =
+                cadmpeg_core::decode::u64_from_index(layout::REFERENCE_COUNT);
+            draft.reference_members =
+                ReferenceRun::unlocated(vec![11, 22, 33, 44, 55, 66, 77, 88, 99, 111, 122]);
+            draft.layout_fixture_references();
+            draft.feature_ordinal_offset =
+                cadmpeg_core::decode::u64_from_index(layout::FEATURE_ORDINAL);
+            if let DesignScopePayload::Extrude(Some(extrude)) = &mut draft.payload {
+                if let Some(DesignExtrudePrologue::ReferenceAware {
+                    reference,
+                    start,
+                    side_extent_discriminator_offsets,
+                    ..
+                }) = &mut extrude.extrude_prologue
+                {
+                    *reference = Some(DesignExtrudePrologueReference {
+                        record_index: 11,
+                        record_index_offset: 26,
+                        trailing_zero_count: 7,
+                        operation_prefix_marker_offset: None,
+                    });
+                    *start = DesignExtrudeStart::FromFace;
+                    *side_extent_discriminator_offsets = [126, 139];
+                }
+            }
+        })
+        .unwrap();
+    assert!(!has_invalid_frame(scope));
 }

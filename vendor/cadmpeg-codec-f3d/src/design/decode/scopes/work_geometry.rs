@@ -39,19 +39,19 @@ pub(super) fn exact_work_plane_frame(
     bytes: &[u8],
     records: &IndexedRecordOffsets,
     scope: &DesignParameterScope,
-) -> Option<ScopePlacementFrame> {
+) -> Option<(ScopePlacementFrame, [u8; 2])> {
     let mut candidate = None;
     for record_index in scope.reference_members().values() {
         for (start, paired) in records.frames(*record_index) {
             let frame_length = paired.checked_sub(start)?;
-            let (matrix_at, reference) = match frame_length {
+            let (matrix_at, reference, inferred_axes) = match frame_length {
                 work_plane_legacy::LEN
                     if bytes.get(start + 4..start + 7) == Some(b"400")
                         && bytes.get(paired + 4..paired + 7) == Some(b"262")
                         && bytes.get(start + 11..start + work_plane_legacy::MATRIX)
                             == Some(&[0u8; work_plane_legacy::MATRIX - 11][..]) =>
                 {
-                    (start + work_plane_legacy::MATRIX, None)
+                    (start + work_plane_legacy::MATRIX, None, [0, 0])
                 }
                 work_plane_class_290::LEN
                     if bytes.get(start + 4..start + 7) == Some(b"290")
@@ -63,7 +63,7 @@ pub(super) fn exact_work_plane_frame(
                                 ..start + work_plane_class_290::MATRIX,
                         ) == Some(&[1, 1, 0, 0][..]) =>
                 {
-                    (start + work_plane_class_290::MATRIX, None)
+                    (start + work_plane_class_290::MATRIX, None, [1, 1])
                 }
                 work_plane_325::LEN
                     if matches!(
@@ -78,7 +78,7 @@ pub(super) fn exact_work_plane_frame(
                     ) && bytes.get(start + 11..start + work_plane_325::MATRIX)
                         == Some(&[0u8; work_plane_325::MATRIX - 11][..]) =>
                 {
-                    (start + work_plane_325::MATRIX, None)
+                    (start + work_plane_325::MATRIX, None, [0, 0])
                 }
                 work_plane_class_256::LEN
                     if bytes.get(start + 4..start + 7) == Some(b"256")
@@ -93,7 +93,12 @@ pub(super) fn exact_work_plane_frame(
                                 [..],
                         ) =>
                 {
-                    (start + work_plane_class_256::MATRIX, None)
+                    (
+                        start + work_plane_class_256::MATRIX,
+                        None,
+                        View::u16_le_at(bytes, start + work_plane_class_256::OPAQUE_U16)?
+                            .to_le_bytes(),
+                    )
                 }
                 work_plane_class_337_325::LEN
                     if bytes.get(start + 4..start + 7) == Some(b"337")
@@ -108,7 +113,12 @@ pub(super) fn exact_work_plane_frame(
                                 - work_plane_class_337_325::ZERO_PAIR][..],
                         ) =>
                 {
-                    (start + work_plane_class_337_325::MATRIX, None)
+                    (
+                        start + work_plane_class_337_325::MATRIX,
+                        None,
+                        View::u16_le_at(bytes, start + work_plane_class_337_325::OPAQUE_U16)?
+                            .to_le_bytes(),
+                    )
                 }
                 work_plane_class_322_332::LEN
                     if bytes.get(start + 4..start + 7) == Some(b"322")
@@ -116,10 +126,10 @@ pub(super) fn exact_work_plane_frame(
                         && bytes.get(start + 11..start + work_plane_class_322_332::MATRIX)
                             == Some(&[0u8; work_plane_class_322_332::MATRIX - 11][..]) =>
                 {
-                    (start + work_plane_class_322_332::MATRIX, None)
+                    (start + work_plane_class_322_332::MATRIX, None, [0, 0])
                 }
                 321 if bytes.get(start + 11..start + 49) == Some(&[0u8; 38][..]) => {
-                    (start + 49, None)
+                    (start + 49, None, [0, 0])
                 }
                 work_plane_321_opaque::LEN
                     if matches!(
@@ -138,21 +148,26 @@ pub(super) fn exact_work_plane_frame(
                                 - work_plane_321_opaque::ZERO_PAIR][..],
                         ) =>
                 {
-                    (start + work_plane_321_opaque::MATRIX, None)
+                    (
+                        start + work_plane_321_opaque::MATRIX,
+                        None,
+                        View::u16_le_at(bytes, start + work_plane_321_opaque::OPAQUE_U16)?
+                            .to_le_bytes(),
+                    )
                 }
                 321 if bytes.get(start + 4..start + 7) == Some(b"364")
                     && bytes.get(paired + 4..paired + 7) == Some(b"264")
                     && bytes.get(start + 11..start + 46) == Some(&[0u8; 35][..])
                     && bytes.get(start + 46..start + 49) == Some(&[1, 0, 0][..]) =>
                 {
-                    (start + 49, None)
+                    (start + 49, None, [0, 1])
                 }
                 321 if bytes.get(start + 4..start + 7) == Some(b"364")
                     && bytes.get(paired + 4..paired + 7) == Some(b"264")
                     && bytes.get(start + 11..start + 45) == Some(&[0u8; 34][..])
                     && bytes.get(start + 45..start + 49) == Some(&[0xcc, 0xcd, 0, 0][..]) =>
                 {
-                    (start + 49, None)
+                    (start + 49, None, [0xcc, 0xcd])
                 }
                 326 if matches!(
                     (
@@ -164,7 +179,7 @@ pub(super) fn exact_work_plane_frame(
                         | (Some(b"450"), Some(b"259"))
                 ) && bytes.get(start + 11..start + 50) == Some(&[0u8; 39][..]) =>
                 {
-                    (start + 50, None)
+                    (start + 50, None, [0, 0])
                 }
                 work_plane_337::LEN
                     if matches!(
@@ -176,22 +191,12 @@ pub(super) fn exact_work_plane_frame(
                     ) && bytes.get(start + 11..start + work_plane_337::MATRIX)
                         == Some(&[0u8; work_plane_337::MATRIX - 11][..]) =>
                 {
-                    (start + work_plane_337::MATRIX, None)
+                    (start + work_plane_337::MATRIX, None, [0, 0])
                 }
                 work_plane_direct_352::LEN
                 | work_plane_direct_363::LEN
                 | work_plane_direct_374::LEN
-                    if matches!(
-                        (
-                            frame_length,
-                            bytes.get(start + 4..start + 7),
-                            bytes.get(paired + 4..paired + 7),
-                        ),
-                        (work_plane_direct_352::LEN, Some(b"293"), Some(b"261"),)
-                            | (work_plane_direct_352::LEN, Some(b"316"), Some(b"260"),)
-                            | (work_plane_direct_363::LEN, Some(b"289"), Some(b"258"),)
-                            | (work_plane_direct_374::LEN, Some(b"267"), Some(b"258"),)
-                    ) && bytes.get(start + work_plane_direct_352::MARKER)
+                    if bytes.get(start + work_plane_direct_352::MARKER)
                         == Some(&work_plane_direct_352::MARKER_VALUE)
                         && bytes.get(
                             start + work_plane_direct_352::ZERO_RUN
@@ -208,7 +213,12 @@ pub(super) fn exact_work_plane_frame(
                                 - work_plane_direct_352::ZERO_PAIR][..],
                         ) =>
                 {
-                    (start + work_plane_direct_352::MATRIX, None)
+                    (
+                        start + work_plane_direct_352::MATRIX,
+                        None,
+                        View::u16_le_at(bytes, start + work_plane_direct_352::OPAQUE_U16)?
+                            .to_le_bytes(),
+                    )
                 }
                 362 | 373
                     if bytes.get(start + 55..start + 58) == Some(&[1, 0, 1][..])
@@ -220,6 +230,7 @@ pub(super) fn exact_work_plane_frame(
                             View::u32_le_at(bytes, start + 58)?,
                             u64_from_index(start + 58),
                         )),
+                        [0, 0],
                     )
                 }
                 _ => continue,
@@ -235,11 +246,14 @@ pub(super) fn exact_work_plane_frame(
                 continue;
             };
             if candidate
-                .replace(ScopePlacementFrame {
-                    transform,
-                    transform_offset: u64_from_index(matrix_at),
-                    reference,
-                })
+                .replace((
+                    ScopePlacementFrame {
+                        transform,
+                        transform_offset: u64_from_index(matrix_at),
+                        reference,
+                    },
+                    inferred_axes,
+                ))
                 .is_some()
             {
                 return None;

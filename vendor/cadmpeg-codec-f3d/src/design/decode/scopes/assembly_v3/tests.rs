@@ -35,6 +35,33 @@ fn versioned_fixture(
     Vec<DesignParameterOwner>,
     StreamTypes<'static>,
 ) {
+    named_fixture(
+        version,
+        reference_count,
+        typed,
+        expanded,
+        identity,
+        first_owner,
+        "Assemble",
+    )
+}
+
+/// The `versioned_fixture` scope storing family name `name`.
+fn named_fixture(
+    version: u32,
+    reference_count: u32,
+    typed: bool,
+    expanded: bool,
+    identity: bool,
+    first_owner: u32,
+    name: &str,
+) -> (
+    Vec<u8>,
+    DesignParameterScope,
+    Vec<DesignParameterOwner>,
+    StreamTypes<'static>,
+) {
+    let extended = version >= 4;
     let mut bytes = Vec::new();
     indexed_header(&mut bytes, if version == 5 { *b"332" } else { *b"499" }, 30);
     bytes.extend([0; 9]);
@@ -45,10 +72,12 @@ fn versioned_fixture(
     bytes.extend([1, 0, 0]);
     if version == 5 {
         bytes.extend([0; 9]);
+    } else if version == 4 {
+        bytes.extend([0; 8]);
     }
     for (ordinal, index) in [10, 20].into_iter().enumerate() {
         reference(&mut bytes, index, typed);
-        if version == 5 {
+        if extended {
             bytes.extend([0; 6]);
         }
         let omitted = identity && ordinal == 0;
@@ -73,7 +102,7 @@ fn versioned_fixture(
                 bytes.extend(value.to_le_bytes());
             }
         }
-        if version == 5 {
+        if extended {
             bytes.extend(crate::bytes::lp_utf16_bytes(OTHER_GUID).unwrap());
         }
     }
@@ -104,12 +133,12 @@ fn versioned_fixture(
     }
     bytes.extend(0_u32.to_le_bytes());
     let kind_offset = bytes.len() + 4;
-    bytes.extend(crate::bytes::lp_utf16_bytes("Assemble").unwrap());
+    bytes.extend(crate::bytes::lp_utf16_bytes(name).unwrap());
     let feature_ordinal_offset = bytes.len();
     bytes.extend(1_u32.to_le_bytes());
     bytes.extend([0; 15]);
     reference(&mut bytes, 60, typed);
-    if version == 5 {
+    if extended {
         reference(&mut bytes, 63, typed);
     }
     let separator = usize::from(!typed && version == 3);
@@ -121,6 +150,8 @@ fn versioned_fixture(
     reference(&mut bytes, 61, typed);
     if version == 5 {
         bytes.extend([1, 1, 0]);
+    } else if version == 4 {
+        bytes.extend([1, 0, 0]);
     } else {
         bytes.extend([0, 0]);
     }
@@ -152,7 +183,10 @@ fn versioned_fixture(
             draft.feature_ordinal_offset = u64_from_index(feature_ordinal_offset);
         })
         .unwrap();
-    let owners = (0..if version == 5 { 4 } else { 12 })
+    if name != "Assemble" {
+        scope.source_kind = Some(name.to_owned());
+    }
+    let owners = (0..if extended { 4 } else { 12 })
         .map(|ordinal| {
             let index = 100 + 3 * ordinal;
             let evaluated_value = if ordinal == first_owner {
@@ -191,7 +225,11 @@ fn versioned_fixture(
         29,
         (
             "7F5A0426-1D2A-4DC4-9F06-58631F69D2F5",
-            if version == 5 { 6 } else { 4 },
+            match version {
+                5 => 6,
+                4 => 5,
+                _ => 4,
+            },
         ),
     );
     types.insert(30, (TYPE_GUID, version));
@@ -672,4 +710,97 @@ fn version_five_locator_wrong_word_and_span_keep_partial_alignment() {
             1
         );
     }
+}
+
+#[test]
+fn version_four_grammar_reads_the_compact_extended_prologue_and_tail_marker() {
+    for name in ["Assemble", "Zusammenfügen"] {
+        for count in [4, 14, 22] {
+            let (bytes, scope, owners, types) =
+                named_fixture(4, count, false, false, false, 0, name);
+            let units = u64_from_index(name.encode_utf16().count());
+            assert_eq!(
+                scope.frame_length(),
+                374 + (u64::from(count) + 12) * 11 + 256 + 2 * units - 16
+            );
+            let grammar = parse(&bytes, &scope, &types).expect("version-4 grammar");
+            assert_eq!(grammar.owners, [100, 109, 103, 106]);
+            assert_eq!(grammar.tail_state, [0, 0]);
+            assert_eq!(grammar.joint, 29);
+            let decoded = alignment(
+                &bytes,
+                &IndexedRecordOffsets::build(&bytes),
+                &scope,
+                &owners,
+                &types,
+            )
+            .unwrap()
+            .expect("version-4 alignment");
+            assert!(valid_alignment(&scope, &decoded, &types, &owners));
+            assert_eq!(decoded.offset(), [2.0, -3.0, 4.0]);
+        }
+    }
+}
+
+#[test]
+fn version_four_joint_with_a_zero_tail_projects_as_assumed_active() {
+    let (mut bytes, mut scope, owners, mut types) = versioned_fixture(4, 7, false, false, false, 0);
+    append_locator_paths(&mut bytes, &mut types, Some((false, 2)));
+    let decoded = alignment(
+        &bytes,
+        &IndexedRecordOffsets::build(&bytes),
+        &scope,
+        &owners,
+        &types,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(matches!(
+        decoded.form,
+        Some(DesignAssemblyAlignmentForm::Qualified(_))
+    ));
+    if let DesignScopePayloadMut::Assemble(slot) = scope.payload_mut() {
+        *slot = Some(decoded);
+    }
+    let projected = crate::design::assembly::project_assembly_joints(
+        &[scope],
+        &[],
+        &crate::design::components::ComponentInserts::default(),
+        &[],
+    );
+    assert_eq!(projected.joints.len(), 1);
+    assert!(!projected.joints[0].suppressed);
+    let [activation] = projected.losses.as_slice() else {
+        panic!("one activation loss");
+    };
+    assert_eq!(
+        activation.code,
+        crate::loss::F3dLossCode::AssemblyJointActivationAssumed.kind()
+    );
+    assert!(activation.message.starts_with("1 projected"));
+}
+
+#[test]
+fn version_four_grammar_refuses_other_versions_markers_and_names() {
+    let (bytes, scope, _, mut types) =
+        named_fixture(4, 14, false, false, false, 0, "Zusammenfügen");
+    for version in [3, 5, 6] {
+        types.insert(30, (TYPE_GUID, version));
+        assert!(parse(&bytes, &scope, &types).is_none(), "{version}");
+    }
+    types.insert(30, (TYPE_GUID, 4));
+    types.insert(29, ("7F5A0426-1D2A-4DC4-9F06-58631F69D2F5", 6));
+    assert!(parse(&bytes, &scope, &types).is_none());
+    types.insert(29, ("7F5A0426-1D2A-4DC4-9F06-58631F69D2F5", 5));
+    let end = usize::try_from(scope.paired_byte_offset()).unwrap();
+    let mut marker = bytes.clone();
+    marker[end - 16] = 0;
+    assert!(parse(&marker, &scope, &types).is_none());
+    let mut renamed = scope.clone();
+    renamed.source_kind = Some("Zusammenfugen".to_owned());
+    assert!(parse(&bytes, &renamed, &types).is_none());
+    let (five_bytes, five_scope, _, mut five_types) =
+        versioned_fixture(5, 14, false, false, false, 0);
+    five_types.insert(30, (TYPE_GUID, 4));
+    assert!(parse(&five_bytes, &five_scope, &five_types).is_none());
 }

@@ -291,9 +291,11 @@ pub(super) fn merge_member_layers(
                 member_path,
             )
             .with_instance(instance);
-        if let Err(cadmpeg_core::dialect::DialectLayerError::Duplicate(rejected)) =
-            target.insert(matched)
-        {
+        if let Err(error) = target.insert(matched) {
+            let rejected = match &error {
+                cadmpeg_core::dialect::DialectLayerError::Duplicate(rejected)
+                | cadmpeg_core::dialect::DialectLayerError::MissingInstance(rejected) => rejected,
+            };
             let format = rejected.format();
             let collision_instance = rejected.instance().unwrap_or("unidentified");
             super::push_loss(&mut losses, F3dLossCode::DialectLayerCollision, format_args!(

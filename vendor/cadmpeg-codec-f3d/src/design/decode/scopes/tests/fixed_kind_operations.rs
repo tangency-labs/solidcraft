@@ -6,7 +6,10 @@ use crate::design::decode::scopes::draft::exact_draft_operation_with_owners;
 use crate::design::decode::scopes::fixed_parameters::{
     exact_fixed_chamfer_parameters, exact_fixed_fillet_parameters,
 };
-use crate::design::decode::scopes::path_feature::exact_path_feature_construction;
+use crate::design::decode::scopes::parameter_scope::parameter_scope_payload_length;
+use crate::design::decode::scopes::path_feature::{
+    exact_path_feature_construction, marker_one_revolve_assumed_length,
+};
 use crate::records::feature::direct_face::DesignDraftOperation;
 use crate::records::feature::extrude::DesignExtrudeOperation;
 use crate::records::feature::fixed_parameters::{
@@ -80,6 +83,7 @@ fn fixed_kind_edge_and_revolve_operations(
         angle_offset: u64_from_index(draft_start + 40),
         opposite_angle_record_index: 176,
         opposite_angle_offset: u64_from_index(draft_start + 155),
+        opposite_angle: None,
         flags: None,
     });
     assert_eq!(
@@ -786,25 +790,58 @@ fn fixed_kind_edge_and_revolve_operations(
         ))
     );
 
-    let class403_start = bytes.len();
-    let mut class403_revolve = vec![0; 387];
-    class403_revolve[21..25].copy_from_slice(&2u32.to_le_bytes());
-    class403_revolve[25..29].copy_from_slice(&2u32.to_le_bytes());
-    class403_revolve[29..31].copy_from_slice(&[0, 1]);
-    class403_revolve[34] = 1;
-    class403_revolve[35..39].copy_from_slice(&indexed_angle_record_index.to_le_bytes());
-    let mut class403_guid = Vec::new();
-    lp_utf16(&mut class403_guid, "00000000-0000-0000-0000-000000000000");
-    class403_revolve[107..183].copy_from_slice(&class403_guid);
-    bytes.extend_from_slice(&class403_revolve);
-    let mut class403_scope = revolve_scope.clone();
-    class403_scope.class_tag =
+    bytes[indexed_revolve_start + 11] = 1;
+    assert!(!matches!(
+        exact_path_feature_construction(
+            &bytes,
+            &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+            &indexed_revolve_scope,
+            std::slice::from_ref(&indexed_angle),
+        ),
+        Some(DesignPathFeatureConstruction::Revolve(_))
+    ));
+    bytes[indexed_revolve_start + 11] = 0;
+
+    for (class_tag, paired_class_tag) in [("304", "258"), ("408", "259")] {
+        let mut scope = indexed_revolve_scope.clone();
+        scope.class_tag =
+            crate::records::references::DesignClassTag::try_from(class_tag.to_owned()).unwrap();
+        scope.paired_class_tag =
+            crate::records::references::DesignClassTag::try_from(paired_class_tag.to_owned())
+                .unwrap();
+        assert_eq!(
+            exact_path_feature_construction(
+                &bytes,
+                &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+                &scope,
+                std::slice::from_ref(&indexed_angle),
+            ),
+            indexed_revolve_construction
+        );
+    }
+
+    let direction_pair_start = bytes.len();
+    let mut direction_pair_revolve = vec![0; 387];
+    direction_pair_revolve[21..25].copy_from_slice(&2u32.to_le_bytes());
+    direction_pair_revolve[25..29].copy_from_slice(&2u32.to_le_bytes());
+    direction_pair_revolve[29..31].copy_from_slice(&[0, 1]);
+    direction_pair_revolve[34] = 1;
+    direction_pair_revolve[35..39].copy_from_slice(&indexed_angle_record_index.to_le_bytes());
+    let mut direction_pair_guid = Vec::new();
+    lp_utf16(
+        &mut direction_pair_guid,
+        "00000000-0000-0000-0000-000000000000",
+    );
+    direction_pair_revolve[107..183].copy_from_slice(&direction_pair_guid);
+    bytes.extend_from_slice(&direction_pair_revolve);
+    let mut direction_pair_scope = revolve_scope.clone();
+    direction_pair_scope.class_tag =
         crate::records::references::DesignClassTag::try_from("403".to_owned()).unwrap();
-    class403_scope.paired_class_tag =
+    direction_pair_scope.paired_class_tag =
         crate::records::references::DesignClassTag::try_from("258".to_owned()).unwrap();
-    class403_scope
+    direction_pair_scope
         .try_edit(|draft| {
-            draft.byte_offset = u64_from_index(class403_start);
+            draft.byte_offset = u64_from_index(direction_pair_start);
             draft.frame_length = 387;
             draft.reference_members = crate::records::identity::ReferenceRun::unlocated(vec![
                 200,
@@ -822,31 +859,34 @@ fn fixed_kind_edge_and_revolve_operations(
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let mut class403_angle = indexed_angle.clone();
+    let mut direction_pair_angle = indexed_angle.clone();
     {
-        let mut wire =
-            crate::records::parameters::DesignParameterOwnerWire::from(class403_angle.clone());
-        wire.scope_record_index = class403_scope.record_index;
-        wire.byte_offset = u64_from_index(class403_start);
-        wire.evaluated_value_offset = u64_from_index(class403_start + 40);
-        class403_angle = crate::records::parameters::DesignParameterOwner::try_from(wire).unwrap();
+        let mut wire = crate::records::parameters::DesignParameterOwnerWire::from(
+            direction_pair_angle.clone(),
+        );
+        wire.scope_record_index = direction_pair_scope.record_index;
+        wire.byte_offset = u64_from_index(direction_pair_start);
+        wire.evaluated_value_offset = u64_from_index(direction_pair_start + 40);
+        direction_pair_angle =
+            crate::records::parameters::DesignParameterOwner::try_from(wire).unwrap();
     }
+    let direction_pair_construction = exact_path_feature_construction(
+        &bytes,
+        &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+        &direction_pair_scope,
+        std::slice::from_ref(&direction_pair_angle),
+    );
     assert_eq!(
-        exact_path_feature_construction(
-            &bytes,
-            &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
-            &class403_scope,
-            std::slice::from_ref(&class403_angle),
-        ),
+        direction_pair_construction,
         Some(DesignPathFeatureConstruction::Revolve(
             crate::records::feature::path_features::DesignRevolveConstruction {
                 operation: DesignExtrudeOperation::Cut,
-                operation_offset: u64_from_index(class403_start + 21),
+                operation_offset: u64_from_index(direction_pair_start + 21),
                 travel: crate::records::feature::path_features::DesignRevolveTravel::Angle(
                     cadmpeg_ir::scalar::PositiveAngle::new(std::f64::consts::TAU).unwrap()
                 ),
                 angle_record_index: indexed_angle_record_index,
-                angle_offset: u64_from_index(class403_start + 40),
+                angle_offset: u64_from_index(direction_pair_start + 40),
                 second_side: None,
                 opposite_angle: None,
                 solid: None,
@@ -854,38 +894,68 @@ fn fixed_kind_edge_and_revolve_operations(
             }
         ))
     );
-    bytes[class403_start + 34] = 0;
+    for offset in [11, 32] {
+        bytes[direction_pair_start + offset] = 1;
+        assert!(!matches!(
+            exact_path_feature_construction(
+                &bytes,
+                &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+                &direction_pair_scope,
+                std::slice::from_ref(&direction_pair_angle),
+            ),
+            Some(DesignPathFeatureConstruction::Revolve(_))
+        ));
+        bytes[direction_pair_start + offset] = 0;
+    }
+    for (class_tag, paired_class_tag) in [("304", "258"), ("408", "259")] {
+        let mut scope = direction_pair_scope.clone();
+        scope.class_tag =
+            crate::records::references::DesignClassTag::try_from(class_tag.to_owned()).unwrap();
+        scope.paired_class_tag =
+            crate::records::references::DesignClassTag::try_from(paired_class_tag.to_owned())
+                .unwrap();
+        assert_eq!(
+            exact_path_feature_construction(
+                &bytes,
+                &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+                &scope,
+                std::slice::from_ref(&direction_pair_angle),
+            ),
+            direction_pair_construction
+        );
+    }
+    bytes[direction_pair_start + 34] = 0;
     assert_eq!(
         exact_path_feature_construction(
             &bytes,
             &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
-            &class403_scope,
-            std::slice::from_ref(&class403_angle),
+            &direction_pair_scope,
+            std::slice::from_ref(&direction_pair_angle),
         ),
         None
     );
-    bytes[class403_start + 34] = 1;
-    let mut localized_class403_scope = class403_scope.clone();
-    localized_class403_scope
+    bytes[direction_pair_start + 34] = 1;
+    let mut localized_direction_pair_scope = direction_pair_scope.clone();
+    localized_direction_pair_scope
         .try_edit(|draft| {
             draft.frame_length = 393;
             draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
             draft.layout_fixture_tail();
         })
         .unwrap();
-    localized_class403_scope.source_kind = Some("R\u{e9}volution".to_owned());
-    let class403_construction = |scope| {
+    localized_direction_pair_scope.source_kind = Some("R\u{e9}volution".to_owned());
+    let direction_pair_construction = |scope| {
         exact_path_feature_construction(
             &bytes,
             &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
             scope,
-            std::slice::from_ref(&class403_angle),
+            std::slice::from_ref(&direction_pair_angle),
         )
     };
-    assert!(class403_construction(&class403_scope).is_some());
+    assert!(direction_pair_construction(&direction_pair_scope).is_some());
     assert_eq!(
-        class403_construction(&localized_class403_scope),
-        class403_construction(&class403_scope)
+        direction_pair_construction(&localized_direction_pair_scope),
+        direction_pair_construction(&direction_pair_scope)
     );
 
     {
@@ -929,7 +999,7 @@ fn fixed_kind_edge_and_revolve_operations(
                 bytes,
                 &crate::design::test_support::indexed_record_offsets_for_test(bytes),
                 &referenced_scope,
-                std::slice::from_ref(&class403_angle),
+                std::slice::from_ref(&direction_pair_angle),
             )
         };
         let expected = Some(DesignPathFeatureConstruction::Revolve(
@@ -940,7 +1010,7 @@ fn fixed_kind_edge_and_revolve_operations(
                     cadmpeg_ir::scalar::PositiveAngle::new(std::f64::consts::TAU).unwrap(),
                 ),
                 angle_record_index: indexed_angle_record_index,
-                angle_offset: u64_from_index(class403_start + 40),
+                angle_offset: u64_from_index(direction_pair_start + 40),
                 second_side: None,
                 opposite_angle: None,
                 solid: Some(true),
@@ -969,7 +1039,7 @@ fn fixed_kind_edge_and_revolve_operations(
                 &bytes,
                 &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
                 scope,
-                std::slice::from_ref(&class403_angle),
+                std::slice::from_ref(&direction_pair_angle),
             )
         };
         assert_eq!(localized(&localized_scope), None);
@@ -1025,12 +1095,11 @@ fn fixed_kind_edge_and_revolve_operations(
                 draft.layout_fixture_tail();
             })
             .unwrap();
-        // The owners reuse the class-403 owner frame; the second sits 200
-        // bytes later.
-        let along_offset = class403_angle.evaluated_value_offset();
+        let along_offset = direction_pair_angle.evaluated_value_offset();
         let owner = |record_index, local_ordinal, value: f64, shift: u64| {
-            let mut wire =
-                crate::records::parameters::DesignParameterOwnerWire::from(class403_angle.clone());
+            let mut wire = crate::records::parameters::DesignParameterOwnerWire::from(
+                direction_pair_angle.clone(),
+            );
             wire.record_index = record_index;
             wire.parameter_record_index = record_index + 1;
             wire.companion_record_index = record_index + 2;
@@ -1101,7 +1170,7 @@ fn fixed_kind_edge_and_revolve_operations(
 
     let legacy_revolve_start = bytes.len();
     let legacy_angle_record_index = 1_800u32;
-    let mut legacy_revolve = vec![0; 359];
+    let mut legacy_revolve = vec![0; 360];
     legacy_revolve[20] = 1;
     legacy_revolve[25..29].copy_from_slice(&4u32.to_le_bytes());
     legacy_revolve[29..33].copy_from_slice(&2u32.to_le_bytes());
@@ -1181,6 +1250,62 @@ fn fixed_kind_edge_and_revolve_operations(
             }
         ))
     );
+    assert_eq!(
+        marker_one_revolve_assumed_length(&bytes, &legacy_revolve_scope),
+        None
+    );
+    let mut undocumented_length_scope = legacy_revolve_scope.clone();
+    undocumented_length_scope
+        .try_edit(|draft| {
+            draft.frame_length = 360;
+            draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    assert!(matches!(
+        exact_path_feature_construction(
+            &bytes,
+            &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+            &undocumented_length_scope,
+            std::slice::from_ref(&legacy_angle),
+        ),
+        Some(DesignPathFeatureConstruction::Revolve(_))
+    ));
+    let assumed_length = marker_one_revolve_assumed_length(&bytes, &undocumented_length_scope);
+    assert!(assumed_length.is_some());
+    assert_eq!(
+        assumed_length,
+        parameter_scope_payload_length(&undocumented_length_scope)
+    );
+
+    let referenced_frame_length = legacy_revolve_scope.frame_length()
+        - parameter_scope_payload_length(&legacy_revolve_scope).unwrap()
+        + 351;
+    let mut referenced_length_scope = legacy_revolve_scope.clone();
+    referenced_length_scope
+        .try_edit(|draft| {
+            draft.frame_length = referenced_frame_length;
+            draft.paired_byte_offset = draft.byte_offset + draft.frame_length;
+            draft.layout_fixture_tail();
+        })
+        .unwrap();
+    bytes.resize(
+        legacy_revolve_start + usize::try_from(referenced_frame_length).unwrap(),
+        0,
+    );
+    assert_eq!(
+        parameter_scope_payload_length(&referenced_length_scope),
+        Some(351)
+    );
+    assert!(!matches!(
+        exact_path_feature_construction(
+            &bytes,
+            &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
+            &referenced_length_scope,
+            std::slice::from_ref(&legacy_angle),
+        ),
+        Some(DesignPathFeatureConstruction::Revolve(_))
+    ));
     legacy_revolve_scope.class_tag =
         crate::records::references::DesignClassTag::try_from("323".to_owned()).unwrap();
     legacy_revolve_scope.paired_class_tag =
@@ -1300,11 +1425,12 @@ fn fixed_kind_edge_and_revolve_operations(
             &[],
             &[],
             (&[], &[]),
+            &[],
         ),
         None
     );
 
-    indexed_revolve_scope.id = "stream:indexed-revolve".into();
+    indexed_revolve_scope.id = "f3d:Design/BulkStream.dat:indexed-revolve".into();
     {
         let value = indexed_revolve_construction;
         indexed_revolve_scope
@@ -1315,14 +1441,14 @@ fn fixed_kind_edge_and_revolve_operations(
             .unwrap();
     }
     let mut indexed_profile = thicken_group.clone();
-    indexed_profile.id = "stream:indexed-profile".into();
+    indexed_profile.id = "f3d:Design/BulkStream.dat:indexed-profile".into();
     indexed_profile.scope_record_index = indexed_revolve_scope.record_index;
     indexed_profile.operand_role =
         crate::records::topology::construction::DesignConstructionOperandRole::Other(
             DesignOperandRole::PROFILE,
         );
     let mut indexed_axis = indexed_profile.clone();
-    indexed_axis.id = "stream:indexed-axis".into();
+    indexed_axis.id = "f3d:Design/BulkStream.dat:indexed-axis".into();
     indexed_axis.record_index = 899;
     indexed_axis
         .try_set_members(vec![crate::records::identity::Located {
@@ -1335,7 +1461,7 @@ fn fixed_kind_edge_and_revolve_operations(
             DesignOperandRole::ROLE_0X21,
         );
     let mut indexed_bodies = indexed_profile.clone();
-    indexed_bodies.id = "stream:indexed-bodies".into();
+    indexed_bodies.id = "f3d:Design/BulkStream.dat:indexed-bodies".into();
     indexed_bodies.record_index = 901;
     indexed_bodies.operand_role =
         crate::records::topology::construction::DesignConstructionOperandRole::Other(
@@ -1344,7 +1470,7 @@ fn fixed_kind_edge_and_revolve_operations(
     let mut axis_selection =
         crate::records::topology::entity_selection::DesignEntitySelectionOperand::try_new(
             crate::records::topology::entity_selection::DesignEntitySelectionOperandDraft {
-                id: "stream:indexed-axis-selection".into(),
+                id: "f3d:Design/BulkStream.dat:indexed-axis-selection".into(),
                 scope_record_index: indexed_revolve_scope.record_index,
                 group_record_index: indexed_axis.record_index,
                 group_member_ordinal: 0,
@@ -1362,6 +1488,8 @@ fn fixed_kind_edge_and_revolve_operations(
                 )
                 .unwrap(),
                 context_id_offset: 0,
+                serialization_form:
+                    crate::records::topology::entity_selection::SelectionSerializationForm::Zero,
                 identity_record_index: 903,
                 identity_record_offset: 0,
                 primary_identity: 100,
@@ -1388,7 +1516,7 @@ fn fixed_kind_edge_and_revolve_operations(
         )
         .unwrap(),
 
-        id: "stream:indexed-axis-placement".into(),
+        id: "f3d:Design/BulkStream.dat:indexed-axis-placement".into(),
         scope_record_index: Some(10),
         entity_id: crate::records::identity::DesignEntityId::try_from("Sketch_100".to_owned())
             .expect("valid entity ID"),
@@ -1402,9 +1530,10 @@ fn fixed_kind_edge_and_revolve_operations(
             .unwrap(),
     };
     let axis_curve = SketchCurveIdentity {
-        id: "stream:indexed-axis-curve".into(),
+        id: "f3d:Design/BulkStream.dat:indexed-axis-curve".into(),
         record_index: 905,
         owner_reference: Some(100),
+        geometry_group: None,
         class_tag: crate::records::references::DesignClassTag::try_from("450".to_owned()).unwrap(),
         byte_offset: 0,
         geometry_offset: 0,
@@ -1433,6 +1562,7 @@ fn fixed_kind_edge_and_revolve_operations(
         std::slice::from_ref(&axis_selection),
         &[],
         (&[axis_placement], &[axis_curve]),
+        &[],
     );
     assert!(matches!(
         projected,
@@ -1473,6 +1603,7 @@ fn fixed_kind_edge_and_revolve_operations(
             std::slice::from_ref(&axis_selection),
             &[],
             (&[], &[]),
+            &[],
         )
         .unwrap();
     assert!(matches!(
@@ -1499,34 +1630,83 @@ fn fixed_kind_edge_and_revolve_operations(
     };
     let surface_id =
         cadmpeg_ir::ids::SurfaceId::mint("test:model:surface#53").expect("identity grammar");
+    let mut unknown_feature = feature.clone();
+    crate::design::feature_project::bind_revolve_face_axes(
+        std::slice::from_mut(&mut unknown_feature),
+        std::slice::from_ref(&indexed_revolve_scope),
+        &[indexed_profile.clone(), indexed_axis.clone()],
+        std::slice::from_ref(&axis_selection),
+        &[],
+        (
+            &[cadmpeg_ir::topology::Face {
+                id: cadmpeg_ir::ids::FaceId::mint("f3d:brep:entity#40").expect("identity grammar"),
+                shell: cadmpeg_ir::ids::ShellId::mint("test:model:shell#1")
+                    .expect("identity grammar"),
+                surface: surface_id.clone(),
+                sense: cadmpeg_ir::topology::Sense::Forward,
+                loops: cadmpeg_ir::topology::FaceLoops::unspecified(Vec::new()),
+                name: None,
+                color: None,
+                tolerance: None,
+            }],
+            &[cadmpeg_ir::geometry::Surface {
+                id: surface_id.clone(),
+                geometry: cadmpeg_ir::geometry::SurfaceGeometry::Solved(
+                    SolvedSurfaceGeometry::Plane(
+                        cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+                            Point3::new(4.0, 5.0, 6.0),
+                            Vector3::new(0.0, 0.0, -2.0).unit().unwrap(),
+                            Vector3::new(1.0, 0.0, 0.0),
+                        )
+                        .unwrap(),
+                    ),
+                ),
+                source_object: None,
+            }],
+        ),
+        &[],
+    );
+    assert!(matches!(
+        unknown_feature.evaluation.definition(),
+        FeatureDefinition::Operation(FeatureOperation::Revolve {
+            ref construction,
+            ..
+        }) if construction.axis().is_none()
+    ));
     crate::design::feature_project::bind_revolve_face_axes(
         std::slice::from_mut(&mut feature),
         std::slice::from_ref(&indexed_revolve_scope),
         &[indexed_profile.clone(), indexed_axis.clone()],
         std::slice::from_ref(&axis_selection),
         &[],
-        &[cadmpeg_ir::topology::Face {
-            id: cadmpeg_ir::ids::FaceId::mint("f3d:brep:entity#40").expect("identity grammar"),
-            shell: cadmpeg_ir::ids::ShellId::mint("test:model:shell#1").expect("identity grammar"),
-            surface: surface_id.clone(),
-            sense: cadmpeg_ir::topology::Sense::Forward,
-            loops: cadmpeg_ir::topology::FaceLoops::unspecified(Vec::new()),
-            name: None,
-            color: None,
-            tolerance: None,
-        }],
-        &[cadmpeg_ir::geometry::Surface {
-            id: surface_id,
-            geometry: cadmpeg_ir::geometry::SurfaceGeometry::Solved(SolvedSurfaceGeometry::Plane(
-                cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
-                    Point3::new(4.0, 5.0, 6.0),
-                    Vector3::new(0.0, 0.0, -2.0).unit().unwrap(),
-                    Vector3::new(1.0, 0.0, 0.0),
-                )
-                .unwrap(),
-            )),
-            source_object: None,
-        }],
+        (
+            &[cadmpeg_ir::topology::Face {
+                id: cadmpeg_ir::ids::FaceId::mint("f3d:brep:entity#40").expect("identity grammar"),
+                shell: cadmpeg_ir::ids::ShellId::mint("test:model:shell#1")
+                    .expect("identity grammar"),
+                surface: surface_id.clone(),
+                sense: cadmpeg_ir::topology::Sense::Forward,
+                loops: cadmpeg_ir::topology::FaceLoops::unspecified(Vec::new()),
+                name: None,
+                color: None,
+                tolerance: None,
+            }],
+            &[cadmpeg_ir::geometry::Surface {
+                id: surface_id.clone(),
+                geometry: cadmpeg_ir::geometry::SurfaceGeometry::Solved(
+                    SolvedSurfaceGeometry::Plane(
+                        cadmpeg_ir::geometry::analytic::PlaneSurface::try_new(
+                            Point3::new(4.0, 5.0, 6.0),
+                            Vector3::new(0.0, 0.0, -2.0).unit().unwrap(),
+                            Vector3::new(1.0, 0.0, 0.0),
+                        )
+                        .unwrap(),
+                    ),
+                ),
+                source_object: None,
+            }],
+        ),
+        &crate::test_support::origin_types::origin_design_types("f3d:Design/MetaStream.dat", 500),
     );
     assert!(matches!(
         feature.evaluation.definition(),
@@ -1540,7 +1720,7 @@ fn fixed_kind_edge_and_revolve_operations(
 
     let face_axis_operand =
         DesignFaceOperand::try_new(crate::records::topology::face::DesignFaceOperandDraft {
-            id: "stream:indexed-face-axis".into(),
+            id: "f3d:Design/BulkStream.dat:indexed-face-axis".into(),
             scope_record_index: indexed_revolve_scope.record_index,
             scope_reference_ordinal: 2,
             group: Some(crate::records::topology::body_recipe::DesignOperandGroup {
@@ -1558,7 +1738,7 @@ fn fixed_kind_edge_and_revolve_operations(
             .unwrap(),
             recipe_record_index: 903,
             recipe_record_byte_offset: 32,
-            recipe_id: "stream:indexed-face-axis-recipe".into(),
+            recipe_id: "f3d:Design/BulkStream.dat:indexed-face-axis-recipe".into(),
             recipe_prefix_offset: 43,
             recipe_prefix_bytes: Vec::new(),
             recipe_references: Vec::new(),
@@ -1593,6 +1773,7 @@ fn fixed_kind_edge_and_revolve_operations(
         &[],
         std::slice::from_ref(&face_axis_operand),
         (&[], &[]),
+        &[],
     )
     .expect("face-recipe axis retains a neutral Revolve before geometry binding");
     let mut face_axis_feature = cadmpeg_ir::features::Feature {
@@ -1671,8 +1852,8 @@ fn fixed_kind_edge_and_revolve_operations(
         &[indexed_profile.clone(), indexed_axis.clone()],
         &[],
         std::slice::from_ref(&face_axis_operand),
-        &axis_faces,
-        &axis_surfaces,
+        (&axis_faces, &axis_surfaces),
+        &[],
     );
     assert!(matches!(
         face_axis_feature.evaluation.definition(),
@@ -1707,8 +1888,8 @@ fn fixed_kind_edge_and_revolve_operations(
         &[indexed_profile, indexed_axis],
         &[],
         std::slice::from_ref(&face_axis_operand),
-        &axis_faces,
-        &axis_surfaces,
+        (&axis_faces, &axis_surfaces),
+        &[],
     );
     assert!(matches!(
         conflicting_face_axis_feature.evaluation.definition(),

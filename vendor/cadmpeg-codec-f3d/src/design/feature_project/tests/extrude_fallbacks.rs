@@ -38,6 +38,7 @@ pub(super) fn scope_with_extent(extent: DesignExtrudeExtent) -> DesignParameterS
                     side_extent_discriminators: [1, 0],
                     side_extent_discriminator_offsets: [177, 190],
                     first_side_target_ordinal: None,
+                    distance_tail: None,
                     extent,
                     direction_face_extend_offsets: [132, 136],
                     direction_reversed: false,
@@ -51,6 +52,7 @@ pub(super) fn scope_with_extent(extent: DesignExtrudeExtent) -> DesignParameterS
             })),
             feature_ordinal: std::num::NonZeroU32::MIN,
             feature_ordinal_offset: 0,
+            label: None,
             history_state_id: None,
             previous_history_state_id: None,
             previous_history_state_id_offset: None,
@@ -62,6 +64,7 @@ pub(super) fn scope_with_extent(extent: DesignExtrudeExtent) -> DesignParameterS
             )
             .unwrap(),
             unclosed_construction_operand_groups: Vec::new(),
+            deleted_members: None,
             paired_class_tag: "261".to_owned().try_into().unwrap(),
             paired_byte_offset: 300,
         }

@@ -580,6 +580,7 @@ fn recipe_reference(candidate_edges: &[i64]) -> DesignRecipeReference {
             .collect(),
         alternate_selector_faces: Vec::new(),
         alternate_selector_edges: Vec::new(),
+        operand_offset: None,
     }
 }
 

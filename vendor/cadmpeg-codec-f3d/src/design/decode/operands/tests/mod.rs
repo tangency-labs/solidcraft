@@ -19,6 +19,7 @@ mod work_point;
 
 mod body_recipes;
 mod body_target_groups;
+mod loft_point_groups;
 
 mod construction_paths;
 

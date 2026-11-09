@@ -713,6 +713,135 @@ pub(crate) fn stream_types_by_entity<'a>(
     by_entity
 }
 
+const ORIGIN_AXIS_TYPE_GUID: &str = "19031004-3AB6-4D13-ABBF-C51EE214688D";
+const ORIGIN_PLANE_TYPE_GUID: &str = "8D424E29-DE23-4B1F-A3AD-84C52A497D1A";
+
+/// The Design Geometry origin axis or plane that a stored identity names.
+///
+/// One origin stores six consecutive entities: three of the axis type, then
+/// three of the plane type. The returned ordinal selects X, Y, Z or XY, XZ, YZ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OriginEntity {
+    Axis(usize),
+    Plane(usize),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OriginRole {
+    Axis,
+    Plane,
+    Other,
+    Conflict,
+}
+
+/// What the Design type table states about a stored identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OriginClassification {
+    /// The identity is a member of one complete origin run.
+    Origin(OriginEntity),
+    /// The table rules out every origin run that could hold the identity.
+    NotOrigin,
+    /// The table has no complete origin run, or an incomplete run can still
+    /// hold the identity. A selection with this class stays unresolved.
+    Unknown,
+}
+
+pub(crate) fn classify_origin_entity(
+    types: &[SegmentType],
+    stream: &str,
+    identity: u64,
+) -> OriginClassification {
+    let Some(entry) = stream
+        .strip_prefix("f3d:")
+        .and_then(crate::ids::decode_identity_key_component)
+    else {
+        return OriginClassification::Unknown;
+    };
+    let roles = stream_origin_roles(types, &entry);
+    let member = |first: u64, ordinal: u64| {
+        let expected = if ordinal < 3 {
+            OriginRole::Axis
+        } else {
+            OriginRole::Plane
+        };
+        first
+            .checked_add(ordinal)
+            .map(|entity| (roles.get(&entity).copied(), expected))
+    };
+    let is_complete = |first: u64| {
+        (0..6).all(|ordinal| {
+            member(first, ordinal).is_some_and(|(role, expected)| role == Some(expected))
+        })
+    };
+    // A partial run needs one listed member, and no listed member can contradict it.
+    let is_partial = |first: u64| {
+        let compatible = (0..6).all(|ordinal| {
+            member(first, ordinal).is_some_and(|(role, expected)| {
+                role.is_none_or(|role| role == expected || role == OriginRole::Conflict)
+            })
+        });
+        compatible && (0..6).any(|ordinal| matches!(member(first, ordinal), Some((Some(_), _))))
+    };
+    let candidate_runs = || {
+        (0..6_u64).filter_map(|position| {
+            identity
+                .checked_sub(position)
+                .map(|first| (position, first))
+        })
+    };
+    if let Some((position, _)) = candidate_runs().find(|&(_, first)| is_complete(first)) {
+        let Ok(ordinal) = usize::try_from(position) else {
+            return OriginClassification::Unknown;
+        };
+        return OriginClassification::Origin(if ordinal < 3 {
+            OriginEntity::Axis(ordinal)
+        } else {
+            OriginEntity::Plane(ordinal - 3)
+        });
+    }
+    if roles.get(&identity) == Some(&OriginRole::Conflict)
+        || candidate_runs().any(|(_, first)| is_partial(first))
+    {
+        return OriginClassification::Unknown;
+    }
+    if roles.get(&identity) == Some(&OriginRole::Other)
+        || roles.keys().any(|&first| is_complete(first))
+    {
+        return OriginClassification::NotOrigin;
+    }
+    OriginClassification::Unknown
+}
+
+/// Role of each listed entity. Registrations that disagree on the origin role
+/// are a conflict, so row order cannot select a role.
+fn stream_origin_roles(types: &[SegmentType], bulk_entry_name: &str) -> HashMap<u64, OriginRole> {
+    let mut roles = HashMap::new();
+    for design_type in types.iter().filter(|design_type| {
+        native_stream(design_type.id())
+            .is_some_and(|scope| meta_scope_matches_bulk(scope, bulk_entry_name))
+    }) {
+        let guid = design_type.type_guid.as_str();
+        let role = if guid.eq_ignore_ascii_case(ORIGIN_AXIS_TYPE_GUID) {
+            OriginRole::Axis
+        } else if guid.eq_ignore_ascii_case(ORIGIN_PLANE_TYPE_GUID) {
+            OriginRole::Plane
+        } else {
+            OriginRole::Other
+        };
+        for &entity in design_type.entities.values() {
+            roles
+                .entry(entity)
+                .and_modify(|listed| {
+                    if *listed != role {
+                        *listed = OriginRole::Conflict;
+                    }
+                })
+                .or_insert(role);
+        }
+    }
+    roles
+}
+
 /// Complete type-table row keyed by the segment-local dynamic class tag.
 pub(super) fn stream_types_by_class_tag<'a>(
     types: &'a [SegmentType],

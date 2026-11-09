@@ -6,7 +6,7 @@ use cadmpeg_ir::native::bytes::NativeBytes;
 use super::{
     DesignRecipeReference, DesignVertexRecipe, DesignWorkPlaneConstruction, DesignWorkPointInput,
     DesignWorkPointInputCarrier, DesignWorkPointPlaneSelection,
-    DesignWorkPointSketchPointSelection,
+    DesignWorkPointSketchPointIdentityForm, DesignWorkPointSketchPointSelection,
 };
 use serde::{Serialize, Serializer};
 
@@ -129,6 +129,8 @@ struct SketchPointSelectionRef<'a> {
     context_id_offset: u64,
     identity_record_index: u32,
     identity_record_offset: u64,
+    #[serde(skip_serializing_if = "crate::history_records::is_default")]
+    identity_form: DesignWorkPointSketchPointIdentityForm,
     sketch_record_index: u32,
     sketch_record_index_offset: u64,
     point_persistent_id: u64,
@@ -148,6 +150,7 @@ impl<'a> SketchPointSelectionRef<'a> {
             context_id_offset: selection.context_id_offset,
             identity_record_index: record_index + 3,
             identity_record_offset: selection.identity_record_offset,
+            identity_form: selection.identity_form,
             sketch_record_index: selection.sketch_record_index,
             sketch_record_index_offset: selection.sketch_record_index_offset(),
             point_persistent_id: selection.point_persistent_id,

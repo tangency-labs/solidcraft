@@ -53,6 +53,7 @@ pub(super) struct ProductPrereqs {
     /// binding.
     pub(super) design_parameter_scopes: Vec<DesignParameterScope>,
     pub(super) design_parameter_scope_losses: Vec<cadmpeg_ir::report::loss::LossNote>,
+    pub(super) design_work_plane_inferred_axes: std::collections::HashMap<String, (u64, [u8; 2])>,
     /// Freedoms and limits of the joints whose motion records carry them.
     pub(super) design_joint_motions: Vec<crate::records::feature::joint_motion::DesignJointMotion>,
     /// Authored feature order, which tells top-level `Component Insert`
@@ -113,6 +114,7 @@ impl ProductPrereqs {
             design_component_occurrence_losses: _,
             design_parameter_scopes,
             design_parameter_scope_losses: _,
+            design_work_plane_inferred_axes: _,
             design_joint_motions,
             design_feature_timelines,
             design_component_naming_spaces,
@@ -196,6 +198,7 @@ pub(super) fn decode(
     let crate::design::decode::scopes::parameter_scope::DecodedParameterScopes {
         scopes: mut design_parameter_scopes,
         losses: design_parameter_scope_losses,
+        work_plane_inferred_axes: design_work_plane_inferred_axes,
     } = crate::design::decode::scopes::parameter_scope::decode_parameter_scopes(
         ctx,
         scan,
@@ -254,6 +257,7 @@ pub(super) fn decode(
         design_component_occurrence_losses,
         design_parameter_scopes,
         design_parameter_scope_losses,
+        design_work_plane_inferred_axes,
         design_joint_motions,
         design_feature_timelines,
         design_component_naming_spaces,

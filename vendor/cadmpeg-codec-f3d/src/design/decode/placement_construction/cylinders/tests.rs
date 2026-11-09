@@ -106,12 +106,18 @@ fn named_cylinder_reports_unbound_placement() {
     flipped.fields.axis_flipped.as_mut().unwrap().value = 1;
     let mut other_version = placement.clone();
     other_version.type_version = 8;
+    let mut inferred_x = placement.clone();
+    inferred_x.fields.inferred_x_axis.value = 1;
+    let mut inferred_z = placement.clone();
+    inferred_z.fields.inferred_z_axis.value = 1;
     for placements in [
         vec![],
         vec![foreign],
         vec![placement.clone(), placement.clone()],
         vec![flipped],
         vec![other_version],
+        vec![inferred_x],
+        vec![inferred_z],
     ] {
         let mut scope = scope();
         let losses = super::bind(std::slice::from_mut(&mut scope), &placements);

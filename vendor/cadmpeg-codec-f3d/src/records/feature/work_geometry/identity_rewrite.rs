@@ -6,7 +6,7 @@ use super::{
     DesignWorkAxisConstruction, DesignWorkAxisSource, DesignWorkPlaneConstruction,
     DesignWorkPointConstruction, DesignWorkPointInput, DesignWorkPointInputCarrier,
     DesignWorkPointPlaneSelection, DesignWorkPointRule, DesignWorkPointRuleForm,
-    DesignWorkPointSketchPointSelection,
+    DesignWorkPointSketchPointIdentityForm, DesignWorkPointSketchPointSelection,
 };
 
 rewrite_native_record!(DesignEdgeTreatmentVertexOperand, []; {id, scope_record_index, scope_reference_ordinal, group_record_index, group_member_ordinal, recipe});
@@ -37,7 +37,8 @@ rewrite_native_enum!(DesignWorkPointRuleForm, []; {
     DistanceOnEdge {input},
     Native {reference_type, inputs},
 }; native work_point_form_fields);
-rewrite_native_record!(DesignWorkPointSketchPointSelection, []; {class_tag, asset_id, asset_id_offset, context_id, context_id_offset, identity_record_offset, sketch_record_index, point_persistent_id, point_native_id});
+rewrite_native_scalar!(DesignWorkPointSketchPointIdentityForm);
+rewrite_native_record!(DesignWorkPointSketchPointSelection, []; {class_tag, asset_id, asset_id_offset, context_id, context_id_offset, identity_record_offset, identity_form, sketch_record_index, point_persistent_id, point_native_id});
 
 fn work_point_form_fields<F: FnMut(&str) -> Result<String, cadmpeg_core::CodecError>>(
     ctx: &cadmpeg_core::decode::DecodeContext<'_>,

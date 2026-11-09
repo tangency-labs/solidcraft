@@ -9,6 +9,7 @@ use crate::records::mesh::{DesignOccurrenceKey, DesignRelaxedGuidText};
 use crate::records::recipes::ConstructionRecipeKind;
 use crate::records::references::DesignClassTag;
 use crate::records::sketch_placement::SketchPlacementMatrix;
+use crate::records::topology::entity_selection::SelectionSerializationForm;
 use cadmpeg_ir::scalar::FiniteReal;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize};
@@ -268,6 +269,8 @@ pub(crate) struct DesignAssemblyLegacySelection {
     pub(crate) context_id: DesignRelaxedGuidText,
     /// Byte offset of the context UUID's UTF-16LE payload.
     pub(crate) context_id_offset: u64,
+    #[serde(default, skip_serializing_if = "crate::history_records::is_default")]
+    pub(crate) serialization_form: SelectionSerializationForm,
     /// Indexed record containing the face recipe.
     pub(crate) recipe_record_index: u32,
     /// Byte offset of the recipe record's indexed header.
@@ -1304,9 +1307,9 @@ pub(crate) struct DesignAssemblyOperandPath {
     occurrence_guids: Vec<Located<DesignOccurrenceKey>>,
     /// Ordered identity GUIDs and their UTF-16 code-unit locations.
     identity_guids: Vec<Located<DesignRelaxedGuidText>>,
-    /// The occurrence identity pairs that follow the identity GUIDs, two
-    /// entries per pair, and their UTF-16 code-unit locations.
-    paired_occurrence_keys: Vec<Located<DesignOccurrenceKey>>,
+    /// The occurrence identity lists that follow the identity GUIDs, and the
+    /// UTF-16 code-unit locations of their keys.
+    occurrence_lists: Vec<Vec<Located<DesignOccurrenceKey>>>,
 }
 
 #[cfg(test)]
@@ -1326,7 +1329,7 @@ impl Clone for DesignAssemblyOperandPath {
             byte_offset: self.byte_offset,
             occurrence_guids: self.occurrence_guids.clone(),
             identity_guids: self.identity_guids.clone(),
-            paired_occurrence_keys: self.paired_occurrence_keys.clone(),
+            occurrence_lists: self.occurrence_lists.clone(),
         }
     }
 }
@@ -1373,13 +1376,21 @@ struct DesignAssemblyOperandPathRef<'a> {
     #[serde(skip_serializing_if = "PathGuidOffsets::is_empty")]
     identity_guid_offsets: PathGuidOffsets<'a, DesignRelaxedGuidText>,
     #[serde(skip_serializing_if = "PathGuidValues::is_empty")]
-    paired_occurrence_keys: PathGuidValues<'a, DesignOccurrenceKey>,
+    occurrence_list_keys: PathGuidValues<'a, DesignOccurrenceKey>,
     #[serde(skip_serializing_if = "PathGuidOffsets::is_empty")]
-    paired_occurrence_key_offsets: PathGuidOffsets<'a, DesignOccurrenceKey>,
+    occurrence_list_key_offsets: PathGuidOffsets<'a, DesignOccurrenceKey>,
+    #[serde(skip_serializing_if = "<[usize]>::is_empty")]
+    occurrence_list_lengths: &'a [usize],
 }
 
 impl Serialize for DesignAssemblyOperandPath {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let keys = self.occurrence_lists.concat();
+        let lengths = self
+            .occurrence_lists
+            .iter()
+            .map(Vec::len)
+            .collect::<Vec<_>>();
         DesignAssemblyOperandPathRef {
             link: &self.link,
             record_index: self.record_index,
@@ -1390,8 +1401,9 @@ impl Serialize for DesignAssemblyOperandPath {
             occurrence_guid_offsets: PathGuidOffsets(&self.occurrence_guids),
             identity_guids: PathGuidValues(&self.identity_guids),
             identity_guid_offsets: PathGuidOffsets(&self.identity_guids),
-            paired_occurrence_keys: PathGuidValues(&self.paired_occurrence_keys),
-            paired_occurrence_key_offsets: PathGuidOffsets(&self.paired_occurrence_keys),
+            occurrence_list_keys: PathGuidValues(&keys),
+            occurrence_list_key_offsets: PathGuidOffsets(&keys),
+            occurrence_list_lengths: &lengths,
         }
         .serialize(serializer)
     }
@@ -1425,12 +1437,15 @@ struct DesignAssemblyOperandPathWire {
     /// Byte offsets parallel to `identity_guids`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     identity_guid_offsets: Vec<u64>,
-    /// Occurrence identity pairs after the identity GUIDs, two entries per pair.
+    /// Keys of the occurrence identity lists after the identity GUIDs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    paired_occurrence_keys: Vec<DesignOccurrenceKey>,
-    /// Byte offsets parallel to `paired_occurrence_keys`.
+    occurrence_list_keys: Vec<DesignOccurrenceKey>,
+    /// Byte offsets parallel to `occurrence_list_keys`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    paired_occurrence_key_offsets: Vec<u64>,
+    occurrence_list_key_offsets: Vec<u64>,
+    /// The number of keys of each list, in stored order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    occurrence_list_lengths: Vec<usize>,
 }
 
 impl DesignAssemblyOperandPath {
@@ -1529,7 +1544,7 @@ impl DesignAssemblyOperandPath {
             byte_offset,
             occurrence_guids,
             identity_guids,
-            paired_occurrence_keys: Vec::new(),
+            occurrence_lists: Vec::new(),
         })
     }
     pub(crate) fn link(&self) -> &DesignAssemblyOperandPathLink {
@@ -1557,34 +1572,33 @@ impl DesignAssemblyOperandPath {
     pub(crate) fn identity_guids(&self) -> &[Located<DesignRelaxedGuidText>] {
         &self.identity_guids
     }
-    pub(crate) fn paired_occurrence_keys(&self) -> &[Located<DesignOccurrenceKey>] {
-        &self.paired_occurrence_keys
+    pub(crate) fn occurrence_lists(&self) -> &[Vec<Located<DesignOccurrenceKey>>] {
+        &self.occurrence_lists
     }
-    /// This path with the occurrence identity pairs that follow its identity
+    /// This path with the occurrence identity lists that follow its identity
     /// GUIDs, two entries per pair, in source order after its first
     /// occurrence. A continued path keeps each record's pairs, so a pair can
     /// precede a continuation's identities.
-    pub(crate) fn with_paired_occurrence_keys(
+    pub(crate) fn with_occurrence_lists(
         mut self,
-        keys: Vec<Located<DesignOccurrenceKey>>,
+        lists: Vec<Vec<Located<DesignOccurrenceKey>>>,
     ) -> Result<Self, String> {
-        if !keys.len().is_multiple_of(2) {
-            return Err("paired_occurrence_keys must hold whole pairs".into());
+        if lists.iter().any(|list| list.len() < 2) {
+            return Err("occurrence_lists must hold at least two keys per list".into());
         }
         let mut previous = self
             .occurrence_guids
             .first()
             .map_or(self.byte_offset, |guid| guid.offset);
-        for key in &keys {
+        for key in lists.iter().flatten() {
             if key.offset <= previous {
                 return Err(
-                    "paired_occurrence_keys must follow the path's first occurrence in order"
-                        .into(),
+                    "occurrence_lists must follow the path's first occurrence in order".into(),
                 );
             }
             previous = key.offset;
         }
-        self.paired_occurrence_keys = keys;
+        self.occurrence_lists = lists;
         Ok(self)
     }
     /// This path continued by a further path record of its own form: two
@@ -1602,8 +1616,8 @@ impl DesignAssemblyOperandPath {
         occurrences.extend(continuation.occurrence_guids);
         let mut identities = self.identity_guids;
         identities.extend(continuation.identity_guids);
-        let mut pairs = self.paired_occurrence_keys;
-        pairs.extend(continuation.paired_occurrence_keys);
+        let mut lists = self.occurrence_lists;
+        lists.extend(continuation.occurrence_lists);
         Self::try_new_typed(
             self.link,
             self.record_index,
@@ -1614,7 +1628,7 @@ impl DesignAssemblyOperandPath {
             identities,
         )
         .ok()?
-        .with_paired_occurrence_keys(pairs)
+        .with_occurrence_lists(lists)
         .ok()
     }
 }
@@ -1631,17 +1645,28 @@ impl TryFrom<DesignAssemblyOperandPathWire> for DesignAssemblyOperandPath {
         if wire.identity_guids.len() != wire.identity_guid_offsets.len() {
             return Err("identity_guids and identity_guid_offsets must have equal lengths".into());
         }
-        if wire.paired_occurrence_keys.len() != wire.paired_occurrence_key_offsets.len() {
+        if wire.occurrence_list_keys.len() != wire.occurrence_list_key_offsets.len() {
             return Err(
-                "paired_occurrence_keys and paired_occurrence_key_offsets must have equal lengths"
+                "occurrence_list_keys and occurrence_list_key_offsets must have equal lengths"
                     .into(),
             );
         }
-        let pairs = wire
-            .paired_occurrence_keys
+        let listed = wire
+            .occurrence_list_lengths
+            .iter()
+            .try_fold(0_usize, |total, length| total.checked_add(*length));
+        if listed != Some(wire.occurrence_list_keys.len()) {
+            return Err("occurrence_list_lengths must count every occurrence_list_keys".into());
+        }
+        let mut keys = wire
+            .occurrence_list_keys
             .into_iter()
-            .zip(wire.paired_occurrence_key_offsets)
-            .map(|(value, offset)| Located { value, offset })
+            .zip(wire.occurrence_list_key_offsets)
+            .map(|(value, offset)| Located { value, offset });
+        let lists = wire
+            .occurrence_list_lengths
+            .into_iter()
+            .map(|length| keys.by_ref().take(length).collect())
             .collect();
         Self::try_new_typed(
             wire.link,
@@ -1660,7 +1685,7 @@ impl TryFrom<DesignAssemblyOperandPathWire> for DesignAssemblyOperandPath {
                 .map(|(value, offset)| Located { value, offset })
                 .collect(),
         )?
-        .with_paired_occurrence_keys(pairs)
+        .with_occurrence_lists(lists)
     }
 }
 
@@ -1677,9 +1702,11 @@ impl From<DesignAssemblyOperandPath> for DesignAssemblyOperandPathWire {
             .into_iter()
             .map(|guid| (guid.value, guid.offset))
             .unzip();
-        let (paired_occurrence_keys, paired_occurrence_key_offsets) = path
-            .paired_occurrence_keys
+        let occurrence_list_lengths = path.occurrence_lists.iter().map(Vec::len).collect();
+        let (occurrence_list_keys, occurrence_list_key_offsets) = path
+            .occurrence_lists
             .into_iter()
+            .flatten()
             .map(|key| (key.value, key.offset))
             .unzip();
         Self {
@@ -1692,8 +1719,9 @@ impl From<DesignAssemblyOperandPath> for DesignAssemblyOperandPathWire {
             occurrence_guid_offsets,
             identity_guids,
             identity_guid_offsets,
-            paired_occurrence_keys,
-            paired_occurrence_key_offsets,
+            occurrence_list_keys,
+            occurrence_list_key_offsets,
+            occurrence_list_lengths,
         }
     }
 }

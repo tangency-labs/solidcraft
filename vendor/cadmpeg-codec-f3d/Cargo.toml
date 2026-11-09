@@ -2,7 +2,7 @@
 [package]
 name = "cadmpeg-codec-f3d"
 description = "Decode and encode Autodesk Fusion .f3d B-rep, design, and appearance data."
-version = "0.6.8"
+version = "0.6.10"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/cadmpeg/cadmpeg"
@@ -18,11 +18,11 @@ name = "cadmpeg_codec_f3d"
 path = "src/lib.rs"
 
 [dependencies]
-cadmpeg-asm = "=0.6.8"
-cadmpeg-container = "=0.6.8"
-cadmpeg-core = "=0.6.8"
-cadmpeg-ir = "=0.6.8"
-cadmpeg-protein = "=0.6.8"
+cadmpeg-asm = "=0.6.10"
+cadmpeg-container = "=0.6.10"
+cadmpeg-core = "=0.6.10"
+cadmpeg-ir = "=0.6.10"
+cadmpeg-protein = "=0.6.10"
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 roxmltree = "0.21"
 lzma-rs = "0.3"

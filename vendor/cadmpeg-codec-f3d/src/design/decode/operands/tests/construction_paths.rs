@@ -287,8 +287,15 @@ fn construction_operand_auxiliary_paths_decode_the_extended_prefix() {
     let restored: DesignConstructionOperandPath = serde_json::from_value(wire).unwrap();
     assert_eq!(restored.following_byte_offset(), 225);
 
+    // Prefix word 2 reads the same way; any other word is refused.
+    assert_eq!(
+        parse_construction_operand_path(&extended_path(&[0, 0, 1, 0], 2), 2339, &header)
+            .expect("extended path with prefix word 2")
+            .entity_ref,
+        55
+    );
     assert!(
-        parse_construction_operand_path(&extended_path(&[0, 0, 1, 0], 2), 2339, &header).is_none()
+        parse_construction_operand_path(&extended_path(&[0, 0, 1, 0], 4), 2339, &header).is_none()
     );
 }
 
@@ -400,167 +407,102 @@ fn construction_tracking_path_decodes_absent_and_present_related_identities() {
     assert_eq!(present.following_byte_offset(), 130);
 }
 
-#[test]
-fn legacy_loft_body_carriers_admit_only_the_class_keyed_frames() {
+fn legacy_loft_carrier_frame(length: usize) -> Vec<u8> {
     fn reference(bytes: &mut Vec<u8>, record_index: u32) {
         bytes.push(1);
         bytes.extend_from_slice(&u64::from(record_index).to_le_bytes());
         bytes.extend_from_slice(&[0, 0]);
     }
-
-    fn carrier(
-        primary_class: &[u8; 3],
-        paired_class: &[u8; 3],
-        scope_record_index: u32,
-        record_index: u32,
-        with_scope_tail: bool,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        indexed_header(&mut bytes, *primary_class, record_index);
-        bytes.extend_from_slice(&[0; 10]);
-        bytes.push(1);
-        bytes.extend_from_slice(&scope_record_index.to_le_bytes());
-        bytes.extend_from_slice(&[0; 6]);
-        bytes.extend_from_slice(&1u32.to_le_bytes());
-        reference(&mut bytes, 900);
-        bytes.extend_from_slice(&89u32.to_le_bytes());
-        bytes.extend_from_slice(&1.25f64.to_le_bytes());
-        bytes.extend_from_slice(&89u32.to_le_bytes());
-        reference(&mut bytes, record_index + 2);
+    let mut bytes = Vec::new();
+    indexed_header(&mut bytes, *b"450", 100);
+    bytes.extend_from_slice(&[0; 10]);
+    bytes.push(1);
+    bytes.extend_from_slice(&12u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 6]);
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    reference(&mut bytes, 900);
+    bytes.extend_from_slice(&89u32.to_le_bytes());
+    bytes.extend_from_slice(&1.25f64.to_le_bytes());
+    bytes.extend_from_slice(&89u32.to_le_bytes());
+    reference(&mut bytes, 102);
+    if length == 100 {
+        bytes.extend_from_slice(&[1, 0, 0]);
+    } else {
         bytes.extend_from_slice(&[0, 0]);
-        reference(&mut bytes, record_index + 1);
-        if with_scope_tail {
-            bytes.push(0);
-            reference(&mut bytes, scope_record_index);
-        }
-        indexed_header(&mut bytes, *paired_class, record_index);
-        bytes
     }
+    reference(&mut bytes, 101);
+    if length != 87 {
+        bytes.push(0);
+        reference(&mut bytes, 12);
+    }
+    indexed_header(&mut bytes, *b"451", 100);
+    bytes
+}
 
-    let mut scope = crate::records::feature::scope::DesignParameterScope::empty(
+fn parse_test_loft_carrier(
+    bytes: &[u8],
+) -> Option<crate::records::topology::entity_selection::DesignLoftLegacyBodyCarrier> {
+    let scope = crate::records::feature::scope::DesignParameterScope::empty(
         "f3d:Design/BulkStream.dat",
         crate::records::feature::scope::DesignFeatureKind::Loft,
         12,
     );
-    {
-        let value = Some(
-            crate::records::feature::path_features::DesignPathFeatureConstruction::Loft(
-                crate::records::feature::path_features::DesignLoftConstruction {
-                    operation: crate::records::feature::extrude::DesignExtrudeOperation::Cut,
-                    operation_offset: 0,
-                },
-            ),
-        );
-        scope
-            .try_edit(|draft| {
-                draft.payload =
-                    value.map_or_else(|| draft.payload.kind().try_into().unwrap(), Into::into);
-            })
-            .unwrap();
-    }
+    let header = crate::records::decal::DesignRecordHeader {
+        id: "header".into(),
+        record_index: 100,
+        class_tag: "450".to_owned().try_into().unwrap(),
+        byte_offset: 0,
+    };
+    parse_loft_legacy_body_carrier(bytes, &scope, &header)
+}
 
-    let class_322 = carrier(b"322", b"262", 12, 100, false);
-    let parsed_322 = parse_loft_legacy_body_carrier(
-        &class_322,
-        &scope,
-        &crate::records::decal::DesignRecordHeader {
-            id: "header-322".into(),
-            record_index: 100,
-            class_tag: crate::records::references::DesignClassTag::try_from("322".to_owned())
-                .unwrap(),
-            byte_offset: 0,
-        },
-    )
-    .expect("class-322 legacy Loft carrier");
-    assert_eq!(parsed_322.paired_class_tag.as_str(), "262");
-    assert_eq!(parsed_322.paired_byte_offset, 87);
-    assert_eq!(parsed_322.member, 900);
-    assert_eq!(parsed_322.member_offset, 36);
-    assert_eq!(parsed_322.opaque_index.get(), 89);
-    assert_eq!(parsed_322.opaque_scalar.get(), 1.25);
-    assert_eq!(parsed_322.next_next_record_index, 102);
-    assert_eq!(parsed_322.next_record_index, 101);
+fn assert_loft_carrier(length: usize, tail: Option<u64>) {
+    let carrier =
+        parse_test_loft_carrier(&legacy_loft_carrier_frame(length)).expect("legacy Loft carrier");
+    assert_eq!(carrier.paired_byte_offset, u64::try_from(length).unwrap());
+    assert_eq!(carrier.paired_class_tag.as_str(), "451");
+    assert_eq!(carrier.member, 900);
+    assert_eq!(carrier.next_next_record_index, 102);
+    assert_eq!(carrier.next_record_index, 101);
+    assert_eq!(carrier.trailing_scope_reference_offset, tail);
     assert_eq!(
-        parsed_322
-            .trailing_scope_reference_offset
-            .map(|_| parsed_322.scope_record_index),
-        None
+        carrier.next_reference_offset,
+        if length == 100 { 77 } else { 76 }
     );
+    let wire = serde_json::to_value(&carrier).unwrap();
+    assert_eq!(wire["flags"], if length == 100 { "010000" } else { "0000" });
+    let decoded: crate::records::topology::entity_selection::DesignLoftLegacyBodyCarrier =
+        serde_json::from_value(wire).unwrap();
+    assert_eq!(decoded.next_reference_offset, carrier.next_reference_offset);
+}
 
-    let class_322_tail = carrier(b"322", b"262", 12, 200, true);
-    let parsed_322_tail = parse_loft_legacy_body_carrier(
-        &class_322_tail,
-        &scope,
-        &crate::records::decal::DesignRecordHeader {
-            id: "header-322-tail".into(),
-            record_index: 200,
-            class_tag: crate::records::references::DesignClassTag::try_from("322".to_owned())
-                .unwrap(),
-            byte_offset: 0,
-        },
-    )
-    .expect("class-322 legacy Loft carrier with scope tail");
-    assert_eq!(parsed_322_tail.paired_class_tag.as_str(), "262");
-    assert_eq!(parsed_322_tail.paired_byte_offset, 99);
-    assert_eq!(
-        parsed_322_tail
-            .trailing_scope_reference_offset
-            .map(|_| parsed_322_tail.scope_record_index),
-        Some(12)
-    );
-    assert_eq!(parsed_322_tail.trailing_scope_reference_offset, Some(88));
+#[test]
+fn legacy_loft_carrier_87_bytes() {
+    assert_loft_carrier(87, None);
+}
 
-    let class_411 = carrier(b"411", b"266", 12, 300, true);
-    let parsed_411 = parse_loft_legacy_body_carrier(
-        &class_411,
-        &scope,
-        &crate::records::decal::DesignRecordHeader {
-            id: "header-411".into(),
-            record_index: 300,
-            class_tag: crate::records::references::DesignClassTag::try_from("411".to_owned())
-                .unwrap(),
-            byte_offset: 0,
-        },
-    )
-    .expect("class-411 legacy Loft carrier");
-    assert_eq!(parsed_411.paired_class_tag.as_str(), "266");
-    assert_eq!(parsed_411.paired_byte_offset, 99);
-    assert_eq!(
-        parsed_411
-            .trailing_scope_reference_offset
-            .map(|_| parsed_411.scope_record_index),
-        Some(12)
-    );
-    assert_eq!(parsed_411.trailing_scope_reference_offset, Some(88));
+#[test]
+fn legacy_loft_carrier_99_bytes() {
+    assert_loft_carrier(99, Some(88));
+}
 
-    let mut wrong_presence = class_322.clone();
-    wrong_presence[21] = 0;
-    assert!(parse_loft_legacy_body_carrier(
-        &wrong_presence,
-        &scope,
-        &crate::records::decal::DesignRecordHeader {
-            id: "header-322".into(),
-            record_index: 100,
-            class_tag: crate::records::references::DesignClassTag::try_from("322".to_owned())
-                .unwrap(),
-            byte_offset: 0,
-        },
-    )
-    .is_none());
+#[test]
+fn legacy_loft_carrier_100_bytes() {
+    assert_loft_carrier(100, Some(89));
+}
 
-    let wrong_pair = carrier(b"322", b"266", 12, 400, false);
-    assert!(parse_loft_legacy_body_carrier(
-        &wrong_pair,
-        &scope,
-        &crate::records::decal::DesignRecordHeader {
-            id: "header-322".into(),
-            record_index: 400,
-            class_tag: crate::records::references::DesignClassTag::try_from("322".to_owned())
-                .unwrap(),
-            byte_offset: 0,
-        },
-    )
-    .is_none());
+#[test]
+fn legacy_loft_carrier_rejects_missing_presence() {
+    let mut bytes = legacy_loft_carrier_frame(87);
+    bytes[21] = 0;
+    assert!(parse_test_loft_carrier(&bytes).is_none());
+}
+
+#[test]
+fn legacy_loft_carrier_100_rejects_zero_flags() {
+    let mut bytes = legacy_loft_carrier_frame(100);
+    bytes[74..77].fill(0);
+    assert!(parse_test_loft_carrier(&bytes).is_none());
 }
 
 #[test]
@@ -603,4 +545,62 @@ fn construction_tracking_path_admits_lane_two_and_three_only() {
     for lane in [0u32, 1, 4] {
         assert!(parse_construction_tracking_path(&tracking_path(lane), 0, 300, &class).is_none());
     }
+}
+
+#[test]
+fn tracking_path_headers_are_named_by_the_path_after_unrelated_wrappers() {
+    use crate::records::{
+        references::DesignClassTag,
+        topology::construction::{
+            DesignConstructionOperandIdentity, DesignConstructionOperandIdentityDraft,
+            DesignConstructionTrackingPath, DesignConstructionTrackingPathDraft,
+            DesignIdentityWrapper,
+        },
+    };
+    let tag = |tag: &str| DesignClassTag::try_from(tag.to_owned()).unwrap();
+    let path = DesignConstructionTrackingPath::try_new(DesignConstructionTrackingPathDraft {
+        wrapper_record_index: 2947,
+        wrapper_byte_offset: 1_024,
+        wrapper_class_tag: tag("354"),
+        carrier_record_index: 2948,
+        carrier_byte_offset: 1_057,
+        carrier_class_tag: tag("412"),
+        primary_identity: 246,
+        primary_identity_offset: 1_094,
+        selector: 1,
+        selector_offset: 1_114,
+        kind: 1,
+        kind_offset: 1_118,
+        first_related_identity: None,
+        second_related_identity: None,
+        following_record_index: 2949,
+        following_byte_offset: 1_138,
+        following_class_tag: tag("354"),
+    })
+    .unwrap();
+    let identity =
+        DesignConstructionOperandIdentity::try_new(DesignConstructionOperandIdentityDraft {
+            id: "f3d:Design/BulkStream.dat:operand-identity#1000".into(),
+            group_record_index: 1116,
+            wrappers: vec![DesignIdentityWrapper {
+                record_index: 2936,
+                byte_offset: 1_000,
+                class_tag: tag("329"),
+            }],
+            following_record_index: 2949,
+            following_byte_offset: 1_138,
+            following_class_tag: tag("354"),
+            tracking_path: Some(path),
+            persistent_identity: None,
+        })
+        .unwrap();
+    assert_eq!(
+        crate::design::decode::operands::tracking_path_record_indices(&[identity])
+            .collect::<Vec<_>>(),
+        vec![
+            ("f3d:Design/BulkStream.dat", 2947),
+            ("f3d:Design/BulkStream.dat", 2948),
+            ("f3d:Design/BulkStream.dat", 2949),
+        ]
+    );
 }

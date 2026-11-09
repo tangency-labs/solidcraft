@@ -170,3 +170,9 @@ vendor. See the [clean-room and legal policy][legal].
 [repo]: https://github.com/cadmpeg/cadmpeg
 [spec]: https://github.com/cadmpeg/cadmpeg/blob/main/docs/formats/f3d.md
 [support]: https://github.com/cadmpeg/cadmpeg/blob/main/docs/format-support.md#fusion-360-f3d
+
+### Saved display poses
+
+The native `f3d.display_poses` arena retains root-design scene override rows. Each record has `stream`, `byte_offset` relative to that stream, an alternating component-definition/carrier `path`, a row-major 4×4 `transform` in millimetres, and `binding`. A bound row has `binding = {"state":"bound","occurrence":"…"}`. Ambiguous and unbound rows have their respective state and carry no occurrence id. Neutral occurrence transforms retain their stored-pose projection. Consumers can select either pose source.
+
+Binding runs after archive composition. Synthetic member roots can share the placing occurrence's path; their rows retain an ambiguous state. Member scene states remain separate from the root design's displayed state. The reader reports counted grammar refusals once per stream and counted ambiguous or unbound rows after binding.

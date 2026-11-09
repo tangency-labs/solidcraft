@@ -9,6 +9,7 @@ use cadmpeg_ir::features::FeatureDefinition;
 use cadmpeg_ir::features::FeatureId;
 use cadmpeg_ir::ids::BodyId;
 use cadmpeg_ir::ids::RegionId;
+use cadmpeg_ir::schema::rewrite::typed::TextReplacements;
 use cadmpeg_ir::topology::Body;
 use cadmpeg_ir::topology::BodyKind;
 use cadmpeg_ir::topology::Region;
@@ -167,6 +168,7 @@ fn saved_edge_loss_counts_final_archive_ownership_once() {
             .extend_rewritten(
                 member,
                 &mut OccurrenceScope {
+                    native_text: &TextReplacements::default(),
                     ctx: &ctx,
                     occurrence: "member",
                 },
@@ -181,6 +183,7 @@ fn saved_edge_loss_counts_final_archive_ownership_once() {
             stack: vec!["root.f3d".to_owned()],
             members: std::collections::BTreeMap::new(),
             failed: std::collections::BTreeMap::new(),
+            scene_sources: &mut crate::scene::Sources::new(),
             operation_poses: std::collections::BTreeMap::new(),
             operation_protected: std::collections::BTreeSet::new(),
             component_path_tables: Vec::new(),
@@ -280,6 +283,7 @@ fn repeated_occurrence_merge_remaps_typed_graphs_disjointly() {
     for ordinal in 0..2 {
         let occurrence = format!("role/occurrence-{ordinal}");
         let mut scope = OccurrenceScope {
+            native_text: &TextReplacements::default(),
             ctx: &ctx,
             occurrence: &occurrence,
         };
@@ -301,6 +305,44 @@ fn repeated_occurrence_merge_remaps_typed_graphs_disjointly() {
 }
 
 #[test]
+fn occurrence_merge_rewrites_only_member_native_record_text() {
+    use cadmpeg_ir::document::EntityRewrite;
+    use cadmpeg_ir::features::{PlanarProfileRef, ProfileRef};
+    use cadmpeg_ir::NativeRecord;
+
+    let ctx = cadmpeg_test_support::service_decode_context();
+    let id = "f3d:Design1/BulkStream.dat:design-construction-operand-group#7";
+    let mut native = Native::default();
+    native.namespace_mut("f3d").arenas_mut().insert(
+        "operands".into(),
+        vec![NativeRecord::new(id.try_into().unwrap(), serde_json::Map::new()).unwrap()],
+    );
+    let targets = super::super::native_record_targets(&native, "member");
+    let native_text = TextReplacements::build(targets.iter()).unwrap();
+    let mut scope = OccurrenceScope {
+        ctx: &ctx,
+        occurrence: "member",
+        native_text: &native_text,
+    };
+    for (source, expected) in [
+        (
+            id,
+            "f3d:xref/member/Design1/BulkStream.dat:design-construction-operand-group#7",
+        ),
+        (
+            "f3d:Design1/BulkStream.dat:design-construction-operand-group#8",
+            "f3d:Design1/BulkStream.dat:design-construction-operand-group#8",
+        ),
+    ] {
+        let profile = ProfileRef::Planar(PlanarProfileRef::Native(source.into()));
+        assert_eq!(
+            scope.rewrite(profile).unwrap(),
+            ProfileRef::Planar(PlanarProfileRef::Native(expected.into()))
+        );
+    }
+}
+
+#[test]
 fn occurrence_merge_preserves_a_body_name_that_spells_its_identity() {
     use cadmpeg_ir::document::EntityRewrite;
     let ctx = cadmpeg_test_support::service_decode_context();
@@ -315,6 +357,7 @@ fn occurrence_merge_preserves_a_body_name_that_spells_its_identity() {
         visible: None,
     };
     let scoped = OccurrenceScope {
+        native_text: &TextReplacements::default(),
         ctx: &ctx,
         occurrence: "component-0",
     }
@@ -592,6 +635,7 @@ fn merged_documents_keep_parameter_names_and_document_local_expression_dependenc
         .extend_rewritten(
             component,
             &mut OccurrenceScope {
+                native_text: &TextReplacements::default(),
                 ctx: &ctx,
                 occurrence: "component-0",
             },
@@ -899,6 +943,7 @@ fn repeated_local_owners_merge_each_external_child_tree_in_its_composed_frame() 
         stack: vec!["root.f3d".to_owned()],
         members: std::collections::BTreeMap::new(),
         failed: std::collections::BTreeMap::new(),
+        scene_sources: &mut crate::scene::Sources::new(),
         operation_poses: std::collections::BTreeMap::new(),
         operation_protected: std::collections::BTreeSet::new(),
         component_path_tables: Vec::new(),
@@ -1347,6 +1392,7 @@ fn merged_joint_descent_selects_unique_member_children_and_retains_ambiguous_pat
             .extend_rewritten(
                 component,
                 &mut OccurrenceScope {
+                    native_text: &TextReplacements::default(),
                     ctx: &ctx,
                     occurrence: "member",
                 },
@@ -1393,6 +1439,7 @@ fn merged_joint_descent_selects_unique_member_children_and_retains_ambiguous_pat
                 stack: vec!["root.f3d".into()],
                 members: std::collections::BTreeMap::from([("member.f3d".into(), member)]),
                 failed: std::collections::BTreeMap::new(),
+                scene_sources: &mut crate::scene::Sources::new(),
                 operation_poses: std::collections::BTreeMap::new(),
                 operation_protected: std::collections::BTreeSet::new(),
                 component_path_tables: Vec::new(),
@@ -1474,6 +1521,7 @@ fn product_history_owner_rescopes_feature_and_parameter_links() {
         .extend_rewritten(
             component,
             &mut OccurrenceScope {
+                native_text: &TextReplacements::default(),
                 ctx: &ctx,
                 occurrence: "left",
             },
@@ -1543,6 +1591,132 @@ fn a_refused_joint_leaves_its_feature_native() {
     ));
     assert!(matches!(
         features[1].evaluation.definition(),
+        FeatureDefinition::Operation(FeatureOperation::Native { .. })
+    ));
+}
+
+/// A standalone model with one insertion occurrence, one `Assemble` feature
+/// and one joint of the same scope whose first operand descends by `keys`.
+fn standalone_joint_model(keys: Vec<String>) -> (Model, cadmpeg_ir::ids::OccurrenceId) {
+    use cadmpeg_ir::ids::OccurrenceId;
+    use cadmpeg_ir::products::{
+        AssemblyJoint, JointConnector, JointId, JointOperand, Occurrence, OccurrenceParent,
+        PairedJointKind, PrototypeReference,
+    };
+    let insertion = OccurrenceId::mint("f3d:model:occurrence#insertion").unwrap();
+    let mut joint = AssemblyJoint::paired(
+        JointId::mint("f3d:model:joint#standalone").unwrap(),
+        PairedJointKind::Fixed {
+            angle: None,
+            translation_offset: None,
+            angular_limits: None,
+            linear_limits: None,
+        },
+        [
+            JointConnector {
+                operand: JointOperand::occurrence(
+                    insertion.clone(),
+                    "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+                    keys,
+                ),
+                frame: Transform::identity(),
+                detached: false,
+            },
+            JointConnector {
+                operand: JointOperand::root("root", Vec::new()),
+                frame: Transform::identity(),
+                detached: false,
+            },
+        ],
+        None,
+    );
+    joint.native_ref = Some("f3d:scope#standalone".to_owned());
+    let mut assemble = feature("f3d:model:feature#standalone", 0);
+    assemble.native_ref = Some("f3d:scope#standalone".to_owned());
+    let mut model = Model::default();
+    model.features = vec![assemble];
+    model.assembly_joints = vec![joint];
+    model.occurrences = vec![Occurrence {
+        id: insertion.clone(),
+        prototype: PrototypeReference::Unresolved {},
+        parent: OccurrenceParent::Root {},
+        ordinal: 0,
+        transform: Transform::identity(),
+        linked_prototype: None,
+        scale: [cadmpeg_ir::scalar::FiniteReal::ONE; 3],
+        name: None,
+        visible: None,
+        link: None,
+        native_ref: None,
+    }];
+    (model, insertion)
+}
+
+#[test]
+fn standalone_joint_of_a_complete_scope_binds_its_feature() {
+    use cadmpeg_ir::features::FeatureOperation;
+    let (mut model, insertion) = standalone_joint_model(Vec::new());
+    let complete = std::collections::BTreeSet::from(["f3d:scope#standalone".to_owned()]);
+    let children = std::collections::BTreeMap::new();
+    let mut losses = Vec::new();
+    super::super::rebind_joints(
+        &mut super::super::JointRows {
+            occurrences: &model.occurrences,
+            joints: &mut model.assembly_joints,
+            features: &mut model.features,
+        },
+        &children,
+        &children,
+        &complete,
+        super::super::JointRebind::CompleteScopes,
+        &mut losses,
+    );
+    assert!(losses.is_empty());
+    assert_eq!(model.assembly_joints.len(), 1);
+    assert!(model
+        .assembly_joints
+        .iter()
+        .flat_map(cadmpeg_ir::products::AssemblyJoint::connectors)
+        .any(|connector| matches!(
+            &connector.operand.container,
+            cadmpeg_ir::products::OperandContainer::Occurrence { occurrence, .. }
+                if occurrence == &insertion
+        )));
+    assert!(matches!(
+        model.features[0].evaluation.definition(),
+        FeatureDefinition::Operation(FeatureOperation::AssemblyJoint { .. })
+    ));
+}
+
+#[test]
+fn standalone_joint_below_an_unmerged_placement_keeps_its_decoded_operand() {
+    use cadmpeg_ir::features::FeatureOperation;
+    let (mut model, _) =
+        standalone_joint_model(vec!["ffffffff-bbbb-4ccc-8ddd-eeeeeeeeeeee".into()]);
+    let decoded = model.assembly_joints.clone();
+    let complete = std::collections::BTreeSet::from(["f3d:scope#standalone".to_owned()]);
+    let children = std::collections::BTreeMap::new();
+    let mut losses = Vec::new();
+    super::super::rebind_joints(
+        &mut super::super::JointRows {
+            occurrences: &model.occurrences,
+            joints: &mut model.assembly_joints,
+            features: &mut model.features,
+        },
+        &children,
+        &children,
+        &complete,
+        super::super::JointRebind::CompleteScopes,
+        &mut losses,
+    );
+    assert_eq!(model.assembly_joints, decoded);
+    assert_eq!(losses.len(), 1);
+    assert_eq!(
+        losses[0].code,
+        crate::loss::F3dLossCode::AssemblyOperandDescentUnresolved.kind()
+    );
+    assert!(matches!(
+        model.features[0].evaluation.definition(),
         FeatureDefinition::Operation(FeatureOperation::Native { .. })
     ));
 }

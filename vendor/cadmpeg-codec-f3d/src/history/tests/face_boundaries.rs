@@ -37,6 +37,7 @@ fn direct_face_recipe_clauses_resolve_ordered_changed_intersections() {
             candidate_edges: Vec::new(),
             alternate_selector_faces: Vec::new(),
             alternate_selector_edges: Vec::new(),
+            operand_offset: None,
         };
     let references = [
         reference(10, &[1, 2]),

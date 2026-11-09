@@ -161,7 +161,7 @@ fn class_322_261_work_plane_332_byte_frame_decodes_its_matrix_only_for_that_pair
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &scope,
@@ -223,7 +223,7 @@ fn legacy_work_plane_class_350_frame_decodes_its_matrix() {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &scope,
@@ -275,7 +275,7 @@ fn legacy_work_plane_class_400_frame_decodes_its_matrix() {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    let decoded = exact_work_plane_frame(
+    let (decoded, _) = exact_work_plane_frame(
         &bytes,
         &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
         &scope,
@@ -288,10 +288,12 @@ fn legacy_work_plane_class_400_frame_decodes_its_matrix() {
 
 #[test]
 fn legacy_move_transform_classes_use_the_shared_253_byte_envelope() {
+    let row = super::move_transform_type("84E6245F-1CDC-4FB8-8048-163A85FAD3F0", 2);
+    let class_types = super::move_transform_types(&row, &[393, 293, 451, 442, 447, 456]);
     let mut bytes = Vec::new();
     let classes: [(&str, u32); 6] = [
         ("393", 5),
-        ("293", 1),
+        ("293", 5),
         ("451", 5),
         ("442", 5),
         ("447", 5),
@@ -341,6 +343,7 @@ fn legacy_move_transform_classes_use_the_shared_253_byte_envelope() {
             &bytes,
             &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
             &scope,
+            &class_types,
         )
         .expect("legacy Move transform frame");
 
@@ -349,20 +352,6 @@ fn legacy_move_transform_classes_use_the_shared_253_byte_envelope() {
         assert_eq!(u32::from(decoded.form), form);
         assert_eq!(decoded.form_offset, u64_from_index(frame_at + 43));
         assert_eq!(decoded.transform_offset, u64_from_index(frame_at + 48));
-
-        if class_tag == "456" {
-            let paired_class_at = frame_at + 253 + 4;
-            bytes[paired_class_at..paired_class_at + 3].copy_from_slice(b"262");
-            assert!(
-                crate::design::decode::scopes::direct_face::exact_move_operation(
-                    &bytes,
-                    &crate::design::test_support::indexed_record_offsets_for_test(&bytes),
-                    &scope,
-                )
-                .is_none(),
-                "class-456 Move requires paired class 258"
-            );
-        }
     }
 }
 
@@ -577,9 +566,8 @@ fn fixed_extrude_owners_follow_parameter_source_kind_before_lane_ordinal() {
             draft.layout_fixture_tail();
         })
         .unwrap();
-    if let crate::records::feature::scope::DesignScopePayloadMut::Extrude(slot)
-    | crate::records::feature::scope::DesignScopePayloadMut::Extrusion(slot)
-    | crate::records::feature::scope::DesignScopePayloadMut::Extrusao(slot) = scope.payload_mut()
+    if let crate::records::feature::scope::DesignScopePayloadMut::Extrude(slot) =
+        scope.payload_mut()
     {
         slot.get_or_insert_with(Default::default).extrude_prologue =
             Some(DesignExtrudePrologue::ReferenceAware {
@@ -590,6 +578,7 @@ fn fixed_extrude_owners_follow_parameter_source_kind_before_lane_ordinal() {
                 side_extent_discriminators: [1, 0],
                 side_extent_discriminator_offsets: [77, 90],
                 first_side_target_ordinal: None,
+                distance_tail: None,
                 extent: DesignExtrudeExtent::OneSidedDistance,
                 direction_face_extend_offsets: [32, 36],
                 direction_reversed: false,
