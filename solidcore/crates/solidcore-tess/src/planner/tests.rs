@@ -155,7 +155,6 @@ fn ok<T>(r: Result<T>) -> T {
 
 const PI: f64 = std::f64::consts::PI;
 
-
 /// A plane is exact for any triangulation of its boundary: it asks for no size, a box's edges
 /// are whole, and each face is its four corners, two triangles. Whatever the box's size.
 #[test]
