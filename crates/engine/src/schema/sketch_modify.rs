@@ -1041,8 +1041,8 @@ fn pattern_forms(circular: bool) -> &'static [&'static [&'static str]] {
 /// Make copies of sketch curves and points evenly round a centre, as an associative pattern: the
 /// copies follow the originals, and the pattern keeps its own constraints. The quantity includes
 /// the original. With `pattern`, edit the pattern that id names instead of making a new one:
-/// keys left out keep their values, surviving instance ids are kept, and the pattern's type and
-/// seed entities cannot change. One undo step.
+/// keys left out keep their values, surviving instance ids are kept, and the pattern's type
+/// cannot change. A changed `entities` list rebuilds every copy with fresh ids. One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = circular_required)]
 pub struct CircularPatternParams {
@@ -1124,8 +1124,8 @@ impl CircularPatternParams {
 /// copies follow the originals, and the pattern keeps its own constraints. Quantities include the
 /// original, at most 500 copies in all; a negative spacing reverses its direction. With
 /// `pattern`, edit the pattern that id names instead of making a new one: keys left out keep
-/// their values, surviving instance ids are kept, and the pattern's type and seed entities
-/// cannot change. One undo step.
+/// their values, surviving instance ids are kept, and the pattern's type cannot change. A changed
+/// `entities` list rebuilds every copy with fresh ids. One undo step.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = rectangular_required)]
 pub struct RectangularPatternParams {
