@@ -212,17 +212,19 @@ try {
     $TargetDir = Join-Path $RepoRoot (Join-Path 'target' $Profile)
     $BackupDir = Join-Path $TargetDir 'backup'
     if ($ForceBuild) {
+        # Protect WEB_INSTALL_DIR from being wiped out by target profile cleanup
+        $WebInstallDir = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
+        $TargetFull = [System.IO.Path]::GetFullPath($TargetDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+        $WebFull = [System.IO.Path]::GetFullPath($WebInstallDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+        if ($WebFull -eq $TargetFull -or $WebFull.StartsWith($TargetFull + [System.IO.Path]::DirectorySeparatorChar)) {
+            throw "WEB_INSTALL_DIR ($WebInstallDir) overlaps with build target directory ($TargetDir)."
+        }
+
         Write-Host '[STEP 2A] Cleaning Cargo artifacts while preserving deployed-binary backups...'
         Clear-ProfileBuildArtifactsPreservingBackups -TargetDirectory $TargetDir -BackupDirectory $BackupDir
         if ($BuildWeb) {
             $WasmTargetDir = Join-Path $RepoRoot (Join-Path 'target' (Join-Path 'wasm32-unknown-unknown' $Profile))
             if (Test-Path -LiteralPath $WasmTargetDir) {
-                $WebInstallDir = if ($env:WEB_INSTALL_DIR) { $env:WEB_INSTALL_DIR } else { 'C:\inetpub\wwwroot\solidcraft' }
-                $WasmFull = [System.IO.Path]::GetFullPath($WasmTargetDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
-                $WebFull = [System.IO.Path]::GetFullPath($WebInstallDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
-                if ($WebFull -eq $WasmFull -or $WebFull.StartsWith($WasmFull + [System.IO.Path]::DirectorySeparatorChar) -or $WasmFull.StartsWith($WebFull + [System.IO.Path]::DirectorySeparatorChar)) {
-                    throw "WEB_INSTALL_DIR ($WebInstallDir) overlaps with WebAssembly target directory ($WasmTargetDir)."
-                }
                 Get-ChildItem -LiteralPath $WasmTargetDir -Force | Remove-Item -Recurse -Force -ErrorAction Stop
                 Write-Host "Cleaned generated contents of WebAssembly target directory: $WasmTargetDir"
             }
