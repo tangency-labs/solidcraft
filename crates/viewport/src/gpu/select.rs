@@ -82,7 +82,8 @@ impl Policy {
         }
     }
 
-    pub(crate) fn admits(self, tier: Tier) -> bool {
+    /// Whether an adapter of `tier` may serve this policy.
+    pub fn admits(self, tier: Tier) -> bool {
         match self {
             Policy::Auto => true,
             Policy::Hardware => tier == Tier::Hardware,
@@ -160,7 +161,7 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
 }
 
 fn instance() -> wgpu::Instance {
-    let mut desc = crate::instance_descriptor_from_env();
+    let mut desc = crate::gpu::instance_descriptor_from_env();
     desc.backends = native_backends();
     wgpu::Instance::new(desc)
 }

@@ -725,9 +725,9 @@ pub(crate) fn sky_uniform(on: bool, up: solidcraft_viewport::UpAxis) -> [f32; 4]
 fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> u32 {
     // Without AO (off, or wireframe) the count is unused: no repaint is asked for it.
     if !app.preferences.ambient_occlusion || app.ui.visual_style == 2 || view_settled(app, ctx, view_proj, size_px) {
-        solidcraft_gpu::view::AO_SAMPLES
+        solidcraft_viewport::gpu::view::AO_SAMPLES
     } else {
-        solidcraft_gpu::view::AO_SAMPLES_MOVING
+        solidcraft_viewport::gpu::view::AO_SAMPLES_MOVING
     }
 }
 
@@ -773,7 +773,7 @@ fn drawn_plan(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, opaque: boo
     (shaded && opaque && app.viewport.gpu.is_some_and(|g| g.tess))
         .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.gpu_plan_at(solidcraft_engine::doc::display_quality::current())))
         .flatten()
-        .filter(|plan| plan.vertex_count() <= solidcraft_gpu::MAX_BATCH)
+        .filter(|plan| plan.vertex_count() <= solidcraft_viewport::gpu::MAX_BATCH)
 }
 
 /// The refined plan and mesh `b` is drawn from, when the view has it drawn finer than the chosen
@@ -2071,12 +2071,12 @@ fn box_corners(bb: &solidcraft_engine::geom::Aabb3) -> [Vec3; 8] {
 
 /// The ground the model's ambient occlusion darkens (#3413) under the bodies whose box in the
 /// camera's frame is `bounds`; none in Wireframe.
-fn ground_ao(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> Option<solidcraft_gpu::view::GroundAo> {
+fn ground_ao(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> Option<solidcraft_viewport::gpu::view::GroundAo> {
     if app.ui.visual_style == 2 {
         return None;
     }
     let radius = (bounds.diagonal() * 0.04).clamp(1e-4, 1e6) as f32;
-    solidcraft_gpu::view::GroundAo::new(solidcraft_engine::render::view_bounds(&bounds), ground_height(app, bounds), app.cam.up, radius)
+    solidcraft_viewport::gpu::view::GroundAo::new(solidcraft_engine::render::view_bounds(&bounds), ground_height(app, bounds), app.cam.up, radius)
 }
 
 /// The box around `corners` in the camera's Z-up frame.
@@ -3389,7 +3389,7 @@ fn bounds_of(app: &SolveApp, items: impl Iterator<Item = Sel>) -> Option<solidcr
 /// The section as the shader's clip plane (normal, d), zero when there is none.
 /// The surface analysis for the shader (see `gpu::Frame::analysis`).
 fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
-    solidcraft_gpu::view::analysis_uniform(app.session.analysis.map(|a| a.mode()), crate::access::map(app).as_ref())
+    solidcraft_viewport::gpu::view::analysis_uniform(app.session.analysis.map(|a| a.mode()), crate::access::map(app).as_ref())
 }
 
 /// Why the model cannot be placed, across the bottom of the viewport, while it cannot: the
@@ -7827,7 +7827,7 @@ mod tests {
                 proj.cam.back().to_f32(),
                 eye,
                 SIZE,
-                tess.then_some(solidcraft_gpu::SHADER),
+                tess.then_some(solidcraft_viewport::gpu::SHADER),
                 [0.0; 8],
                 crate::gpu::analysis_colors(&t.analysis),
             ) else {
@@ -7991,7 +7991,7 @@ mod tests {
             let proj = projection(&app, rect);
             let e = proj.cam.eye().to_f32();
             let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
-            let (planned, shader) = (scene.planned.len(), tess.then_some(solidcraft_gpu::SHADER));
+            let (planned, shader) = (scene.planned.len(), tess.then_some(solidcraft_viewport::gpu::SHADER));
             (
                 planned,
                 scene.tris.len(),
@@ -8076,7 +8076,7 @@ mod tests {
     /// count once it has held still for `SS_SETTLE`, and the full count whenever AO is off.
     #[test]
     fn ambient_occlusion_takes_fewer_samples_while_the_view_moves() {
-        use solidcraft_gpu::view::{AO_SAMPLES, AO_SAMPLES_MOVING};
+        use solidcraft_viewport::gpu::view::{AO_SAMPLES, AO_SAMPLES_MOVING};
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let ctx = egui::Context::default();
         let size = [800.0, 600.0];
@@ -8173,7 +8173,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn ambient_occlusion_draws_no_copies_of_a_part() {
-        use solidcraft_gpu::view::{AO_SAMPLES, AO_SAMPLES_MOVING};
+        use solidcraft_viewport::gpu::view::{AO_SAMPLES, AO_SAMPLES_MOVING};
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.box", &json!({"length": 300, "width": 300, "height": 4, "corner": [-150, -150, -4], "body_name": "plate"})).unwrap();
         s.execute("solid.box", &json!({"length": 30, "width": 160, "height": 16, "corner": [0, -80, 0], "operation": "new", "body_name": "block"}))
@@ -8324,7 +8324,7 @@ mod tests {
                 proj.cam.back().to_f32(),
                 eye,
                 SIZE,
-                tess.then_some(solidcraft_gpu::SHADER),
+                tess.then_some(solidcraft_viewport::gpu::SHADER),
                 [0.0; 8],
                 crate::gpu::analysis_colors(&Tokens::get().analysis),
             )
@@ -8365,7 +8365,7 @@ mod tests {
             let proj = projection(&app, rect);
             let e = proj.cam.eye().to_f32();
             let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
-            let shader = tess.then_some(solidcraft_gpu::SHADER);
+            let shader = tess.then_some(solidcraft_viewport::gpu::SHADER);
             crate::gpu::render_offscreen(
                 scene,
                 Some(highlight),
@@ -9123,7 +9123,7 @@ mod tests {
         };
         let scale: u32 = std::env::var("SOLIDCRAFT_BENCH_DIV").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
         let (w, h, samples) = (3600u32 / scale, 2190u32 / scale, 4u32);
-        let depth = solidcraft_gpu::depth_format(&device, true);
+        let depth = solidcraft_viewport::gpu::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         app.viewport.gpu = Some(GpuTarget { format, depth: Some(depth), samples, tess: false, oit: false });
         app.fit_view();
@@ -9237,7 +9237,7 @@ mod tests {
                     outline: true,
                     eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
                     ao_radius: 0.0,
-                    ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+                    ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
                     sky: [0.0; 4],
                     ssaa: 1.0,
                     hover_tint: [0.0; 3],
@@ -9264,7 +9264,9 @@ mod tests {
                             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                                 view: &depth_view,
                                 depth_ops: Some(wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(solidcraft_gpu::view::far_depth(solidcraft_gpu::view::reversed_depth(Some(depth)))),
+                                    load: wgpu::LoadOp::Clear(solidcraft_viewport::gpu::view::far_depth(
+                                        solidcraft_viewport::gpu::view::reversed_depth(Some(depth)),
+                                    )),
                                     store: wgpu::StoreOp::Discard,
                                 }),
                                 stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),

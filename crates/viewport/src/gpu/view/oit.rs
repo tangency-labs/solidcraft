@@ -190,7 +190,7 @@ impl Pipelines {
         });
         let mut failed = None;
         for scope in scopes.into_iter().rev() {
-            if let Some(e) = crate::popped(scope.pop()) {
+            if let Some(e) = crate::gpu::popped(scope.pop()) {
                 failed.get_or_insert(e.to_string());
             }
         }

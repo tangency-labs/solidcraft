@@ -4,14 +4,14 @@
 //! reason printed, without a GPU adapter (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
 
 use solidcore_record::Vec3;
-use solidcraft_gpu::GpuError;
-use solidcraft_gpu::capture::Capturer;
+use solidcraft_viewport::gpu::GpuError;
+use solidcraft_viewport::gpu::capture::Capturer;
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine, StandardView};
 
 /// Pictures drawn with one sample per pixel: with 4× multisampling a thin line covers some
 /// samples wherever it falls, which hides the fault.
 fn capturer() -> Option<&'static Capturer> {
-    static SINGLE: std::sync::OnceLock<solidcraft_gpu::Result<Capturer>> = std::sync::OnceLock::new();
+    static SINGLE: std::sync::OnceLock<solidcraft_viewport::gpu::Result<Capturer>> = std::sync::OnceLock::new();
     match SINGLE.get_or_init(|| Capturer::headless_single_sample(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}")))).as_ref() {
         Ok(c) => {
             assert_eq!(c.samples(), 1);

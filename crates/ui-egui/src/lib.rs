@@ -1060,8 +1060,8 @@ impl SolveApp {
             let mut renderer = rs.renderer.write();
             if let Some(res) = renderer.callback_resources.get_mut::<gpu::Renderer>() {
                 match res.check_msaa(&rs.device, &rs.queue) {
-                    Ok(solidcraft_gpu::view::MsaaCheck::Passed) => {}
-                    Ok(solidcraft_gpu::view::MsaaCheck::Fallback) => {
+                    Ok(solidcraft_viewport::gpu::view::MsaaCheck::Passed) => {}
+                    Ok(solidcraft_viewport::gpu::view::MsaaCheck::Fallback) => {
                         installed.samples = 1;
                         self.msaa_compatibility = true;
                         eprintln!(
@@ -1069,7 +1069,7 @@ impl SolveApp {
                             scene.samples
                         );
                     }
-                    Ok(solidcraft_gpu::view::MsaaCheck::FailedAtOne) => {
+                    Ok(solidcraft_viewport::gpu::view::MsaaCheck::FailedAtOne) => {
                         eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                     }
                     Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),

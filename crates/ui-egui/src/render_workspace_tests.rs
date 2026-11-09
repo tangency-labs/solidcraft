@@ -1740,12 +1740,12 @@ fn progressive_image_controls_route_to_the_registered_host() {
     use std::time::{Duration, Instant};
 
     let host = solidcraft_gpu::env::policy()
-        .and_then(|policy| solidcraft_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
+        .and_then(|policy| solidcraft_viewport::gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
         .and_then(|(adapter, _)| solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
     let host = match host {
         Ok(host) => host,
         Err(e) => {
-            let expected = !solidcraft_gpu::select::path_backends().is_empty();
+            let expected = !solidcraft_viewport::gpu::select::path_backends().is_empty();
             assert!(!expected || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("skipping progressive UI device test: {e}");
             return;

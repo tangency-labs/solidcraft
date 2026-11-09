@@ -9,6 +9,7 @@
 mod analysis;
 mod camera;
 pub mod clear_coat;
+pub mod gpu;
 pub mod hatch;
 mod raster;
 mod scene;

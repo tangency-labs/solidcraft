@@ -1,6 +1,6 @@
 //! What a picture of the model shows, independent of how it is drawn: meshes in colours, lines,
 //! the background, a section cut and a surface analysis. The GPU draws it with the viewport's
-//! pipelines (`solidcraft_gpu::capture`).
+//! pipelines (`solidcraft_viewport::gpu::capture`).
 
 use std::sync::Arc;
 

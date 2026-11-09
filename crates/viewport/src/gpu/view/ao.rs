@@ -34,9 +34,9 @@ pub(super) struct Maps {
 /// model batches, so moving a preview never re-uploads unchanged model colours or vertices.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundAo {
-    bounds: solidcraft_viewport::vec::Bounds,
+    bounds: crate::vec::Bounds,
     height: f64,
-    up: solidcraft_viewport::UpAxis,
+    up: crate::UpAxis,
     radius: f32,
 }
 
@@ -45,11 +45,11 @@ impl GroundAo {
         if !back.iter().all(|v| v.is_finite()) {
             return false;
         }
-        let cam = solidcraft_viewport::Camera { up: self.up, ..Default::default() };
+        let cam = crate::Camera { up: self.up, ..Default::default() };
         cam.to_frame(solidcore_record::Vec3::new(f64::from(back[0]), f64::from(back[1]), f64::from(back[2]))).z > 0.0
     }
 
-    pub fn new(bounds: solidcraft_viewport::vec::Bounds, height: f64, up: solidcraft_viewport::UpAxis, radius: f32) -> Option<Self> {
+    pub fn new(bounds: crate::vec::Bounds, height: f64, up: crate::UpAxis, radius: f32) -> Option<Self> {
         if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() || !height.is_finite() || !radius.is_finite() || radius <= 0.0 {
             return None;
         }
@@ -58,17 +58,17 @@ impl GroundAo {
 
     /// Two triangles (168 bytes), extended to cover an optional preview without moving the
     /// existing ground height. Invalid preview bounds are ignored.
-    pub fn vertices(&self, preview: Option<solidcraft_viewport::vec::Bounds>) -> Vec<u8> {
+    pub fn vertices(&self, preview: Option<crate::vec::Bounds>) -> Vec<u8> {
         self.vertices_with_radius(preview, self.radius)
     }
 
     /// Cover the preview plus the current frame's sampling margin. Invalid radii draw nothing.
-    pub fn vertices_with_radius(&self, preview: Option<solidcraft_viewport::vec::Bounds>, radius: f32) -> Vec<u8> {
+    pub fn vertices_with_radius(&self, preview: Option<crate::vec::Bounds>, radius: f32) -> Vec<u8> {
         use solidcore_record::Vec3;
         if !radius.is_finite() || radius <= 0.0 {
             return Vec::new();
         }
-        let cam = solidcraft_viewport::Camera { up: self.up, ..Default::default() };
+        let cam = crate::Camera { up: self.up, ..Default::default() };
         let mut coverage = self.bounds;
         if let Some(bb) = preview.filter(|b| !b.is_empty() && b.min.is_finite() && b.max.is_finite()) {
             for i in 0..8 {
@@ -377,9 +377,9 @@ mod tests {
     #[test]
     fn receiver_visibility_follows_the_camera_side_in_both_up_axes() {
         use solidcore_record::Vec3;
-        let bounds = solidcraft_viewport::vec::Bounds { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
-        for up in [solidcraft_viewport::UpAxis::Y, solidcraft_viewport::UpAxis::Z] {
-            let cam = solidcraft_viewport::Camera { up, ..Default::default() };
+        let bounds = crate::vec::Bounds { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
+        for up in [crate::UpAxis::Y, crate::UpAxis::Z] {
+            let cam = crate::Camera { up, ..Default::default() };
             let ground = GroundAo::new(bounds, 0.0, up, 1.0).unwrap();
             assert!(ground.visible_from(cam.from_frame(Vec3::Z).to_f32()));
             assert!(!ground.visible_from(cam.from_frame(-Vec3::Z).to_f32()));
@@ -390,13 +390,13 @@ mod tests {
 
     #[test]
     fn a_growing_preview_keeps_the_current_sampling_margin_at_the_fixed_ground_height() {
+        use crate::vec::Bounds;
         use solidcore_record::Vec3;
-        use solidcraft_viewport::vec::Bounds;
         let bounds = Bounds { min: Vec3::ZERO, max: Vec3::new(3.0, 4.0, 12.0) };
-        let ground = GroundAo::new(bounds, -0.014, solidcraft_viewport::UpAxis::Z, 1.0).unwrap();
+        let ground = GroundAo::new(bounds, -0.014, crate::UpAxis::Z, 1.0).unwrap();
         let preview = Bounds { min: Vec3::new(100.0, 200.0, -40.0), max: Vec3::new(103.0, 204.0, -28.0) };
         let mut drawn = Bounds::EMPTY;
-        for vertex in ground.vertices_with_radius(Some(preview), 10.0).as_chunks::<{ crate::view::TRI_SIZE }>().0 {
+        for vertex in ground.vertices_with_radius(Some(preview), 10.0).as_chunks::<{ crate::gpu::view::TRI_SIZE }>().0 {
             let read = |i| f64::from(f32::from_le_bytes(vertex[i..i + 4].try_into().unwrap()));
             drawn.add(Vec3::new(read(0), read(4), read(8)));
         }

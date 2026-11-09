@@ -1,4 +1,4 @@
-//! The GPU viewport in egui: the viewport's pipelines ([`solidcraft_gpu::view`]) drawn in an
+//! The GPU viewport in egui: the viewport's pipelines ([`solidcraft_viewport::gpu::view`]) drawn in an
 //! `egui_wgpu` paint callback. Everything that draws lives in the GPU crate, so headless pictures
 //! (`solidcraft-cli snapshot`, MCP screenshots, `ui.render`) use the same pipelines; this is the
 //! glue that hands them egui's device and render pass.
@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
-pub use solidcraft_gpu::view::{
+pub use solidcraft_viewport::gpu::view::{
     AccessMap, BlockBuilder, BlockBytes, BlockTris, DrawStats, DrawStatsHandle, Frame, GpuImage, GpuScene, GpuTarget, INSTANCE_SIZE, InstanceLook,
     InstancedMesh, LINE_SIZE, LOD_PX, MAX_PALETTE, MovingLayer, PBR_SIZE, Palette, PaletteIndex, PlannedBody, Renderer, SHARED_SIZE, SceneBlock,
     SceneSlot, SharedTris, TRI_SIZE, TriClass, UploadError, extend_runs, level_for, lifted_width, placement_scale, runs_within, supersampled_size,
@@ -95,7 +95,7 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
 }
 
 /// The GPU plan evaluation compiling beside the window: there once it is ready ([`tick_tessellation`]).
-pub type TessReady = std::sync::Arc<std::sync::OnceLock<solidcraft_gpu::TessGpu>>;
+pub type TessReady = std::sync::Arc<std::sync::OnceLock<solidcraft_viewport::gpu::TessGpu>>;
 
 /// Create the pipelines. Call once with the app's render state, the scene target's depth/stencil/
 /// MSAA settings, and the target of the pass the picture is shown in. Without a stencil the
@@ -114,16 +114,20 @@ pub fn install(
     // takes seconds, most of the start (#4860). Bodies are built on the CPU until it is ready.
     #[cfg(not(target_arch = "wasm32"))]
     let later = gpu_meshing.then(|| {
-        solidcraft_gpu::view::TessLater::start(
+        solidcraft_viewport::gpu::view::TessLater::start(
             &rs.adapter,
             &rs.device,
             &rs.queue,
-            solidcraft_gpu::SHADER,
+            solidcraft_viewport::gpu::SHADER,
             solidcraft_gpu::env::force_cpu_tessellation(),
         )
     });
     #[cfg(target_arch = "wasm32")]
-    let tess = if gpu_meshing { solidcraft_gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_gpu::SHADER, false) } else { None };
+    let tess = if gpu_meshing {
+        solidcraft_viewport::gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_viewport::gpu::SHADER, false)
+    } else {
+        None
+    };
     #[cfg(not(target_arch = "wasm32"))]
     let tess = None;
     let (scene, window) = (GpuTarget { tess: tess.is_some(), ..scene }, GpuTarget { tess: tess.is_some(), ..window });
@@ -183,7 +187,7 @@ pub fn log_uncaptured_errors(device: &wgpu::Device) {
 /// rasterizer draws them.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn install_picture_renderer(rs: &egui_wgpu::RenderState) {
-    match solidcraft_gpu::capture::Capturer::new(&rs.adapter, rs.device.clone(), rs.queue.clone()) {
+    match solidcraft_viewport::gpu::capture::Capturer::new(&rs.adapter, rs.device.clone(), rs.queue.clone()) {
         Ok(capturer) => install_capturer(capturer.watching(rs.device_lost.flag())),
         Err(e) => {
             log::warn!("pictures of the model are drawn by the CPU rasterizer: the GPU cannot draw them: {e}");
@@ -195,7 +199,7 @@ pub fn install_picture_renderer(rs: &egui_wgpu::RenderState) {
 /// Draw this process's headless pictures with `capturer`; once its device is lost (the graphics
 /// driver was reset, #4172) the CPU rasterizer draws them, so saving still writes a thumbnail.
 #[cfg(not(target_arch = "wasm32"))]
-fn install_capturer(capturer: solidcraft_gpu::capture::Capturer) {
+fn install_capturer(capturer: solidcraft_viewport::gpu::capture::Capturer) {
     let capturer = std::sync::Arc::new(capturer);
     solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| picture(&capturer, scene, cam, w, h)));
 }
@@ -203,7 +207,7 @@ fn install_capturer(capturer: solidcraft_gpu::capture::Capturer) {
 /// `scene` drawn by `capturer`, or by the CPU rasterizer once its device is lost.
 #[cfg(not(target_arch = "wasm32"))]
 fn picture(
-    capturer: &solidcraft_gpu::capture::Capturer,
+    capturer: &solidcraft_viewport::gpu::capture::Capturer,
     scene: &solidcraft_viewport::Scene,
     cam: &solidcraft_viewport::Camera,
     w: u32,
@@ -211,7 +215,7 @@ fn picture(
 ) -> Result<solidcraft_engine::capture::Picture, String> {
     match capturer.rgba(scene, cam, w, h) {
         Ok(rgba) => Ok(solidcraft_engine::capture::Picture { rgba, renderer: capturer.renderer() }),
-        Err(solidcraft_gpu::GpuError::DeviceLost) => Ok(cpu_picture(scene, cam, w, h)),
+        Err(solidcraft_viewport::gpu::GpuError::DeviceLost) => Ok(cpu_picture(scene, cam, w, h)),
         Err(e) => Err(e.to_string()),
     }
 }
@@ -254,7 +258,7 @@ mod test_support {
             let format = wgpu::TextureFormat::Rgba8UnormSrgb;
             let renderer = Arc::new(egui::epaint::mutex::RwLock::new(egui_wgpu::Renderer::new(&device, format, Default::default())));
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
-            let scene = GpuTarget { depth: Some(solidcraft_gpu::depth_format(&device, true)), ..window };
+            let scene = GpuTarget { depth: Some(solidcraft_viewport::gpu::depth_format(&device, true)), ..window };
             let view = Renderer::with_window_target(&device, scene, window, None);
             let installed = view.target();
             app.viewport.gpu = Some(installed);
@@ -394,7 +398,7 @@ mod test_support {
     /// the reason printed, on a machine without a GPU adapter, and the test skips.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn test_picture_renderer() -> bool {
-        match solidcraft_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
+        match solidcraft_viewport::gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
             Ok(c) => {
                 solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                     c.rgba(scene, cam, w, h)
@@ -403,7 +407,7 @@ mod test_support {
                 }));
                 true
             }
-            Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+            Err(e @ solidcraft_viewport::gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
                 eprintln!("skipping: {e}");
                 false
             }
@@ -463,7 +467,7 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
 
 /// The shader's analysis colours and flags for the theme's colours.
 pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
-    solidcraft_gpu::view::analysis_colors(c)
+    solidcraft_viewport::gpu::view::analysis_colors(c)
 }
 
 /// The backends the offscreen tests start, chosen once per test process as the app chooses them
@@ -475,14 +479,14 @@ pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
 pub(crate) fn offscreen_backends() -> wgpu::Backends {
     static CHOSEN: std::sync::OnceLock<wgpu::Backends> = std::sync::OnceLock::new();
     *CHOSEN.get_or_init(|| {
-        let default = solidcraft_gpu::instance_descriptor_from_env().backends;
+        let default = solidcraft_viewport::gpu::instance_descriptor_from_env().backends;
         if !cfg!(target_os = "windows") || std::env::var("WGPU_BACKEND").is_ok_and(|v| !v.trim().is_empty()) {
             return default;
         }
         let hardware = |backends: wgpu::Backends| {
             let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
             desc.backends = backends;
-            desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
+            desc.backend_options.dx12.shader_compiler = solidcraft_viewport::gpu::dx12_compiler();
             let adapters = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
             adapters.iter().any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
         };
@@ -502,19 +506,19 @@ fn offscreen_starting() -> std::sync::MutexGuard<'static, ()> {
 /// The adapter an offscreen test opens under `policy` (`SOLIDCRAFT_GPU`, #9040), on
 /// [`offscreen_backends`]; call it holding [`offscreen_starting`]. Under `auto` (the variable
 /// unset) wgpu's default adapter, as before; under `hardware` or `software` the one
-/// `solidcraft_gpu::select` picks for headless pictures of that tier, so `software` keeps the
+/// `solidcraft_viewport::gpu::select` picks for headless pictures of that tier, so `software` keeps the
 /// tests off the hardware GPU; under `cpu`, as for pictures, none. `None` when none qualifies.
 #[cfg(all(test, not(target_arch = "wasm32")))]
-fn offscreen_adapter(policy: solidcraft_gpu::select::Policy) -> Option<wgpu::Adapter> {
-    use solidcraft_gpu::select::Policy;
-    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+fn offscreen_adapter(policy: solidcraft_viewport::gpu::select::Policy) -> Option<wgpu::Adapter> {
+    use solidcraft_viewport::gpu::select::Policy;
+    let mut desc = solidcraft_viewport::gpu::instance_descriptor_from_env();
     desc.backends = offscreen_backends();
     let instance = wgpu::Instance::new(desc);
     match policy {
         Policy::Auto => pollster::block_on(instance.request_adapter(&Default::default())).ok(),
         Policy::Hardware | Policy::Software => {
             let found = pollster::block_on(instance.enumerate_adapters(offscreen_backends()));
-            solidcraft_gpu::select::pick_among(found, policy).map(|(adapter, _)| adapter)
+            solidcraft_viewport::gpu::select::pick_among(found, policy).map(|(adapter, _)| adapter)
         }
         Policy::Cpu => None,
     }
@@ -546,7 +550,7 @@ pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgp
     let _one_at_a_time = offscreen_starting();
     let adapter = offscreen_adapter(policy)?;
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: solidcraft_gpu::depth_features(&adapter),
+        required_features: solidcraft_viewport::gpu::depth_features(&adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         ..Default::default()
     }))
@@ -559,7 +563,7 @@ pub(crate) fn offscreen_own_device() -> Option<(wgpu::Adapter, wgpu::Device, wgp
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_tessellates(shader: &str) -> Option<bool> {
     let (adapter, device, queue) = offscreen_device()?;
-    Some(solidcraft_gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation()).is_some())
+    Some(solidcraft_viewport::gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation()).is_some())
 }
 
 /// Render `scene` offscreen on a device of its own, through the viewport's real resources and
@@ -598,7 +602,7 @@ pub(crate) fn render_offscreen(
             analysis_colors: colors,
             ssaa: 1.0,
             ao_radius: 0.0,
-            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
         },
     )
 }
@@ -630,7 +634,7 @@ pub(crate) fn render_product_offscreen(
             analysis_colors: [0.0; 36],
             ssaa: 1.0,
             ao_radius: 0.0,
-            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
         },
     )
 }
@@ -676,7 +680,7 @@ pub(crate) fn render_ao_offscreen(
             analysis_colors: [0.0; 36],
             ssaa: 1.0,
             ao_radius,
-            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
         },
     )
 }
@@ -707,7 +711,7 @@ pub(crate) fn render_offscreen_ssaa(
             analysis_colors: [0.0; 36],
             ssaa,
             ao_radius: 0.0,
-            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
         },
     )
 }
@@ -759,9 +763,10 @@ fn offscreen(
     let (adapter, device, queue) = offscreen_device()?;
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
-    let depth = solidcraft_gpu::depth_format(&device, true);
-    let compute =
-        tess.and_then(|shader| solidcraft_gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation()));
+    let depth = solidcraft_viewport::gpu::depth_format(&device, true);
+    let compute = tess.and_then(|shader| {
+        solidcraft_viewport::gpu::view::tessellation(&adapter, &device, &queue, shader, solidcraft_gpu::env::force_cpu_tessellation())
+    });
     let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false };
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(Renderer::new(&device, target, compute));
@@ -883,9 +888,15 @@ impl OffscreenFrames {
     pub(crate) fn new(size: u32, tess: bool) -> Option<OffscreenFrames> {
         let (adapter, device, queue) = offscreen_device()?;
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let depth = solidcraft_gpu::depth_format(&device, true);
+        let depth = solidcraft_viewport::gpu::depth_format(&device, true);
         let compute = if tess {
-            solidcraft_gpu::view::tessellation(&adapter, &device, &queue, solidcraft_gpu::SHADER, solidcraft_gpu::env::force_cpu_tessellation())
+            solidcraft_viewport::gpu::view::tessellation(
+                &adapter,
+                &device,
+                &queue,
+                solidcraft_viewport::gpu::SHADER,
+                solidcraft_gpu::env::force_cpu_tessellation(),
+            )
         } else {
             None
         };
@@ -971,7 +982,7 @@ impl OffscreenFrames {
     }
 
     /// What the model scene's last change uploaded.
-    pub(crate) fn uploads(&self) -> solidcraft_gpu::view::UploadStats {
+    pub(crate) fn uploads(&self) -> solidcraft_viewport::gpu::view::UploadStats {
         self.resources.get::<Renderer>().map(Renderer::uploads).unwrap_or_default()
     }
 
@@ -1160,7 +1171,7 @@ mod tests {
             app.cam.distance = 110.0;
             app.cam.target = solidcore_record::Vec3::new(20.0, 15.0, 12.5);
             let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
-            let scene = GpuTarget { depth: Some(solidcraft_gpu::depth_format(&device, true)), ..window };
+            let scene = GpuTarget { depth: Some(solidcraft_viewport::gpu::depth_format(&device, true)), ..window };
             let view = Renderer::with_window_target(&device, scene, window, None);
             app.viewport.gpu = Some(view.target());
             app.viewport.draw_stats = Some(view.stats());
@@ -1257,7 +1268,7 @@ mod tests {
     fn blur_production_policy_rejects_software_adapter() {
         use crate::blur::{Capability, FixturePolicy};
         let Some(mut f) = BlurFixture::new(false, FixturePolicy::Production) else { return };
-        if solidcraft_gpu::select::tier_of(f.adapter.get_info().device_type) != solidcraft_gpu::select::Tier::Software {
+        if solidcraft_viewport::gpu::select::tier_of(f.adapter.get_info().device_type) != solidcraft_viewport::gpu::select::Tier::Software {
             eprintln!("skipped software policy assertion: selected adapter is not software");
             return;
         }
@@ -1706,7 +1717,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn offscreen_tests_pick_their_adapter_by_the_gpu_policy() {
-        use solidcraft_gpu::select::Policy;
+        use solidcraft_viewport::gpu::select::Policy;
         let _one_at_a_time = super::offscreen_starting();
         assert!(super::offscreen_adapter(Policy::Cpu).is_none(), "cpu opens no adapter");
         for (policy, software) in [(Policy::Software, true), (Policy::Hardware, false)] {
@@ -1740,7 +1751,7 @@ mod tests {
             return;
         };
         let lost = egui_wgpu::DeviceLost::watch(&device);
-        let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
+        let capturer = solidcraft_viewport::gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
         let (scene, cam) = (solidcraft_viewport::Scene::default(), solidcraft_viewport::Camera::default());
         assert_ne!(super::picture(&capturer, &scene, &cam, 16, 16).unwrap().renderer, "cpu");
         assert!(!lost.probe(&device, &queue), "a working device isn't lost");
@@ -1780,7 +1791,7 @@ mod tests {
             return;
         };
         let lost = egui_wgpu::DeviceLost::watch(&device);
-        let capturer = solidcraft_gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
+        let capturer = solidcraft_viewport::gpu::capture::Capturer::new(&adapter, device.clone(), queue.clone()).unwrap().watching(lost.flag());
         let mut renderer = egui_wgpu::Renderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, Default::default());
         let image = egui::ImageData::Color(std::sync::Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::WHITE)));
         let delta = egui::epaint::ImageDelta::full(image, egui::TextureOptions::LINEAR);

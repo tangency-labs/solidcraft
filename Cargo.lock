@@ -4626,11 +4626,18 @@ name = "solidcraft-viewport"
 version = "0.40.0-rc.3"
 dependencies = [
  "image",
+ "log",
+ "naga",
+ "pollster 0.4.0",
  "serde",
  "serde_json",
+ "solidcore",
+ "solidcore-convert",
  "solidcore-record",
  "solidcore-tess",
  "solidcraft-color",
+ "thiserror 2.0.21",
+ "wgpu",
 ]
 
 [[package]]

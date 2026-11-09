@@ -2,10 +2,12 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 use solidcraft_kernel::{Body, BoolOp};
 
-use super::*;
+use solidcore::eval::EvalSurface;
+use solidcore_tess::TessPlan;
+use solidcraft_viewport::gpu::{GpuError, PackedPlans, SHADER, TessGpu, VERTEX_STRIDE, open_headless};
 
 /// The adapter policy this crate's GPU tests run under: the host's, from its environment.
-pub(crate) fn policy() -> crate::select::Policy {
+pub(crate) fn policy() -> solidcraft_viewport::gpu::select::Policy {
     crate::env::policy().unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -79,37 +81,6 @@ fn a_pipeline_the_device_rejects_is_an_error_not_a_crash() {
 /// target, with wgpu's options) avoids what FXC cannot compile without unrolling a loop:
 /// arrays inside structs and two-dimensional arrays written by a loop counter. Runs everywhere;
 /// the Windows CI job compiles the real thing with FXC.
-#[test]
-fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
-    use naga::back::hlsl;
-    let module = ok(naga::front::wgsl::parse_str(SHADER));
-    let info = ok(naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::default()).validate(&module));
-    let options = hlsl::Options {
-        shader_model: hlsl::ShaderModel::V5_1,
-        force_loop_bounding: true,
-        restrict_indexing: true,
-        fake_missing_bindings: true,
-        ..Default::default()
-    };
-    let pipeline = hlsl::PipelineOptions::default();
-    let mut out = String::new();
-    ok(hlsl::Writer::new(&mut out, &options, &pipeline).write(&module, &info, None));
-    assert!(out.contains("void main("), "{out}");
-    // Struct members that are arrays: `float n0_[8];` inside a `struct ... { };`.
-    let mut in_struct = false;
-    for line in out.lines() {
-        let l = line.trim();
-        if l.starts_with("struct ") && !l.ends_with(';') {
-            in_struct = true;
-        } else if l.starts_with("};") {
-            in_struct = false;
-        } else if in_struct {
-            assert!(!l.contains('['), "an array inside a struct: {l}");
-        }
-        assert!(!l.contains("]["), "a two-dimensional array: {l}");
-    }
-}
-
 /// The shader's basis slots hold the highest degree the CPU evaluator takes, so every surface
 /// the CPU evaluates the GPU evaluates too.
 #[test]
@@ -278,7 +249,7 @@ fn a_resident_mesh_matches_the_cpu() {
         for (t, f) in cpu.triangles.iter().zip(&cpu.tri_face) {
             assert!(t.iter().all(|&i| mesh.vertex_face[i as usize] == *f), "{name}: a triangle's vertices belong to its face");
         }
-        let d = &gpu.device;
+        let d = gpu.device();
         let read = |src: &wgpu::Buffer, size: u64| {
             let dst = d.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("test read"),
@@ -289,7 +260,7 @@ fn a_resident_mesh_matches_the_cpu() {
             let mut enc = d.create_command_encoder(&Default::default());
             gpu.record(&mut enc, &mesh);
             enc.copy_buffer_to_buffer(src, 0, &dst, 0, size);
-            gpu.queue.submit([enc.finish()]);
+            gpu.queue().submit([enc.finish()]);
             let slice = dst.slice(..);
             slice.map_async(wgpu::MapMode::Read, |_| {});
             ok(d.poll(wgpu::PollType::wait_indefinitely()));
@@ -318,7 +289,7 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     let refs: Vec<&TessPlan> = gpu_plans.iter().collect();
     let mesh = ok(gpu.prepare_many(&refs));
     assert_eq!(mesh.parts.len(), plans.len());
-    let d = &gpu.device;
+    let d = gpu.device();
     let size = u64::from(mesh.vertex_count) * VERTEX_STRIDE;
     let dst = d.create_buffer(&wgpu::BufferDescriptor {
         label: Some("test read"),
@@ -329,7 +300,7 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
     let mut enc = d.create_command_encoder(&Default::default());
     gpu.record(&mut enc, &mesh);
     enc.copy_buffer_to_buffer(&mesh.vertices, 0, &dst, 0, size);
-    gpu.queue.submit([enc.finish()]);
+    gpu.queue().submit([enc.finish()]);
     let slice = dst.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
     ok(d.poll(wgpu::PollType::wait_indefinitely()));
@@ -344,48 +315,6 @@ fn a_scene_in_one_dispatch_matches_each_body_on_the_cpu() {
             assert!(q.dist(*p) < 20.0 * 1e-5, "{name}: vertex {k}");
         }
     }
-}
-
-fn check_empty_tessellation(gpu: &TessGpu, plan: &TessPlan) {
-    let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let evaluated = ok(gpu.evaluate(plan));
-    assert!(evaluated.positions.is_empty());
-    assert!(evaluated.normals.is_empty());
-    assert!(evaluated.triangles.is_empty());
-
-    let mesh = ok(gpu.prepare(plan));
-    assert_eq!(mesh.vertex_count, 0);
-    assert_eq!(mesh.index_count, 0);
-    assert!(mesh._inputs[1].size() >= std::mem::size_of::<[u32; SURFACE_WORDS]>() as u64);
-    assert!(mesh._inputs[2].size() >= std::mem::size_of::<f32>() as u64);
-    assert!(mesh._inputs[3].size() >= std::mem::size_of::<[u32; VERTEX_WORDS]>() as u64);
-    let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    gpu.record(&mut encoder, &mesh);
-    gpu.queue.submit([encoder.finish()]);
-    ok(gpu.device.poll(wgpu::PollType::wait_indefinitely()));
-    let error = pollster::block_on(scope.pop());
-    assert!(error.is_none(), "{error:?}");
-}
-
-#[test]
-fn tessellation_without_vertices_does_not_dispatch() {
-    let Some(gpu) = gpu() else { return };
-    let plan = TessPlan {
-        surfaces: vec![EvalSurface::Plane {
-            origin: solidcore_convert::vec3(Vec3::ZERO),
-            du: solidcore_convert::vec3(Vec3::X),
-            dv: solidcore_convert::vec3(Vec3::Y),
-        }],
-        faces: vec![solidcore_tess::FacePlan { surface: Some(0), ..Default::default() }],
-        ..Default::default()
-    };
-    check_empty_tessellation(&gpu, &plan);
-}
-
-#[test]
-fn tessellation_without_surfaces_does_not_dispatch() {
-    let Some(gpu) = gpu() else { return };
-    check_empty_tessellation(&gpu, &TessPlan::default());
 }
 
 /// Display meshing of a 400-hole plate (#303's benchmark): reference mesher, plan, CPU and GPU

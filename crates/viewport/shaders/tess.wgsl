@@ -1,6 +1,6 @@
 // Display tessellation: surface points and normals at each vertex's (u, v).
 //
-// The GPU twin of solidcraft_geom::tess::EvalSurface::{derivs, eval}: the same surface forms,
+// The GPU twin of the CPU surface evaluators (`EvalSurface::{derivs, eval}`): the same surface forms,
 // the same algorithms (The NURBS Book A2.1 span search, A2.2 basis functions, A2.3 first
 // derivatives, the rational quotient rule), in f32.
 

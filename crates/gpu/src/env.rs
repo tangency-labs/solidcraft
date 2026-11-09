@@ -4,13 +4,13 @@
 //! - `SOLIDCRAFT_GPU` (`auto`, `hardware`, `software`, `cpu`): the [`Policy`] that picks the
 //!   adapter headless pictures, the CLI and the path tracer draw with; `auto` when unset.
 //! - `SOLIDCRAFT_CPU_TESS`: set, bodies are built on the CPU on any device (the `force_cpu` of
-//!   [`crate::view::tessellation`]).
+//!   [`solidcraft_viewport::gpu::view::tessellation`]).
 //!
 //! `WGPU_BACKEND` and `WGPU_DX12_COMPILER` are wgpu's own and are read where wgpu reads them.
 
-use crate::capture::Headless;
-use crate::select::Policy;
-use crate::{GpuError, TessGpu};
+use solidcraft_viewport::gpu::capture::Headless;
+use solidcraft_viewport::gpu::select::Policy;
+use solidcraft_viewport::gpu::{GpuError, TessGpu};
 
 /// The variable naming the adapter policy.
 pub const POLICY: &str = "SOLIDCRAFT_GPU";
@@ -53,9 +53,9 @@ pub fn explain(e: &GpuError) -> String {
     }
 }
 
-/// What draws this process's headless pictures under `SOLIDCRAFT_GPU` ([`crate::capture::headless`]).
+/// What draws this process's headless pictures under `SOLIDCRAFT_GPU` ([`solidcraft_viewport::gpu::capture::headless`]).
 pub fn headless() -> Result<Headless, String> {
-    crate::capture::headless(policy()?).map_err(explain)
+    solidcraft_viewport::gpu::capture::headless(policy()?).map_err(explain)
 }
 
 /// A picture of `scene` drawn as [`headless`] draws it ([`Headless::rgba`]).
@@ -107,32 +107,34 @@ mod tests {
         assert_eq!(explain(&GpuError::DeviceLost), GpuError::DeviceLost.to_string());
     }
 
-    /// The GPU code that moves to the shared viewport crate reads no variable of SolidCraft's and
-    /// names neither SolidCraft nor its CLI: what the app wants, it passes in. (Its test modules
-    /// are scanned once they read the crate's own test variables.)
+    /// The shared viewport crate reads no variable of SolidCraft's and names neither SolidCraft nor
+    /// its CLI, in its code or its tests: what the app wants, it passes in.
     #[test]
-    fn the_viewport_gpu_code_reads_no_variable_of_the_apps() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = ["lib.rs", "view.rs", "pbr.rs", "capture.rs", "concurrent.rs", "select.rs"].map(|f| dir.join(f)).to_vec();
-        files.extend(std::fs::read_dir(dir.join("view")).unwrap().map(|e| e.unwrap().path()));
-        for f in files {
-            let text = std::fs::read_to_string(&f).unwrap();
-            let (mut test_module, mut after_cfg_test) = (false, false);
-            for (n, line) in text.lines().enumerate() {
-                if test_module {
-                    test_module = line != "}";
+    fn the_viewport_crate_reads_no_variable_of_the_apps() {
+        let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../viewport")];
+        let mut scanned = 0;
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
                     continue;
                 }
-                test_module = after_cfg_test && line.starts_with("mod ") && line.ends_with('{');
-                after_cfg_test = line.starts_with("#[cfg(") && line.contains("test");
-                let lower = line.to_ascii_lowercase();
-                assert!(
-                    !line.contains("SOLIDCRAFT") && !lower.contains("solidcraft-cli") && !lower.contains("solidcraft "),
-                    "{}:{}: {line}",
-                    f.display(),
-                    n + 1
-                );
+                if !path.extension().is_some_and(|e| e == "rs" || e == "wgsl" || e == "toml" || e == "md") {
+                    continue;
+                }
+                scanned += 1;
+                for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                    let lower = line
+                        .to_ascii_lowercase()
+                        .replace("solidcraft_color", "")
+                        .replace("solidcraft-color", "")
+                        .replace("solidcraft_viewport", "")
+                        .replace("solidcraft-viewport", "");
+                    assert!(!lower.contains("solidcraft"), "{}:{}: {line}", path.display(), n + 1);
+                }
             }
         }
+        assert!(scanned > 20, "{scanned} files");
     }
 }

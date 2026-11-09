@@ -21,7 +21,7 @@ struct U {
     model: mat4x4<f32>,
     tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
-    // the section hatch colours by part (`solidcraft_render::hatch`), the first the cap's own
+    // the section hatch colours by part (`crate::hatch`), the first the cap's own
     hatch: array<vec4<f32>, 3>,
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation

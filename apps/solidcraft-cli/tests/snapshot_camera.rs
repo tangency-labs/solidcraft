@@ -17,14 +17,14 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 /// Whether pictures can be drawn here; installs the renderer the CLI installs, so the MCP
 /// `screenshot` in this process draws as `solidcraft-cli mcp` does.
 fn gpu() -> bool {
-    match solidcraft_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
+    match solidcraft_viewport::gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                 c.rgba(scene, cam, w, h).map(|rgba| solidcraft_engine::capture::Picture { rgba, renderer: c.renderer() }).map_err(|e| e.to_string())
             }));
             true
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport::gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("skipping: {e}");
             false
         }
