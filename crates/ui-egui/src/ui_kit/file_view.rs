@@ -40,7 +40,26 @@ impl<'a> From<&'a str> for Icon<'a> {
     }
 }
 
+impl<'a> From<&'a String> for Icon<'a> {
+    fn from(name: &'a String) -> Self {
+        Icon::Kit(name)
+    }
+}
+
 impl Icon<'_> {
+    /// No picture at all: an empty kit name.
+    pub(crate) fn is_blank(&self) -> bool {
+        matches!(self, Icon::Kit(""))
+    }
+
+    /// As [`Self::paint`], with a kit icon in its plain colours rather than accented.
+    pub(crate) fn paint_plain(&self, painter: &egui::Painter, rect: Rect, opacity: f32) {
+        match self {
+            Icon::Kit(name) => crate::icons::paint_icon(painter, rect, name, opacity),
+            host => host.paint(painter, rect, opacity),
+        }
+    }
+
     pub(crate) fn paint(&self, painter: &egui::Painter, rect: Rect, opacity: f32) {
         match self {
             Icon::Kit(name) => crate::icons::paint_accented(painter, rect, name, None, opacity),

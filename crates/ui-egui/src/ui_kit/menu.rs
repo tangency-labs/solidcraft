@@ -1,10 +1,87 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{Container, Icon, Surface};
 use crate::{icons, ui_kit::type_face::RichTextExt as _};
-use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Color32, FontId, Rect, Response, Sense, Stroke, TextureId, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
 use solidcraft_theme::Tokens;
+use std::sync::Arc;
+
+/// The picture on an [`Item`]: a name in the kit's icon set, or a host's own picture. An item
+/// owns its data, so it cannot hold a borrowed [`Icon`]. It reads as the kit name, which is empty
+/// for a host's picture, so reports and the surfaces that only draw kit icons stay as they were.
+#[derive(Clone, Default)]
+pub struct ItemIcon {
+    name: String,
+    host: Option<HostIcon>,
+}
+
+#[derive(Clone)]
+enum HostIcon {
+    Texture(TextureId),
+    Paint(Arc<dyn Fn(&egui::Painter, Rect, f32) + Send + Sync>),
+}
+
+impl ItemIcon {
+    /// A texture the host made.
+    pub fn texture(texture: TextureId) -> Self {
+        Self { name: String::new(), host: Some(HostIcon::Texture(texture)) }
+    }
+    /// The host's own painter, called with the icon's rect and opacity.
+    pub fn paint(paint: impl Fn(&egui::Painter, Rect, f32) + Send + Sync + 'static) -> Self {
+        Self { name: String::new(), host: Some(HostIcon::Paint(Arc::new(paint))) }
+    }
+    pub(crate) fn as_icon(&self) -> Icon<'_> {
+        match &self.host {
+            Some(HostIcon::Texture(texture)) => Icon::Texture(*texture),
+            Some(HostIcon::Paint(paint)) => Icon::Paint(&**paint),
+            None => Icon::Kit(&self.name),
+        }
+    }
+}
+
+impl std::ops::Deref for ItemIcon {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl From<&str> for ItemIcon {
+    fn from(name: &str) -> Self {
+        Self { name: name.into(), host: None }
+    }
+}
+
+impl From<String> for ItemIcon {
+    fn from(name: String) -> Self {
+        Self { name, host: None }
+    }
+}
+
+impl PartialEq<&str> for ItemIcon {
+    fn eq(&self, other: &&str) -> bool {
+        self.name == *other
+    }
+}
+
+impl std::fmt::Display for ItemIcon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)
+    }
+}
+
+impl std::fmt::Debug for ItemIcon {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.name.fmt(f)
+    }
+}
+
+impl Serialize for ItemIcon {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.name)
+    }
+}
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
 /// click) or a `ui.*` action. `-` is a separator, `#…` a section heading.
@@ -14,7 +91,7 @@ pub struct Item {
     pub label: String,
     pub shortcut: String,
     pub enabled: bool,
-    pub icon: String,
+    pub icon: ItemIcon,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -47,7 +124,7 @@ impl Item {
             label: String::new(),
             shortcut: String::new(),
             enabled: false,
-            icon: String::new(),
+            icon: ItemIcon::default(),
             params: None,
             children: Vec::new(),
             swatch: None,
@@ -60,7 +137,7 @@ impl Item {
             label: label.into(),
             shortcut: String::new(),
             enabled: false,
-            icon: String::new(),
+            icon: ItemIcon::default(),
             params: None,
             children: Vec::new(),
             swatch: None,
@@ -365,7 +442,7 @@ impl Menu {
 pub(crate) struct MenuItem<'a> {
     pub id: &'a str,
     pub label: &'a str,
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub shortcut: &'a str,
     pub enabled: bool,
     pub highlighted: bool,
@@ -376,8 +453,19 @@ pub(crate) struct MenuItem<'a> {
 }
 
 impl<'a> MenuItem<'a> {
-    pub(crate) fn new(id: &'a str, label: &'a str, icon: &'a str) -> Self {
-        Self { id, label, icon, shortcut: "", enabled: true, highlighted: false, checked: None, swatch: None, danger: false, submenu: false }
+    pub(crate) fn new(id: &'a str, label: &'a str, icon: impl Into<Icon<'a>>) -> Self {
+        Self {
+            id,
+            label,
+            icon: icon.into(),
+            shortcut: "",
+            enabled: true,
+            highlighted: false,
+            checked: None,
+            swatch: None,
+            danger: false,
+            submenu: false,
+        }
     }
 
     pub(crate) fn show(&self, ui: &mut Ui) -> Response {
@@ -433,13 +521,11 @@ impl<'a> MenuItem<'a> {
             }
         } else if let Some(color) = self.swatch {
             painter.rect(icon, t.radius_sm, color, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
-        } else if !self.icon.is_empty() {
-            if self.danger {
-                icons::paint_danger(&painter, icon, self.icon, 1.0);
-            } else if hot {
-                icons::paint_ink(&painter, icon, self.icon, dim);
-            } else {
-                icons::paint_icon(&painter, icon, self.icon, 1.0);
+        } else if !self.icon.is_blank() {
+            match self.icon {
+                Icon::Kit(name) if self.danger => icons::paint_danger(&painter, icon, name, 1.0),
+                Icon::Kit(name) if hot => icons::paint_ink(&painter, icon, name, dim),
+                plain => plain.paint_plain(&painter, icon, 1.0),
             }
         }
         let label = solidcraft_ui_text::tr_label(self.label);
@@ -525,8 +611,10 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                     vec2(t.space_24 + t.space_16 + t.space_4, t.space_24 + t.space_16 + t.space_4),
                 );
                 ui.painter().rect_filled(tile, t.radius_xl.saturating_sub(1), if planned { t.panel_header } else { soft });
-                if !item.icon.is_empty() {
-                    icons::paint_icon(ui.painter(), tile.shrink(t.space_6 + 1.0), &item.icon, if item.enabled { 1.0 } else { 0.35 });
+                let opacity = if item.enabled { 1.0 } else { 0.35 };
+                let icon = item.icon.as_icon();
+                if !icon.is_blank() {
+                    icon.paint_plain(ui.painter(), tile.shrink(t.space_6 + 1.0), opacity);
                 }
                 let text = if item.enabled { t.text } else { t.text_dim };
                 let name = solidcraft_ui_text::tr_label(&item.label);
@@ -637,6 +725,21 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
 mod tests {
     use super::*;
     use crate::test_support::{key, pointer};
+
+    #[test]
+    fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {
+        const HOST: TextureId = TextureId::User(7);
+        let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
+        let output = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| {
+            MenuItem::new(&item.id, &item.label, item.icon.as_icon()).show(ui);
+        });
+        assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
+
+        assert_eq!(serde_json::to_value(&item.icon).unwrap(), serde_json::json!(""), "a host's picture has no name to report");
+        let named = ItemIcon::from("delete");
+        assert!(named == "delete" && matches!(named.as_icon(), Icon::Kit("delete")));
+        assert_eq!(serde_json::to_value(&named).unwrap(), serde_json::json!("delete"));
+    }
 
     #[test]
     fn menu_navigation_skips_disabled_rows_and_wraps() {

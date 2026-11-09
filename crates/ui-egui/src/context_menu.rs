@@ -140,7 +140,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         label: label.into(),
         shortcut,
         enabled: info.as_ref().is_some_and(|i| i.enabled),
-        icon: info.map(|i| i.icon.to_string()).unwrap_or_default(),
+        icon: info.map(|i| i.icon).unwrap_or_default().into(),
         params: None,
         children: Vec::new(),
         swatch: None,
@@ -2802,7 +2802,7 @@ fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
     crate::ui_kit::MenuItem {
         id: &item.id,
         label: &item.label,
-        icon: &item.icon,
+        icon: item.icon.as_icon(),
         shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
         enabled: item.enabled,
         highlighted: lit,
