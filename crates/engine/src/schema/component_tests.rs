@@ -55,7 +55,22 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PasteNewParams>(), &["component", "in_place", "occurrence", "parent", "parent_path", "path", "translate"]);
     assert_keys(
         input_schema_for::<MoveParams>(),
-        &["angle", "axis", "base_transform", "capture", "matrix", "move_grounded", "occurrence", "origin", "path", "space", "to", "to_matrix", "tolerance", "translate"],
+        &[
+            "angle",
+            "axis",
+            "base_transform",
+            "capture",
+            "matrix",
+            "move_grounded",
+            "occurrence",
+            "origin",
+            "path",
+            "space",
+            "to",
+            "to_matrix",
+            "tolerance",
+            "translate",
+        ],
     );
     assert_keys(input_schema_for::<DragParams>(), &["at", "continuous", "occurrence", "path", "point"]);
     assert_keys(input_schema_for::<OccurrencePropertiesParams>(), &["about", "descendants", "occurrence", "path"]);

@@ -1777,7 +1777,8 @@ impl<'de> Deserialize<'de> for MoveParams {
             }
             if *key == "to_matrix" {
                 let tolerance = crate::cmd::matrix_tolerance(&value, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
-                crate::cmd::rigid_matrix(value.get("to_matrix").unwrap_or(&Value::Null), tolerance, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
+                crate::cmd::rigid_matrix(value.get("to_matrix").unwrap_or(&Value::Null), tolerance, "")
+                    .map_err(|e| D::Error::custom(whole(refusal(e))))?;
                 return staged(&value, &[&["occurrence"], &["space"], &["path"]]).map(MoveParams);
             }
             value = without(value, &["tolerance"]);

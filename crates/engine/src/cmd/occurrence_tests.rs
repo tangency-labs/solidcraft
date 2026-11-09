@@ -1910,7 +1910,7 @@ fn absolute_move_to_matrix_in_world_under_a_turned_parent() {
     let (_, child) = created(&mut s, "Child");
     run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
     run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "translate": [3,4,5]}));
-    let target = json!([1,0,0,10, 0,1,0,20, 0,0,1,30]);
+    let target = json!([1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30]);
     for _ in 0..2 {
         run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "space": "world", "to_matrix": target}));
         let result = run(&mut s, "occurrence.properties", json!({"occurrence": child, "path": [parent,child]}));
@@ -1928,7 +1928,14 @@ fn absolute_move_to_matrix_in_world_under_a_turned_parent() {
 fn absolute_move_refuses_relative_keys_and_keeps_capture_and_grounding() {
     let mut s = Session::default();
     let (_, occ) = created(&mut s, "Part");
-    for extra in [json!({"translate": [1,0,0]}), json!({"axis": [0,0,1]}), json!({"angle": 1}), json!({"origin": [0,0,0]}), json!({"matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}), json!({"to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0]})] {
+    for extra in [
+        json!({"translate": [1,0,0]}),
+        json!({"axis": [0,0,1]}),
+        json!({"angle": 1}),
+        json!({"origin": [0,0,0]}),
+        json!({"matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+        json!({"to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+    ] {
         let mut p = json!({"occurrence": occ, "to": {"position": [1,2,3]}});
         for (k, v) in extra.as_object().unwrap() {
             p[k] = v.clone();
