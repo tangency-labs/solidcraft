@@ -785,20 +785,24 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
             return Err(DocError::Invalid("damaged design: timeline folder cannot contain itself".into()));
         }
     }
+    // Each folder's chain of parents ends at the top, walked once: a chain stops at a folder
+    // already known to end there. Walking every chain with a search per step took minutes on a
+    // design with 10 000 nested folders.
+    let parents: std::collections::BTreeMap<u64, Option<u64>> = d.timeline_groups.iter().map(|g| (g.id, g.parent)).collect();
+    let mut ends = std::collections::BTreeSet::new();
     for group in &d.timeline_groups {
-        if let Some(parent) = group.parent {
-            if !group_ids.contains(&parent) {
-                return Err(DocError::Invalid("damaged design: timeline folder has an unknown parent".into()));
-            }
-            let mut seen = std::collections::BTreeSet::new();
-            let mut current = Some(parent);
-            while let Some(id) = current {
-                if !seen.insert(id) {
-                    return Err(DocError::Invalid("damaged design: cyclic timeline folders".into()));
-                }
-                current = d.timeline_groups.iter().find(|candidate| candidate.id == id).and_then(|candidate| candidate.parent);
-            }
+        if group.parent.is_some_and(|parent| !group_ids.contains(&parent)) {
+            return Err(DocError::Invalid("damaged design: timeline folder has an unknown parent".into()));
         }
+        let mut chain = std::collections::BTreeSet::new();
+        let mut current = Some(group.id);
+        while let Some(id) = current.filter(|id| !ends.contains(id)) {
+            if !chain.insert(id) {
+                return Err(DocError::Invalid("damaged design: cyclic timeline folders".into()));
+            }
+            current = parents.get(&id).copied().flatten();
+        }
+        ends.extend(chain);
     }
     if let Some(id) = crate::non_contiguous_timeline_group(&d.features, &d.timeline_groups) {
         return Err(DocError::Invalid(format!("damaged design: timeline folder {id} is not contiguous")));
@@ -1914,6 +1918,7 @@ mod tests {
                         distance2: None,
                         start_offset: None,
                         through_all: false,
+                        second_follows_first: false,
                         taper: Some("0 deg".into()),
                         corner: Default::default(),
                         to: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 10.0))),

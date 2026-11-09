@@ -16,6 +16,13 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+/// The call that deletes item `id` with `delete`: Edit Contact Set deletes with `delete: true`;
+/// Delete Motion Study and Delete Exploded View take only the item, and strict refuses any other
+/// key (#12155).
+fn deletion(delete: &str, key: &str, id: u64) -> Value {
+    if delete == "contact.edit" { json!({key: id, "delete": true}) } else { json!({key: id}) }
+}
+
 #[test]
 fn deleted_motion_item_ids_are_not_reused_after_reopening() {
     for (create, delete, key, params) in [
@@ -29,13 +36,13 @@ fn deleted_motion_item_ids_are_not_reused_after_reopening() {
             run(&mut s, "component.create", json!({"name": name}));
         }
         let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
-        let deletion = json!({key: first, "delete": true});
-        run(&mut s, delete, deletion.clone());
+        let deleting = deletion(delete, key, first);
+        run(&mut s, delete, deleting.clone());
         let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         *s.doc_mut() = doc;
         let second = run(&mut s, create, params)[key].as_u64().unwrap();
         assert!(second > first, "{create}: deleted item {first} was reused as {second}");
-        assert!(s.execute(delete, &deletion).is_err());
+        assert!(s.execute(delete, &deleting).is_err());
     }
 }
 
@@ -60,7 +67,7 @@ fn default_names_skip_names_in_use() {
         let (first, one) = made(&mut s);
         let (_, two) = made(&mut s);
         assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
-        run(&mut s, delete, json!({key: first, "delete": true}));
+        run(&mut s, delete, deletion(delete, key, first));
         assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
     }
     // Placements: with the first deleted, a copy takes a name none has.
@@ -680,6 +687,25 @@ fn motion_study_plays_and_exports() {
     assert_eq!(run(&mut s, "motion.list", json!({}))["studies"].as_array().map(Vec::len), Some(0));
 }
 
+/// A placement's name in a motion CSV is one field, whatever it holds (#12728). A comma is kept in
+/// quotes, where it used to become a space; a quote or a line break no longer splits the row; and a
+/// name that a spreadsheet would run as a formula opens as text.
+#[test]
+fn a_motion_csv_keeps_each_placement_name_in_its_field() {
+    let mut s = rail();
+    run(&mut s, "motion.study", json!({"name": "Push", "steps": 100, "keys": [{"joint": "Rail", "points": [[0, 10], [100, -5]]}]}));
+    run(&mut s, "component.rename", json!({"component": "B", "name": "=B, \"x\"\ny"}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-motion-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let csv = dir.join("names.csv");
+    run(&mut s, "motion.export", json!({"study": "Push", "samples": 2, "path": csv.to_string_lossy()}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(text.contains(",A:1,") && text.contains(",\"'=B, \"\"x\"\"\ny:1\","), "{text}");
+    // A header, a row for each placement at each of the two samples, and the line break in each of B's rows.
+    assert_eq!(text.matches('\n').count(), 1 + 2 * 2 + 2, "{text}");
+}
+
 /// Regression (#9741): `motion.study` takes degrees for angle keys, so `motion.list` must give
 /// the keys back in those same units — feeding a listed study straight back to `motion.study`
 /// must not turn a 90° key into 1.57°.
@@ -772,8 +798,8 @@ fn exploded_view_is_greyed_out_until_there_are_two_components() {
 }
 
 /// Pictures drawn by the CPU rasterizer (the engine has no GPU): real views of the scene.
-fn cpu(scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32) -> Result<crate::capture::Picture, String> {
-    Ok(crate::capture::Picture { rgba: crate::render::render(scene, cam, w as usize, h as usize).rgba, renderer: "cpu" })
+fn cpu(scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32) -> Result<crate::capture::Picture, String> {
+    Ok(crate::capture::Picture { rgba: solidcraft_viewport::render(scene, cam, w as usize, h as usize).rgba, renderer: "cpu" })
 }
 
 /// A folder of its own for one test's files.
@@ -896,7 +922,7 @@ fn an_animation_is_drawn_from_the_camera_given() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = {
         let seen = seen.clone();
-        move |scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32| {
+        move |scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32| {
             seen.lock().unwrap().push(*cam);
             cpu(scene, cam, w, h)
         }
@@ -946,7 +972,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = {
         let seen = seen.clone();
-        move |scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32| {
+        move |scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32| {
             let mut lows: Vec<[i64; 2]> =
                 scene.meshes.iter().map(|m| m.mesh.bounds().min).map(|v| [(v.x * 1e3).round() as i64, (v.z * 1e3).round() as i64]).collect();
             lows.sort();
@@ -967,7 +993,7 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
         assert_eq!(gif_frames(&std::fs::read(&gif).unwrap()), (24, 16, seen.len()));
         seen
     };
-    let lows = |seen: &[(Vec<[i64; 2]>, crate::render::Camera)]| seen.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
+    let lows = |seen: &[(Vec<[i64; 2]>, solidcraft_viewport::Camera)]| seen.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
     // A at x 0, B at x 20: each moves 10 mm out, at a steady pace.
     let at = |x: i64| vec![[x * 1000, 0], [(20 - x) * 1000, 0]];
     let apart = frames(json!({"view": "Apart", "samples": 3}));
@@ -977,8 +1003,8 @@ fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
     assert_eq!(lows(&round), [at(0), at(-5), at(-10), at(-5), at(0)]);
     // One camera for the whole clip, framing the parts assembled and exploded alike.
     assert!(round.iter().all(|(_, c)| *c == round[0].1));
-    let mut framed = crate::render::Camera::default();
-    framed.fit(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) });
+    let mut framed = solidcraft_viewport::Camera::default();
+    framed.fit(&solidcraft_render::view_bounds(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) }));
     assert!(round[0].1.target.dist(framed.target) < 1e-9 && (round[0].1.distance - framed.distance).abs() < 1e-9, "{:?}", round[0].1);
     // Without samples: 41 frames, or 81 with back (the middle one exploded).
     assert_eq!(frames(json!({"view": "Apart"})).len(), 41);

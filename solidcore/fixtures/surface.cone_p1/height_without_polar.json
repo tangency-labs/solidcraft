@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "name": "height_without_polar_tiny_axis_swap0_inside0",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, -1e-300, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": false,
+            "inside": false
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_tiny_axis_swap0_inside1",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, -1e-300, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": false,
+            "inside": true
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_tiny_axis_swap1_inside0",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, -1e-300, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": true,
+            "inside": false
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_tiny_axis_swap1_inside1",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, -1e-300, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": 1.5628,
+            "top": 1.5628,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": true,
+            "inside": true
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_negative_radius_swap0_inside0",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, 1.0, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": -1.8,
+            "top": -1.8,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": false,
+            "inside": false
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_negative_radius_swap0_inside1",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, 1.0, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": -1.8,
+            "top": -1.8,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": false,
+            "inside": true
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_negative_radius_swap1_inside0",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, 1.0, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": -1.8,
+            "top": -1.8,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": true,
+            "inside": false
+          }
+        }
+      }
+    },
+    {
+      "name": "height_without_polar_negative_radius_swap1_inside1",
+      "upstream_ref": "source/SMLib/src/SmCone.cpp:2251-2268; SmVector3d.h:56-58 (issue #207; GetHeight keeps initialized points when EvaluatePoint fails)",
+      "inputs": {
+        "op": "build",
+        "cone": {
+          "origin": [0.0, 0.0, 0.0],
+          "x": [1.0, 0.0, 0.0],
+          "y": [0.0, 1.0, 0.0],
+          "mode": {
+            "kind": "cone_bounded",
+            "bot": -1.8,
+            "top": -1.8,
+            "height": 1.1078,
+            "start": 0.0,
+            "end": 360.0,
+            "swap": true,
+            "inside": true
+          }
+        }
+      }
+    }
+  ]
+}

@@ -24,21 +24,20 @@
 
 use std::sync::PoisonError;
 
-use solidcore::EntityRef;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent2d::Extent2d;
-use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::object::Shape;
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::{edge_closest_point, face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepQuery, LiveBrepObjects};
 use solidcore::surface::cone::p1::Cone;
+use solidcore::surface::extend::Continuity;
+use solidcore::surface::side::BoxSide;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::surface::SurfaceKind;
 use solidcore::topology::brep::p1 as brep_p1;
@@ -54,6 +53,7 @@ use solidcore::topology::face::{p1 as face_p1, p2 as face_p2, p4 as face_p4};
 use solidcore::topology::loopuse::{loop_edges, loop_loopuses, notify_ref};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, LoopId, edge};
+use solidcore::{EntityRef, SolidError};
 
 use super::blend::{p3, status};
 use super::sweep::build_faces;
@@ -454,17 +454,17 @@ pub(crate) fn untrim_face(body: &Body, point: [f64; 3], tol: f64, holes: Option<
 /// grows in u), and whether it is at the box's max.
 #[derive(Clone, Copy)]
 struct Side {
-    which: SurfParamType,
+    which: BoxSide,
     u: bool,
     high: bool,
 }
 
 /// `SIDES`.
 const SIDES: [Side; 4] = [
-    Side { which: SurfParamType::UMin, u: true, high: false },
-    Side { which: SurfParamType::UMax, u: true, high: true },
-    Side { which: SurfParamType::VMin, u: false, high: false },
-    Side { which: SurfParamType::VMax, u: false, high: true },
+    Side { which: BoxSide::UMin, u: true, high: false },
+    Side { which: BoxSide::UMax, u: true, high: true },
+    Side { which: BoxSide::VMin, u: false, high: false },
+    Side { which: BoxSide::VMax, u: false, high: true },
 ];
 
 /// `SAMPLES`.
@@ -546,55 +546,6 @@ fn side_edge(k: &Kernel, b: &Brep, surf: &Surface, dom: &Extent2d, s: Side, edge
     e.filter(|_| d <= on)
 }
 
-/// `across`: how far `ext` (the face's surface extended past side `s` of its box `dom`, on the
-/// same parameters) runs past that side, measured across it through the side's middle, by
-/// 16-point Gauss-Legendre quadrature on 64 pieces. Negative when it can't be evaluated.
-fn across(k: &Kernel, ext: &Surface, dom: &Extent2d, s: Side) -> f64 {
-    const X: [f64; 8] = [
-        0.0950125098376374,
-        0.2816035507792589,
-        0.4580167776572274,
-        0.6178762444026438,
-        0.755404408355003,
-        0.8656312023878318,
-        0.9445750230732326,
-        0.9894009349916499,
-    ];
-    const W: [f64; 8] = [
-        0.1894506104550685,
-        0.1826034150449236,
-        0.1691565193950025,
-        0.1495959888165767,
-        0.1246289712555339,
-        0.0951585116824928,
-        0.0622535239386479,
-        0.0271524594117541,
-    ];
-    const PIECES: usize = 64;
-    let Ok(bx) = ext.natural_uv_domain_with_nurb(k) else { return -1.0 };
-    let mid = on_side(dom, s, 0.5);
-    let from = if s.u { mid.x } else { mid.y };
-    let to = match (s.u, s.high) {
-        (true, true) => bx.max().x,
-        (true, false) => bx.min().x,
-        (false, true) => bx.max().y,
-        (false, false) => bx.min().y,
-    };
-    let h = (to - from) / PIECES as f64;
-    let mut length = 0.0;
-    for piece in 0..PIECES {
-        let c = from + (piece as f64 + 0.5) * h;
-        for i in 0..16 {
-            let (x, w) = if i < 8 { (-X[i], W[i]) } else { (X[i - 8], W[i - 8]) };
-            let t = c + 0.5 * h * x;
-            let uv = if s.u { Point2::new(t, mid.y) } else { Point2::new(mid.x, t) };
-            let Some((_, du, dv)) = eval(k, ext, uv) else { return -1.0 };
-            length += 0.5 * h.abs() * w * if s.u { du } else { dv }.length();
-        }
-    }
-    length
-}
-
 /// `cone_continued`: a cone's or cylinder's face continued naturally `distance` past side `s` of
 /// its box `dom`, as the analytic itself over a wider STEP domain (degrees round the axis,
 /// height along it). `None` where the cone can't be widened so (more than a turn, or past the
@@ -656,82 +607,18 @@ fn same_patch(k: &Kernel, p: &Surface, q: &Surface, tol: f64) -> bool {
 }
 
 /// `extended_by`: the surface `surf` (whose face is its whole box `dom`) extended past side `s` as
-/// `ct` says, so that it runs `distance` past that side measured across it ([`across`]), within
-/// 1e-9 of it. `CreateExtendedSurface` takes its distance as an estimate, and how far it then runs
-/// is increasing in what it is asked: a bracketed solve on that (each ask scaled by the distance
-/// over what it gave until two asks fall either side, then Illinois false position). An extension
-/// that moves the face's side off its parameters, or a target not met, is [`Error::NotExact`],
-/// never the surface as it came out.
-fn extended_by(k: &Kernel, surf: &Surface, dom: &Extent2d, s: Side, ct: ContinuityType, distance: f64, model_tol: f64) -> Result<Surface> {
-    const BRACKET_TRIES: usize = 40;
-    const SOLVE_TRIES: usize = 100;
-    let tol = 1e-9 * distance;
-    // How far asking `ask` runs, and the surface it makes.
-    let try_ask = |ask: f64| -> Result<(Surface, f64)> {
-        let tried = surf.create_extended_surface_dir(k, s.which, ask, ct).map_err(status)?;
-        // The face's side stays where it was on the extended surface's parameters.
-        let mid = on_side(dom, s, 0.5);
-        let stays = matches!((point_at(k, surf, mid), point_at(k, &tried, mid)), (Some(was), Some(now)) if (was - now).length() <= model_tol);
-        if !stays {
-            return Err(Error::NotExact);
-        }
-        let got = across(k, &tried, dom, s);
-        if got.is_finite() && got > 0.0 { Ok((tried, got)) } else { Err(Error::NotExact) }
-    };
-    // Asks that run short of and past `distance`, by f = got - distance.
-    let (mut short, mut past) = (None, None);
-    let mut ask = distance;
-    for _ in 0..BRACKET_TRIES {
-        let (made, got) = try_ask(ask)?;
-        let f = got - distance;
-        if f.abs() <= tol {
-            return Ok(made);
-        }
-        if f < 0.0 {
-            short = Some((ask, f));
-        } else {
-            past = Some((ask, f));
-        }
-        if short.is_some() && past.is_some() {
-            break;
-        }
-        ask *= distance / got;
+/// `how` says, so that it runs `distance` past that side measured across it, exactly: solidcore's
+/// one extension ([`Surface::extended_by_distance`]), which keeps the source's own part bit for bit
+/// and meets the distance within 1e-9 of it. A distance it cannot meet exactly is
+/// [`Error::NotExact`], never a surface that falls short or runs past.
+fn extended_by(k: &Kernel, surf: &Surface, dom: &Extent2d, s: Side, how: Continuity, distance: f64) -> Result<Surface> {
+    match surf.extended_by_distance(k, dom, s.which, how, distance) {
+        Ok(Some(e)) => Ok(e.surface),
+        // Below the side's resolution: the distance is too small to extend by, so the surface stays as it is.
+        Ok(None) => Ok(surf.clone()),
+        Err(SolidError::ExtendRefused { .. } | SolidError::NotConverged { .. }) => Err(Error::NotExact),
+        Err(e) => Err(status(e)),
     }
-    let (Some((mut lo, mut flo)), Some((mut hi, mut fhi))) = (short, past) else { return Err(Error::NotExact) };
-    // Illinois: false position, halving the value at the end that stays when the same end moves
-    // twice running.
-    #[derive(PartialEq)]
-    enum Moved {
-        Neither,
-        Lo,
-        Hi,
-    }
-    let mut moved = Moved::Neither;
-    for _ in 0..SOLVE_TRIES {
-        let x = hi - fhi * (hi - lo) / (fhi - flo);
-        if !(x > lo.min(hi) && x < lo.max(hi)) {
-            break;
-        }
-        let (made, got) = try_ask(x)?;
-        let f = got - distance;
-        if f.abs() <= tol {
-            return Ok(made);
-        }
-        if f < 0.0 {
-            (lo, flo) = (x, f);
-            if moved == Moved::Lo {
-                fhi *= 0.5;
-            }
-            moved = Moved::Lo;
-        } else {
-            (hi, fhi) = (x, f);
-            if moved == Moved::Hi {
-                flo *= 0.5;
-            }
-            moved = Moved::Hi;
-        }
-    }
-    Err(Error::NotExact)
 }
 
 /// `smlib_extend_sheet`: the one-face sheet `sheet`, whose face is its surface's whole parameter
@@ -787,15 +674,13 @@ pub(crate) fn extend_sheet(sheet: &Body, point: [f64; 3], tol: f64, distance: f6
         if (nl.x - dl.x).abs() > ptol || (nl.y - dl.y).abs() > ptol || (nh.x - dh.x).abs() > ptol || (nh.y - dh.y).abs() > ptol {
             return Ok(Err(Error::Unsupported));
         }
-        let ct = match how {
-            Continuation::Tangent => ContinuityType::G1,
-            Continuation::Curvature => ContinuityType::G1G2,
-            Continuation::Natural => ContinuityType::CInfinity,
+        let continuity = match how {
+            Continuation::Tangent => Continuity::Tangent,
+            Continuation::Curvature => Continuity::Curvature,
+            Continuation::Natural => Continuity::Natural,
         };
-        // CreateExtendedSurface takes its distance as an estimate (a natural parabola falls 2.5%
-        // short, a G2 run-off of a circle runs more than twice as far): the distance asked of it
-        // is solved for until the extension measures `distance` across the side's middle.
-        let extended = match extended_by(k, &surf, &dom, grow, ct, distance, model_tol) {
+        // The extension runs `distance` across the side, exactly (solidcore's one extension).
+        let extended = match extended_by(k, &surf, &dom, grow, continuity, distance) {
             Ok(e) => e,
             Err(e) => return Ok(Err(e)),
         };

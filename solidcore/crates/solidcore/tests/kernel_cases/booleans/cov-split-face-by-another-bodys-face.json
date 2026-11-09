@@ -1,0 +1,186 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                20.0,
+                15.0,
+                10.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 5.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "split_faces",
+      "outputs": [
+        "b7"
+      ],
+      "params": {
+        "faces": [
+          0
+        ],
+        "tools": [
+          {
+            "cylinder": {
+              "angle_deg": [
+                0.0,
+                360.0
+              ],
+              "height": [
+                -68.68921464952062,
+                58.68921464952062
+              ],
+              "origin": [
+                20.0,
+                15.0,
+                10.0
+              ],
+              "radius": 5.0,
+              "xaxis": [
+                0.8178681931579773,
+                0.5754056122601737,
+                0.0
+              ],
+              "yaxis": [
+                -0.5754056122601737,
+                0.8178681931579773,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-split-face-by-another-bodys-face",
+  "expected": {
+    "body_count": 2,
+    "faces": 10,
+    "method": "the cylinder's side meets the top in the circle r5: the top becomes two faces (7); the block keeps V 12000, the cylinder 250 pi and its 3 faces",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 12785.398163397449,
+    "what": "a block's top face split by the side of a cylinder standing on it (the tool face's surface extended)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 16,
+      "faces": 10,
+      "vertices": 11
+    }
+  },
+  "records": "cov-split-face-by-another-bodys-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b7"
+    },
+    {
+      "body": "Cutter",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4271.2388980412725,
+      "body_count": 2,
+      "edges": 16,
+      "faces": 10,
+      "vertices": 11,
+      "volume_mm3": 12785.398163411544
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "split_faces"
+  ],
+  "ungraded": [],
+  "what": "a block's top face split by the side of a cylinder standing on it (the tool face's surface extended)",
+  "why_not": []
+}

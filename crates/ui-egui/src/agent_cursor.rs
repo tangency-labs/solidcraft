@@ -109,7 +109,7 @@ pub fn speed_slider(ui: &mut egui::Ui, speed: &mut Speed) -> egui::Response {
         1.0..=5.5,
         crate::ui_kit::Slider {
             step: Some(0.5),
-            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { format!("{v:.2}x") },
+            format: |v| if v > 5.25 { solidcraft_ui_text::tr_label("Instant").into() } else { format!("{v:.2}x") },
             ..Default::default()
         },
     );
@@ -157,7 +157,7 @@ pub struct AgentCursor {
     /// Click ripples: where and when.
     ripples: Vec<(Pos2, f64)>,
     /// The view before a followed sketch (restored when it finishes).
-    saved_view: Option<solidcraft_engine::render::Camera>,
+    saved_view: Option<solidcraft_viewport::Camera>,
 }
 
 impl AgentCursor {
@@ -493,7 +493,7 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
     crate::icons::pointer::paint(&painter, p);
     if let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty()) {
         use crate::ui_kit::{Container, Surface};
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
             .area(egui::Id::unique("sc_agent_command"))
             .order(egui::Order::Debug)
@@ -504,7 +504,7 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
             .show(ctx, |ui| {
                 let frame = Container::popup_frame(ui.style()).fill(t.overlay);
                 Container::show_backing(ui, frame, |ui| {
-                    ui.label(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.text));
+                    ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label).color(t.text));
                 });
             });
     }

@@ -17,11 +17,13 @@ pub const MAX_VALUES: usize = 200;
 /// or loses its reference there, against the design as it is. The design itself isn't changed.
 /// Give `values`, or `from` and `to`.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
+#[schemars(deny_unknown_fields, transform = parameter_required)]
 pub struct ParameterSweepParams {
     /// The parameter, by name, as `parameters.list` lists it.
+    // Optional in the type, required in the schema (`parameter_required`): left out, the
+    // handler refuses the call with its own message. Text only, as `parameter_name` reads it.
     #[serde(default, deserialize_with = "parameter_name")]
-    #[schemars(required, transform = drop_default)]
+    #[schemars(with = "String", transform = drop_default)]
     pub parameter: Option<String>,
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "SweepValues")]
@@ -43,6 +45,22 @@ pub struct ParameterSweepParams {
 /// `serde(default)` makes schemars publish `"default": null` on a required string; drop it.
 fn drop_default(schema: &mut Schema) {
     schema.remove("default");
+}
+
+/// Puts `parameter` in the schema's `required` list. The type has it optional so that the
+/// handler, not the check, refuses a call without it, with its own message; a field's
+/// `#[schemars(required)]` doesn't do this for a key with `serde(default)`.
+fn parameter_required(schema: &mut Schema) {
+    match schema.get_mut("required") {
+        Some(Value::Array(required)) => {
+            if !required.iter().any(|k| k == "parameter") {
+                required.push("parameter".into());
+            }
+        }
+        _ => {
+            schema.insert("required".into(), Value::Array(vec!["parameter".into()]));
+        }
+    }
 }
 
 /// The parameter's name, with the handler's message for anything that isn't text.

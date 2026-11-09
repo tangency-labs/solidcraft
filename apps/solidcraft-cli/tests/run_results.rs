@@ -67,6 +67,9 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--out", "--quiet"][..], "--out needs a value"),
         (&["--ouut", "part.step"][..], "doesn't take --ouut"),
         (&["--unknown"][..], "doesn't take --unknown"),
+        (&["--quality"][..], "--quality needs a value"),
+        (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
@@ -288,6 +291,38 @@ fn results_still_save_and_export_the_script_once() {
     }
 }
 
+/// The triangles of a binary STL: the count after its 80-byte header.
+fn stl_triangles(path: &Path) -> u32 {
+    let bytes = std::fs::read(path).unwrap();
+    u32::from_le_bytes(bytes[80..84].try_into().unwrap())
+}
+
+/// #12270: `run --out part.stl --quality fine` writes the mesh at that quality, as
+/// `file.export`'s `quality` does, without a script to say so.
+#[test]
+fn run_exports_meshes_at_the_quality_asked_for() {
+    let dir = Scratch::new();
+    let script = dir.0.join("cylinder.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.cylinder", "params": {"diameter": 40, "height": 10}}]}).to_string()).unwrap();
+    let export = |name: &str, quality: Option<&str>| {
+        let stl = dir.0.join(name);
+        let mut command = cli();
+        command.arg("run").arg(&script).arg("--quiet").arg("--out").arg(&stl);
+        if let Some(q) = quality {
+            command.args(["--quality", q]);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{quality:?}: {}", String::from_utf8_lossy(&output.stderr));
+        stl_triangles(&stl)
+    };
+    let default = export("default.stl", None);
+    let standard = export("standard.stl", Some("standard"));
+    let fine = export("fine.stl", Some("fine"));
+    let finest = export("finest.stl", Some("finest"));
+    assert_eq!(default, standard);
+    assert!(standard < fine && fine < finest, "standard {standard}, fine {fine}, finest {finest}");
+}
+
 #[test]
 fn results_with_base_design_and_quiet_still_report_and_save() {
     let dir = Scratch::new();
@@ -472,7 +507,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
         std::fs::read(&png).unwrap()
     };
     // Pictures are drawn on the GPU: without an adapter only the option checks below run.
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(_) => {
             let alone = shot("alone.png", &[shifted.as_os_str()]);
             let on_base = shot("on_base.png", &[shifted.as_os_str(), "--in".as_ref(), base.as_os_str()]);
@@ -480,7 +515,7 @@ fn snapshot_runs_its_script_on_the_in_design() {
             assert_ne!(alone, on_base, "the script ran on the --in design");
             assert_ne!(base_only, on_base);
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("pictures left out: {e}")
         }
         Err(e) => panic!("{e}"),
@@ -638,6 +673,7 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .unwrap(),
         );
         assert_eq!(result["preflight"]["resolved"]["executor"], "cpu-raytrace");
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "available_ram");
         assert_eq!(result["export"]["frame"]["executor"], "cpu-raytrace");
         assert_eq!(result["preflight"]["request"]["integrator"], "raytrace");
         assert_eq!(result["preflight"]["request"]["raytrace"].get("progressive"), options.get("progressive"));
@@ -654,11 +690,12 @@ fn render_uses_typed_cpu_setups_from_scripts_and_saved_designs() {
                 .arg(&saved)
                 .args(["--setup", "Portable setup", "--out"])
                 .arg(&overridden)
-                .args(["--width", "12", "--height", "8", "--exposure", "1.25"])
+                .args(["--width", "12", "--height", "8", "--exposure", "1.25", "--legacy-memory-admission"])
                 .env("SOLIDCRAFT_GPU", "must-not-be-read-for-cpu")
                 .output()
                 .unwrap(),
         );
+        assert_eq!(result["preflight"]["admission"]["host_memory"]["policy"], "software_pool_only");
         assert_eq!(result["preflight"]["request"]["width"], 12);
         assert_eq!(result["preflight"]["request"]["height"], 8);
         assert_eq!(result["preflight"]["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -738,7 +775,13 @@ fn typed_gpu_render_selects_its_host_without_a_progressive_runtime_flag() {
         let script = render_setup_script(&dir, job.clone());
         let out = dir.0.join("gpu.png");
         let mut command = cli();
-        command.arg("render").arg(&script).args(["--setup", "Portable setup", "--out"]).arg(&out).env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
+        command
+            .arg("render")
+            .arg(&script)
+            .args(["--setup", "Portable setup", "--out"])
+            .arg(&out)
+            .arg("--legacy-memory-admission")
+            .env("SOLIDCRAFT_GPU", "not-a-gpu-policy");
         if job.is_null() {
             command.arg("--progressive");
         }

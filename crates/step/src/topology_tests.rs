@@ -775,6 +775,43 @@ fn edited(edit: impl Fn(&str) -> String) -> Solids {
     read_solids(&parse(&text))
 }
 
+/// The cube with its first edge's LINE replaced by a CURVE_REPLICA of a line 7 mm lower, moved up
+/// by a transformation operator (what FreeCAD writes for a repeated edge).
+fn replica_edge(t: &str) -> String {
+    let at = t.find("=LINE('',#").expect("a line");
+    let (_, line_id) = t[..at].rsplit_once('#').expect("an id");
+    let tail = &t[at + "=LINE('',#".len()..];
+    let (point, tail) = tail.split_once(",#").expect("a vector");
+    let (vector, _) = tail.split_once(')').expect("the end");
+    let pt = t.split_once(&format!("#{point}=CARTESIAN_POINT('',(")).expect("the point").1;
+    let xyz: Vec<f64> = pt.split_once(')').unwrap().0.split(',').map(|v| v.parse().unwrap()).collect();
+    let replaced = t.replacen(&format!("#{line_id}=LINE('',#{point},#{vector})"), &format!("#{line_id}=CURVE_REPLICA('',#9003,#9004)"), 1);
+    format!(
+        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=LINE('',#9001,#{vector});#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#9002,$,$);",
+        real(xyz[0]),
+        real(xyz[1]),
+        real(xyz[2] - 7.0)
+    )
+}
+
+#[test]
+fn an_edge_on_a_curve_replica_is_the_moved_curve() {
+    let plain = edited(str::to_string);
+    let moved = edited(|t| {
+        let edited = replica_edge(t);
+        assert!(edited.contains("CURVE_REPLICA"), "the edit did not apply");
+        edited
+    });
+    assert!(moved.failures.is_empty(), "{:?}", moved.failures);
+    assert_eq!(moved.solids.len(), 1);
+    let (a, b) = (&plain.solids[0].brep, &moved.solids[0].brep);
+    solidcraft_geom::brep::check::validate(b).unwrap();
+    assert_eq!(counts(a), counts(b));
+    // The replica's edge is the plain cube's edge: same curve, same interval.
+    assert_eq!(a.edges[0].curve, b.edges[0].curve);
+    assert_eq!(a.edges[0].interval, b.edges[0].interval);
+}
+
 #[test]
 fn hostile_topology_is_an_error_never_a_panic() {
     // Sanity: unedited, the cube reads.
@@ -1236,4 +1273,23 @@ fn parabola_and_hyperbola_edges_bound_faces() {
             assert!(on.abs() < 1e-12, "{kind}: {p:?}");
         }
     }
+}
+
+/// A sliver face's parameter box is `OPEN_DOMAIN_SPAN` across even against a bound of its
+/// surface's natural range, and pcurves wholly outside that range stay an empty box (#12757).
+#[test]
+fn face_domain_sliver_at_a_natural_bound() {
+    use std::f64::consts::FRAC_PI_2;
+    let ball = BSurface::Sphere { frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: 5.0 };
+    let loop_at = |v0: f64, v1: f64| vec![vec![Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.1, v0], [0.3, v1]] }]];
+    for (v0, v1, want) in [
+        (-FRAC_PI_2, -FRAC_PI_2 + 1e-6, [-FRAC_PI_2, -FRAC_PI_2 + OPEN_DOMAIN_SPAN]),
+        (FRAC_PI_2 - 1e-6, FRAC_PI_2, [FRAC_PI_2 - OPEN_DOMAIN_SPAN, FRAC_PI_2]),
+    ] {
+        let d = face_domain(&ball, &loop_at(v0, v1)).unwrap();
+        assert!((d[1][0] - want[0]).abs() < 1e-12 && (d[1][1] - want[1]).abs() < 1e-12, "{v0} {v1}: {d:?}");
+    }
+    let mid = face_domain(&ball, &loop_at(0.0, 1e-6)).unwrap();
+    assert!((mid[1][1] - mid[1][0] - OPEN_DOMAIN_SPAN).abs() < 1e-12 && mid[1][0] < 0.0 && mid[1][1] > 1e-6, "{mid:?}");
+    assert!(face_domain(&ball, &loop_at(FRAC_PI_2 + 1e-4, FRAC_PI_2 + 2e-4)).is_err());
 }

@@ -1,0 +1,199 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "not supported yet: SMLib does not set back corner 1: it sets back a corner only where every edge meeting it is blended, all convex or all concave",
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_setback_open",
+      "params": {
+        "corners": {
+          "kind": "vertex",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              15.0,
+              0.0,
+              10.0
+            ]
+          ],
+          "tolerance": 2.06255281280883
+        },
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  20.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  30.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 8
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 16
+            }
+          ],
+          "points": [
+            [
+              15.0,
+              10.0,
+              10.0
+            ],
+            [
+              22.5,
+              0.0,
+              10.0
+            ],
+            [
+              15.0,
+              0.0,
+              15.0
+            ]
+          ],
+          "tolerance": 2.06255281280883
+        },
+        "kind": "curvature",
+        "setbacks": [
+          3.0
+        ],
+        "sizes": [
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-g2-mixed-corner",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g2"
+    },
+    "method": "a 30 x 20 x 10 box with a 15 x 20 x 10 box joined on its top at x 0..15; the three edges at (15, 0, 10); the fillet type curvature (G2 sections and G2 corner patches): every seam of a round and of the corner patch with its neighbours G2, one valid body",
+    "source": "invariants",
+    "what": "a step's corner (the concave step edge, the lower box's convex front top edge, the upper box's convex upright edge) filleted 2 as a curvature-continuous (G2) fillet"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 3 (solid.fillet): invalid input: not supported yet: setting back the corner at (15.000, 0.000, 10.000) with the SMLib kernel (a G2 corner is set back): SMLib sets back a corner only where every edge meeting it is rounded and they are all convex or all concave",
+    "kernel_error": "not supported yet: SMLib does not set back corner 1: it sets back a corner only where every edge meeting it is blended, all convex or all concave",
+    "ran": false
+  },
+  "records": "cov-fillet-g2-mixed-corner.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": "step 3 (solid.fillet): invalid input: not supported yet: setting back the corner at (15.000, 0.000, 10.000) with the SMLib kernel (a G2 corner is set back): SMLib sets back a corner only where every edge meeting it is rounded and they are all convex or all concave",
+    "known_failing": "[unsupported] refused as on SMLib d01d7b0: a G2 corner is set back only where every edge meeting it is rounded and all are convex or all concave",
+    "measured": null,
+    "refused_with": null,
+    "status": "unsupported"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_setback_open"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a step's corner (the concave step edge, the lower box's convex front top edge, the upper box's convex upright edge) filleted 2 as a curvature-continuous (G2) fillet",
+  "why_not": []
+}

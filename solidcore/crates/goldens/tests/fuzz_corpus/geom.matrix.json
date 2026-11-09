@@ -1,0 +1,8 @@
+{
+  "unit": "geom.matrix",
+  "cases": [
+    {"name": "fuzz00922_operands_for_resize_3x3_v_0", "origin": "fuzz-out/n2000/geom.matrix/fuzz00922.json (panic: rust: capacity overflow)", "cpp": "harness: invalid argument: operands for Resize: 3x3, v 0, i 5, j 9223372036854775807", "rust": "error: status_1007", "inputs": {"cols": 3, "i": 5, "j": 9223372036854775807, "m": [2680.0, 2.0, -1.0, 2680.0, 2.0, -1.0, -8.73, 3.0, 8.66], "op": "resize", "rows": 3}},
+    {"name": "fuzz01415_runs", "origin": "fuzz-out/n2000/geom.matrix/fuzz01415.json (crash: cpp: killed by signal 6 (memory allocation of 103079215176 bytes failed))", "cpp": "ok", "rust": "ok", "inputs": {"cols": 1, "m": [1.0], "op": "eigen", "rows": 1}},
+    {"name": "fuzz01733_runs", "origin": "fuzz-out/n2000/geom.matrix/fuzz01733.json (panic: cpp runner: attempt to multiply with overflow)", "cpp": "ok", "rust": "ok", "inputs": {"cols": 1, "m": [1.0], "op": "lu", "rows": 1}}
+  ]
+}

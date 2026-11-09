@@ -62,9 +62,9 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile and --profile-out as for run)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `bench-open`'s lines in the usage.
@@ -76,7 +76,7 @@ const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 
 /// `snapshot`'s lines in the usage.
 const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.sc|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.sc|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
 /// `render`'s lines in the usage.
-const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted]\n";
+const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted] [--legacy-memory-admission]\n      --legacy-memory-admission skips available-RAM checks; fixed shared/host budgets and allocation limits still apply.\n";
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
@@ -451,11 +451,12 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     known_args(
         "run",
         args,
-        &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation"],
+        &["--in", "--out", "--save", "--json-out", "--param-check", "--profile-out", "--validation", "--quality"],
         &["--quiet", "--results", "--timings", "--profile", "--allow-errors"],
         true,
     )?;
     let validation = validation_flag("run", args)?;
+    let quality = export_quality("run", args)?;
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
@@ -503,7 +504,11 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         timeline_ok(&s, flags(args, "--out").is_empty())?;
     }
     for out in flags(args, "--out") {
-        s.execute("file.export", &json!({"path": out})).map_err(|e| e.to_string())?;
+        let mut params = json!({"path": out});
+        if let Some(q) = quality {
+            params["quality"] = json!(q);
+        }
+        s.execute("file.export", &params).map_err(|e| e.to_string())?;
     }
     if let Some(p) = flag(args, "--save") {
         s.execute("file.save_as", &json!({"path": p})).map_err(|e| e.to_string())?;
@@ -541,6 +546,20 @@ fn open_validating(
         (Some(b), None) => load(b),
         (None, Some(p)) => load(p),
         (None, None) => Err(usage()),
+    }
+}
+
+/// `--quality standard|fine|finest`: how closely the meshes `--out` writes (STL, OBJ, 3MF)
+/// follow curved faces, as `file.export`'s `quality` (#12270). Checked before anything runs;
+/// given twice it is refused, since only one quality can apply.
+fn export_quality<'a>(cmd: &str, args: &'a [String]) -> Result<Option<&'a str>, String> {
+    if flags(args, "--quality").len() > 1 {
+        return Err(format!("{cmd}: --quality is given more than once"));
+    }
+    match flag(args, "--quality") {
+        Some(q) if solidcraft_engine::io::MeshQuality::from_name(q).is_some() => Ok(Some(q)),
+        Some(q) => Err(format!("{cmd}: --quality must be standard, fine or finest, not `{q}`")),
+        None => Ok(None),
     }
 }
 
@@ -592,10 +611,12 @@ fn timeline_ok(s: &Session, skip_newer_features: bool) -> Result<(), String> {
     ))
 }
 
+/// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    known_args("eval", args, &["--in", "--json-out", "--profile-out"], &["--profile"], true)?;
-    let mut s = open(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off)?;
+    known_args("eval", args, &["--in", "--json-out", "--profile-out", "--validation"], &["--profile"], true)?;
+    let validation = validation_flag("eval", args)?;
+    let mut s = open_validating(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
     let mut out = json!({
@@ -632,9 +653,9 @@ fn cmd_script(args: &[String]) -> Result<(), String> {
 
 /// `gpu`: the headless adapter survey and the policy's pick.
 fn cmd_gpu(args: &[String]) -> Result<(), String> {
-    use solidcraft_gpu::select::{Policy, survey};
+    use solidcraft_viewport_gpu::select::{Policy, survey};
     let policy = match args {
-        [] => Policy::from_env()?,
+        [] => solidcraft_gpu::env::policy()?,
         [flag, v] if flag == "--policy" => Policy::parse(v).ok_or_else(|| format!("--policy must be auto, hardware, software or cpu, not `{v}`"))?,
         _ => return Err("usage: solidcraft-cli gpu [--policy auto|hardware|software|cpu]".into()),
     };
@@ -654,7 +675,7 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
         }))
     );
     match s.lands_on {
-        Some(solidcraft_gpu::select::Landing::Cpu) => {
+        Some(solidcraft_viewport_gpu::select::Landing::Cpu) => {
             solidcraft_engine::note!("warning: {}", solidcraft_engine::capture::CPU_WARNING);
             Ok(())
         }
@@ -670,7 +691,7 @@ fn cmd_gpu(args: &[String]) -> Result<(), String> {
 /// error that names the policy.
 fn install_renderer() {
     solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
         Ok(solidcraft_engine::capture::Picture { rgba, renderer })
     }));
 }
@@ -757,7 +778,7 @@ fn cmd_icon(args: &[String]) -> Result<(), String> {
 }
 
 fn icon_png(size: usize) -> Result<Vec<u8>, String> {
-    solidcraft_engine::render::png(size, size, app_icon::rgba(size)?).ok_or_else(|| "icon: PNG encoding failed".to_string())
+    solidcraft_viewport::png(size, size, app_icon::rgba(size)?).ok_or_else(|| "icon: PNG encoding failed".to_string())
 }
 
 /// A Windows icon file holding PNG images (Vista and later read these).
@@ -895,7 +916,7 @@ fn serve_mcp(
 /// The port of the running desktop app: the one its discovery file names, if something listens
 /// there (a file left by an app that crashed names a closed port).
 fn discover_app() -> Option<u16> {
-    let port = solidcraft_engine::control_auth::read_current_port()?;
+    let port = solidcraft_engine::control_auth::APP.read_current_port()?;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(500)).ok().map(|_| port)
 }

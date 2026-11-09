@@ -1,0 +1,489 @@
+{
+  "cases": [
+    {
+      "name": "real-box-single-edge-radius-half",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "real-box-prepared-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:720",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "prepared"
+        }
+      }
+    },
+    {
+      "name": "real-box-corners-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:1834",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "corners"
+        }
+      }
+    },
+    {
+      "name": "real-box-first_topology-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:5990 (direct first corner after setup and creation)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "first_topology"
+        }
+      }
+    },
+    {
+      "name": "real-box-prepared-native-unknown-xsect-default",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2064",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 99,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "prepared"
+        }
+      }
+    },
+    {
+      "name": "real-box-first-vertex-geometry-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:1471 (direct first corner after topology)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "first_vertex_geometry"
+        }
+      }
+    },
+    {
+      "name": "real-box-corner-vertices-component-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:1940 (shared corner-vertex component; smoothing omitted on both sides)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "corner_vertices_component"
+        }
+      }
+    },
+    {
+      "name": "real-box-adjusted-topology-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2088 (actual smooth prelude and retained component stages; first solver geometry is direct)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "adjusted_topology"
+        }
+      }
+    },
+    {
+      "name": "real-box-solver-geometry-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2140 (actual smooth prelude and retained component stages; first solver geometry is direct)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "solver_geometry"
+        }
+      }
+    },
+    {
+      "name": "real-box-corner-edges-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2269 (all actual solvers, then per-corner tangent adjustment, repeated vertices and boundary edges)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "corner_edges"
+        }
+      }
+    },
+    {
+      "name": "real-box-trim-rails-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2347 (actual shared solver rail trimming after all corner boundary geometry, before classification)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "trim_rails"
+        }
+      }
+    },
+    {
+      "name": "real-box-classified-rails-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2380 (enabled TestRollOver and actual adjusted-corner repair after TrimRails)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "classified_rails"
+        }
+      }
+    },
+    {
+      "name": "real-box-intermediate-faces-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2434 (actual intermediate SmBrep, all corner geometry, then all solver MakeFaceBrep; before attributes and stitching)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "intermediate_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-attribute-stitch-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2580 (actual executive E attribute on all intermediate edges, then real StitchFaces; before optional error copy and target integration)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "stitched_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-direct-shrink-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2990 (direct first-FG owner-face ShrinkGeometry after E/Stitch; unchanged direct context, before target integration)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "shrunk_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-create-fillet-brep-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:1891 (actual complete CreateFilletBrep after real parameter/corner setup; unchanged direct context; no target merge/DoFilleting)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "created_fillet_brep"
+        }
+      }
+    },
+    {
+      "name": "real-box-edge-map-actual-session",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:4147 (direct actual CreateFilletBrep, first-FG owner shrink, then ordered SetFilletBrepEdgeMap; unchanged context, no target integration)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "mapped_fillet_edges"
+        }
+      }
+    },
+    {
+      "name": "real-box-insert-intersection-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2920,3048,3074 (actual true-context constructor, shrink, map, all geometry then corner insertion; prefix only)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "inserted_intersection_topology"
+        }
+      }
+    },
+    {
+      "name": "real-box-select-original-surfaces-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:3243-3386 (actual common mate marking, real lock, all-FG original face selection; stops before deletion)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "selected_original_surfaces"
+        }
+      }
+    },
+    {
+      "name": "real-box-delete-original-faces-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:3243-3455 (actual same-lock selection, unkept managed append, real TI.DeleteFaces; stops before attribute tagging/merge)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "deleted_original_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-merge-fillet-faces-true-context",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:3243-3530 (same original mark scope, actual selection/DeleteFaces, temporary edge tagging and MergeBrep; stops before TI clear, managed deletion and final Stitch)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ],
+          "checkpoint": "merged_fillet_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-trihedral-equal-radius-analytic-corner",
+      "upstream_ref": "source/SMLib/src/SmFilletExecutive.cpp:2439; SmFilletCorner.cpp:3379 (three incident edges, actual solver generators and analytic sphere fit producing a BSplineSurface; intermediate faces before attributes/Stitch)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2,
+            6,
+            7
+          ],
+          "checkpoint": "intermediate_faces"
+        }
+      }
+    },
+    {
+      "name": "real-box-trihedral-equal-radius-full-api",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049 (full public fillet API on three incident box edges; final topology, geometry and mass)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            10,
+            20,
+            30
+          ],
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2,
+            6,
+            7
+          ]
+        }
+      }
+    }
+  ]
+}

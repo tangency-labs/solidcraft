@@ -1,6 +1,7 @@
 use super::*;
-use crate::gpu::{Renderer as ViewRenderer, ViewportCallback};
+use crate::gpu::Renderer as ViewRenderer;
 use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
+use solidcraft_viewport_egui::ViewportCallback;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -213,7 +214,7 @@ impl State {
             self.retire();
             return Scope { previous, alpha };
         }
-        let colors = crate::theme::Tokens::get();
+        let colors = solidcraft_theme::Tokens::get();
         let background = [colors.viewport_top, colors.viewport_bottom, colors.app_bar];
         if self.last_background != Some(background) {
             let failed = self.failure.is_some() || self.active.as_ref().is_some_and(|s| s.inner.lock().is_ok_and(|i| i.failure.is_some()));
@@ -433,7 +434,7 @@ pub fn viewport(painter: &Painter, rect: Rect, cb: ViewportCallback, background:
             if let Ok(mut inner) = shared.inner.lock() {
                 inner.source_count = inner.source_count.saturating_add(1);
             }
-            let outside = crate::theme::Tokens::get().app_bar;
+            let outside = solidcraft_theme::Tokens::get().app_bar;
             painter.add(egui_wgpu::Callback::new_paint_callback(
                 rect,
                 Source {
@@ -609,7 +610,7 @@ impl Source {
 
     fn key(&self, screen: &ScreenDescriptor, geometry: [Rect; 3]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        solidcraft_gpu::view::frame_key(&self.cb.0).hash(&mut h);
+        solidcraft_viewport_gpu::view::frame_key(&self.cb.0).hash(&mut h);
         for r in geometry {
             [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits).hash(&mut h);
         }

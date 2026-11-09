@@ -2,6 +2,7 @@
 //! design with many bodies must not make every frame or every click slower per body squared.
 
 use serde_json::json;
+use solidcraft_engine::geom::MeshGeom;
 
 use crate::scenario::Harness;
 
@@ -95,7 +96,7 @@ fn appearance_and_selection_rebuild_cost() {
         let colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"bodies":[body.clone()],"color":"#336699","opacity":0.5})).unwrap();
         let opacity_class = ms(|| drop(crate::viewport::build_scene(&h.app)));
-        let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+        let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
         let _ = h.call("ui.prefs", json!({"theme": theme_name}));
         let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let geometry = match h.app.run("solid.move", json!({"bodies":[body.clone()], "translate":[1.0, 0.0, 0.0]})) {
@@ -133,7 +134,7 @@ fn large_body_scene_rebuild_cost() {
         let colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"bodies":[body.clone()],"color":"#336699","opacity":0.5})).unwrap();
         let opacity_class = ms(|| drop(crate::viewport::build_scene(&h.app)));
-        let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+        let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
         let _ = h.call("ui.prefs", json!({"theme": theme_name}));
         let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
         println!(
@@ -198,7 +199,7 @@ fn assembly_scene_rebuild_cost() {
         let opacity_class = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"components": ["Wheel"], "color": "#cc6633"})).unwrap();
         let component_colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
-        let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+        let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
         let _ = h.call("ui.prefs", json!({"theme": theme_name}));
         let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("browser.visibility", json!({"visible": false, "items": [part.clone()]})).unwrap();
@@ -262,7 +263,7 @@ pub(crate) fn view_frame(
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size as f32, size as f32));
     let proj = crate::viewport::projection(app, rect);
     let e = proj.cam.eye().to_f32();
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
     crate::gpu::Frame {
         product: false,
@@ -291,7 +292,7 @@ pub(crate) fn view_frame(
         outline: false,
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
-        ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
@@ -521,7 +522,7 @@ fn step_file_cost() {
     phase(&mut line, "opacity_command", opacity_command);
     let opacity = ms(|| drop(crate::viewport::build_scene(&h.app)));
     phase(&mut line, "opacity_scene", opacity);
-    let theme_name = if crate::theme::is_dark() { "light" } else { "dark" };
+    let theme_name = if solidcraft_theme::is_dark() { "light" } else { "dark" };
     let _ = h.call("ui.prefs", json!({"theme": theme_name}));
     let theme = ms(|| drop(crate::viewport::build_scene(&h.app)));
     phase(&mut line, "theme_scene", theme);

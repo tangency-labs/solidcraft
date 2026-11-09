@@ -8,8 +8,8 @@ use egui::{RichText, vec2};
 use serde_json::{Value, json};
 
 use crate::SolveApp;
-use crate::i18n::{format, tr};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::{format, tr};
 
 /// Messages kept (the oldest go first).
 pub const KEEP: usize = 200;
@@ -130,7 +130,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 ui.label(RichText::new(tr("messages.none")).color(t.text_dim));
                 return;
             }
-            egui::ScrollArea::vertical().max_height(crate::theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(solidcraft_theme::Tokens::get().form_card_width).auto_shrink([false, true]).show(ui, |ui| {
                 for m in app.messages.iter().rev() {
                     ui.horizontal_top(|ui| {
                         ui.add_sized(vec2(70.0, 14.0), egui::Label::new(RichText::new(ago(now, m.at)).small().color(t.text_dim)));
@@ -154,6 +154,7 @@ mod tests {
 
     #[test]
     fn repeats_count_up_and_the_oldest_go_past_the_limit() {
+        crate::i18n::install();
         let mut m = Messages::default();
         m.push("Box done", false, 1000.0);
         m.push("Box done", false, 2000.0);

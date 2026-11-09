@@ -463,6 +463,7 @@ mod tests {
                             distance2: None,
                             start_offset: None,
                             through_all: false,
+                            second_follows_first: false,
                             taper: None,
                             corner: Default::default(),
                             to: None,

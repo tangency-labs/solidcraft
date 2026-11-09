@@ -1,0 +1,370 @@
+{
+ "cases": [
+  {
+   "name": "wr254_slice_box_by_its_top_face",
+   "note": "WR-254 (#528): a box sliced by a sheet in the plane of its top face; SMLib keeps the coincident top face",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      10.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "wr254_slice_box_mid",
+   "note": "control: the same box sliced through its middle (no coincident face)",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -5.0,
+      -5.0,
+      5.0
+     ],
+     "size": [
+      20.0,
+      20.0
+     ]
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "wr254_slice_slab_tower_in_slab_face",
+   "note": "WR-254 (#528): a slab with a tower sliced by a sheet in the slab's top face",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "boolean",
+     "operation": 1,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       40.0,
+       40.0,
+       5.0
+      ]
+     },
+     "b": {
+      "kind": "box",
+      "origin": [
+       15.0,
+       15.0,
+       5.0
+      ],
+      "size": [
+       10.0,
+       10.0,
+       10.0
+      ]
+     }
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -10.0,
+      -10.0,
+      5.0
+     ],
+     "size": [
+      60.0,
+      60.0
+     ]
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "wr254_slice_slab_tower_mid_tower",
+   "note": "control: the slab with a tower sliced through the middle of the tower",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "boolean",
+     "operation": 1,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       40.0,
+       40.0,
+       5.0
+      ]
+     },
+     "b": {
+      "kind": "box",
+      "origin": [
+       15.0,
+       15.0,
+       5.0
+      ],
+      "size": [
+       10.0,
+       10.0,
+       10.0
+      ]
+     }
+    },
+    "b": {
+     "kind": "plane",
+     "origin": [
+      -10.0,
+      -10.0,
+      10.0
+     ],
+     "size": [
+      60.0,
+      60.0
+     ]
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "wr265_cup_lid_cup_first",
+   "note": "WR-265 (#388): an open cup united with a lid sealing its cavity",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       100.0,
+       100.0,
+       100.0
+      ]
+     },
+     "b": {
+      "kind": "box",
+      "origin": [
+       10.0,
+       10.0,
+       10.0
+      ],
+      "size": [
+       80.0,
+       80.0,
+       100.0
+      ]
+     }
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      90.0
+     ],
+     "size": [
+      100.0,
+      100.0,
+      10.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "wr265_cup_lid_lid_first",
+   "note": "WR-265 (#388): the lid united with the cup",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      90.0
+     ],
+     "size": [
+      100.0,
+      100.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       100.0,
+       100.0,
+       100.0
+      ]
+     },
+     "b": {
+      "kind": "box",
+      "origin": [
+       10.0,
+       10.0,
+       10.0
+      ],
+      "size": [
+       80.0,
+       80.0,
+       100.0
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "wr265_void_then_union",
+   "note": "WR-265: a cube with a sealed void united with a bar through the void",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       100.0,
+       100.0,
+       100.0
+      ]
+     },
+     "b": {
+      "kind": "box",
+      "origin": [
+       30.0,
+       30.0,
+       30.0
+      ],
+      "size": [
+       40.0,
+       40.0,
+       40.0
+      ]
+     }
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      45.0,
+      45.0,
+      -10.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      120.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "wr265_void_by_difference",
+   "note": "WR-265 control: a cube with a void made by a difference, united with a box beside it",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "boolean",
+     "operation": 3,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "size": [
+       100.0,
+       100.0,
+       100.0
+      ]
+     },
+     "b": {
+      "kind": "box",
+      "origin": [
+       30.0,
+       30.0,
+       30.0
+      ],
+      "size": [
+       40.0,
+       40.0,
+       40.0
+      ]
+     }
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      20.0
+     ]
+    }
+   }
+  }
+ ]
+}

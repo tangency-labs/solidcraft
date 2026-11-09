@@ -94,6 +94,13 @@ impl JsonSchema for FaceSpots {
     }
 }
 
+/// The text form `inspect::color_param` reads: three bytes after any number of `#`, with
+/// spaces at either end as Rust's `trim` drops them. A byte is two hex digits, or a `+` and one
+/// hex digit, because `u8::from_str_radix` takes a leading `+` (`"+f"` is 15).
+fn color_pattern() -> String {
+    format!("^[{ws}]*#*(?:[0-9A-Fa-f]{{2}}|\\+[0-9A-Fa-f]){{3}}[{ws}]*$", ws = super::types::whitespace_class())
+}
+
 /// A colour, `"#rrggbb"` (the `#` optional) or `[r, g, b]` of numbers 0–255, as
 /// `inspect::color_param` reads it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -116,7 +123,7 @@ impl JsonSchema for ColorParam {
         json_schema!({
             "description": "A colour: \"#rrggbb\" or [r, g, b] with values 0–255.",
             "anyOf": [
-                {"type": "string", "pattern": "^#?[0-9A-Fa-f]{6}$"},
+                {"type": "string", "pattern": color_pattern()},
                 {"type": "array", "items": channel, "minItems": 3, "maxItems": 3}
             ]
         })

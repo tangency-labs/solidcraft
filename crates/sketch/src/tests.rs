@@ -35,6 +35,15 @@ pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
 }
 
+thread_local! {
+    static ID_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A search of every id in a sketch (is this id taken?) on this thread.
+pub(crate) fn count_id_scan() {
+    ID_SCANS.with(|c| c.set(c.get() + 1));
+}
+
 /// Run `f` with the constructive seed on or off, without the seed-on/seed-off comparison (for
 /// tests that measure the difference).
 pub(crate) fn seeded<T>(on: bool, f: impl FnOnce() -> T) -> T {
@@ -277,6 +286,94 @@ fn circles_tangent_equal_concentric() {
     sk.add_constraint(Concentric { a: c3, b: c2 }, None).unwrap();
     assert!(solve(&mut sk).ok());
     assert!(sk.center(c3).unwrap().dist(sk.center(c2).unwrap()) < 1e-7);
+}
+
+/// The least and greatest of `gap` over many points along a free-form curve, read from its own
+/// definition (not the solver's polyline).
+fn freeform_gap_range(sk: &Sketch, c: usize, gap: impl Fn(Vec2) -> f64) -> (f64, f64) {
+    let p = |i: usize| sk.points[i].pos;
+    let n = 20_000;
+    let at: Box<dyn Fn(f64) -> Vec2> = match sk.curves[c].kind {
+        CurveKind::Ellipse { c, m, r } => Box::new(move |t| crate::curves::ellipse_point(p(c), p(m), r, t * 2.0 * PI)),
+        CurveKind::Conic { a, b, apex, rho } => Box::new(move |t| crate::curves::conic_point(p(a), p(apex), p(b), rho, t)),
+        _ => panic!("not an ellipse or a conic"),
+    };
+    (0..=n).map(|i| gap(at(i as f64 / n as f64))).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), g| (lo.min(g), hi.max(g)))
+}
+
+/// Touching means the gap reaches zero on one side only: `(least, greatest)` crossing zero is a
+/// crossing.
+fn assert_touches(what: &str, (lo, hi): (f64, f64)) {
+    let near = if lo.abs() < hi.abs() { lo } else { hi };
+    assert!(near.abs() < 1e-3 && (lo > -1e-3 || hi < 1e-3), "{what}: the gap runs from {lo} to {hi}");
+}
+
+/// A tangent to an ellipse or a conic keeps the curves touching, also once the geometry moves:
+/// a crossing has a zero gap as well, and was taken for a touch (#11535).
+#[test]
+fn a_tangent_to_an_ellipse_or_a_conic_touches_and_never_crosses() {
+    use ConstraintKind::*;
+    let side = |a: Vec2, b: Vec2| move |q: Vec2| (b - a).cross(q - a) / a.dist(b);
+    // A line on an ellipse (a 30, b 15), then the line's end dragged to (38, 6).
+    let mut sk = Sketch::new();
+    let (ec, em) = (sk.add_point(v(0.0, 0.0), None).unwrap(), sk.add_point(v(30.0, 0.0), None).unwrap());
+    let e = sk.add_curve(CurveKind::Ellipse { c: ec, m: em, r: 15.0 }, None).unwrap();
+    let l = sk.add_line(v(-20.0, 25.0), v(40.0, 20.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: e }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line", freeform_gap_range(&sk, e, side(a, b)));
+    let CurveKind::Line { b: end, .. } = sk.curves[l].kind else { panic!("a line") };
+    sk.points[end].pos = v(38.0, 6.0);
+    let hold = Hold { points: vec![ec, em, end], radii: vec![e] };
+    assert!(solve_holding(&mut sk, &hold).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line dragged", freeform_gap_range(&sk, e, side(a, b)));
+
+    // A circle of radius 10 on the same ellipse, then the major axis's end dragged from 30 to 36.
+    let mut sk = Sketch::new();
+    let (ec, em) = (sk.add_point(v(0.0, 0.0), None).unwrap(), sk.add_point(v(30.0, 0.0), None).unwrap());
+    let e = sk.add_curve(CurveKind::Ellipse { c: ec, m: em, r: 15.0 }, None).unwrap();
+    let c = sk.add_circle(v(45.0, 12.0), 10.0, None, None).unwrap();
+    sk.add_constraint(Radius { c, value: 10.0 }, None).unwrap();
+    sk.add_constraint(Tangent { a: e, b: c }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let round = |sk: &Sketch| {
+        let (cc, r) = (sk.center(c).unwrap(), sk.radius(c).unwrap());
+        move |q: Vec2| q.dist(cc) - r
+    };
+    assert_touches("the circle", freeform_gap_range(&sk, e, round(&sk)));
+    sk.points[em].pos = v(36.0, 0.0);
+    assert!(solve_holding(&mut sk, &Hold { points: vec![ec, em], radii: vec![e] }).ok());
+    assert_touches("the circle on the longer ellipse", freeform_gap_range(&sk, e, round(&sk)));
+
+    // A line on a conic arch, then the line's end dragged down to (45, 2).
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(-10.0, 15.0), v(50.0, 12.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    assert!(solve(&mut sk).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line on the conic", freeform_gap_range(&sk, k, side(a, b)));
+    let CurveKind::Line { b: end, .. } = sk.curves[l].kind else { panic!("a line") };
+    sk.points[end].pos = v(45.0, 2.0);
+    assert!(solve_holding(&mut sk, &Hold { points: vec![ca, cb, apex, end], radii: vec![] }).ok());
+    let (a, b) = line_pts(&sk, l);
+    assert_touches("the line on the conic dragged", freeform_gap_range(&sk, k, side(a, b)));
+
+    // A line that crosses the arch from end to end (x = 20 through the apex's span): the gap is
+    // monotone and ~0 at the crossing, which is not a touch.
+    let mut sk = Sketch::new();
+    let [ca, cb, apex] = [v(0.0, 0.0), v(40.0, 0.0), v(20.0, 20.0)].map(|p| sk.add_point(p, None).unwrap());
+    let k = sk.add_curve(CurveKind::Conic { a: ca, b: cb, apex, rho: 0.5 }, None).unwrap();
+    let l = sk.add_line(v(20.0, -10.0), v(20.0, 40.0), None, None, None).unwrap();
+    sk.add_constraint(Tangent { a: l, b: k }, None).unwrap();
+    // The solver may report it cannot do it, but it must never call the crossing a touch.
+    if solve(&mut sk).ok() {
+        let (a, b) = line_pts(&sk, l);
+        assert_touches("the line across the conic", freeform_gap_range(&sk, k, side(a, b)));
+    }
 }
 
 #[test]
@@ -1773,6 +1870,42 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
+/// in proportion to the square of its size (about 40 s for 60000 lines). A batch searches no
+/// sketch for an id, and gives the points and curves exactly the ids, checks and refusals that
+/// adding them one at a time does, including after ids a damaged counter would reuse.
+#[test]
+fn a_batch_adds_points_and_curves_without_searching_for_ids() {
+    let mut base = Sketch::new();
+    base.add_point(v(0.0, 0.0), Some("p2")).unwrap();
+    base.add_point(v(1.0, 0.0), Some("l1")).unwrap();
+    let mut one_by_one = base.clone();
+    let mut batched = base.clone();
+    let lines = 2000;
+    for i in 0..lines {
+        let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+        let a = one_by_one.add_point(v(x, y), None).unwrap();
+        let b = one_by_one.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+        one_by_one.add_curve(CurveKind::Line { a, b }, None).unwrap();
+    }
+    ID_SCANS.with(|c| c.set(0));
+    {
+        let mut batch = batched.batch();
+        for i in 0..lines {
+            let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+            let a = batch.add_point(v(x, y), None).unwrap();
+            let b = batch.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+            batch.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        }
+        assert!(matches!(batch.add_point(v(0.0, 0.0), Some("p2")), Err(SketchError::Duplicate(_))), "a taken id is refused");
+        assert!(matches!(batch.add_curve(CurveKind::Line { a: 0, b: usize::MAX }, None), Err(SketchError::Invalid(_))), "the same checks");
+        assert_eq!(batch.sketch().points.len(), one_by_one.points.len());
+    }
+    assert_eq!(ID_SCANS.with(std::cell::Cell::get), 0, "id searches of the whole sketch in a batch");
+    assert_eq!(batched, one_by_one, "the same ids as one at a time");
+    assert_eq!(batched.fresh("p").unwrap(), one_by_one.fresh("p").unwrap(), "the counters carry on alike");
 }
 
 /// A fillet whose corner the solve leaves where it is stays that corner's arc, even when the
