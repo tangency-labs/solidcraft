@@ -255,6 +255,84 @@ fn update_links_names_the_design_it_reads_while_the_window_draws() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Insert Design reads the saved design beside the window, as Insert STEP does (#11593, #12108):
+/// the overlay names the file and the rebuild's progress, the design waits meanwhile, Cancel
+/// keeps it as it was, and the component comes in once it is read, as one undo step.
+#[test]
+fn insert_design_reads_the_saved_design_while_the_window_draws() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    // A plate with two holes (three features: the read can be held at the third), saved without
+    // its model so inserting it rebuilds the features.
+    let part = h.dir.join("plate.solidcraft");
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 40, "width": 20, "height": 5})).unwrap();
+    for x in [10, 30] {
+        s.execute("solid.cylinder", &json!({"radius": 2, "height": 200, "base": [x, 10, -1], "operation": "cut"})).unwrap();
+    }
+    s.execute("file.save", &json!({"path": part, "cache": false})).unwrap();
+    let plate = s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    // The design it goes into already has a body of its own.
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]})).unwrap();
+    let volume = |app: &mut SolveApp| app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    let near = |app: &mut SolveApp, v: f64| {
+        let got = volume(app);
+        assert!((got - v).abs() < 1e-3 * v, "{got} mm³, not {v}");
+    };
+    let links = |app: &mut SolveApp| app.session.execute("component.links", &json!({})).unwrap()["links"].as_array().map_or(0, Vec::len);
+    let until = |h: &mut crate::scenario::Harness, done: &dyn Fn(&SolveApp) -> bool| {
+        let began = std::time::Instant::now();
+        while !done(&h.app) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "Insert Design went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+    // Insert Design, and the plate picked in its file dialog.
+    let insert = |h: &mut crate::scenario::Harness| {
+        h.step(&json!({"choose_file": "plate.solidcraft"})).unwrap();
+        h.app.start("component.insert_design");
+        h.frames(2);
+    };
+
+    // Held before the plate's third feature: the window draws, saying what it reads.
+    let design = h.app.session.doc.clone();
+    h.app.file_load.hold_at = Some(2);
+    insert(&mut h);
+    assert!(h.app.file_load.busy(), "Insert Design reads the design off the window thread");
+    until(&mut h, &|app| app.file_load.features().is_some_and(|(done, total)| done >= 2 && total == 3));
+    assert!(h.app.file_load.busy(), "Insert Design is still reading the plate");
+    assert!(h.widget(solidcraft_ui_text::tr("file_load.inserting")).is_some(), "the overlay says a file is going in");
+    assert!(h.widget("plate.solidcraft…").is_some(), "and names the design being read");
+    assert_eq!(h.app.file_load.features(), Some((2, 3)), "and the plate's rebuild progress, held before its third feature");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "the design waits");
+    // Cancel on the overlay keeps the design as it was.
+    let [x, y] = h.widget(solidcraft_ui_text::tr("ui.cancel")).expect("the overlay's Cancel");
+    let at = pos2(x as f32, y as f32);
+    let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+    for event in [Event::PointerMoved(at), button(true), button(false)] {
+        h.frame_with(vec![event]);
+    }
+    assert!(!h.app.file_load.busy(), "Cancel gives the window back at once");
+    until(&mut h, &|app| app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "a cancelled insert changes nothing");
+    assert_eq!(links(&mut h.app), 0);
+    near(&mut h.app, 1000.0);
+
+    // Run through, it brings the plate in as a linked component and says so.
+    insert(&mut h);
+    until(&mut h, &|app| app.file_load.idle());
+    assert!(h.widget(solidcraft_ui_text::tr("file_load.inserting")).is_none(), "the overlay goes once it is done");
+    assert_eq!(links(&mut h.app), 1, "the plate is a linked component");
+    near(&mut h.app, 1000.0 + plate);
+    assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Inserted plate"));
+    // One undo step takes it back.
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(links(&mut h.app), 0);
+    near(&mut h.app, 1000.0);
+}
+
 /// Reload from file reads beside the window, as an insert does: the design waits, Cancel changes
 /// nothing, and a file that is gone is said in the status line.
 #[test]
