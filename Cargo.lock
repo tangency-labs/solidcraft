@@ -4397,6 +4397,7 @@ version = "0.40.0-rc.3"
 dependencies = [
  "serde",
  "serde_json",
+ "solidcore",
  "solidcore-record",
  "solidcore-tess",
  "thiserror 2.0.21",
@@ -4465,6 +4466,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore-record",
+ "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",

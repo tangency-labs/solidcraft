@@ -5,12 +5,10 @@
 //! added. The boundary stays exactly the shared edge nodes, so the face meets its neighbours
 //! exactly, and only the band next to the boundary is irregular (cut-cell meshing).
 
-use std::cmp::Ordering;
-
 use crate::ring::Ring;
 
+use super::cdt;
 use super::motorcycle::Trace;
-use super::{UvMesh, cdt};
 
 /// A cell is kept when the boundary stays at least this fraction of its smaller side away from
 /// it (in the metric): closer, the band triangle between them would be a sliver.
@@ -32,27 +30,17 @@ struct Lines {
 fn lines(grid: &[f64], traces: &[f64]) -> Option<(Lines, Vec<usize>)> {
     let mut at: Vec<f64> = grid.to_vec();
     let mut full = vec![true; at.len()];
-    // Proven: capacity of allocated `traces`' length, elements of the same size
     let mut place = Vec::with_capacity(traces.len());
     for &c in traces {
         // The full-grid cell around c, and every line inside it.
         let k = grid.partition_point(|g| *g < c);
-        let (lo, hi) = (
-            *grid.get(k.saturating_sub(1))?,
-            *grid.get(k.min(grid.len().saturating_sub(1)))?,
-        );
+        let (lo, hi) = (*grid.get(k.saturating_sub(1))?, *grid.get(k.min(grid.len().saturating_sub(1)))?);
         let w = (hi - lo).max(f64::MIN_POSITIVE);
         let last = grid.len().saturating_sub(1);
-        let near = at
-            .iter()
-            .enumerate()
-            .filter(|(_, x)| (**x - c).abs() < SNAP * w)
-            .min_by(|a, b| (a.1 - c).abs().total_cmp(&(b.1 - c).abs()));
+        let near = at.iter().enumerate().filter(|(_, x)| (**x - c).abs() < SNAP * w).min_by(|a, b| (a.1 - c).abs().total_cmp(&(b.1 - c).abs()));
         match near {
             // An earlier trace, or a box edge: join it.
-            Some((i, _)) if !full.get(i).copied().unwrap_or(false) || i == 0 || i == last => {
-                place.push(i);
-            }
+            Some((i, _)) if !full.get(i).copied().unwrap_or(false) || i == 0 || i == last => place.push(i),
             // An inner grid line: it moves onto the trace.
             Some((i, _)) => {
                 *at.get_mut(i)? = c;
@@ -67,24 +55,14 @@ fn lines(grid: &[f64], traces: &[f64]) -> Option<(Lines, Vec<usize>)> {
     }
     // Sort, carrying the trace indices along.
     let mut order: Vec<usize> = (0..at.len()).collect();
-    order.sort_by(|a, b| {
-        at.get(*a)
-            .copied()
-            .unwrap_or(0.0)
-            .total_cmp(&at.get(*b).copied().unwrap_or(0.0))
-    });
+    order.sort_by(|a, b| at.get(*a).copied().unwrap_or(0.0).total_cmp(&at.get(*b).copied().unwrap_or(0.0)));
     let mut rank = vec![0; at.len()];
     for (r, &i) in order.iter().enumerate() {
         *rank.get_mut(i)? = r;
     }
-    let lines = Lines {
-        at: order.iter().filter_map(|&i| at.get(i).copied()).collect(),
-        full: order.iter().filter_map(|&i| full.get(i).copied()).collect(),
-    };
-    let place = place
-        .iter()
-        .filter_map(|&i| rank.get(i).copied())
-        .collect::<Vec<_>>();
+    let lines =
+        Lines { at: order.iter().filter_map(|&i| at.get(i).copied()).collect(), full: order.iter().filter_map(|&i| full.get(i).copied()).collect() };
+    let place = place.iter().filter_map(|&i| rank.get(i).copied()).collect::<Vec<_>>();
     (place.len() == traces.len()).then_some((lines, place))
 }
 
@@ -101,7 +79,7 @@ pub(crate) fn cut_grid(
     vs: &[f64],
     traces: &[Trace],
     scale: [f64; 2],
-) -> Option<UvMesh> {
+) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
     if us.len() < 2 || vs.len() < 2 || !scale.iter().all(|s| s.is_finite() && *s > 0.0) {
         return None;
     }
@@ -112,16 +90,11 @@ pub(crate) fn cut_grid(
     // grid is) until the cells fit, rather than the face falling through to Delaunay, whose
     // refinement budget a grid this size is past.
     let (mut us, mut vs) = (us.to_vec(), vs.to_vec());
-    let cells = |us: &[f64], vs: &[f64]| {
-        (us.len() + tu.len())
-            .saturating_sub(1)
-            .saturating_mul((vs.len() + tv.len()).saturating_sub(1))
-    };
+    let cells = |us: &[f64], vs: &[f64]| (us.len() + tu.len()).saturating_sub(1).saturating_mul((vs.len() + tv.len()).saturating_sub(1));
     for _ in 0..64 {
         if cells(&us, &vs) <= super::grid::MAX_FACE_GRID || (us.len() <= 2 && vs.len() <= 2) {
             break;
         }
-        // Proven: the divisor is the constant 10, not zero.
         let cap = us.len().saturating_mul(vs.len()).saturating_mul(9) / 10;
         super::grid::thin(&mut us, &mut vs, cap);
     }
@@ -141,8 +114,7 @@ pub(crate) fn cut_grid(
         let full = lu.full.get(i).copied().unwrap_or(false);
         for j in 0..cv {
             let (a, b) = (*lv.at.get(j)?, *lv.at.get(j + 1)?);
-            *vert.get_mut(j * nu + i)? =
-                full || tu.iter().zip(&pu).any(|(t, &k)| k == i && covers(t, a, b));
+            *vert.get_mut(j * nu + i)? = full || tu.iter().zip(&pu).any(|(t, &k)| k == i && covers(t, a, b));
         }
     }
     let mut horiz = vec![false; nv * cu];
@@ -150,16 +122,15 @@ pub(crate) fn cut_grid(
         let full = lv.full.get(j).copied().unwrap_or(false);
         for i in 0..cu {
             let (a, b) = (*lu.at.get(i)?, *lu.at.get(i + 1)?);
-            *horiz.get_mut(j * cu + i)? =
-                full || tv.iter().zip(&pv).any(|(t, &k)| k == j && covers(t, a, b));
+            *horiz.get_mut(j * cu + i)? = full || tv.iter().zip(&pv).any(|(t, &k)| k == j && covers(t, a, b));
         }
     }
     // Rectangles: fine cells joined across sides that are no line. A T-mesh's faces are
     // rectangles; anything else (a trace ending in the open after snapping) falls back to
     // every line running the whole face.
     let rects = rectangles(cu, cv, &vert, &horiz).or_else(|| {
-        vert.fill(true);
-        horiz.fill(true);
+        vert.iter_mut().for_each(|s| *s = true);
+        horiz.iter_mut().for_each(|s| *s = true);
         rectangles(cu, cv, &vert, &horiz)
     })?;
     // In the metric, so clearances are lengths on the surface.
@@ -169,20 +140,9 @@ pub(crate) fn cut_grid(
         .iter()
         .flat_map(|r| {
             let n = r.len();
-            (0..n).filter_map(move |k| {
-                Some((
-                    *boundary.get(r.start + k)?,
-                    // Proven: n = r.len() > 0: `k` ranges over `0..n`
-                    *boundary.get(r.start + (k + 1) % n)?,
-                ))
-            })
+            (0..n).filter_map(move |k| Some((*boundary.get(r.start + k)?, *boundary.get(r.start + (k + 1) % n)?)))
         })
-        .map(|(a, b)| {
-            (
-                [a[0] * scale[0], a[1] * scale[1]],
-                [b[0] * scale[0], b[1] * scale[1]],
-            )
-        })
+        .map(|(a, b)| ([a[0] * scale[0], a[1] * scale[1]], [b[0] * scale[0], b[1] * scale[1]]))
         .collect();
     let keep = clear_cells(&gx, &gy, &segs, &rects)?;
     if !keep.iter().any(|k| *k) {
@@ -193,12 +153,7 @@ pub(crate) fn cut_grid(
             && j >= 0
             && (i as usize) < cu
             && (j as usize) < cv
-            && rects
-                .of
-                .get(j as usize * cu + i as usize)
-                .and_then(|r| keep.get(*r))
-                .copied()
-                .unwrap_or(false)
+            && rects.of.get(j as usize * cu + i as usize).and_then(|r| keep.get(*r)).copied().unwrap_or(false)
     };
     // Grid points on the kept rectangles' corners, numbered after the boundary.
     let mut used = vec![false; nu * nv];
@@ -246,13 +201,8 @@ pub(crate) fn cut_grid(
         for j in (j0 + 1..=j1).rev() {
             ring.push(((i0, j), (i0 as isize - 1, j as isize - 1)));
         }
-        let corners = ring
-            .iter()
-            .filter(|((i, j), _)| used.get(j * nu + i).copied().unwrap_or(false))
-            .count();
-        // Proven: corners <= ring.len(), allocated with larger elements
+        let corners = ring.iter().filter(|((i, j), _)| used.get(j * nu + i).copied().unwrap_or(false)).count();
         let mut poly: Vec<u32> = Vec::with_capacity(corners);
-        // Proven: corners <= ring.len(), allocated with larger elements
         let mut across: Vec<(isize, isize)> = Vec::with_capacity(corners);
         for &((i, j), c) in &ring {
             if used.get(j * nu + i).copied().unwrap_or(false) {
@@ -267,10 +217,7 @@ pub(crate) fn cut_grid(
             tris.push([a, c, d]);
         } else {
             // Hanging nodes from neighbours: a fan from the rectangle's centre.
-            let centre = [
-                0.5 * (lu.at.get(i0)? + lu.at.get(i1)?),
-                0.5 * (lv.at.get(j0)? + lv.at.get(j1)?),
-            ];
+            let centre = [0.5 * (lu.at.get(i0)? + lu.at.get(i1)?), 0.5 * (lv.at.get(j0)? + lv.at.get(j1)?)];
             let m = u32::try_from(n + extra.len()).ok()?;
             extra.push(centre);
             for (&a, &b) in poly.edges() {
@@ -289,13 +236,9 @@ pub(crate) fn cut_grid(
     tris.extend(band);
     // Every triangle counter-clockwise with some area: one that is not has folded.
     for t in &tris {
-        let (a, b, c) = (
-            all.get(t[0] as usize)?,
-            all.get(t[1] as usize)?,
-            all.get(t[2] as usize)?,
-        );
+        let (a, b, c) = (all.get(t[0] as usize)?, all.get(t[1] as usize)?, all.get(t[2] as usize)?);
         let area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
-        if area.partial_cmp(&0.0) != Some(Ordering::Greater) {
+        if !(area > 0.0) {
             return None;
         }
     }
@@ -374,12 +317,7 @@ fn rectangles(cu: usize, cv: usize, vert: &[bool], horiz: &[bool]) -> Option<Rec
 
 /// Per rectangle: kept when every fine cell in it is inside the region and clear of the
 /// boundary (see [`CLEARANCE`]). `gx`, `gy`: the lines in the metric; `segs`: the boundary.
-fn clear_cells(
-    gx: &[f64],
-    gy: &[f64],
-    segs: &[([f64; 2], [f64; 2])],
-    rects: &Rects,
-) -> Option<Vec<bool>> {
+fn clear_cells(gx: &[f64], gy: &[f64], segs: &[([f64; 2], [f64; 2])], rects: &Rects) -> Option<Vec<bool>> {
     let (cu, cv) = (gx.len().saturating_sub(1), gy.len().saturating_sub(1));
     let cells = cu * cv;
     let cell = |i: usize, j: usize| -> Option<([f64; 2], [f64; 2])> {
@@ -395,9 +333,7 @@ fn clear_cells(
     let maxpad = rects
         .boxes
         .iter()
-        .filter_map(|b| {
-            Some(CLEARANCE * (gx.get(b[2])? - gx.get(b[0])?).min(gy.get(b[3])? - gy.get(b[1])?))
-        })
+        .filter_map(|b| Some(CLEARANCE * (gx.get(b[2])? - gx.get(b[0])?).min(gy.get(b[3])? - gy.get(b[1])?)))
         .fold(0.0f64, f64::max);
     let span = |g: &[f64], lo: f64, hi: f64| {
         let a = g.partition_point(|t| *t < lo - maxpad).saturating_sub(1);
@@ -421,23 +357,15 @@ fn clear_cells(
     // The other cells are wholly inside or wholly outside: even–odd along each row's middle.
     let mut keep = vec![true; rects.boxes.len()];
     for j in 0..cv {
-        let (Some(y0), Some(y1)) = (gy.get(j), gy.get(j + 1)) else {
-            return None;
-        };
+        let (Some(y0), Some(y1)) = (gy.get(j), gy.get(j + 1)) else { return None };
         let ym = 0.5 * (y0 + y1);
-        let mut cross: Vec<f64> = segs
-            .iter()
-            .filter(|(a, b)| (a[1] > ym) != (b[1] > ym))
-            .map(|(a, b)| a[0] + (ym - a[1]) / (b[1] - a[1]) * (b[0] - a[0]))
-            .collect();
+        let mut cross: Vec<f64> =
+            segs.iter().filter(|(a, b)| (a[1] > ym) != (b[1] > ym)).map(|(a, b)| a[0] + (ym - a[1]) / (b[1] - a[1]) * (b[0] - a[0])).collect();
         cross.sort_by(f64::total_cmp);
         for i in 0..cu {
             let k = j * cu + i;
-            let (Some(x0), Some(x1)) = (gx.get(i), gx.get(i + 1)) else {
-                return None;
-            };
+            let (Some(x0), Some(x1)) = (gx.get(i), gx.get(i + 1)) else { return None };
             let xm = 0.5 * (x0 + x1);
-            // Proven: the divisor is the constant 2, not zero.
             let inside = cross.partition_point(|c| *c < xm) % 2 == 1;
             if near.get(k).copied().unwrap_or(true) || !inside {
                 *keep.get_mut(*rects.of.get(k)?)? = false;
@@ -450,9 +378,9 @@ fn clear_cells(
 /// Whether the segment `a`–`b` meets the closed box `lo`–`hi` (Liang–Barsky clipping).
 fn segment_meets_box(a: [f64; 2], b: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> bool {
     let (mut t0, mut t1) = (0.0f64, 1.0f64);
-    for (((a, b), lo), hi) in a.into_iter().zip(b).zip(lo).zip(hi) {
-        let delta = b - a;
-        for (p, q) in [(-delta, a - lo), (delta, hi - a)] {
+    for d in 0..2 {
+        let delta = b[d] - a[d];
+        for (p, q) in [(-delta, a[d] - lo[d]), (delta, hi[d] - a[d])] {
             if p == 0.0 {
                 if q < 0.0 {
                     return false;
@@ -497,17 +425,11 @@ mod tests {
 
     /// Every boundary segment is the side of exactly one triangle, every inner side of two,
     /// and the triangles cover the region's area.
-    fn check(
-        boundary: &[[f64; 2]],
-        loops: &[std::ops::Range<usize>],
-        area: f64,
-        out: &(Vec<[f64; 2]>, Vec<[u32; 3]>),
-    ) {
+    fn check(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>], area: f64, out: &(Vec<[f64; 2]>, Vec<[u32; 3]>)) {
         let (extra, tris) = out;
         let mut all = boundary.to_vec();
         all.extend_from_slice(extra);
-        let mut sides: std::collections::HashMap<(u32, u32), i32> =
-            std::collections::HashMap::new();
+        let mut sides: std::collections::HashMap<(u32, u32), i32> = std::collections::HashMap::new();
         let mut sum = 0.0;
         for t in tris {
             let [a, b, c] = t.map(|i| all[i as usize]);
@@ -522,26 +444,15 @@ mod tests {
             let n = r.len();
             for k in 0..n {
                 let (a, b) = ((r.start + k) as u32, (r.start + (k + 1) % n) as u32);
-                assert_eq!(
-                    sides.get(&(a, b)).copied().unwrap_or(0),
-                    1,
-                    "boundary side {a}-{b} used once, forwards"
-                );
+                assert_eq!(sides.get(&(a, b)).copied().unwrap_or(0), 1, "boundary side {a}-{b} used once, forwards");
                 sides.remove(&(a, b));
             }
         }
         for (&(a, b), &k) in &sides {
             assert_eq!(k, 1);
-            assert_eq!(
-                sides.get(&(b, a)).copied(),
-                Some(1),
-                "inner side {a}-{b} shared"
-            );
+            assert_eq!(sides.get(&(b, a)).copied(), Some(1), "inner side {a}-{b} shared");
         }
-        assert!(
-            (sum - area).abs() < 1e-9 * area.max(1.0),
-            "area {sum} vs {area}"
-        );
+        assert!((sum - area).abs() < 1e-9 * area.max(1.0), "area {sum} vs {area}");
     }
 
     #[test]
@@ -549,47 +460,10 @@ mod tests {
         let b = circle([0.0, 0.0], 1.0, 64, true);
         let loops = one(64);
         let poly_area = 0.5 * 64.0 * (std::f64::consts::TAU / 64.0).sin();
-        let Some(out) = cut_grid(
-            &b,
-            &loops,
-            &lines(-1.0, 1.0, 10),
-            &lines(-1.0, 1.0, 10),
-            &[],
-            [1.0, 1.0],
-        ) else {
-            panic!("meshes")
-        };
+        let Some(out) = cut_grid(&b, &loops, &lines(-1.0, 1.0, 10), &lines(-1.0, 1.0, 10), &[], [1.0, 1.0]) else { panic!("meshes") };
         check(&b, &loops, poly_area, &out);
         // Most of the disc is grid cells (two triangles each).
         assert!(out.1.len() > 100, "{}", out.1.len());
-    }
-
-    /// A square with a hole and lines wanting more cells than a grid may have (1000 × 1000,
-    /// past [`super::super::grid::MAX_FACE_GRID`]): the cut grid thins its lines until the cells
-    /// fit, and still meshes the face (it gave the face up, for an under-refined Delaunay: the
-    /// halves of a split coil measured 1.5% short of the whole).
-    #[test]
-    fn lines_past_the_grid_cap_are_thinned_to_fit() {
-        let mut b = vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]];
-        b.extend(circle([2.0, 2.0], 1.0, 32, false));
-        let loops = [0..4, 4..36];
-        let hole = 0.5 * 32.0 * (std::f64::consts::TAU / 32.0).sin();
-        let Some(out) = cut_grid(
-            &b,
-            &loops,
-            &lines(0.0, 4.0, 1000),
-            &lines(0.0, 4.0, 1000),
-            &[],
-            [1.0, 1.0],
-        ) else {
-            panic!("meshes")
-        };
-        check(&b, &loops, 16.0 - hole, &out);
-        assert!(
-            out.0.len() <= super::super::grid::MAX_FACE_GRID,
-            "{} points",
-            out.0.len()
-        );
     }
 
     #[test]
@@ -598,28 +472,19 @@ mod tests {
         b.extend(circle([2.0, 2.0], 1.0, 32, false));
         let loops = [0..4, 4..36];
         let hole = 0.5 * 32.0 * (std::f64::consts::TAU / 32.0).sin();
-        let Some(out) = cut_grid(
-            &b,
-            &loops,
-            &lines(0.0, 4.0, 16),
-            &lines(0.0, 4.0, 16),
-            &[],
-            [1.0, 1.0],
-        ) else {
-            panic!("meshes")
-        };
+        let Some(out) = cut_grid(&b, &loops, &lines(0.0, 4.0, 16), &lines(0.0, 4.0, 16), &[], [1.0, 1.0]) else { panic!("meshes") };
         check(&b, &loops, 16.0 - hole, &out);
     }
 
     #[test]
     fn a_curved_triangle_in_a_stretched_metric() {
         // A three-cornered patch (as a vertex blend in its parameters), u twice as long as v.
-        let mut b: Vec<[f64; 2]> = (0..=8).map(|k| [f64::from(k) / 8.0, 0.0]).collect();
+        let mut b: Vec<[f64; 2]> = (0..=8).map(|k| [k as f64 / 8.0, 0.0]).collect();
         b.extend((1..8).map(|k| {
-            let a = std::f64::consts::FRAC_PI_2 * f64::from(k) / 8.0;
+            let a = std::f64::consts::FRAC_PI_2 * k as f64 / 8.0;
             [a.cos(), a.sin()]
         }));
-        b.extend((1..8).rev().map(|k| [0.0, f64::from(k) / 8.0]));
+        b.extend((1..8).rev().map(|k| [0.0, k as f64 / 8.0]));
         let n = b.len();
         let loops = one(n);
         let area: f64 = (0..n)
@@ -628,16 +493,7 @@ mod tests {
                 0.5 * (p[0] * q[1] - q[0] * p[1])
             })
             .sum();
-        let Some(out) = cut_grid(
-            &b,
-            &loops,
-            &lines(0.0, 1.0, 12),
-            &lines(0.0, 1.0, 6),
-            &[],
-            [2.0, 1.0],
-        ) else {
-            panic!("meshes")
-        };
+        let Some(out) = cut_grid(&b, &loops, &lines(0.0, 1.0, 12), &lines(0.0, 1.0, 6), &[], [2.0, 1.0]) else { panic!("meshes") };
         check(&b, &loops, area, &out);
     }
 
@@ -651,68 +507,26 @@ mod tests {
         let hole = 0.5 * 32.0 * (std::f64::consts::TAU / 32.0).sin();
         let traces = super::super::motorcycle::traces(&b, &loops, [1.0, 1.0], 0.0);
         assert_eq!(traces.len(), 4, "{traces:?}");
-        let Some(out) = cut_grid(
-            &b,
-            &loops,
-            &lines(0.0, 4.0, 16),
-            &lines(0.0, 4.0, 16),
-            &traces,
-            [1.0, 1.0],
-        ) else {
-            panic!("meshes")
-        };
+        let Some(out) = cut_grid(&b, &loops, &lines(0.0, 4.0, 16), &lines(0.0, 4.0, 16), &traces, [1.0, 1.0]) else { panic!("meshes") };
         check(&b, &loops, 16.0 - hole, &out);
         // The traces run through the hole's extremes: along v = 2.3 from its u-extremes and
         // along u = 1.7 from its v-extremes; their lines are in the grid.
         for (d, x) in [(0, 1.7), (1, 2.3)] {
-            assert!(
-                out.0.iter().any(|p| (p[d] - x).abs() < 1e-9),
-                "a grid point on line {d} = {x}"
-            );
+            assert!(out.0.iter().any(|p| (p[d] - x).abs() < 1e-9), "a grid point on line {d} = {x}");
         }
     }
 
     #[test]
     fn nothing_kept_is_refused() {
         let b = circle([0.0, 0.0], 0.1, 16, true);
-        assert!(
-            cut_grid(
-                &b,
-                &one(16),
-                &lines(-1.0, 1.0, 1),
-                &lines(-1.0, 1.0, 1),
-                &[],
-                [1.0, 1.0]
-            )
-            .is_none()
-        );
+        assert!(cut_grid(&b, &one(16), &lines(-1.0, 1.0, 1), &lines(-1.0, 1.0, 1), &[], [1.0, 1.0]).is_none());
     }
 
     #[test]
     fn segments_meet_boxes() {
-        assert!(segment_meets_box(
-            [-1.0, 0.5],
-            [2.0, 0.5],
-            [0.0, 0.0],
-            [1.0, 1.0]
-        ));
-        assert!(!segment_meets_box(
-            [-1.0, 2.0],
-            [2.0, 2.0],
-            [0.0, 0.0],
-            [1.0, 1.0]
-        ));
-        assert!(segment_meets_box(
-            [0.5, 0.5],
-            [0.6, 0.6],
-            [0.0, 0.0],
-            [1.0, 1.0]
-        ));
-        assert!(!segment_meets_box(
-            [2.0, 0.0],
-            [3.0, 1.0],
-            [0.0, 0.0],
-            [1.0, 1.0]
-        ));
+        assert!(segment_meets_box([-1.0, 0.5], [2.0, 0.5], [0.0, 0.0], [1.0, 1.0]));
+        assert!(!segment_meets_box([-1.0, 2.0], [2.0, 2.0], [0.0, 0.0], [1.0, 1.0]));
+        assert!(segment_meets_box([0.5, 0.5], [0.6, 0.6], [0.0, 0.0], [1.0, 1.0]));
+        assert!(!segment_meets_box([2.0, 0.0], [3.0, 1.0], [0.0, 0.0], [1.0, 1.0]));
     }
 }

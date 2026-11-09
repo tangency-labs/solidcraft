@@ -1,13 +1,14 @@
 //! Exact partial derivatives of the display evaluator's surfaces up to the fourth order, and the
 //! derivatives of a rational spline curve: what a seam's change of curvature (G3) and the change
 //! of that change (G4) are read from. Splines differentiate their basis functions
-//! ([`crate::bspline::basis_derivatives`]) and divide out the weight by Leibniz's rule (NURBS
+//! ([`super::basis::basis_derivatives`]) and divide out the weight by Leibniz's rule (NURBS
 //! Book eq. 4.8 and 4.20); a revolution turns its profile's derivatives by the rotation's own.
 
 use super::{EvalCurve, EvalSurface, affine, linear, onto_knots};
-use crate::bspline::{MAX_SPLINE_DEGREE, basis_derivatives, binomial};
-use crate::prelude::*;
-use solidcore_record::Vec3;
+use super::MAX_SPLINE_DEGREE;
+use super::basis::{basis_derivatives, binomial};
+use crate::eval::vec::VecExt as _;
+use crate::math::Vec3;
 
 /// The highest total order of [`Partials`].
 pub const MAX_PARTIAL_ORDER: usize = 4;
@@ -17,12 +18,12 @@ pub const MAX_PARTIAL_ORDER: usize = 4;
 pub type Partials = [[Vec3; MAX_PARTIAL_ORDER + 1]; MAX_PARTIAL_ORDER + 1];
 
 /// The pairs `(i, j)` with `i + j ≤ MAX_PARTIAL_ORDER`.
-pub(crate) fn orders() -> impl Iterator<Item = (usize, usize)> {
+pub fn orders() -> impl Iterator<Item = (usize, usize)> {
     (0..=MAX_PARTIAL_ORDER).flat_map(|i| (0..=MAX_PARTIAL_ORDER - i).map(move |j| (i, j)))
 }
 
 /// A table of partials from `f(i, j)`; `None` when one is missing or not finite.
-pub(crate) fn tabulate(mut f: impl FnMut(usize, usize) -> Option<Vec3>) -> Option<Partials> {
+pub fn tabulate(mut f: impl FnMut(usize, usize) -> Option<Vec3>) -> Option<Partials> {
     let mut d = [[Vec3::ZERO; MAX_PARTIAL_ORDER + 1]; MAX_PARTIAL_ORDER + 1];
     for (i, j) in orders() {
         let x = f(i, j).filter(|x| x.is_finite())?;
@@ -79,7 +80,7 @@ fn rotation_derivative(axis: Vec3, x: Vec3, a: f64, j: usize) -> Vec3 {
 }
 
 /// The `k`-th derivatives of cos and sin at `t`: `cos(t + kπ/2)` and `sin(t + kπ/2)`.
-pub(crate) fn trig_derivative(t: f64, k: usize) -> (f64, f64) {
+pub fn trig_derivative(t: f64, k: usize) -> (f64, f64) {
     let (sin, cos) = t.sin_cos();
     match k % 4 {
         0 => (cos, sin),
@@ -166,7 +167,7 @@ impl EvalCurve {
         if !(w.abs() > 1e-300) {
             return None;
         }
-        let mut d: Vec<Vec3> = Vec::with_capacity(order + 1);
+        let mut d: Vec<Vec3> = Vec::new();
         for k in 0..=order {
             let mut x = xyz(*a.get(k)?);
             for i in 1..=k {

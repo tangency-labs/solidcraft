@@ -550,9 +550,9 @@ fn push3(data: &mut Vec<f32>, v: Vec3) {
 
 fn push_curve(data: &mut Vec<f32>, c: &EvalCurve) -> Result<(u32, u32)> {
     let knots = word(data.len())?;
-    data.extend(c.knots().iter().map(|k| *k as f32));
+    data.extend(c.knots.iter().map(|k| *k as f32));
     let ctrl = word(data.len())?;
-    data.extend(c.ctrl().iter().flat_map(|h| h.map(|x| x as f32)));
+    data.extend(c.ctrl.iter().flat_map(|h| h.map(|x| x as f32)));
     Ok((knots, ctrl))
 }
 
@@ -571,8 +571,7 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
                 push3(&mut data, solidcore_tess::record_vec3(*du));
                 push3(&mut data, solidcore_tess::record_vec3(*dv));
             }
-            EvalSurface::Nurbs(n) => {
-                let (degree, knots, count, ctrl, closed) = (n.degree(), n.knots(), n.count(), n.ctrl(), n.closed());
+            EvalSurface::Nurbs { degree, knots, count, ctrl, closed } => {
                 head[0] = 1;
                 head[11] = u32::from(closed[0]) | (u32::from(closed[1]) << 1);
                 head[1] = word(degree[0])?;
@@ -588,8 +587,8 @@ fn pack(plans: &[&TessPlan]) -> Result<PackedPlans> {
             }
             EvalSurface::Revolved { profile, origin, axis, transform, swap } => {
                 head[0] = 2;
-                head[1] = word(profile.degree())?;
-                head[3] = word(profile.ctrl().len())?;
+                head[1] = word(profile.degree)?;
+                head[3] = word(profile.ctrl.len())?;
                 let (k, c) = push_curve(&mut data, profile)?;
                 head[5] = k;
                 head[7] = c;

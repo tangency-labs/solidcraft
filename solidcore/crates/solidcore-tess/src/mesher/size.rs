@@ -8,9 +8,9 @@
 //! sags the tolerance; an edge takes the smaller size of its two faces, so a curved face and
 //! its flat neighbour meet at the same spacing.
 
-use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
-use solidcraft_geom::tess::EvalSurface;
+use solidcore::Vec3;
+use crate::vec::VecExt as _;
+use solidcore::eval::plan::EvalSurface;
 
 use super::uv::Domain;
 
@@ -32,7 +32,7 @@ const SAMPLES: usize = 9;
 /// Most segments a face's boundary may get from the facet angle: past it, the face's curved
 /// edges are sampled again at twice the angle (a plate with a thousand small holes is not worth
 /// a hundred times the work to draw each hole round).
-pub(crate) const MAX_ANGLE_BOUNDARY: usize = 4096;
+pub const MAX_ANGLE_BOUNDARY: usize = 4096;
 /// How often the angle is doubled for a crowded face before only the chord tolerance is left.
 pub(crate) const MAX_RELAX: u8 = 4;
 
@@ -170,7 +170,7 @@ fn planar(s: &EvalSurface) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcraft_geom::tess::EvalCurve;
+    use solidcore::eval::plan::EvalCurve;
 
     const THIRTY: Option<Turn> = Some(Turn { angle: std::f64::consts::PI / 6.0, floor: 0.0 });
 
