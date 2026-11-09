@@ -244,3 +244,4 @@ mesh_convert
 mesh_import
 repair
   remap_bodies: body
+lighten

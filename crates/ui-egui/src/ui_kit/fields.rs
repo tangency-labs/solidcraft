@@ -901,11 +901,34 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
+    dropdown_disabled(ui, id, selected, options, &[])
+}
+
+/// [`dropdown`] that grays out and crosses through options marked `true` in `disabled`.
+pub(crate) fn dropdown_disabled(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], disabled: &[bool]) -> Response {
+    let t = Tokens::get();
     let text = options.get(*selected).copied().map(solidcraft_ui_text::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, solidcraft_ui_text::tr_label(option));
+            let label_text = solidcraft_ui_text::tr_label(option);
+            let is_disabled = disabled.get(index).copied().unwrap_or(false);
+            let response = if is_disabled {
+                let mut job = egui::text::LayoutJob::default();
+                job.append(
+                    label_text,
+                    0.0,
+                    egui::TextFormat {
+                        font_id: egui::FontId::proportional(t.font_label),
+                        color: t.text_dim,
+                        strikethrough: egui::Stroke::new(1.0, t.text_dim),
+                        ..Default::default()
+                    },
+                );
+                ui.add_enabled(false, egui::Button::selectable(false, job))
+            } else {
+                ui.selectable_value(selected, index, label_text)
+            };
             solidcraft_ui_registry::publish_target(&format!("dialog:{row}:{option}"), response.rect);
         }
     })

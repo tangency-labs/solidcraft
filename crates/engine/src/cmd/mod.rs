@@ -37,7 +37,7 @@ mod delete;
 pub(crate) mod diagnostics;
 mod edit;
 mod face;
-mod features;
+pub(crate) mod features;
 mod features_more;
 mod join_pieces;
 pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
@@ -343,6 +343,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(crate::features::lighten::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
     v.extend(sheet::COMMANDS.iter());

@@ -695,7 +695,7 @@ pub(super) fn check_count(s: &Session, e: &str, cmd: &str, what: &str) -> Result
 }
 
 /// Add a feature, evaluate, and report its result (an evaluation error fails the command).
-pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
+pub(crate) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, true)
 }
 

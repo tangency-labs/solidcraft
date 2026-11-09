@@ -77,6 +77,7 @@ mod issue_871_tests;
 #[cfg(test)]
 mod join_between_caps_tests;
 mod lip;
+pub mod lighten;
 pub mod loft_blend;
 mod loft_rails;
 #[cfg(test)]
@@ -194,6 +195,7 @@ pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
 pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
+pub use lighten::*;
 pub use lip::{raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
