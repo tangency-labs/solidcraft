@@ -418,158 +418,127 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
         return;
     }
-    let mut close = false;
-    let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::unique("sc_file_area"))
-        .fixed_pos(pos2(ctx.data(|d| d.get_temp::<f32>(egui::Id::unique("sc_file_menu_x"))).unwrap_or(100.0), APP_BAR_HEIGHT))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
-                ui.set_min_width(190.0);
-                ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-                ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
-                ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
-                let item_if = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str, enabled: bool| {
-                    crate::context_menu::list_row(ui, &crate::ui_kit::Item::action(label, label, icon).key(key).on_if(enabled)).is_some()
-                };
-                let item = |ui: &mut egui::Ui, label: &str, key: &str, icon: &str| item_if(ui, label, key, icon, true);
-                // Insert, Save and Export act on the design, which Home hides.
-                let shown = design_shown(app);
-                if item(ui, app.tr("ui.new_design"), "Ctrl+N", "new") {
-                    FileAction::New.run(app);
-                    close = true;
-                }
-                if item(ui, &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open") {
-                    FileAction::Open.run(app);
-                    close = true;
-                }
-                crate::ui_kit::Menu::button(ui, app.tr("ui.open_recent"), |ui| {
-                    for path in app.home.recent.clone() {
-                        let missing = !crate::home::available(app, &path);
-                        let label = format!("{path}{}", if missing { " (missing)" } else { "" });
-                        if crate::context_menu::button(ui, &label, "open").clicked() {
-                            FileAction::OpenRecent(path).run(app);
-                            close = true;
-                            ui.close();
-                        }
-                    }
-                    ui.separator();
-                    if crate::context_menu::button(ui, app.tr("ui.clear_recent"), "delete").clicked() {
-                        FileAction::ClearRecent.run(app);
-                        close = true;
-                        ui.close();
-                    }
-                });
-                if item_if(ui, "Insert STEP…", "", "import", shown) {
-                    FileAction::Command("file.insert_step").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Insert Mesh…", "", "import", shown) {
-                    FileAction::Command("file.insert_mesh").run(app);
-                    close = true;
-                }
-                if item_if(ui, &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown) {
-                    app.start("pointcloud.insert");
-                    close = true;
-                }
-                if item_if(ui, &format!("{}…", app.tr_label("Insert Design")), "", "component", shown) {
-                    FileAction::Command("component.insert_design").run(app);
-                    close = true;
-                }
-                if item_if(ui, app.tr("ui.save"), "Ctrl+S", "save", shown) {
-                    FileAction::Save.run(app);
-                    close = true;
-                }
-                // Save As shows the shortcut of the command it runs, from the app's own registry.
-                let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
-                if item_if(ui, &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown) {
-                    FileAction::SaveAs.run(app);
-                    close = true;
-                }
-                if item(ui, "Save As JSON…", "", "save") {
-                    FileAction::SaveJson.run(app);
-                    close = true;
-                }
-                // The browser build: a copy as a downloaded file, whatever Save does.
-                if app.services.download_design.is_some() && item_if(ui, "Download design", "", "export", shown) {
-                    download_design(app);
-                    close = true;
-                }
-                if app.services.browser_files.is_some() && item(ui, "Files in this browser…", "", "open") {
-                    if let Some(show) = &app.services.browser_files {
-                        show();
-                    }
-                    close = true;
-                }
-                ui.separator();
-                // Each format's item runs its own command, so it shows that command's key.
-                let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
-                let (stl_key, mf_key, step_key, obj_key, urdf_key) =
-                    (key("file.export_stl"), key("file.export_3mf"), key("file.export_step"), key("file.export_obj"), key("file.export_urdf"));
-                if item_if(ui, "Export STL…", &stl_key, "mesh_export", shown) {
-                    FileAction::Command("file.export_stl").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export 3MF…", &mf_key, "mesh_export", shown) {
-                    FileAction::Command("file.export_3mf").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)) {
-                    app.start("file.send_to_slicer");
-                    close = true;
-                }
-                if item_if(ui, "Export STEP…", &step_key, "export", shown) {
-                    FileAction::Command("file.export_step").run(app);
-                    close = true;
-                }
-                if item_if(ui, app.tr_label("Export Current View as DXF…"), "", "export", shown) {
-                    FileAction::Command("file.export_view_dxf").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export OBJ…", &obj_key, "export", shown) {
-                    FileAction::Command("file.export_obj").run(app);
-                    close = true;
-                }
-                if item_if(ui, "Export URDF…", &urdf_key, "export", shown) {
-                    FileAction::Command("file.export_urdf").run(app);
-                    close = true;
-                }
-                if item(ui, "Export Design as JSON…", "", "export") {
-                    FileAction::Export("json").run(app);
-                    close = true;
-                }
-                ui.separator();
-                if item_if(ui, &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown) {
-                    FileAction::Command("document.metadata").run(app);
-                    close = true;
-                }
-                ui.separator();
-                // The browser can install SolidCraft as an app (`install`): only while it offers to.
-                if let Some(offer) = crate::install::offered(app)
-                    && crate::context_menu::button(ui, solidcraft_ui_text::tr("install.menu"), "new")
-                        .backing_on_hover_text(solidcraft_ui_text::tr("install.button_tip"))
-                        .clicked()
-                {
-                    crate::install::start(app, offer);
-                    close = true;
-                }
-                if item(ui, &format!("{}…", app.tr("ui.preferences")), "", "settings") {
-                    FileAction::Settings.run(app);
-                    close = true;
-                }
-                if item(ui, &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list") {
-                    FileAction::Shortcuts.run(app);
-                    close = true;
-                }
-                if item(ui, app.tr("ui.quit"), "", "close") {
-                    FileAction::Quit.run(app);
-                    close = true;
-                }
-            });
-        });
+    let rows = file_rows(app);
+    let at = pos2(ctx.data(|d| d.get_temp::<f32>(egui::Id::unique("sc_file_menu_x"))).unwrap_or(100.0), APP_BAR_HEIGHT);
     let just_opened = ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_file_menu_opened"))) == Some(ctx.cumulative_pass_nr());
-    if close || (!just_opened && resp.response.clicked_elsewhere()) {
+    let out = app_bar::file_menu(ctx, &rows, at, egui::Id::unique("sc_file_area"), just_opened);
+    if let Some(chosen) = out.chosen {
+        run_file_row(app, &chosen);
+    }
+    if out.close {
         ctx.data_mut(|d| d.insert_temp(id, false));
+    }
+}
+
+/// The File menu's rows, each named by what it runs ([`run_file_row`]).
+fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
+    use app_bar::{FileItem, FileRow};
+    let row = |id: &str, label: &str, key: &str, icon: &str, enabled: bool| {
+        FileRow::Item(FileItem { id: id.to_string(), label: label.to_string(), key: key.to_string(), icon: icon.to_string(), enabled })
+    };
+    let button = |id: &str, label: &str, icon: &str, tip: Option<&str>| FileRow::Button {
+        item: FileItem { id: id.to_string(), label: label.to_string(), key: String::new(), icon: icon.to_string(), enabled: true },
+        tip: tip.map(str::to_string),
+    };
+    // Insert, Save and Export act on the design, which Home hides.
+    let shown = design_shown(app);
+    let mut rows =
+        vec![row("new", app.tr("ui.new_design"), "Ctrl+N", "new", true), row("open", &format!("{}…", app.tr("ui.open")), "Ctrl+O", "open", true)];
+    let mut recent: Vec<FileRow> = app
+        .home
+        .recent
+        .iter()
+        .enumerate()
+        .map(|(i, path)| {
+            let missing = !crate::home::available(app, path);
+            button(&format!("recent:{i}"), &format!("{path}{}", if missing { " (missing)" } else { "" }), "open", None)
+        })
+        .collect();
+    recent.push(FileRow::Separator);
+    recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
+    rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
+    rows.push(row("file.insert_step", "Insert STEP…", "", "import", shown));
+    rows.push(row("file.insert_mesh", "Insert Mesh…", "", "import", shown));
+    rows.push(row("pointcloud.insert", &format!("{}…", app.tr_label("Insert Point Cloud")), "", "import", shown));
+    rows.push(row("component.insert_design", &format!("{}…", app.tr_label("Insert Design")), "", "component", shown));
+    rows.push(row("save", app.tr("ui.save"), "Ctrl+S", "save", shown));
+    // Save As shows the shortcut of the command it runs, from the app's own registry.
+    let save_as_key = crate::keymap::effective(app, "file.save_as").unwrap_or_default();
+    rows.push(row("save_as", &format!("{}…", app.tr("ui.save_as")), &save_as_key, "save", shown));
+    rows.push(row("save_json", "Save As JSON…", "", "save", true));
+    // The browser build: a copy as a downloaded file, whatever Save does.
+    if app.services.download_design.is_some() {
+        rows.push(row("download", "Download design", "", "export", shown));
+    }
+    if app.services.browser_files.is_some() {
+        rows.push(row("browser_files", "Files in this browser…", "", "open", true));
+    }
+    rows.push(FileRow::Separator);
+    // Each format's item runs its own command, so it shows that command's key.
+    let key = |id: &str| crate::keymap::effective(app, id).unwrap_or_default();
+    rows.push(row("file.export_stl", "Export STL…", &key("file.export_stl"), "mesh_export", shown));
+    rows.push(row("file.export_3mf", "Export 3MF…", &key("file.export_3mf"), "mesh_export", shown));
+    rows.push(row("file.send_to_slicer", "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)));
+    rows.push(row("file.export_step", "Export STEP…", &key("file.export_step"), "export", shown));
+    rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
+    rows.push(row("file.export_obj", "Export OBJ…", &key("file.export_obj"), "export", shown));
+    rows.push(row("file.export_urdf", "Export URDF…", &key("file.export_urdf"), "export", shown));
+    rows.push(row("export_json", "Export Design as JSON…", "", "export", true));
+    rows.push(FileRow::Separator);
+    rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
+    rows.push(FileRow::Separator);
+    // The browser can install SolidCraft as an app (`install`): only while it offers to.
+    if crate::install::offered(app).is_some() {
+        rows.push(button("install", solidcraft_ui_text::tr("install.menu"), "new", Some(solidcraft_ui_text::tr("install.button_tip"))));
+    }
+    rows.push(row("settings", &format!("{}…", app.tr("ui.preferences")), "", "settings", true));
+    rows.push(row("shortcuts", &format!("{}…", app.tr("ui.keyboard_shortcuts")), "", "list", true));
+    rows.push(row("quit", app.tr("ui.quit"), "", "close", true));
+    rows
+}
+
+/// Runs the File menu's row `id` ([`file_rows`]).
+fn run_file_row(app: &mut SolveApp, id: &str) {
+    if let Some(i) = id.strip_prefix("recent:").and_then(|i| i.parse::<usize>().ok()) {
+        if let Some(path) = app.home.recent.get(i).cloned() {
+            FileAction::OpenRecent(path).run(app);
+        }
+        return;
+    }
+    match id {
+        "new" => FileAction::New.run(app),
+        "open" => FileAction::Open.run(app),
+        "clear_recent" => FileAction::ClearRecent.run(app),
+        "file.insert_step" => FileAction::Command("file.insert_step").run(app),
+        "file.insert_mesh" => FileAction::Command("file.insert_mesh").run(app),
+        "component.insert_design" => FileAction::Command("component.insert_design").run(app),
+        "file.export_stl" => FileAction::Command("file.export_stl").run(app),
+        "file.export_3mf" => FileAction::Command("file.export_3mf").run(app),
+        "file.export_step" => FileAction::Command("file.export_step").run(app),
+        "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
+        "file.export_obj" => FileAction::Command("file.export_obj").run(app),
+        "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
+        "save" => FileAction::Save.run(app),
+        "save_as" => FileAction::SaveAs.run(app),
+        "save_json" => FileAction::SaveJson.run(app),
+        "download" => download_design(app),
+        "browser_files" => {
+            if let Some(show) = &app.services.browser_files {
+                show();
+            }
+        }
+        "export_json" => FileAction::Export("json").run(app),
+        "install" => {
+            if let Some(offer) = crate::install::offered(app) {
+                crate::install::start(app, offer);
+            }
+        }
+        "settings" => FileAction::Settings.run(app),
+        "shortcuts" => FileAction::Shortcuts.run(app),
+        "quit" => FileAction::Quit.run(app),
+        _ => {}
     }
 }
 
@@ -1312,79 +1281,25 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if bg.secondary_clicked() {
             crate::context_menu::open_for(app, bg.interact_pointer_pos().unwrap_or(r.left_bottom()), crate::context_menu::Target::Toolbar);
         }
-        let wresp = ui.interact(ws, ui.scope_id().with("workspace_switcher"), Sense::click());
-        let open = app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Workspace;
-        if wresp.hovered() || open {
-            painter.rect_filled(ws, if floating { t.radius_lg } else { 0 }, t.hover);
-        }
-        // Keep the accent straight while leaving the floating card's top corners round.
-        let accent_inset = if crate::render_workspace::active(app) {
-            t.space_12
-        } else if floating {
-            f32::from(t.radius_lg)
-        } else {
-            0.0
-        };
-        painter.rect_filled(
-            Rect::from_min_size(ws.left_top() + vec2(accent_inset, 0.0), vec2((ws.width() - 2.0 * accent_inset).max(0.0), t.space_3)),
-            egui::CornerRadius { nw: 0, ne: 0, sw: if floating { t.radius_sm / 2 } else { 0 }, se: if floating { t.radius_sm / 2 } else { 0 } },
-            if crate::render_workspace::active(app) { solidcraft_theme::TabAccent::current(ui.ctx()).color } else { t.accent },
-        );
-        if !floating {
-            t.secondary_line(&painter, [ws.right_top(), ws.right_bottom()], t.border);
-        }
         let render = crate::render_workspace::active(app);
-        if render {
-            crate::ui_kit::StageBar::workspace(ui, ws, "ws_render", app.tr("ui.render"), app.tr("ui.ribbon_workspace"));
-        } else if folded {
-            // Folded to the tab row: the workspace's name and its arrow, on one line.
-            let galley = egui::WidgetText::from(egui::RichText::new(app.tr("ui.design")).size(t.font_button).color(t.text)).into_galley(
-                ui,
-                Some(egui::TextWrapMode::Truncate),
-                (ws.width() - 2.0 * t.space_8 - t.space_12).max(0.0),
-                egui::TextStyle::Button,
-            );
-            let label_width = galley.size().x;
-            ribbon::galley_at(ui, pos2(ws.center().x - 6.0, ws.center().y + 1.0), galley, t.text);
-            ribbon::dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.center().y + 1.5), t.text_dim);
-        } else {
-            let workspace_icon = if render { "ws_render" } else { "ws_design" };
-            icons::paint_icon(
-                &painter,
-                Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0)),
-                workspace_icon,
-                1.0,
-            );
-            ribbon::text(
-                ui,
-                pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
-                app.tr(if render { "ui.render" } else { "ui.design" }),
-                t.font_button,
-                t.text,
-                true,
-            );
-            let label = app.tr("ui.ribbon_workspace");
-            // Long translations share the switcher's width with the arrow and its gap.
-            let galley = egui::WidgetText::from(egui::RichText::new(label).size(t.font_small).color(t.text_dim)).into_galley(
-                ui,
-                Some(egui::TextWrapMode::Truncate),
-                (ws.width() - 2.0 * t.space_8 - t.space_12).max(0.0),
-                egui::TextStyle::Button,
-            );
-            let label_width = galley.size().x;
-            ribbon::galley_at(ui, pos2(ws.center().x - 6.0, ws.top() + if labels { 89.0 } else { 70.0 }), galley, t.text_dim);
-            ribbon::dropdown_arrow(
-                &painter,
-                pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.top() + if labels { 89.5 } else { 70.5 }),
-                t.text_dim,
-            );
-        }
-        if wresp.backing_on_hover_text(app.tr("ui.change_workspace")).clicked() {
+        let switcher = app_bar::Switcher {
+            name: app.tr(if render { "ui.render" } else { "ui.design" }),
+            caption: app.tr("ui.ribbon_workspace"),
+            icon: if render { "ws_render" } else { "ws_design" },
+            tip: app.tr("ui.change_workspace"),
+            open: app.viewport.context_menu.is_some() && app.menu.target == crate::context_menu::Target::Workspace,
+            floating,
+            labels,
+            folded,
+            stage: render,
+            accent: if render { solidcraft_theme::TabAccent::current(ui.ctx()).color } else { t.accent },
+            handle_rect: "workspace_switcher",
+            handle_target: "ribbon:workspace",
+        };
+        if app_bar::switcher(ui, &switcher, ws) {
             crate::context_menu::toggle_for(app, ws, ws.left_bottom(), crate::context_menu::Target::Workspace);
         }
         crate::scenario::publish_rect("toolbar", r);
-        crate::scenario::publish_rect("workspace_switcher", ws);
-        crate::scenario::publish_target("ribbon:workspace", ws);
         if render {
             crate::render_ui::stage_bar(app, ui, cards.ribbon);
             return None;

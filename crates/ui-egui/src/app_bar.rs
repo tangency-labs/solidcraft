@@ -823,6 +823,183 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
     actions
 }
 
+/// A row of the File menu: what it runs (its `id`), its label, shortcut and kit icon.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileItem {
+    pub id: String,
+    pub label: String,
+    pub key: String,
+    pub icon: String,
+    pub enabled: bool,
+}
+
+/// The File menu's rows, in order.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FileRow {
+    /// A menu row with its shortcut.
+    Item(FileItem),
+    /// A plain button row, with an optional hover text.
+    Button {
+        item: FileItem,
+        tip: Option<String>,
+    },
+    /// A submenu of rows (Open Recent).
+    Sub {
+        label: String,
+        rows: Vec<FileRow>,
+    },
+    Separator,
+}
+
+/// The File menu drawn: the row chosen (its id), and whether the menu closes (a row was chosen or
+/// a click landed elsewhere).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FileMenuOut {
+    pub chosen: Option<String>,
+    pub close: bool,
+}
+
+fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, in_sub: bool) {
+    for row in rows {
+        match row {
+            FileRow::Item(item) => {
+                let row = crate::ui_kit::Item::action(&item.label, &item.label, &item.icon).key(&item.key).on_if(item.enabled);
+                if crate::context_menu::list_row(ui, &row).is_some() {
+                    *chosen = Some(item.id.clone());
+                    if in_sub {
+                        ui.close();
+                    }
+                }
+            }
+            FileRow::Button { item, tip } => {
+                let response = crate::context_menu::button(ui, &item.label, &item.icon);
+                let response = match tip {
+                    Some(tip) => response.backing_on_hover_text(tip),
+                    None => response,
+                };
+                if response.clicked() {
+                    *chosen = Some(item.id.clone());
+                    if in_sub {
+                        ui.close();
+                    }
+                }
+            }
+            FileRow::Sub { label, rows } => {
+                crate::ui_kit::Menu::button(ui, label, |ui| file_rows(ui, rows, chosen, true));
+            }
+            FileRow::Separator => {
+                ui.separator();
+            }
+        }
+    }
+}
+
+/// Draws the File menu's `rows` at `at` (under the File button) in the area `id`. `just_opened`:
+/// the click that opened it this pass is not a click elsewhere.
+pub fn file_menu(ctx: &egui::Context, rows: &[FileRow], at: Pos2, id: egui::Id, just_opened: bool) -> FileMenuOut {
+    use crate::ui_kit::{Container, Surface};
+    let mut chosen = None;
+    let resp = Container::new(ctx, Surface::Popup).area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
+        crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
+            ui.set_min_width(190.0);
+            ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+            ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
+            file_rows(ui, rows, &mut chosen, false);
+        });
+    });
+    let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere());
+    FileMenuOut { chosen, close }
+}
+
+/// The workspace switcher at the ribbon's left end: the workspace's icon and name over a caption
+/// with a chevron (one line while the ribbon is folded, the stage bar's own look in a staged
+/// workspace), under an accent strip.
+pub struct Switcher<'a> {
+    pub name: &'a str,
+    pub caption: &'a str,
+    /// A kit icon name.
+    pub icon: &'a str,
+    pub tip: &'a str,
+    /// Its menu is open: drawn held.
+    pub open: bool,
+    /// On a floating card (rounder, its accent strip inset by the card's corner).
+    pub floating: bool,
+    /// The ribbon shows button labels (a taller switcher).
+    pub labels: bool,
+    /// The ribbon is folded to its tab row.
+    pub folded: bool,
+    /// The staged workspace's look.
+    pub stage: bool,
+    pub accent: egui::Color32,
+    /// Its rect, and its rect as a target.
+    pub handle_rect: &'a str,
+    pub handle_target: &'a str,
+}
+
+/// Draws the switcher in `ws`; returns whether it was clicked (the app opens its workspace menu
+/// from `ws`).
+pub fn switcher(ui: &mut egui::Ui, data: &Switcher, ws: Rect) -> bool {
+    let t = Tokens::get();
+    let painter = ui.painter().clone();
+    let wresp = ui.interact(ws, ui.scope_id().with("workspace_switcher"), Sense::click());
+    if wresp.hovered() || data.open {
+        painter.rect_filled(ws, if data.floating { t.radius_lg } else { 0 }, t.hover);
+    }
+    // Keep the accent straight while leaving the floating card's top corners round.
+    let accent_inset = if data.stage {
+        t.space_12
+    } else if data.floating {
+        f32::from(t.radius_lg)
+    } else {
+        0.0
+    };
+    let corner = if data.floating { t.radius_sm / 2 } else { 0 };
+    painter.rect_filled(
+        Rect::from_min_size(ws.left_top() + vec2(accent_inset, 0.0), vec2((ws.width() - 2.0 * accent_inset).max(0.0), t.space_3)),
+        egui::CornerRadius { nw: 0, ne: 0, sw: corner, se: corner },
+        data.accent,
+    );
+    if !data.floating {
+        t.secondary_line(&painter, [ws.right_top(), ws.right_bottom()], t.border);
+    }
+    let caption_room = (ws.width() - 2.0 * t.space_8 - t.space_12).max(0.0);
+    if data.stage {
+        crate::ui_kit::StageBar::workspace(ui, ws, data.icon, data.name, data.caption);
+    } else if data.folded {
+        // Folded to the tab row: the workspace's name and its arrow, on one line.
+        let galley = egui::WidgetText::from(egui::RichText::new(data.name).size(t.font_button).color(t.text)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            caption_room,
+            egui::TextStyle::Button,
+        );
+        let label_width = galley.size().x;
+        crate::ribbon::galley_at(ui, pos2(ws.center().x - 6.0, ws.center().y + 1.0), galley, t.text);
+        crate::ribbon::dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.center().y + 1.5), t.text_dim);
+    } else {
+        let labels = data.labels;
+        let icon = Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0));
+        crate::icons::paint_icon(&painter, icon, data.icon, 1.0);
+        crate::ribbon::text(ui, pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }), data.name, t.font_button, t.text, true);
+        // Long translations share the switcher's width with the arrow and its gap.
+        let galley = egui::WidgetText::from(egui::RichText::new(data.caption).size(t.font_small).color(t.text_dim)).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            caption_room,
+            egui::TextStyle::Button,
+        );
+        let label_width = galley.size().x;
+        crate::ribbon::galley_at(ui, pos2(ws.center().x - 6.0, ws.top() + if labels { 89.0 } else { 70.0 }), galley, t.text_dim);
+        let arrow = pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.top() + if labels { 89.5 } else { 70.5 });
+        crate::ribbon::dropdown_arrow(&painter, arrow, t.text_dim);
+    }
+    let clicked = wresp.backing_on_hover_text(data.tip).clicked();
+    solidcraft_ui_registry::publish_rect(data.handle_rect, ws);
+    solidcraft_ui_registry::publish_target(data.handle_target, ws);
+    clicked
+}
+
 #[cfg(test)]
 #[path = "app_bar_tests.rs"]
 mod tests;

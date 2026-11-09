@@ -207,3 +207,87 @@ fn the_tab_strip_returns_what_was_clicked_and_dragged() {
     actions.extend(rig.frame(vec![button(to, false)]));
     assert_eq!(actions, vec![TabAction::Reorder { from: 0, to: 2 }]);
 }
+
+fn file_item(id: &str, enabled: bool) -> FileItem {
+    FileItem { id: id.to_string(), label: format!("Item {id}"), key: String::new(), icon: "open".to_string(), enabled }
+}
+
+/// The File menu drawn for a frame with `events`: what it returned, and where each text was.
+fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
+    let rows = vec![FileRow::Item(file_item("new", true)), FileRow::Item(file_item("save", false)), FileRow::Separator];
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+        time: Some(time),
+        events,
+        focused: true,
+        ..Default::default()
+    };
+    let mut out = FileMenuOut::default();
+    let output = crate::test_support::frame(ctx, input, |ui| {
+        out = file_menu(ui.ctx(), &rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
+    });
+    let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
+    (out, texts)
+}
+
+/// A row returns its id and closes the menu; a disabled one returns nothing and keeps it open;
+/// a click elsewhere closes it.
+#[test]
+fn the_file_menu_returns_the_row_chosen() {
+    let ctx = crate::fonts::test_context();
+    let mut time = 0.0;
+    let mut click = |at: Pos2| {
+        let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let mut last = FileMenuOut::default();
+        for events in [vec![egui::Event::PointerMoved(at)], vec![egui::Event::PointerMoved(at), press(true)], vec![press(false)]] {
+            time += 0.5;
+            let (out, _) = file_menu_frame(&ctx, time, events);
+            if out.chosen.is_some() || out.close {
+                last = out;
+            }
+        }
+        last
+    };
+    // An area is laid out on its first frame and painted from the next.
+    file_menu_frame(&ctx, 0.0, Vec::new());
+    let (_, texts) = file_menu_frame(&ctx, 0.1, Vec::new());
+    let at = |text: &str| texts.iter().find(|(t, _)| t == text).map(|(_, p)| *p).unwrap_or_else(|| panic!("{text} is painted"));
+    let (new, save) = (at("Item new"), at("Item save"));
+    assert_eq!(click(save), FileMenuOut::default(), "a disabled row chooses nothing and the menu stays");
+    assert_eq!(click(new), FileMenuOut { chosen: Some("new".into()), close: true });
+    assert_eq!(click(pos2(700.0, 500.0)), FileMenuOut { chosen: None, close: true }, "a click elsewhere closes it");
+}
+
+/// The switcher returns its click and publishes where it is.
+#[test]
+fn the_workspace_switcher_returns_its_click() {
+    let ctx = crate::fonts::test_context();
+    let ws = Rect::from_min_size(Pos2::ZERO, vec2(88.0, 117.0));
+    let data = Switcher {
+        name: "Design",
+        caption: "Workspace",
+        icon: "ws_design",
+        tip: "Change",
+        open: false,
+        floating: false,
+        labels: true,
+        folded: false,
+        stage: false,
+        accent: Tokens::get().accent,
+        handle_rect: "t:ws",
+        handle_target: "t:ws_target",
+    };
+    let mut clicked = Vec::new();
+    for (i, events) in
+        [vec![egui::Event::PointerMoved(ws.center())], vec![press(ws.center(), true)], vec![press(ws.center(), false)]].into_iter().enumerate()
+    {
+        let input = egui::RawInput { time: Some(i as f64 * 0.1), events, focused: true, ..Default::default() };
+        crate::test_support::frame(&ctx, input, |ui| clicked.push(switcher(ui, &data, ws)));
+    }
+    assert_eq!(clicked, [false, false, true]);
+    assert_eq!(solidcraft_ui_registry::rect_of("t:ws"), Some(ws));
+}
+
+fn press(pos: Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+}
