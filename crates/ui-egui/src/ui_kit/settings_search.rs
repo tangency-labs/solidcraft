@@ -1256,7 +1256,7 @@ mod tests {
         h.frames(2);
         h.step(&serde_json::json!({"key": "F", "cmd": true})).expect("find");
         h.frames(1);
-        assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::unique("prefs_search"))), "Cmd+F focuses search");
+        assert!(h.ctx.memory(|memory| memory.has_focus(crate::prefs::search_id())), "Cmd+F focuses search");
         h.step(&serde_json::json!({"text": "zo"})).expect("type");
         h.frames(20);
         assert!(h.widget("Reverse zoom direction").is_some(), "typed letters search from the open page");

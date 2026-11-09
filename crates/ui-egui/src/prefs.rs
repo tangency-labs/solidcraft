@@ -2541,12 +2541,22 @@ impl SettingReset {
 /// when a font was picked, and egui keeps that in the saved window state: it then opened as its
 /// title bar alone, for good (#1800). Unfold it.
 fn unfold(ctx: &egui::Context) {
-    if let Some(mut body) = egui::collapsing_header::CollapsingState::load(ctx, egui::Id::unique("sc_prefs").with("collapsing"))
+    if let Some(mut body) = egui::collapsing_header::CollapsingState::load(ctx, window_id().with("collapsing"))
         && !body.is_open()
     {
         body.set_open(true);
         body.store(ctx);
     }
+}
+
+/// The Preferences window's id.
+pub(crate) fn window_id() -> egui::Id {
+    egui::Id::unique("sc_prefs")
+}
+
+/// Its search field's id.
+pub(crate) fn search_id() -> egui::Id {
+    prefs_window::search_id(window_id())
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
@@ -2578,7 +2588,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let before = app.preferences.clone();
     let layout_page = app.prefs_window.shell.section == PAGE_LAYOUT;
     let options = prefs_window::Options {
-        id: egui::Id::unique("sc_prefs"),
+        id: window_id(),
+        prefix: "prefs",
         labels: prefs_window::Labels {
             title: app.tr("ui.preferences"),
             icon: "settings",

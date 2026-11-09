@@ -615,7 +615,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     // A Preferences search lists the matching shortcuts too, and one recorded from there takes
     // the key like one on this page (#10043). Only a search field that has the keyboard keeps
     // its keys: going back to it to type stops the recording.
-    if ctx.memory(|m| m.has_focus(egui::Id::unique("prefs_search"))) && app.keymap.capturing.is_some() {
+    if ctx.memory(|m| m.has_focus(crate::prefs::search_id())) && app.keymap.capturing.is_some() {
         stop_capture(app);
     }
     // Keep a pending chord until it has settled and all keys are released. Modifier-only

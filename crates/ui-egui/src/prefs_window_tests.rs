@@ -80,9 +80,10 @@ const PAGES: &[Page<Fake>] = &[
     }),
 ];
 
-fn options() -> Options<'static, Fake> {
+fn options(prefix: &'static str) -> Options<'static, Fake> {
     Options {
-        id: egui::Id::unique("test_prefs_window"),
+        id: egui::Id::unique(("test_prefs_window", prefix)),
+        prefix,
         labels: Labels {
             title: "Preferences",
             icon: "settings",
@@ -100,6 +101,10 @@ fn options() -> Options<'static, Fake> {
 }
 
 fn frame(ctx: &egui::Context, fake: &mut Fake, events: Vec<egui::Event>) -> Option<Button> {
+    frame_as(ctx, fake, events, "test")
+}
+
+fn frame_as(ctx: &egui::Context, fake: &mut Fake, events: Vec<egui::Event>, prefix: &'static str) -> Option<Button> {
     registry::clear_handles();
     fake.drawn.clear();
     let mut pressed = None;
@@ -111,7 +116,7 @@ fn frame(ctx: &egui::Context, fake: &mut Fake, events: Vec<egui::Event>) -> Opti
             events,
             ..Default::default()
         },
-        |ui| pressed = show(ui.ctx(), fake, PAGES, &options(), |_| {}),
+        |ui| pressed = show(ui.ctx(), fake, PAGES, &options(prefix), |_| {}),
     );
     pressed
 }
@@ -164,7 +169,7 @@ fn the_window_switches_page_searches_and_highlights_and_cancel_restores_the_snap
     fake.values.grid = true;
     frame(&ctx, &mut fake, Vec::new());
     assert!(apply_pending(&fake), "a change since opening is something to apply");
-    assert_eq!(click(&ctx, &mut fake, "prefs:cancel"), Some(Button::Cancel));
+    assert_eq!(click(&ctx, &mut fake, "test:cancel"), Some(Button::Cancel));
     assert_eq!(fake.values, Values::default(), "Cancel puts the snapshot back");
     assert!(!fake.window.open && fake.window.snapshot().is_none());
     assert_eq!(fake.closed, 1);
@@ -175,11 +180,11 @@ fn apply_keeps_the_change_and_restore_defaults_resets_only_the_page_shown() {
     let (ctx, mut fake) = opened();
     fake.values = Values { grid: true, shadow: true };
     frame(&ctx, &mut fake, Vec::new());
-    assert_eq!(click(&ctx, &mut fake, "prefs:apply"), Some(Button::Apply));
+    assert_eq!(click(&ctx, &mut fake, "test:apply"), Some(Button::Apply));
     assert!(!apply_pending(&fake) && fake.window.open, "Apply keeps the window open with nothing left to apply");
-    assert_eq!(click(&ctx, &mut fake, "prefs:defaults"), Some(Button::Defaults));
+    assert_eq!(click(&ctx, &mut fake, "test:defaults"), Some(Button::Defaults));
     assert_eq!(fake.values, Values { grid: false, shadow: true }, "General's defaults leave the other page alone");
-    assert_eq!(click(&ctx, &mut fake, "prefs:cancel"), Some(Button::Cancel));
+    assert_eq!(click(&ctx, &mut fake, "test:cancel"), Some(Button::Cancel));
     assert_eq!(fake.values, Values { grid: true, shadow: true }, "Cancel returns to the last Apply");
 }
 
@@ -189,7 +194,7 @@ fn a_failed_restore_keeps_the_window_and_the_snapshot_until_one_succeeds() {
     fake.values.shadow = true;
     fake.failing_restores = 1;
     frame(&ctx, &mut fake, Vec::new());
-    assert_eq!(click(&ctx, &mut fake, "prefs:cancel"), Some(Button::Cancel));
+    assert_eq!(click(&ctx, &mut fake, "test:cancel"), Some(Button::Cancel));
     assert!(fake.window.open && fake.window.snapshot().is_some() && fake.closed == 0);
     assert_eq!(fake.window.restore_error(), Some("not now"));
     press(&mut fake, PAGES, Button::Apply);
@@ -210,4 +215,25 @@ fn a_hostile_page_index_shows_the_last_page_and_no_pages_draws_no_body() {
     assert_eq!(fake.window.section, 0);
     press(&mut fake, &[], Button::Defaults);
     assert_eq!(fake.values, Values::default());
+}
+
+#[test]
+fn every_name_the_window_publishes_starts_with_the_hosts_prefix() {
+    crate::i18n::install();
+    let ctx = crate::fonts::test_context();
+    let mut fake = Fake::default();
+    fake.window.open_at(0, PAGES.len());
+    for events in [Vec::new(), Vec::new(), vec![egui::Event::Text("zz".into())], Vec::new()] {
+        frame_as(&ctx, &mut fake, events, "x");
+    }
+    assert_eq!(fake.window.filter, "zz", "the search shows its clear button");
+    for name in ["x:defaults", "x:search", "x:search:clear", "x:ok", "x:apply", "x:cancel"] {
+        assert!(registry::handle_at(name).is_some(), "{name} is published");
+    }
+    for name in ["x:search:frame", "x:page_body", "x:window", "x:footer", "x:actions"] {
+        assert!(registry::rect_of(name).is_some(), "{name} is published");
+    }
+    assert_eq!(registry::handles("prefs:"), Vec::new(), "no handle of another window's");
+    assert_eq!(registry::rects("prefs:"), Vec::new(), "no rect of another window's");
+    assert!(ctx.memory(|memory| memory.has_focus(search_id(egui::Id::unique(("test_prefs_window", "x"))))), "the field's id is the window's");
 }

@@ -49,10 +49,13 @@ pub struct Labels<'a> {
     pub restore_defaults_hint: &'a str,
 }
 
-/// How the host frames the window: its id, its words, a block pinned under the page list, and a
-/// strip drawn above every page body.
+/// How the host frames the window: its id, its words, the prefix of the names it publishes, a
+/// block pinned under the page list, and a strip drawn above every page body.
 pub struct Options<'a, S> {
     pub id: egui::Id,
+    /// Registry names are this followed by `:` and the part: `defaults`, `search`, `search:frame`,
+    /// `search:clear`, `page_body`, `window`, `footer`, `ok`, `apply`, `cancel`, `actions`.
+    pub prefix: &'a str,
     pub labels: Labels<'a>,
     pub sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
     pub above_page: Option<fn(&mut Ui, &mut S)>,
@@ -139,9 +142,9 @@ impl<H> State<H> {
     }
 }
 
-/// The search field's id. The kit's search field and the shortcut recorder know it.
-fn search_id() -> egui::Id {
-    egui::Id::unique("prefs_search")
+/// The search field's id in the window with id `window`.
+pub fn search_id(window: egui::Id) -> egui::Id {
+    window.with("search")
 }
 
 /// Take the snapshot if the window holds none yet.
@@ -240,7 +243,7 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
             ui_kit::WindowPage { icon: page.icon, label: page.label, group: page.group, handle: page.handle, scroll: page.scroll, draw: &body }
         })
         .collect();
-    let header = |ui: &mut Ui, host: &mut S| search_header(ui, host, labels.search);
+    let header = |ui: &mut Ui, host: &mut S| search_header(ui, host, options);
     let on_select = |host: &mut S, index: usize| {
         host.window().clear_search();
         if host.window_ref().section != index {
@@ -257,19 +260,19 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
     let mut defaults = false;
     let (closed, action) = window.show_pages_with_header(ctx, &mut selected, &list, host, &hooks, |ui| {
         let button = ui_kit::button(ui, labels.restore_defaults, ui_kit::Button::Ghost).backing_on_hover_text(labels.restore_defaults_hint);
-        solidcraft_ui_registry::publish_target("prefs:defaults", button.rect);
+        solidcraft_ui_registry::publish_target(&format!("{}:defaults", options.prefix), button.rect);
         defaults = button.clicked();
     });
     if let Some(rect) = solidcraft_ui_registry::rect_of("dialog:page_body") {
-        solidcraft_ui_registry::publish_rect("prefs:page_body", rect);
+        solidcraft_ui_registry::publish_rect(&format!("{}:page_body", options.prefix), rect);
     }
     for name in ["window", "footer", "ok", "apply", "cancel"] {
         if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:{name}")) {
-            solidcraft_ui_registry::publish_target(&format!("prefs:{name}"), rect);
+            solidcraft_ui_registry::publish_target(&format!("{}:{name}", options.prefix), rect);
         }
     }
     if let Some(rect) = solidcraft_ui_registry::rect_of("dialog:footer:actions") {
-        solidcraft_ui_registry::publish_rect("prefs:actions", rect);
+        solidcraft_ui_registry::publish_rect(&format!("{}:actions", options.prefix), rect);
     }
     edited(host);
     let button = match action {
@@ -301,13 +304,14 @@ fn page_path<S>(pages: &[Page<S>], index: usize) -> String {
     }
 }
 
-fn search_header<S: Host>(ui: &mut Ui, host: &mut S, hint: &str) {
-    let typed = drive_search(ui, host);
-    let field = ui_kit::preferences_search_field(ui, search_id(), &mut host.window().filter, hint);
+fn search_header<S: Host>(ui: &mut Ui, host: &mut S, options: &Options<'_, S>) {
+    let id = search_id(options.id);
+    let typed = drive_search(ui, host, id);
+    let field = ui_kit::preferences_search_field(ui, id, &mut host.window().filter, options.labels.search, options.prefix);
     if typed {
-        place_search_cursor(ui.ctx(), search_id(), host.window_ref().filter.chars().count());
+        place_search_cursor(ui.ctx(), id, host.window_ref().filter.chars().count());
     }
-    solidcraft_ui_registry::publish_handle("prefs:search", field.rect.center());
+    solidcraft_ui_registry::publish_handle(&format!("{}:search", options.prefix), field.rect.center());
     if field.has_focus() {
         settings_search::note_key_sink(ui.ctx());
     }
@@ -318,12 +322,11 @@ fn search_header<S: Host>(ui: &mut Ui, host: &mut S, hint: &str) {
 
 /// Keys for the search field: Cmd+F focuses it, typing anywhere goes to it, Up/Down move through
 /// the results, Enter opens one, Esc clears it. A control taking the keys keeps them.
-fn drive_search<S: Host>(ui: &mut Ui, host: &mut S) -> bool {
+fn drive_search<S: Host>(ui: &mut Ui, host: &mut S, id: egui::Id) -> bool {
     let ctx = ui.ctx().clone();
     if host.keys_captured() {
         return false;
     }
-    let id = search_id();
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
         ctx.memory_mut(|memory| memory.request_focus(id));
     }
