@@ -1097,7 +1097,6 @@ fn blend_call(
                 Ok(_) => {}
                 Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
             }
-            eprintln!("DEBUG blend_call: after tolerance grow, before finish");
             return finish(w, solid_in);
         }
         // Each corner opened: its patch removed, the edges round its hole in the result's
