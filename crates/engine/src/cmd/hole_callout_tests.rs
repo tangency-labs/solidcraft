@@ -336,6 +336,7 @@ fn hostile_callout_input_is_refused_without_a_panic() {
         r.err().map(|e| e.to_string()).unwrap_or_default()
     };
     let component = run(&mut s, "component.create", json!({"name": "Bought"}))["component"].as_u64().unwrap_or_default();
+    let occurrence = std::sync::Arc::make_mut(&mut s.doc).add_occurrence(component, 0, solidcraft_doc::IDENTITY).unwrap_or_default();
     // Ids: unknown, malformed, of another kind of feature or of an item that is no feature; each
     // refused for its own reason.
     for (p, why) in [
@@ -347,6 +348,7 @@ fn hostile_callout_input_is_refused_without_a_panic() {
         (json!({"feature": "Holes"}), "feature"),
         (json!({}), "feature"),
         (json!({"feature": component}), "is a component"),
+        (json!({"feature": occurrence}), "is an occurrence"),
         (json!({"feature": holes, "point": 7}), "point"),
         (json!({"feature": holes, "point": ""}), "point"),
         (json!({"feature": holes, "point": "p\u{0}1"}), "point"),

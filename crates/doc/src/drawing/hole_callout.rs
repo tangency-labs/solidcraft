@@ -192,7 +192,7 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
     hole.validate()?;
     let Some(f) = doc.feature(hole.feature) else {
         if let Some(kind) = other_item(doc, hole.feature) {
-            return Err(DocError::Invalid(format!("{} is a {kind}, not a Hole feature", hole.feature)));
+            return Err(DocError::Invalid(format!("{} is {kind}, not a Hole feature", hole.feature)));
         }
         // An id the design gave once belonged to something that has since been removed.
         if hole.feature >= 1 && hole.feature < doc.next_id {
@@ -276,14 +276,16 @@ fn later_motion(doc: &Document, model: &Model, vals: &BTreeMap<String, Value>, i
 fn other_item(doc: &Document, id: u64) -> Option<&'static str> {
     let a = &doc.assembly;
     [
-        ("component", doc.components.iter().any(|c| c.id == id)),
-        ("browser folder", doc.browser_groups.iter().any(|g| g.id == id)),
-        ("timeline folder", doc.timeline_groups.iter().any(|g| g.id == id)),
-        ("canvas", doc.canvases.iter().any(|c| c.id == id)),
-        ("joint", a.joints.iter().any(|j| j.id == id)),
-        ("contact set", a.contact_sets.iter().any(|c| c.id == id)),
-        ("motion study", a.studies.iter().any(|s| s.id == id)),
-        ("exploded view", a.exploded.iter().any(|v| v.id == id)),
+        ("a component", doc.components.iter().any(|c| c.id == id)),
+        ("an occurrence", doc.occurrences.iter().any(|o| o.id == id)),
+        ("a browser folder", doc.browser_groups.iter().any(|g| g.id == id)),
+        ("a timeline folder", doc.timeline_groups.iter().any(|g| g.id == id)),
+        ("a canvas", doc.canvases.iter().any(|c| c.id == id)),
+        ("a point cloud", doc.point_clouds.iter().any(|c| c.id == id)),
+        ("a joint", a.joints.iter().any(|j| j.id == id)),
+        ("a contact set", a.contact_sets.iter().any(|c| c.id == id)),
+        ("a motion study", a.studies.iter().any(|s| s.id == id)),
+        ("an exploded view", a.exploded.iter().any(|v| v.id == id)),
     ]
     .into_iter()
     .find_map(|(kind, is)| is.then_some(kind))
