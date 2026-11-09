@@ -49,6 +49,7 @@ use solidcore::topology::brep::p2 as brep_p2;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3::{DeleteFaceOptions, delete_face};
 use solidcore::topology::brep::p5::{StitchAndOrientOptions, stitch_and_orient};
+use solidcore::topology::brep::validation::{CheckLevel, validate_and_update_tolerances};
 use solidcore::topology::edgeuse::p1 as eu_p1;
 use solidcore::topology::edgeuse::p3::{BinormalOptions, evaluate_binormal};
 use solidcore::topology::face::p2 as face_p2;
@@ -1083,6 +1084,10 @@ fn blend_call(
             Err(Err(e)) => return Ok(Err(e)),
         }
         if open == Corners::Filled {
+            match validate_and_update_tolerances(k, &mut w, false, None, CheckLevel::Level2 as u8) {
+                Ok(_) => {}
+                Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
+            }
             return finish(w, solid_in);
         }
         // Each corner opened: its patch removed, the edges round its hole in the result's
@@ -1114,6 +1119,10 @@ fn blend_call(
                 edges.push(HoleEdge { edge, face, forward: h.forward });
             }
             holes.push(Hole { edges });
+        }
+        match validate_and_update_tolerances(k, &mut w, false, None, CheckLevel::Level2 as u8) {
+            Ok(_) => {}
+            Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
         }
         finish(w, false)
     })?;
