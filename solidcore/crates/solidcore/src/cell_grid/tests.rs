@@ -1747,3 +1747,31 @@ fn a_cell_grid_error_names_what_is_wrong() {
     .unwrap_err();
     assert!(e.to_string().contains("cell size"));
 }
+
+#[test]
+fn a_cells_regions_put_each_hole_in_the_outer_loop_that_holds_it() {
+    // A small keep-out sits inside the cell at the anchor: that cell opens as its hexagon with
+    // a hole, the others as one loop each.
+    let p = run(
+        &[rect(-20.0, -20.0, 40.0, 40.0), rect(-0.5, -0.5, 0.5, 0.5)],
+        &with_clip(CellShape::Hexagon, Clip::Free),
+    );
+    let holed = p
+        .cells
+        .iter()
+        .find(|c| c.center.x.abs() < 1e-9 && c.center.y.abs() < 1e-9)
+        .unwrap();
+    assert_eq!(holed.loops.len(), 2);
+    let regions = holed.regions().unwrap();
+    assert_eq!(regions.len(), 1);
+    assert_eq!(regions[0].holes.len(), 1);
+    let whole = p.cells.iter().find(|c| c.kind == CellKind::Whole).unwrap();
+    let regions = whole.regions().unwrap();
+    assert_eq!((regions.len(), regions[0].holes.len()), (1, 0));
+    // Every cell's regions keep its loops.
+    for c in &p.cells {
+        let regions = c.regions().unwrap();
+        let loops: usize = regions.iter().map(|r| 1 + r.holes.len()).sum();
+        assert_eq!(loops, c.loops.len());
+    }
+}

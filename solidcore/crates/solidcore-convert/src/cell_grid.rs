@@ -81,6 +81,30 @@ pub fn record_kind(c: k::CellKind) -> CellKind {
     }
 }
 
+/// A record cell kind as the kernel's.
+#[must_use]
+pub fn kind(c: CellKind) -> k::CellKind {
+    match c {
+        CellKind::Whole => k::CellKind::Whole,
+        CellKind::Exact => k::CellKind::Exact,
+        CellKind::Fallback => k::CellKind::Fallback,
+        CellKind::Free => k::CellKind::Free,
+    }
+}
+
+/// A record cell as the kernel's.
+#[must_use]
+pub fn cell(c: &GridCell) -> k::GridCell {
+    k::GridCell {
+        i: c.i,
+        j: c.j,
+        kind: kind(c.kind),
+        center: vec2(c.center),
+        loops: field(&c.loops),
+        area: c.area,
+    }
+}
+
 /// A record cell grid spec as the kernel's.
 #[must_use]
 pub fn spec(s: &CellGridSpec) -> k::CellGridSpec {

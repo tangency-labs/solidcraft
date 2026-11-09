@@ -50,7 +50,7 @@ mod vec;
 mod tests;
 
 use crate::math::Vec2;
-use crate::prism::profile::{Loop2, Seg2, MAX_BEZIER_DEGREE};
+use crate::prism::profile::{Loop2, Region2, Seg2, MAX_BEZIER_DEGREE};
 
 use free::Cell as FreeCell;
 use lattice::Lattice;
@@ -260,6 +260,50 @@ pub struct CellGridPlan {
     /// Things worth telling the user: a loop that collapsed when snapped and was kept as drawn,
     /// curves followed approximately.
     pub warnings: Vec<String>,
+}
+
+impl GridCell {
+    /// The opening as regions: each counter-clockwise loop an outer loop, each clockwise loop a
+    /// hole of the outer loop that holds it.
+    ///
+    /// # Errors
+    ///
+    /// [`CellGridError::Field`] when a loop has no decided orientation, or a hole lies in no outer
+    /// loop.
+    pub fn regions(&self) -> Result<Vec<Region2>, CellGridError> {
+        let mut regions: Vec<Region2> = Vec::new();
+        let mut holes: Vec<&Loop2> = Vec::new();
+        for lp in &self.loops {
+            let area = lp
+                .signed_area()
+                .map_err(|e| CellGridError::Field(format!("a cell's loop has no area: {e}")))?;
+            match area.sign() {
+                Some(true) => regions.push(Region2 {
+                    outer: lp.clone(),
+                    holes: Vec::new(),
+                }),
+                Some(false) => holes.push(lp),
+                None => {
+                    return Err(CellGridError::Field(
+                        "a cell's loop has no decided orientation".into(),
+                    ))
+                }
+            }
+        }
+        for hole in holes {
+            let probe = hole
+                .segs
+                .first()
+                .map(|s| s.point_at(0.5))
+                .ok_or_else(|| CellGridError::Field("a cell's hole is empty".into()))?;
+            let owner = regions
+                .iter_mut()
+                .find(|r| r.outer.holds(probe) == Some(true))
+                .ok_or_else(|| CellGridError::Field("a cell's hole lies in no loop".into()))?;
+            owner.holes.push(hole.clone());
+        }
+        Ok(regions)
+    }
 }
 
 /// The centre, in the sketch plane, of lattice cell `(i, j)` of a grid.

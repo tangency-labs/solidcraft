@@ -8,8 +8,8 @@
 
 use solidcore::cell_grid as kernel;
 use solidcore_convert as convert;
-use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec};
-use solidcore_record::{Loop2, Vec2};
+use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell};
+use solidcore_record::{Loop2, Region2, Vec2};
 
 pub use solidcore::cell_grid::{
     CellGridError, FLATTEN_TOL, MAX_CELLS, MAX_COORD, MAX_SIDES, MIN_SIZE,
@@ -34,6 +34,17 @@ pub fn plan_cell_grid(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPl
         &convert::cell_grid::spec(spec),
     )?;
     Ok(convert::cell_grid::record_plan(&plan))
+}
+
+/// The opening of `cell` as regions: each counter-clockwise loop an outer loop, each clockwise
+/// loop a hole of the outer loop that holds it.
+///
+/// # Errors
+///
+/// [`CellGridError`] when a loop has no decided orientation or a hole lies in no outer loop.
+pub fn cell_regions(cell: &GridCell) -> Result<Vec<Region2>, CellGridError> {
+    let k = convert::cell_grid::cell(cell);
+    Ok(k.regions()?.iter().map(convert::record_region2).collect())
 }
 
 /// The centre, in the sketch plane, of lattice cell `(i, j)` of the grid `spec`.
