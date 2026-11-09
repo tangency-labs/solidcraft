@@ -834,6 +834,8 @@ impl FilletCorner {
         let mut approx_tol_3d = SM_BIG_DOUBLE;
         // Angle tol for tangent field approximation
         let mut tangency_tol_radians = SM_BIG_DOUBLE;
+        // the blends' largest offset (their radius), for the tangency of a Join's side edges
+        let mut max_offset: f64 = 0.0;
 
         // for every to-be-filleted edgeuse connected to vertex:
         // Collect max tolerances and check for Chamfer corner.
@@ -841,6 +843,11 @@ impl FilletCorner {
             let solver = solver_of(edge_use)?;
             let tol = solver.approx_tol_3d;
             let tan_tol = solver.tangency_tolerance;
+            for rail in 0..2 {
+                if let Ok(Some(slot)) = solver.surface(rail) {
+                    max_offset = max_offset.max(slot.surface.offset_distance().abs());
+                }
+            }
 
             // save tightest tolerance value
             if tol < approx_tol_3d {
@@ -863,6 +870,14 @@ impl FilletCorner {
         }
 
         let tan_tol_deg = rad_to_deg(tangency_tol_radians);
+        // Not the fork's: the tangency at which a Join takes a side edge as tangent. Across a side
+        // edge whose faces meet at an angle phi, the balls of the two blends stand R phi apart,
+        // so they are one section only where R phi is within the approximation tolerance
+        let side_tol_deg = if max_offset > 0.0 {
+            tan_tol_deg.min(rad_to_deg(approx_tol_3d / max_offset))
+        } else {
+            tan_tol_deg
+        };
         let make = |kind| {
             Self::new(
                 kind,
@@ -1089,6 +1104,7 @@ impl FilletCorner {
                                     solver_eus,
                                     &all_eus,
                                     tan_tol_deg,
+                                    side_tol_deg,
                                 )?;
                                 let mut c = make(FilletCornerKind::NByTwo);
                                 c.blend = Some(blend);

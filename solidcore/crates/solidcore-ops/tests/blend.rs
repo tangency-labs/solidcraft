@@ -1055,3 +1055,133 @@ fn curvature_rounds_over_mixed_wedges_each_take_their_own_balls_area() {
     assert!((ba - 40.0 * per_length).abs() < 1e-5, "[B, A] took {ba}");
     assert!((ab - ba).abs() < 1e-7, "{ab} {ba}");
 }
+
+/// A row-vector rotation about y (`p' = p M`): +x turns toward -z for `t > 0`.
+fn fold_rot_y(t: f64) -> [[f64; 4]; 4] {
+    [
+        [t.cos(), 0.0, -t.sin(), 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [t.sin(), 0.0, t.cos(), 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+}
+
+/// A block x -20..15, y -10..0, z -10..0 whose top (z = 0) folds by `theta_deg` along x = 0:
+/// past the fold the top is the plane through the fold line tilted down (theta > 0, a convex
+/// fold) or up (theta < 0, concave). Its wall y = 0 meets the two tops in two convex edges
+/// meeting at the origin.
+fn folded_top(theta_deg: f64) -> Body {
+    let t = theta_deg.to_radians();
+    let b = make_box([-20.0, -10.0, -10.0], [35.0, 10.0, 10.0]).unwrap();
+    if theta_deg > 0.0 {
+        let cut = make_box([0.0, -20.0, 0.0], [40.0, 40.0, 20.0]).unwrap();
+        cut.transform(&fold_rot_y(t)).unwrap();
+        solidcore_ops::boolean::boolean(b, cut, solidcore_ops::BooleanOp::Subtract)
+            .unwrap()
+            .unwrap()
+    } else if theta_deg < 0.0 {
+        let add = make_box([0.0, -10.0, -10.0], [40.0, 10.0, 10.0]).unwrap();
+        add.transform(&fold_rot_y(t)).unwrap();
+        let keep = make_box([0.0, -10.0, -10.0], [15.0, 10.0, 30.0]).unwrap();
+        let add = solidcore_ops::boolean::boolean(add, keep, solidcore_ops::BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+        solidcore_ops::boolean::boolean(b, add, solidcore_ops::BooleanOp::Union)
+            .unwrap()
+            .unwrap()
+    } else {
+        b
+    }
+}
+
+/// The removal of [`folded_top`]'s two wall edges rounded R in one call, by rolling-ball
+/// truth. Every face at the two edges contains the y direction, so the ball-centre set is
+/// `{c_y <= -R} x D` with D in (x, z), and the removal is the integral over the body's (x, z)
+/// section of `R - sqrt(R^2 - d^2)`, d the distance to D (the fold crease itself kept sharp):
+/// composite Gauss-Legendre quadrature converged to 1e-5, exact at theta 0, where it is the
+/// prism `35 R^2 (1 - pi/4)`. Rows: (theta degrees, R, removal mm^3).
+const FOLD_TRUTH: &[(f64, f64, f64)] = &[
+    (0.00, 1.30, 12.693697),
+    (0.10, 1.30, 12.693705),
+    (0.25, 1.30, 12.693749),
+    (0.50, 1.30, 12.693904),
+    (1.00, 1.30, 12.694526),
+    (2.00, 1.30, 12.697017),
+    (4.00, 1.30, 12.706979),
+    (8.00, 1.30, 12.747141),
+    (10.00, 1.30, 12.777592),
+    (11.00, 1.30, 12.795497),
+    (15.00, 1.30, 12.885537),
+    (-0.25, 1.30, 12.693749),
+    (-0.50, 1.30, 12.693904),
+    (-1.00, 1.30, 12.694525),
+    (-2.00, 1.30, 12.697011),
+    (-4.00, 1.30, 12.706969),
+    (-8.00, 1.30, 12.747064),
+    (-10.00, 1.30, 12.777431),
+    (-15.00, 1.30, 12.884957),
+    (0.00, 0.35, 0.920105),
+    (0.10, 0.35, 0.920106),
+    (0.25, 0.35, 0.920109),
+    (0.50, 0.35, 0.920120),
+    (1.00, 0.35, 0.920165),
+    (2.00, 0.35, 0.920346),
+    (4.00, 0.35, 0.921068),
+    (8.00, 0.35, 0.923980),
+    (10.00, 0.35, 0.926188),
+    (11.00, 0.35, 0.927485),
+    (15.00, 0.35, 0.934015),
+    (-0.25, 0.35, 0.920109),
+    (-0.50, 0.35, 0.920120),
+    (-1.00, 0.35, 0.920165),
+    (-2.00, 0.35, 0.920346),
+    (-4.00, 0.35, 0.921068),
+    (-8.00, 0.35, 0.923979),
+    (-10.00, 0.35, 0.926185),
+    (-15.00, 0.35, 0.934003),
+];
+
+/// Two rounds on a wall's edges either side of a shallow fold of its top, in one call, meet as
+/// two blends turning at the fold, not as one joined section: the edges continue each other
+/// within the 10 degree tangency, but the balls either side of the crease stand R theta apart.
+/// Joined, the original faces' trim leaked (status 1001) at folds of about 1..10 degrees, and
+/// below that the join built wrong solids, passing the full check (R 1.3: 2.1e-3 too much
+/// removed at 0.1 degrees, 5.3e-3 at 0.25) or failing it (R 1.3 at 0.5 degrees, R 0.35 at 1).
+/// Tolerance 4e-4 R^2: the largest gap from the truth on the folds the kernel already turned at
+/// (15 degrees, R 1.3: 5.6e-4, 3.3e-4 R^2).
+#[test]
+fn rounds_either_side_of_a_shallow_fold_turn_there() {
+    all_fixes();
+    let mut wrong = Vec::new();
+    for &(theta, r, truth) in FOLD_TRUTH {
+        let t = f64::to_radians(theta);
+        let b = folded_top(theta);
+        let v0 = b.volume(1e-10).unwrap();
+        let mut edges = vec![edge_at(&b, [-5.0, 0.0, 0.0])];
+        if theta != 0.0 {
+            edges.push(edge_at(&b, [5.0 * t.cos(), 0.0, -5.0 * t.sin()]));
+        }
+        let radii = vec![r; edges.len()];
+        let why = if let Err(e) = blend(&b, Blend::Round, &edges, &radii, &[], Corners::Filled) {
+            Some(format!("refused {e:?}"))
+        } else {
+            let removed = v0 - b.volume(1e-10).unwrap();
+            let valid = b.check(CheckLevel::All).unwrap().is_valid();
+            let record = b
+                .to_record()
+                .map_err(|e| format!("{e:?}"))
+                .and_then(|(rec, _)| {
+                    rec.validate().map_err(|e| format!("validate {e}"))?;
+                    Body::from_record(&rec, true).map_err(|e| format!("round trip {e:?}"))?;
+                    Ok(())
+                });
+            (!valid || record.is_err() || (removed - truth).abs() > 4e-4 * r * r).then(|| {
+                format!("removed {removed:.6} vs {truth:.6}; check {valid}; record {record:?}")
+            })
+        };
+        if let Some(why) = why {
+            wrong.push(format!("theta {theta} R {r}: {why}"));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

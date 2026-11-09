@@ -248,7 +248,11 @@ impl BlendCorner {
 /// off each face, so they lie the radius times the faces' angle apart. A sharp side edge
 /// whose faces are tangent only at the vertex (a ruled loft's side edge at its circular rim)
 /// is the Turn of `docs/generic-blend.md` §3.2: the blends meet on their crossing, a crease
-/// running on from the side edge.
+/// running on from the side edge. Not the fork's either: the side edge is tangent within
+/// `side_tol_deg`, the angle at which the two balls either side of it stand within the
+/// approximation tolerance (the caller's), not within the edges' `tangency_tol_deg`. Edges
+/// continuing each other within 10 degrees across a fold of a few degrees between their other
+/// faces were taken as one section, and the original faces' trim leaked.
 ///
 /// # Errors
 ///
@@ -261,6 +265,7 @@ pub fn classify(
     solver_eus: &[EdgeuseId],
     all_eus: &[EdgeuseId],
     tangency_tol_deg: f64,
+    side_tol_deg: f64,
 ) -> Result<BlendCorner> {
     let mut out = BlendCorner::default();
     let vertex = vertex.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
@@ -282,7 +287,10 @@ pub fn classify(
     {
         // edges continuing each other with a sharp edge between their faces: the blends'
         // balls where their rails cross it are two, so they turn there
-        if g1 && !side_edges_tangent(k, b, solver_eus, all_eus, tangency_tol_deg)? {
+        // (a side edge is tangent within `side_tol_deg`, the angle at which the balls either
+        // side of it stand within the tolerance, not the edges' `tangency_tol_deg`: across a
+        // fold of a few degrees the edges continue each other within it, yet the balls do not)
+        if g1 && !side_edges_tangent(k, b, solver_eus, all_eus, side_tol_deg)? {
             out.event = BlendCornerEvent::Turn;
             return Ok(out);
         }
