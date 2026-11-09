@@ -18,7 +18,7 @@ Copy bodies or features to the other side of a plane: model half of a symmetric 
 
 #### Try it: model half, mirror the rest
 
-1. Sketch a 2 in × 1.5 in rectangle on the XY plane with one long edge on the Y axis, and Extrude it 0.5 in. This is the right half of a 4 in wide block.
+1. Sketch a 2 in × 1.5 in rectangle on the XY plane with one 1.5 in short edge on the Y axis, so the 2 in side runs along X, and Extrude it 0.5 in. This is the right half of a 4 in wide block.
 2. Click Mirror. Leave Object Type on Bodies and click the block.
 3. Click Mirror Plane, then click the YZ plane.
 4. Set Operation to Join. Click OK. The block is now 4 in wide and one body.
