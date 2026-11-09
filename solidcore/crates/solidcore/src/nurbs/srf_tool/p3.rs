@@ -1132,6 +1132,24 @@ mod tests {
     }
 
     #[test]
+    fn rational_and_non_rational_halves_join_as_rational() {
+        let s = sample();
+        for (t, dir, rational_first) in [(0.4, Direction::U, true), (0.3, Direction::V, false)] {
+            let (mut a, mut b) = super::super::p1::split(&s, t, dir).unwrap();
+            if rational_first {
+                a.non_rat_to_rat();
+            } else {
+                b.non_rat_to_rat();
+            }
+            let j = join(&a, &b, dir, 1e-9).unwrap();
+            // The joint knot is removed again and every weight is the 1.0 of `s`.
+            assert_eq!((j.n(), j.m()), (s.n(), s.m()));
+            assert!(j.rows().flatten().all(|pw| pw.w == 1.0));
+            assert!(max_dist(&s, &j) < 1e-9);
+        }
+    }
+
+    #[test]
     fn compatible_surfaces_share_knots() {
         let s = sample();
         let mut t = elevate_degree(&s, 1, Direction::V).unwrap();
