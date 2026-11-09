@@ -25,8 +25,8 @@ use crate::ui_kit::{self, StatusTone};
 
 /// The command the window builds: its ribbon button opens the window, and the window runs it.
 pub const ID: &str = "drawing.export";
-/// Seconds between reads of the drawing's status while the window is open.
-const STATUS_EVERY: f64 = 1.0;
+/// What a sheet export stopped by Cancel answers (`file_load`).
+const CANCELLED: &str = "file operation cancelled";
 /// The longest file name the window makes, in characters, before its extension.
 const MAX_NAME: usize = 120;
 
@@ -98,9 +98,10 @@ pub enum Folder {
     Choose,
 }
 
-/// One sheet being written: the background job answers on `reply`.
+/// One sheet being written to `path`: the background job answers on `reply`.
 struct Job {
     sheet: u64,
+    path: String,
     reply: Receiver<Value>,
 }
 
@@ -116,12 +117,19 @@ pub struct Export {
     jobs: Vec<Job>,
     /// OK was pressed: the window closes once every sheet is written.
     close_when_done: bool,
+    /// Cancel stopped the sheets being written: the window stays to say which were written.
+    stopping: bool,
     /// What the last export said, sheet by sheet, translated.
     outcome: Vec<(StatusTone, String)>,
-    /// The last `drawing.status` reply and when it was read.
+    /// The last `drawing.status` reply, and the revision and drawing cache it was read at.
     status: Option<Value>,
-    status_read: Option<(f64, u64)>,
+    status_read: Option<StatusKey>,
 }
+
+/// What `drawing.status` was read at: the session's revision and how far the drawing's views and
+/// dimensions are drawn ([`solidcraft_engine::drawing_scene::drawn`]). It reads the same until
+/// one of them moves.
+type StatusKey = (u64, (Option<u64>, u64));
 
 impl Export {
     fn new(first_sheet: Option<u64>, paper: Paper, saved: bool) -> Self {
@@ -134,6 +142,7 @@ impl Export {
             folder: if saved { Folder::Design } else { Folder::Choose },
             jobs: Vec::new(),
             close_when_done: false,
+            stopping: false,
             outcome: Vec::new(),
             status: None,
             status_read: None,
@@ -161,8 +170,13 @@ pub fn starting_paper(theme: &str) -> Paper {
 }
 
 /// Open the window for the drawing open (the ribbon's Export, `ui.start drawing.export`). With no
-/// drawing open the engine's own rule says why, and nothing opens.
+/// drawing open the engine's own rule says why, and nothing opens. A window writing sheets stays as
+/// it is: a new one would drop the sheets under way, and what they say.
 pub fn open(app: &mut SolveApp) {
+    if app.drawing_workspace.export.as_ref().is_some_and(Export::busy) {
+        app.drawing_workspace.settings_open = false;
+        return;
+    }
     if let Some(command) = solidcraft_engine::find_command(ID)
         && let Err(why) = command.allowed(&app.session)
     {
@@ -173,6 +187,34 @@ pub fn open(app: &mut SolveApp) {
     let paper = starting_paper(&app.preferences.theme);
     app.drawing_workspace.export = Some(Export::new(first, paper, app.session.path.is_some()));
     app.drawing_workspace.settings_open = false;
+}
+
+/// Close the window (Cancel, its close button, Esc, another panel). While sheets are being written
+/// it stops them instead and stays open, so it can say which were written and which weren't.
+pub fn close(app: &mut SolveApp) {
+    if app.drawing_workspace.export.as_ref().is_some_and(Export::busy) {
+        stop(app);
+    } else {
+        app.drawing_workspace.export = None;
+    }
+}
+
+/// Another panel asks for the window's place: it goes, unless it is writing sheets, which it goes on
+/// with and stays for (dropping it would leave them writing with nothing to say what they did).
+pub fn give_way(app: &mut SolveApp) {
+    if !app.drawing_workspace.export.as_ref().is_some_and(Export::busy) {
+        app.drawing_workspace.export = None;
+    }
+}
+
+/// Stop the sheets being written: those waiting are dropped, the one under way is told to stop, and
+/// each answers in the window. A file already written is said as saved. Other file operations go on.
+fn stop(app: &mut SolveApp) {
+    let Some(export) = app.drawing_workspace.export.as_mut() else { return };
+    export.stopping = true;
+    export.close_when_done = false;
+    let paths: Vec<String> = export.jobs.iter().map(|job| job.path.clone()).collect();
+    app.file_load.cancel_sheet_exports(&paths);
 }
 
 /// A sheet's paper size as people name it: `A3`, `ANSI B`, `Letter`, or its sides for a custom one.
@@ -283,7 +325,7 @@ fn begin(app: &mut SolveApp, files: Vec<(u64, PathBuf)>) {
         request.options = params(export, sheet, &path).as_object().cloned().unwrap_or_default();
         request.reply = Some(tx);
         queued.push(request);
-        export.jobs.push(Job { sheet, reply: rx });
+        export.jobs.push(Job { sheet, path, reply: rx });
     }
     for request in queued {
         // A refusal to queue answers the job's reply, which the window then shows.
@@ -396,6 +438,10 @@ fn outcome_lines(d: Option<&Drawing>, sheet: u64, reply: &Value) -> Vec<(StatusT
         return lines;
     }
     let error = reply.get("error").and_then(Value::as_str).unwrap_or_default();
+    if error == CANCELLED {
+        let stopped = crate::i18n::tr("ui.drawing_export.stopped");
+        return vec![(StatusTone::Warning, crate::i18n::format("ui.drawing_export.failed", &[("sheet", &sheet_name), ("error", stopped)]))];
+    }
     // The refusal names each view that can't be drawn by its id: name it as people know it.
     let named: Vec<(StatusTone, String)> = d.map_or_else(Vec::new, |d| {
         d.views
@@ -422,9 +468,11 @@ fn collect(app: &mut SolveApp) {
     let d = app.session.drawing(ID).ok().cloned();
     let Some(export) = app.drawing_workspace.export.as_mut() else { return };
     let mut finished = false;
+    let mut stopped = false;
     let mut lines = Vec::new();
     export.jobs.retain(|job| match job.reply.try_recv() {
         Ok(reply) => {
+            stopped |= reply.get("error").and_then(Value::as_str) == Some(CANCELLED);
             lines.extend(outcome_lines(d.as_deref(), job.sheet, &reply));
             finished = true;
             false
@@ -437,9 +485,12 @@ fn collect(app: &mut SolveApp) {
         }
     });
     export.outcome.extend(lines);
+    // Cancel here or on the progress card: the window stays to say which sheets were written.
+    export.stopping |= stopped;
     if finished && export.jobs.is_empty() {
         let failed = export.outcome.iter().any(|(tone, _)| matches!(tone, StatusTone::Error));
-        if export.close_when_done && !failed {
+        let stopped = std::mem::take(&mut export.stopping);
+        if export.close_when_done && !failed && !stopped {
             app.drawing_workspace.export = None;
         } else {
             export.close_when_done = false;
@@ -447,19 +498,22 @@ fn collect(app: &mut SolveApp) {
     }
 }
 
-/// Read the drawing's status (`drawing.status`, read-only) when the window opens, after a change,
-/// and once a second, so a view that can't be drawn is named before Export is pressed.
-fn refresh_status(app: &mut SolveApp, now: f64) {
-    let revision = app.session.revision;
-    let due =
-        app.drawing_workspace.export.as_ref().is_some_and(|e| e.status_read.is_none_or(|(at, seen)| seen != revision || now - at >= STATUS_EVERY));
-    if !due {
+/// Read the drawing's status (`drawing.status`, read-only) when the window opens, after a change to
+/// the design and after a view or its dimensions are drawn, so a view that can't be drawn is named
+/// before Export is pressed. Nothing else changes it, so it isn't read again until then: each read
+/// measures every dimension of the drawing.
+fn refresh_status(app: &mut SolveApp) {
+    let key = |app: &SolveApp| (app.session.revision, solidcraft_engine::drawing_scene::drawn(&app.session));
+    let seen = key(app);
+    if app.drawing_workspace.export.as_ref().is_none_or(|e| e.status_read == Some(seen)) {
         return;
     }
     let status = app.session.execute("drawing.status", &json!({})).ok();
+    // As read: the read itself may bring the cache to the drawing open.
+    let read = key(app);
     if let Some(export) = app.drawing_workspace.export.as_mut() {
         export.status = status;
-        export.status_read = Some((now, revision));
+        export.status_read = Some(read);
     }
 }
 
@@ -491,11 +545,13 @@ fn close_button(ui: &mut egui::Ui) -> bool {
 pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
     collect(app);
     if app.session.open_drawing.is_none() {
+        // Its sheets are gone with it: nothing is left to write them for.
+        stop(app);
         app.drawing_workspace.export = None;
         return;
     }
     let Ok(d) = app.session.drawing(ID).cloned() else { return };
-    refresh_status(app, ui.input(|i| i.time));
+    refresh_status(app);
     let saved = app.session.path.is_some();
     let design = app.session.doc.name.clone();
     let Some(export) = app.drawing_workspace.export.as_mut() else { return };
@@ -673,7 +729,7 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = export.status.as_ref().and_then(|s| s.get("held")).and_then(Value::as_bool) == Some(true);
     let stale = views.iter().filter(|(_, sheet, status, _)| export.sheets.contains(sheet) && status == "out_of_date").count();
     let footer_status = if export.busy() {
-        Some(crate::i18n::tr("ui.drawing_export.exporting").to_owned())
+        Some(crate::i18n::tr(if export.stopping { "ui.drawing_export.stopping" } else { "ui.drawing_export.exporting" }).to_owned())
     } else if held && stale > 0 {
         let key = if stale == 1 { "ui.drawing_export.out_of_date_one" } else { "ui.drawing_export.out_of_date_other" };
         Some(crate::i18n::format(key, &[("count", &stale.to_string())]))
@@ -690,7 +746,7 @@ pub fn body(app: &mut SolveApp, ui: &mut egui::Ui) {
         _ => {}
     }
     if close {
-        app.drawing_workspace.export = None;
+        crate::drawing_export_panel::close(app);
     }
 }
 

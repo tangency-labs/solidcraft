@@ -32,6 +32,34 @@ fn wait(h: &mut Harness) {
     h.frames(2);
 }
 
+/// A sheet export of the drawing that isn't the window's (an agent's, through the control channel).
+fn other_export(h: &mut Harness, sheet: u64, file: &str) -> std::sync::mpsc::Receiver<Value> {
+    let path = h.dir.join(file).to_string_lossy().into_owned();
+    let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ExportSheet);
+    request.options = json!({"sheet": ids::encode(sheet), "format": "svg", "path": path}).as_object().cloned().unwrap_or_default();
+    let (tx, rx) = std::sync::mpsc::channel();
+    request.reply = Some(tx);
+    crate::file_load::begin_request(&mut h.app, request).unwrap();
+    rx
+}
+
+/// Hold the next file worker until `release` is sent; `started` says when it is waiting.
+fn hold_next_worker(h: &mut Harness) -> (std::sync::mpsc::Receiver<std::thread::ThreadId>, std::sync::mpsc::Sender<()>) {
+    let (started_tx, started) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    h.app.file_load.worker_gate = Some((started_tx, release_rx));
+    (started, release)
+}
+
+fn until_started(h: &mut Harness, started: &std::sync::mpsc::Receiver<std::thread::ThreadId>) {
+    let began = std::time::Instant::now();
+    while started.try_recv().is_err() {
+        h.frames(1);
+        assert!(began.elapsed().as_secs() < 30, "the export did not start");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
 fn answer_saves_with(h: &mut Harness, file: &str) {
     let path = h.dir.join(file).to_string_lossy().into_owned();
     h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(path.clone())))));
@@ -205,4 +233,128 @@ fn views_are_named_as_people_know_them() {
     let d = h.app.session.drawing("test").unwrap().clone();
     let front_name = crate::i18n::tr("ui.drawing_export.view_front");
     assert!(view_name(&d, front).starts_with(front_name) && view_name(&d, front) != view_name(&d, again));
+}
+
+/// Cancel while sheets are being written stops them: the one waiting is never written, the one
+/// under way stops, and the window stays to say so. Export pressed again meanwhile keeps the window
+/// and its sheets instead of leaving them writing with nothing to say what they did. An export that
+/// isn't the window's, waiting behind it, goes on.
+#[test]
+fn cancel_while_sheets_are_written_stops_them_and_says_so() {
+    let mut h = Harness::new();
+    let (sheet, ..) = drawing(&mut h);
+    h.app.start(ID);
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "drawing:export:sheet:Sheet 2"}})).unwrap();
+    h.frames(2);
+    // The first sheet's worker waits to be let go, so both sheets are still to be written.
+    let (started, release) = hold_next_worker(&mut h);
+    answer_saves_with(&mut h, "held.svg");
+    h.step(&json!({"click": {"handle": "dialog:OK"}})).unwrap();
+    until_started(&mut h, &started);
+    let other = other_export(&mut h, sheet, "other.svg");
+    let jobs = |h: &Harness| h.app.drawing_workspace.export.as_ref().map(|e| e.jobs.len());
+    assert_eq!(jobs(&h), Some(2));
+
+    // The window's own guards, called as its buttons do: while a file job runs the app holds clicks
+    // and keys, but not once the progress card's Cancel has let go of a sheet still finishing.
+    open(&mut h.app);
+    h.frames(1);
+    assert_eq!(jobs(&h), Some(2), "a second Export keeps the sheets under way");
+
+    close(&mut h.app);
+    h.frames(1);
+    let export = h.app.drawing_workspace.export.as_ref().expect("the window stays while the sheets stop");
+    assert!(export.stopping && !export.close_when_done);
+    release.send(()).unwrap();
+    wait(&mut h);
+    for name in ["held - Sheet 1.svg", "held - Sheet 2.svg"] {
+        assert!(!h.dir.join(name).exists(), "{name} written after Cancel");
+    }
+    let export = h.app.drawing_workspace.export.as_ref().expect("the window says what Cancel stopped");
+    let said: Vec<&str> = export.outcome.iter().map(|(_, line)| line.as_str()).collect();
+    let stopped = crate::i18n::tr("ui.drawing_export.stopped");
+    assert!(said.len() == 2 && said.iter().all(|line| line.contains(stopped)), "{said:?}");
+    assert!(!export.busy() && !export.stopping);
+    assert!(h.app.file_load.idle());
+    assert_eq!(other.try_recv().ok().map(|r| r["ok"].clone()), Some(json!(true)), "the other export went on");
+    assert!(h.dir.join("other.svg").exists());
+
+    // With nothing under way, Cancel closes the window.
+    h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.drawing_workspace.export.is_none());
+}
+
+/// The status is read when the window opens, after a change to the design and after the drawing's
+/// views are drawn, and not otherwise: each read measures every dimension of the drawing.
+#[test]
+fn the_status_is_read_again_only_when_what_it_says_can_change() {
+    let mut h = Harness::new();
+    let (sheet, front, _) = drawing(&mut h);
+    h.app.start(ID);
+    h.frames(3);
+    let status = |h: &Harness| h.app.drawing_workspace.export.as_ref().and_then(|e| e.status.clone());
+    let forget = |h: &mut Harness| {
+        if let Some(export) = h.app.drawing_workspace.export.as_mut() {
+            export.status = None;
+        }
+    };
+    assert!(status(&h).is_some(), "read as the window opens");
+    forget(&mut h);
+    // Two seconds of frames with nothing changed read nothing.
+    h.frames(120);
+    assert!(status(&h).is_none(), "read again with nothing changed");
+
+    // The views drawn, as the sheet page draws them, change what it says, not the design.
+    let revision = h.app.session.revision;
+    solidcraft_engine::drawing_scene::extract(&mut h.app.session, sheet).unwrap();
+    for _ in 0..10 {
+        if !solidcraft_engine::drawing_scene::step(&mut h.app.session) {
+            break;
+        }
+    }
+    assert_eq!(h.app.session.revision, revision);
+    h.frames(1);
+    let read = status(&h).expect("read again once the views are drawn");
+    let front_view = read["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(front)))).cloned();
+    assert_eq!(front_view.map(|v| v["status"].clone()), Some(json!("current")), "{read}");
+
+    forget(&mut h);
+    h.frames(3);
+    assert!(status(&h).is_none());
+    h.app.run("drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}})).unwrap();
+    h.frames(1);
+    assert!(status(&h).is_some(), "read again after a change to the design");
+}
+
+/// An import or export under way that isn't the window's is never stopped by its Cancel: only the
+/// window's sheets waiting behind it are dropped.
+#[test]
+fn cancel_stops_only_the_windows_own_sheets() {
+    let mut h = Harness::new();
+    let (sheet, ..) = drawing(&mut h);
+    h.app.start(ID);
+    h.frames(3);
+    let (started, release) = hold_next_worker(&mut h);
+    let other = other_export(&mut h, sheet, "other.svg");
+    until_started(&mut h, &started);
+    answer_saves_with(&mut h, "mine.svg");
+    // OK, as the window's own button would (the other export's progress card covers it now).
+    export_now(&mut h.app, true);
+    let began = std::time::Instant::now();
+    while !h.app.drawing_workspace.export.as_ref().is_some_and(Export::busy) {
+        h.frames(1);
+        assert!(began.elapsed().as_secs() < 30, "the window's sheet was not queued");
+    }
+    close(&mut h.app);
+    h.frames(1);
+    release.send(()).unwrap();
+    wait(&mut h);
+    assert_eq!(other.try_recv().ok().map(|r| r["ok"].clone()), Some(json!(true)), "the other export went on");
+    assert!(h.dir.join("other.svg").exists() && !h.dir.join("mine.svg").exists());
+    let export = h.app.drawing_workspace.export.as_ref().expect("the window says what Cancel stopped");
+    let stopped = crate::i18n::tr("ui.drawing_export.stopped");
+    let said: Vec<&str> = export.outcome.iter().map(|(_, line)| line.as_str()).collect();
+    assert!(said.len() == 1 && said.iter().all(|line| line.contains(stopped)), "{said:?}");
 }
