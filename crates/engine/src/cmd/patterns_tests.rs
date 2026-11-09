@@ -488,6 +488,52 @@ fn component_pattern_follows_its_count_parameter() {
     assert!(s.doc.occurrences.iter().any(|o| o.id == first_copy), "survivor keeps its id after grow again");
 }
 
+/// #12116 review: deleting one of several patterned components must not orphan the sibling's
+/// managed copy (positional old_per would shrink and force a new occurrence every refresh).
+#[test]
+fn component_pattern_keeps_sibling_copy_when_one_component_is_deleted() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "BlockA"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "B"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 20, 5], "operation": "new", "body_name": "BlockB"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"components": ["A", "B"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    let copies = r["occurrences"].as_array().cloned().unwrap_or_default();
+    assert_eq!(copies.len(), 2, "{r}");
+    let b_id = s.doc.find_component("B").expect("B");
+    let b_copy = copies
+        .iter()
+        .filter_map(|v| v.as_u64())
+        .find(|&id| s.doc.occurrences.iter().any(|o| o.id == id && o.component == b_id))
+        .expect("B's patterned copy");
+
+    run(&mut s, "component.delete", json!({"component": "A"}));
+    // A second refresh must reuse B's copy, not allocate another untracked occurrence.
+    s.refresh();
+    s.refresh();
+    let pattern = s
+        .doc
+        .features
+        .iter()
+        .find_map(|f| match &f.kind {
+            solidcraft_doc::FeatureKind::Pattern { components, occurrences, .. } if !components.is_empty() => {
+                Some((components.clone(), occurrences.clone()))
+            }
+            _ => None,
+        })
+        .expect("pattern feature");
+    assert_eq!(pattern.0, vec![b_id], "dead component dropped from Pattern: {:?}", pattern.0);
+    assert_eq!(pattern.1, vec![b_copy], "sibling copy id kept: {:?}", pattern.1);
+    assert_eq!(
+        s.doc.occurrences.iter().filter(|o| o.component == b_id).count(),
+        2,
+        "seed + one managed copy for B, not more: {:?}",
+        s.doc.occurrences
+    );
+}
+
 /// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
 /// where the pattern puts the body as it is shown (beside it), not where the body sits before
 /// its component is placed (x 10, near the origin).

@@ -1573,7 +1573,17 @@ impl Dialog {
 
     /// Does the active input pick component occurrences rather than bodies?
     pub(crate) fn takes_components(&self) -> bool {
-        matches!(self.kind, Kind::Align { components: true, .. }) && self.active == 0
+        if self.active != 0 {
+            return false;
+        }
+        if matches!(self.kind, Kind::Align { components: true, .. }) {
+            return true;
+        }
+        // Pattern of components (restored/edited): label is "Components"; body picks must
+        // resolve to placements like Align, or pattern_objects keeps bodies and drops them
+        // while an occurrence remains selected (#12116 review).
+        matches!(self.kind, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. })
+            && self.inputs.first().is_some_and(|i| i.label == "Components")
     }
 
     /// Everything the inputs hold (for highlighting).

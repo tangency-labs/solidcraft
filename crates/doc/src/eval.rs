@@ -8282,6 +8282,13 @@ fn placement_unchanged(doc: &Document, id: u64, component: u64, parent: u64, tra
     doc.occurrences.iter().any(|o| o.id == id && o.component == component && o.parent == parent && o.transform == transform)
 }
 
+/// Previous managed copies of one patterned component. Matched by occurrence
+/// component id, not by a positional `old_per` slice: deleting one of several
+/// patterned components must not shift another component's ids (#12116 review).
+fn pattern_previous_for_component(doc: &Document, previous: &[u64], component: u64) -> Vec<u64> {
+    previous.iter().copied().filter(|&id| doc.occurrences.iter().any(|o| o.id == id && o.component == component)).collect()
+}
+
 /// True when reconcile would add, remove, or rewrite at least one managed
 /// occurrence. Safe with a shared `&Document` so refresh can skip `doc_mut()`
 /// when patterns are already aligned.
@@ -8298,24 +8305,24 @@ pub fn component_patterns_need_update(doc: &Document, st: &ModelState) -> bool {
             // Bad transforms are already reported by evaluate; leave copies alone.
             continue;
         };
-        let old_per = match plan.components.len() {
-            0 => 0,
-            n => plan.previous.len() / n,
-        };
-        let mut made_len = 0usize;
-        for (ci, component) in plan.components.iter().copied().enumerate() {
+        let mut made = Vec::with_capacity(plan.components.len().saturating_mul(mats.len()));
+        let mut live_components = 0usize;
+        for &component in &plan.components {
+            let block = pattern_previous_for_component(doc, &plan.previous, component);
             let Some(src) = doc.occurrence_of(component).cloned() else {
-                // Missing seed: drop any leftover managed copies for this pattern.
-                return !plan.previous.is_empty();
+                // Same as reconcile: drop this component's leftover copies and go on.
+                if !block.is_empty() {
+                    return true;
+                }
+                continue;
             };
-            let start = ci.saturating_mul(old_per);
-            let block = plan.previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
-            let mut old = block.iter().copied();
+            live_components += 1;
+            let mut old = block.into_iter();
             for m in &mats {
                 let transform = crate::mat_mul(m, &src.transform);
                 match old.next() {
                     Some(id) if placement_unchanged(doc, id, component, src.parent, transform) => {
-                        made_len += 1;
+                        made.push(id);
                     }
                     Some(_) | None => return true,
                 }
@@ -8324,7 +8331,12 @@ pub fn component_patterns_need_update(doc: &Document, st: &ModelState) -> bool {
                 return true;
             }
         }
-        if made_len != plan.previous.len() {
+        // Dead component ids still listed on the feature, or previous ids no longer used.
+        if live_components != plan.components.len() {
+            return true;
+        }
+        let live_previous: Vec<u64> = plan.previous.iter().copied().filter(|&id| doc.occurrences.iter().any(|o| o.id == id)).collect();
+        if made != live_previous {
             return true;
         }
     }
@@ -8350,27 +8362,24 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
             continue;
         };
         let mut made = Vec::with_capacity(plan.components.len().saturating_mul(mats.len()));
-        // Occurrences are stored per component, then per matrix. Shrink/grow each component's
-        // block on its own so survivors keep their ids when the count changes.
-        let old_per = match plan.components.len() {
-            0 => 0,
-            n => plan.previous.len() / n,
-        };
-        let mut leftover = std::collections::BTreeSet::new();
-        for (ci, component) in plan.components.iter().copied().enumerate() {
-            let start = ci.saturating_mul(old_per);
-            let block = plan.previous.get(start..start.saturating_add(old_per)).unwrap_or(&[]);
-            let mut old = block.iter().copied();
+        // Occurrences are stored per component, then per matrix. Match each component's previous
+        // copies by occurrence component id (not a positional slice) so deleting one patterned
+        // component does not shift another's ids or leave untracked copies (#12116 review).
+        let mut live_components = Vec::with_capacity(plan.components.len());
+        let mut used = std::collections::BTreeSet::new();
+        for &component in &plan.components {
+            let block = pattern_previous_for_component(doc, &plan.previous, component);
             let Some(src) = doc.occurrence_of(component).cloned() else {
                 // Missing seed: drop this component's previous copies; keep going so a later
-                // Pattern still reconciles.
-                leftover.extend(old);
+                // Pattern / sibling component still reconciles.
                 continue;
             };
+            live_components.push(component);
             // The first placement is the pattern's seed; keep it by id so later adds of this
             // reconcile do not change which occurrence we read as the source.
             let seed = src.id;
             let src = doc.occurrences.iter().find(|o| o.id == seed).cloned().unwrap_or(src);
+            let mut old = block.into_iter();
             for m in &mats {
                 let transform = crate::mat_mul(m, &src.transform);
                 match old.next() {
@@ -8381,30 +8390,33 @@ pub fn reconcile_component_patterns(doc: &mut Document, st: &ModelState) -> Resu
                             o.parent = src.parent;
                             o.transform = transform;
                         }
+                        used.insert(id);
                         made.push(id);
                     }
-                    Some(id) => {
-                        leftover.insert(id);
-                        match doc.add_occurrence(component, src.parent, transform) {
-                            Ok(new_id) => made.push(new_id),
-                            Err(_) => continue,
+                    Some(_) | None => match doc.add_occurrence(component, src.parent, transform) {
+                        Ok(new_id) => {
+                            used.insert(new_id);
+                            made.push(new_id);
                         }
-                    }
-                    None => match doc.add_occurrence(component, src.parent, transform) {
-                        Ok(new_id) => made.push(new_id),
                         Err(_) => continue,
                     },
                 }
             }
-            leftover.extend(old);
+            // Surplus copies after a count shrink stay out of `used` and are removed below.
+            drop(old);
         }
+        let leftover: std::collections::BTreeSet<u64> =
+            plan.previous.iter().copied().filter(|id| !used.contains(id) && doc.occurrences.iter().any(|o| o.id == *id)).collect();
         if !leftover.is_empty() {
             doc.remove_occurrences(&leftover);
         }
-        if let Some(FeatureKind::Pattern { occurrences, .. }) = doc.feature_mut(plan.feature_id).map(|f| &mut f.kind)
-            && *occurrences != made
-        {
-            *occurrences = made;
+        if let Some(FeatureKind::Pattern { components, occurrences, .. }) = doc.feature_mut(plan.feature_id).map(|f| &mut f.kind) {
+            if *components != live_components {
+                *components = live_components;
+            }
+            if *occurrences != made {
+                *occurrences = made;
+            }
         }
     }
     Ok(())
