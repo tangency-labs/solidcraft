@@ -18,7 +18,10 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
     assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "lay_on_print_faces", "path", "quality", "solids"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["collision", "effort", "images", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"]);
+    assert_keys(
+        input_schema_for::<ExportUrdfParams>(),
+        &["collision", "effort", "images", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"],
+    );
     assert_keys(input_schema_for::<ExportSdfParams>(), &["bodies", "model_uris", "name", "path", "quality", "static"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
@@ -379,6 +382,9 @@ fn strict_keeps_todays_errors() {
         ("doc.recovery_discard", json!({})),
         ("doc.recovery_discard", json!({"all": false})),
         ("doc.recovery_discard", json!({"id": "nothing-here"})),
+        ("file.export", json!({"path": at("a.urdf"), "mimic": "yes"})),
+        ("file.export", json!({"path": at("a.urdf"), "place_meshes": 1})),
+        ("file.export", json!({"path": at("a.urdf"), "collision": "hull"})),
     ]);
     assert_eq!(std::fs::read_dir(&dir).map(|d| d.count()).unwrap_or(0), 0, "nothing written");
     let _ = std::fs::remove_dir_all(&dir);
@@ -397,6 +403,9 @@ fn the_export_type_reads_each_key_only_for_its_format() {
     assert!(ok(json!({"path": "a.stl", "format": "3mf", "objects": "component"})).objects.is_some());
     assert!(read(json!({"path": "a.3mf", "format": "stl", "objects": "component"})).is_err());
     assert!(read(json!({"path": "a", "format": "urdf", "effort": 0})).is_err());
+    let p = ok(json!({"path": "a.urdf", "mimic": true, "place_meshes": false, "collision": "convex_hull"}));
+    assert!(p.mimic == Some(true) && p.place_meshes == Some(false) && p.collision.as_deref() == Some("convex_hull"), "{p:?}");
+    assert!(ok(json!({"path": "a.stl", "mimic": "yes", "place_meshes": 1, "collision": "hull"})).mimic.is_none());
     // An unknown format, or no path to write to, is the handler's to refuse: nothing else is read.
     assert!(ok(json!({"path": "a.xyz", "quality": "rough", "effort": -1})).quality.is_none());
     assert!(ok(json!({"quality": "rough"})).path.is_none());
