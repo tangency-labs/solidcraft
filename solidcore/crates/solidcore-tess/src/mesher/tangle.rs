@@ -42,9 +42,23 @@ pub(crate) fn crossing(s: &super::poles::Face, reach: f64, loops: &[seam::Loop])
         if n < 3 {
             continue;
         }
+        // Each node is on a pole or not whichever two chords it ends: asked once (ported from
+        // #13559).
+        let mut on_pole: Vec<Option<bool>> = vec![None; n];
+        let mut node_pole = |k: usize, q: [f64; 2]| -> bool {
+            if let Some(p) = on_pole.get(k).copied().flatten() {
+                return p;
+            }
+            let p = pole(q);
+            if let Some(slot) = on_pole.get_mut(k) {
+                *slot = Some(p);
+            }
+            p
+        };
         for k in 0..n {
-            let (Some(&a), Some(&b)) = (l.uv.get(k), l.uv.get((k + 1) % n)) else { continue };
-            if !(a.iter().chain(&b).all(|x| x.is_finite())) || pole(a) || pole(b) {
+            let next = (k + 1) % n;
+            let (Some(&a), Some(&b)) = (l.uv.get(k), l.uv.get(next)) else { continue };
+            if !(a.iter().chain(&b).all(|x| x.is_finite())) || node_pole(k, a) || node_pole(next, b) {
                 continue;
             }
             // The loop's closing chord of a loop that winds round the surface ends at the copy of
