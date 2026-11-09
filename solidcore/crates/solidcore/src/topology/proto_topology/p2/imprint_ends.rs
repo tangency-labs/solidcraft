@@ -38,6 +38,7 @@
 use super::{curve_of, dangling, ignore_soft, EdgeDefId, ProtoBrep, ProtoTopologyManager};
 use super::{ProtoVertexId, Result};
 use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::error::{Failure, Reason, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::are_same;
@@ -48,9 +49,280 @@ use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 
+const OP: &str = "topology::proto_topology::p2::imprint_ends";
+
 /// How far ahead of a curve's end, as a fraction of the interval, a proto vertex may lie
 /// for the curve to be continued to it.
 const MAX_EXTENSION_FRACTION: f64 = 0.05;
+
+/// Not upstream (#3062): a quadric's equation about a point `o`, `f(x) = y.M.y + 2 m.y + c`
+/// with `y = x - o`, and how a bound of `|f|` bounds the distance from the surface
+/// ([`QuadricKind`]).
+struct Quadric {
+    o: Vec3,
+    m: [[f64; 3]; 3],
+    lin: Vec3,
+    c: f64,
+    kind: QuadricKind,
+}
+
+/// A quadric's kind, for its distance bound: a plane's `|f|` (its normal unit), a sphere's
+/// `|f| / r`, a cylinder's or cone's `|f| / R`, `R` its least radius along the span.
+enum QuadricKind {
+    Plane,
+    Sphere {
+        radius: f64,
+    },
+    Cone {
+        axis: Vec3,
+        radius: f64,
+        tan_angle: f64,
+    },
+}
+
+/// The quadric of a plane, cylinder, cone or sphere; `None` for any other surface.
+fn quadric_of(surface: &crate::surface::surface::Surface) -> Option<Quadric> {
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    Some(match AnalyticSupport::of(surface)?.implicit() {
+        Implicit::Plane { origin, normal } => Quadric {
+            o: origin,
+            m: [[0.0; 3]; 3],
+            lin: normal * 0.5,
+            c: 0.0,
+            kind: QuadricKind::Plane,
+        },
+        Implicit::Sphere { centre, radius } => Quadric {
+            o: centre,
+            m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            lin: Vec3::ZERO,
+            c: -radius * radius,
+            kind: QuadricKind::Sphere { radius },
+        },
+        // |y|^2 - (y.a)^2 - (r + t y.a)^2
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } => {
+            let a = [axis.x, axis.y, axis.z];
+            let s = 1.0 + tan_angle * tan_angle;
+            let mut m = [[0.0; 3]; 3];
+            for (row, ai) in m.iter_mut().zip(a) {
+                for (x, aj) in row.iter_mut().zip(a) {
+                    *x = -s * ai * aj;
+                }
+            }
+            for (i, row) in m.iter_mut().enumerate() {
+                if let Some(x) = row.get_mut(i) {
+                    *x += 1.0;
+                }
+            }
+            Quadric {
+                o: origin,
+                m,
+                lin: axis * (-radius * tan_angle),
+                c: -radius * radius,
+                kind: QuadricKind::Cone {
+                    axis,
+                    radius,
+                    tan_angle,
+                },
+            }
+        }
+        Implicit::Torus { .. } => return None,
+    })
+}
+
+/// `C(n, k)`.
+fn binomial(n: usize, k: usize) -> f64 {
+    let mut r = 1.0_f64;
+    for i in 0..k {
+        #[allow(clippy::cast_precision_loss)]
+        let f = (n - i) as f64 / (i + 1) as f64;
+        r *= f;
+    }
+    r
+}
+
+/// The product of two polynomials in Bernstein form over `[0, 1]`, of degrees
+/// `a.len() - 1` and `b.len() - 1`.
+fn bernstein_product(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let (p, q) = (a.len().saturating_sub(1), b.len().saturating_sub(1));
+    let mut c = vec![0.0; p + q + 1];
+    for (i, x) in a.iter().enumerate() {
+        for (j, y) in b.iter().enumerate() {
+            if let Some(slot) = c.get_mut(i + j) {
+                *slot += binomial(p, i) * binomial(q, j) / binomial(p + q, i + j) * x * y;
+            }
+        }
+    }
+    c
+}
+
+/// De Casteljau's split of homogeneous control points at `u`: the part over `[u, 1]` when
+/// `upper`, else over `[0, u]`.
+fn de_casteljau(pts: &[[f64; 4]], u: f64, upper: bool) -> Vec<[f64; 4]> {
+    let mut row = pts.to_vec();
+    let mut lower = Vec::new();
+    let mut higher = Vec::new();
+    while let (Some(first), Some(last)) = (row.first().copied(), row.last().copied()) {
+        lower.push(first);
+        higher.push(last);
+        if row.len() == 1 {
+            break;
+        }
+        row = row
+            .windows(2)
+            .map(|w| {
+                let p = w.first().copied().unwrap_or_default();
+                let q = w.get(1).copied().unwrap_or_default();
+                [
+                    p[0] + u * (q[0] - p[0]),
+                    p[1] + u * (q[1] - p[1]),
+                    p[2] + u * (q[2] - p[2]),
+                    p[3] + u * (q[3] - p[3]),
+                ]
+            })
+            .collect();
+    }
+    if upper {
+        higher.reverse();
+        higher
+    } else {
+        lower
+    }
+}
+
+/// Not upstream (#3062): a certified bound of how far `curve` over `[from, to]` (inside one
+/// of its spans) lies from each of `surfaces` (planes, cylinders, cones, spheres), with no
+/// sampling. The span's Bézier form, its homogeneous control points `(X, W)` cut to the
+/// interval by de Casteljau, composes with each quadric to the polynomial
+/// `F = Y.M.Y + 2 m.Y W + c W^2`, `Y = X - o W`, in Bernstein form. `|f| = |F| / W^2` is at
+/// most the largest coefficient's size, with their rounding (`gamma`), over the least weight
+/// coefficient squared, and the distance follows ([`QuadricKind`]). `None` where a surface
+/// is of another kind, the curve is no B-spline, a weight coefficient is not positive, or a
+/// cone's radius along the span is not bounded away from zero.
+fn span_off_surfaces(
+    curve: &Curve,
+    from: f64,
+    to: f64,
+    surfaces: [&crate::surface::surface::Surface; 2],
+) -> Option<f64> {
+    let CurveKind::BSpline(bs) = curve.kind() else {
+        return None;
+    };
+    let (lo, hi) = (from.min(to), from.max(to));
+    let segments = bs.gw_nurb()?.decompose_bez().ok()?;
+    let segment = segments.iter().find(|seg| {
+        let kn = seg.knots();
+        kn.first()
+            .is_some_and(|a| *a <= lo + EFF_ZERO * (1.0 + lo.abs()))
+            && kn
+                .last()
+                .is_some_and(|b| *b >= hi - EFF_ZERO * (1.0 + hi.abs()))
+    })?;
+    let (a, b) = (*segment.knots().first()?, *segment.knots().last()?);
+    if !(b > a) {
+        return None;
+    }
+    let mut pts: Vec<[f64; 4]> = segment
+        .cpts()
+        .iter()
+        .map(|c| {
+            if c.w == crate::nurbs::math::NOW {
+                [c.x, c.y, c.z, 1.0]
+            } else {
+                [c.x, c.y, c.z, c.w]
+            }
+        })
+        .collect();
+    let (u0, u1) = ((lo - a) / (b - a), (hi - a) / (b - a));
+    pts = de_casteljau(&pts, u0.clamp(0.0, 1.0), true);
+    let u = if u0 < 1.0 {
+        ((u1 - u0) / (1.0 - u0)).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    pts = de_casteljau(&pts, u, false);
+    let w: Vec<f64> = pts.iter().map(|p| p[3]).collect();
+    let w_min = w.iter().copied().fold(f64::INFINITY, f64::min);
+    if !(w_min > 0.0) {
+        return None;
+    }
+    let n = pts.len().saturating_sub(1);
+    let mut worst = 0.0_f64;
+    for surface in surfaces {
+        let q = quadric_of(surface)?;
+        let y: Vec<[f64; 3]> = pts
+            .iter()
+            .map(|p| {
+                [
+                    p[0] - q.o.x * p[3],
+                    p[1] - q.o.y * p[3],
+                    p[2] - q.o.z * p[3],
+                ]
+            })
+            .collect();
+        let comp =
+            |i: usize| -> Vec<f64> { y.iter().map(|v| v.get(i).copied().unwrap_or(0.0)).collect() };
+        let mut f = vec![0.0; 2 * n + 1];
+        let mut f_abs = vec![0.0; 2 * n + 1];
+        let mut add = |terms: Vec<f64>, factor: f64| {
+            for ((slot, abs), t) in f.iter_mut().zip(f_abs.iter_mut()).zip(terms) {
+                *slot += factor * t;
+                *abs += (factor * t).abs();
+            }
+        };
+        for (i, row) in q.m.iter().enumerate() {
+            for (j, mij) in row.iter().enumerate() {
+                if *mij != 0.0 {
+                    add(bernstein_product(&comp(i), &comp(j)), *mij);
+                }
+            }
+        }
+        for (i, li) in [q.lin.x, q.lin.y, q.lin.z].iter().enumerate() {
+            if *li != 0.0 {
+                add(bernstein_product(&comp(i), &w), 2.0 * li);
+            }
+        }
+        if q.c != 0.0 {
+            add(bernstein_product(&w, &w), q.c);
+        }
+        let rounding =
+            crate::nurbs::math::gamma(8 * (n + 1) + 16) * f_abs.iter().copied().fold(0.0, f64::max);
+        let f_bound = f.iter().fold(0.0_f64, |m, x| m.max(x.abs())) + rounding;
+        let f_over = f_bound / (w_min * w_min);
+        let off = match q.kind {
+            QuadricKind::Plane => f_over,
+            QuadricKind::Sphere { radius } => f_over / radius,
+            QuadricKind::Cone {
+                axis,
+                radius,
+                tan_angle,
+            } => {
+                // the radius along the span, `r + t (x - o).a`, at least its least over the
+                // Euclidean control points (the span is their convex combination)
+                let along =
+                    |v: &[f64; 3], wi: f64| (v[0] * axis.x + v[1] * axis.y + v[2] * axis.z) / wi;
+                let mut h_lo = f64::INFINITY;
+                let mut h_hi = f64::NEG_INFINITY;
+                for (v, wi) in y.iter().zip(&w) {
+                    let h = along(v, *wi);
+                    h_lo = h_lo.min(h);
+                    h_hi = h_hi.max(h);
+                }
+                let r_min = (radius + tan_angle * h_lo).min(radius + tan_angle * h_hi);
+                if !(r_min > 0.0) {
+                    return None;
+                }
+                f_over / r_min
+            }
+        };
+        worst = worst.max(off);
+    }
+    Some(worst)
+}
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
@@ -363,6 +635,35 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             };
             if !(on_face.distance(new_end_pt) <= tol) {
                 return Ok(false);
+            }
+        }
+
+        // Not upstream (#3062): where both faces are planes, cylinders, cones or spheres the
+        // continued span is certified on both surfaces over its whole length, or the edge is
+        // refused, naming how far
+        let mut surfaces = Vec::new();
+        for which in [1, 2] {
+            let surface = d
+                .src_topo(which)
+                .filter(|_| d.src_topo_type(which) == PointClassType::Face)
+                .filter(|o| o.class_kind() == ClassObjectKind::Face)
+                .and_then(|f| brep.face_surface(f))
+                .flatten()
+                .and_then(|s| brep.surface(s));
+            surfaces.extend(surface);
+        }
+        if let [s1, s2] = surfaces[..] {
+            if let Some(bound) = span_off_surfaces(&new_3d, end_param, new_param, [s1, s2]) {
+                if bound.is_nan() || bound > tol {
+                    return Err(SolidError::Failed(Box::new(Failure::new(
+                        OP,
+                        Reason::EdgeOffItsFaces {
+                            gap,
+                            bound,
+                            tolerance: tol,
+                        },
+                    ))));
+                }
             }
         }
 
@@ -683,6 +984,33 @@ fn ieee_remainder(x: f64, y: f64) -> f64 {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test helpers
     use super::*;
+
+    /// #3062: the certified bound of a span off two planes is its distance from them, to
+    /// rounding, for a line; for a quarter circle at least that, and at most that over cos² 45°.
+    #[test]
+    fn a_span_is_bounded_off_its_surfaces() {
+        use crate::surface::plane::p1::Plane;
+        use crate::surface::surface::Surface;
+        let plane =
+            |z: f64, n: Vec3| Surface::from(Plane::from_normal(Point3::new(0.0, 0.0, z), n));
+        let (z, y) = (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 1.0, 0.0));
+        let end = Point3::new(4.0, 0.0, 0.0);
+        let line = Curve::from(BSplineCurve::create_line_segment(3, Point3::ZERO, end).unwrap());
+        let ivl = line.natural_interval();
+        let (a, b) = (ivl.evaluate(0.25), ivl.evaluate(0.75));
+        let on = span_off_surfaces(&line, a, b, [&plane(0.0, z), &plane(0.0, y)]).unwrap();
+        assert!(on <= 1e-14, "{on:e}");
+        let off = span_off_surfaces(&line, a, b, [&plane(1e-3, z), &plane(0.0, y)]).unwrap();
+        assert!((off - 1e-3).abs() <= 1e-15, "{off:e}");
+        let arc = crate::primitive::api_curves::create_arc(Point3::ZERO, 2.0, 0.0, 90.0).unwrap();
+        let arc = Curve::from(arc);
+        let ivl = arc.natural_interval();
+        let (a, b) = (ivl.evaluate(0.1), ivl.evaluate(0.6));
+        let on = span_off_surfaces(&arc, a, b, [&plane(0.0, z), &plane(0.0, z)]).unwrap();
+        assert!(on <= 1e-14, "{on:e}");
+        let off = span_off_surfaces(&arc, a, b, [&plane(-2e-4, z), &plane(0.0, z)]).unwrap();
+        assert!((2e-4..=4e-4 * (1.0 + 1e-12)).contains(&off), "{off:e}");
+    }
 
     /// A clamped cubic with three spans (inner knots 1 and 2) over `[0, 3]`.
     fn cubic() -> Curve {

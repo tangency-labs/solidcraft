@@ -23,6 +23,7 @@ use crate::intersect::point_class::{
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::query::face::p2 as face_p2;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p2 as brep_p2;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::topology as topo;
@@ -891,7 +892,121 @@ fn crossing_error(gap: f64, crossing_sine: f64) -> f64 {
     max2(gap, 0.0) / crossing_sine
 }
 
+/// The most Newton steps [`common_point`] takes: a bound on the loop; convergence is
+/// checked at each step, never assumed.
+const COMMON_POINT_STEPS: usize = 32;
+
+/// Not upstream (#3062): the value at `x` of the implicit equation of `a` and its gradient
+/// (a plane, a cylinder or cone, a sphere; `None` for a torus, whose equation is quartic).
+fn implicit_value(a: &crate::surface::implicit::Implicit, x: Point3) -> Option<(f64, Vec3)> {
+    use crate::surface::implicit::Implicit;
+    Some(match *a {
+        Implicit::Plane { origin, normal } => ((x - origin).dot(normal), normal),
+        Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        } => {
+            let u = x - origin;
+            let h = u.dot(axis);
+            let radial = u - axis * h;
+            let r = radius + tan_angle * h;
+            let f = radial.dot(radial) - r * r;
+            let g = (radial - axis * (r * tan_angle)) * 2.0;
+            (f, g)
+        }
+        Implicit::Sphere { centre, radius } => {
+            let u = x - centre;
+            (u.dot(u) - radius * radius, u * 2.0)
+        }
+        Implicit::Torus { .. } => return None,
+    })
+}
+
+/// Not upstream (#3062): the common point of three analytic surfaces nearest `start`, by
+/// Newton's method on their implicit equations: `None` where one is not a plane, cylinder,
+/// cone or sphere, the normals do not span space at a step, or it does not converge in
+/// [`COMMON_POINT_STEPS`] steps to within rounding of `start`'s size.
+fn common_point(surfaces: [&Surface; 3], start: Point3) -> Option<Point3> {
+    use crate::surface::implicit::AnalyticSupport;
+    let of = |s: &Surface| AnalyticSupport::of(s).map(|a| a.implicit());
+    let [s0, s1, s2] = surfaces;
+    let eq = [of(s0)?, of(s1)?, of(s2)?];
+    let size = 1.0 + start.max_dimension();
+    let mut x = start;
+    for _ in 0..COMMON_POINT_STEPS {
+        let mut rows = [(0.0, Vec3::ZERO); 3];
+        for (row, a) in rows.iter_mut().zip(&eq) {
+            *row = implicit_value(a, x)?;
+        }
+        let [(f0, g0), (f1, g1), (f2, g2)] = rows;
+        let det = g0.dot(g1.cross(g2));
+        let scale = g0.length() * g1.length() * g2.length();
+        if det.is_nan() || det.abs() <= EFF_ZERO * scale {
+            return None;
+        }
+        // Cramer's rule for g_i . dx = -f_i
+        let dx = (g1.cross(g2) * -f0 + g2.cross(g0) * -f1 + g0.cross(g1) * -f2) / det;
+        x += dx;
+        if dx.length() <= 4.0 * f64::EPSILON * size {
+            return Some(x);
+        }
+    }
+    None
+}
+
 impl<O: ClassObject> VertexDefinition<O> {
+    /// Not upstream (#3062): where this definition is a crossing of an edge of one B-rep
+    /// (between two faces) and a face of the other, all three on planes, cylinders, cones or
+    /// spheres, it is placed at their common point, solved on the surfaces from its
+    /// position: a curve crossing the edge at a grazing angle fixes the crossing along the
+    /// edge only to the tolerance over the angle's sine, and the curves meeting there each
+    /// come within tolerance of the third face at a different point. Moved only within the
+    /// definition's own tolerance. Returns whether it moved.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology walks.
+    pub fn place_on_three_surfaces(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+    ) -> Result<bool> {
+        let (edge_pc, face_pc) = match (self.pc1.point_class(), self.pc2.point_class()) {
+            (PointClassType::Edge, PointClassType::Face) => (self.pc1, self.pc2),
+            (PointClassType::Face, PointClassType::Edge) => (self.pc2, self.pc1),
+            _ => return Ok(false),
+        };
+        let (Some(eo), Some(fo)) = (edge_pc.object(), face_pc.object()) else {
+            return Ok(false);
+        };
+        let (Some((eb, EntityRef::Edge(e))), Some((fb, EntityRef::Face(f)))) =
+            (geometry.topology_entity(eo), geometry.topology_entity(fo))
+        else {
+            return Ok(false);
+        };
+        let [a, b] = edge::faces(eb, e, None)?[..] else {
+            return Ok(false);
+        };
+        let (Some(sa), Some(sb), Some(sf)) = (
+            crate::topology::face::p2::surface(eb, a)?,
+            crate::topology::face::p2::surface(eb, b)?,
+            crate::topology::face::p2::surface(fb, f)?,
+        ) else {
+            return Ok(false);
+        };
+        let Some(x) = common_point([sa, sb, sf], self.position) else {
+            return Ok(false);
+        };
+        let moved = x.distance(self.position);
+        if moved.is_nan() || moved > self.tolerance(k) {
+            return Ok(false);
+        }
+        self.position = x;
+        Ok(true)
+    }
+
     /// `SmVertexDefinition(pCtx, cpPC1, cpPC2, rPosition, dTol, dGap, pOwner)`: copies
     /// the classifications and computes their parameters at `position` when unset
     /// (statuses ignored); a non-positive `gap` becomes the distance between the two
@@ -2939,10 +3054,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // Placed again by a crossing that fixes it more closely, it moves this
         // ProtoVertex, the average of its VertexDefinitions, with it.
         let old = self.vd(vd)?.position;
-        let moved = self
+        let def = self
             .vertex_def_mut(vd)
-            .ok_or(dangling("vertex definition is deleted"))?
-            .place_by_crossing(k, geometry, pc1, pc2, crossing_sine)?;
+            .ok_or(dangling("vertex definition is deleted"))?;
+        let crossed = def.place_by_crossing(k, geometry, pc1, pc2, crossing_sine)?;
+        // (#3062) and then on its three faces' common point, where it has one
+        let moved = def.place_on_three_surfaces(k, geometry)? || crossed;
         if moved {
             let (new, vd_tol) = {
                 let v = self.vd(vd)?;

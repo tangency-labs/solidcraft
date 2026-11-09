@@ -78,7 +78,10 @@ fn taken(r: f64) -> f64 {
 
 #[test]
 fn the_upright_round_runs_on_until_it_leaves_the_material() {
-    for r in [2.0, 1.0] {
+    // r 0.48 to 0.65 (#3062): where the round crosses the seam of the r 5 and r 3 rounds,
+    // near (60, 40 - r, 17), the r 5 round's curve with the upright meets the r 3 round at a
+    // grazing angle, so the vertex there is the three faces' common point
+    for r in [2.0, 1.0, 0.7, 0.65, 0.6, 0.55, 0.5, 0.48, 0.45, 0.42] {
         let b = rounded();
         let v0 = volume(&b);
         let e = edge_at(&b, [60.0, 40.0, 8.0]);
@@ -90,4 +93,63 @@ fn the_upright_round_runs_on_until_it_leaves_the_material() {
         let want = v0 - taken(r);
         assert!(rel(volume(&b), want) < 1e-8, "r {r}: {} {want}", volume(&b));
     }
+}
+
+/// #3062: at r 0.5 the edges at the vertex where the upright crosses the seam of the r 5 and
+/// r 3 rounds lie on both their faces' surfaces along their last stretch (the continued
+/// span, 1.2e-4 long, and on), within each edge's tolerance: measured at 200 points of the
+/// last 1e-3 of each edge's length, by dropping each point on each face's surface.
+#[test]
+fn the_edges_at_the_grazing_crossing_lie_on_their_faces() {
+    use solidcore::surface::surface::p4::NoObject;
+    use solidcore::surface::surface::p5::DropPointOptions;
+    use solidcore::topology::{edge, edgeuse, face, vertex};
+    let r = 0.5;
+    let b = rounded();
+    let e = edge_at(&b, [60.0, 40.0, 8.0]);
+    blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    let (k, brep) = kernel_copy(&b);
+    let near = solidcore::math::Point3::new(60.0, 40.0 - r, 17.0);
+    let mut seen = 0;
+    for &e in brep.edge_list() {
+        let curve = edge::curve(&brep, e).unwrap().unwrap();
+        let ivl = edge::interval(&brep, e).unwrap();
+        let ends = [
+            (edge::start_vertex(&brep, e).unwrap(), ivl.min()),
+            (edge::end_vertex(&brep, e).unwrap(), ivl.max()),
+        ];
+        for (v, at) in ends {
+            let Some(v) = v else { continue };
+            let p = vertex::point(&brep, v).unwrap();
+            if p.distance(near) > 0.2 || (p.z - 17.0).abs() < 1e-6 {
+                continue;
+            }
+            seen += 1;
+            let tol = edge::tolerance(&brep, e).unwrap();
+            let span = 1e-3 * ivl.length();
+            for eu in edge::edgeuses(&brep, e, None, None).unwrap() {
+                let f = edgeuse::p1::face(&brep, eu).unwrap().unwrap();
+                let s = face::p2::surface(&brep, f).unwrap().unwrap();
+                let dom = s.natural_uv_domain_with_nurb(&k).unwrap();
+                let mut worst = 0.0_f64;
+                for i in 0..=200 {
+                    let t = if at == ivl.min() {
+                        at + span * f64::from(i) / 200.0
+                    } else {
+                        at - span * f64::from(i) / 200.0
+                    };
+                    let x = curve.evaluate_point(&k, t).unwrap();
+                    let d = s
+                        .drop_point::<NoObject>(&k, x, &dom, &DropPointOptions::default())
+                        .unwrap();
+                    worst = worst.max(d.gap);
+                }
+                assert!(
+                    worst <= tol,
+                    "{e:?} on {f:?}: {worst:e} off, tolerance {tol:e}"
+                );
+            }
+        }
+    }
+    assert!(seen >= 3, "the crossing's three edges, found {seen}");
 }
