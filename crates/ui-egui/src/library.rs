@@ -16,7 +16,7 @@ use solidcraft_engine::geom::Vec3Geom as _;
 
 use crate::SolveApp;
 use crate::prefs::LibrarySize;
-use crate::theme::{TabAccent, Tokens};
+use solidcraft_theme::{TabAccent, Tokens};
 use crate::ui_kit::{Container, PartCard, PartCardSize, PartFace, Surface};
 
 /// Most entries listed from one folder (a share can hold thousands).

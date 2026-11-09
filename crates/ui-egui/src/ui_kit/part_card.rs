@@ -3,7 +3,7 @@
 //! button that starts the library's breadcrumb. Tokens only; the Model accent marks a selection.
 use egui::{Response, Sense, TextureId, Ui, vec2};
 
-use crate::theme::{TabAccent, Tokens};
+use solidcraft_theme::{TabAccent, Tokens};
 
 /// The library's card sizes: three Small, two Medium or one Large across the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
