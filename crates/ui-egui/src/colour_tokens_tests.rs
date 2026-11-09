@@ -202,6 +202,36 @@ const COLOUR_LITERALS: &[&str] = &[
     "Color32::LIGHT_YELLOW",
 ];
 
+/// How many colour literals the code of a source file holds, outside its test-only items.
+fn colour_literals(src: &str) -> Result<usize, String> {
+    // Code from the first test-only item on (test code and the kit's test fixtures) is not drawn.
+    let code = src.split("#[cfg(test)]").next().unwrap_or(src);
+    let code = code.split(r#"#[cfg(any(test, feature = "test-support"))]"#).next().unwrap_or(code);
+    Ok(COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum())
+}
+
+/// A test helper in the middle of a file hides neither the code after it nor that code's
+/// colours (#13497); the test-only items themselves are not counted.
+#[test]
+fn a_colour_after_a_mid_file_test_helper_is_counted() {
+    let src = r#"
+fn before() -> Color32 { Color32::from_rgb(1, 2, 3) }
+#[cfg(test)]
+fn helper() -> Color32 { Color32::RED }
+fn after() -> Color32 { Color32::from_gray(7) }
+impl Paint {
+    #[cfg(test)]
+    fn sample() -> Color32 { Color32::BLUE }
+    fn ink() -> Vec<Color32> { vec![Color32::WHITE] }
+}
+#[cfg(test)]
+mod tests {
+    fn more() -> Color32 { Color32::BLACK }
+}
+"#;
+    assert_eq!(colour_literals(src), Ok(3));
+}
+
 #[test]
 fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -228,10 +258,7 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
         if src.trim_start().starts_with("#![cfg(test)]") {
             return;
         }
-        // Code from the first test-only item on (test code and the kit's test fixtures) is not drawn.
-        let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
-        let code = code.split(r#"#[cfg(any(test, feature = "test-support"))]"#).next().unwrap_or(code);
-        let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
+        let n = colour_literals(&src).unwrap_or_else(|e| panic!("{relative}: {e}"));
         let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
         if n > allowed {
             found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
