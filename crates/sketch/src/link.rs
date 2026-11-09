@@ -299,7 +299,7 @@ enum LCurve {
     Spline(usize, usize, usize, usize, bool, u8, bool, Option<crate::Nurbs>),
 }
 
-fn layout(geom: &[LinkGeom]) -> Result<Layout> {
+fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
     if geom.len() > MAX_LINK_ENTITIES {
         return Err(SketchError::TooLarge);
     }
@@ -376,8 +376,9 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
     let curves = l.curves.clone();
     l.lone.retain(|i| !used(*i, &curves));
     // A face seen edge-on: every edge falls on one line, and one line end to end stands for
-    // them all (its vertices can be projected one by one).
-    if l.lone.is_empty() && l.curves.len() > 1 && flat(&l.curves, &l.pts) {
+    // them all (its vertices can be projected one by one). A section is not a projection: pieces
+    // on one line with a gap between them (a ring cut through its hole) stay apart (#14282).
+    if kind != LinkKind::Intersect && l.lone.is_empty() && l.curves.len() > 1 && flat(&l.curves, &l.pts) {
         let (a, b) = extent(&l.pts);
         l = Layout { pts: vec![a, b], lone: Vec::new(), curves: vec![LCurve::Line(0, 1)] };
     }
@@ -687,7 +688,7 @@ impl Sketch {
     /// and ends; other curves, and points on their own (the origin, a vertex), never count as
     /// present.
     pub fn link_geometry_present(&self, geom: &[LinkGeom]) -> bool {
-        let Ok(lay) = layout(geom) else { return false };
+        let Ok(lay) = layout(geom, LinkKind::Project) else { return false };
         if lay.curves.is_empty() || !lay.lone.is_empty() {
             return false;
         }
@@ -707,7 +708,7 @@ impl Sketch {
     /// Add linked geometry. Returns the link id; the new curve and point ids are
     /// [`Sketch::link_curves`] / [`Sketch::link_points`] of it.
     pub fn add_link(&mut self, kind: LinkKind, source: LinkSource, geom: &[LinkGeom]) -> Result<String> {
-        let lay = layout(geom)?;
+        let lay = layout(geom, kind)?;
         if lay.curves.is_empty() && lay.lone.is_empty() {
             return Err(SketchError::Invalid("the reference projects to nothing on this sketch plane".into()));
         }
@@ -776,10 +777,10 @@ impl Sketch {
     /// constraints and dimensions on them survive; otherwise the link is rebuilt. Returns
     /// `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
-        if self.link(id).is_none() {
+        let Some(kind) = self.link(id).map(|l| l.kind) else {
             return Err(SketchError::Unknown(id.into()));
-        }
-        let lay = layout(geom)?;
+        };
+        let lay = layout(geom, kind)?;
         if self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. }))
             && lay.lone.is_empty()
             && lay.curves.len() <= 512
