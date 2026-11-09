@@ -279,6 +279,33 @@ fn a_driven_dimension_to_an_origin_axis_reports_the_solved_value() {
     assert!((out["measured"].as_f64().unwrap_or(f64::NAN) - 7.0).abs() < 1e-6, "{out}");
 }
 
+/// A line parallel only to another free line still gets its Parallel to the axis: the two free
+/// lines could otherwise turn together and leave all but one end of the line off the distance.
+/// Once that other line's direction is fixed, the line's is too, and no Parallel is added.
+#[test]
+fn a_line_parallel_to_a_free_line_still_keeps_parallel_to_the_axis() {
+    let axis_parallels = |sk: &Sketch| {
+        let axis: Vec<usize> = (0..sk.curves.len()).filter(|c| sk.curves[*c].link.is_some()).collect();
+        sk.constraints
+            .iter()
+            .filter(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { a, b } if axis.contains(&a) || axis.contains(&b)))
+            .count()
+    };
+    for fixed in [false, true] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 20], [10, 20]], "ids": ["m"]}));
+        run(&mut s, "sketch.constraint.parallel", json!({"a": "l", "b": "m"}));
+        if fixed {
+            run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": "m", "mode": "horizontal"}));
+        }
+        run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+        let sk = sketch(&s);
+        assert_eq!(axis_parallels(&sk), usize::from(!fixed), "m fixed: {fixed}: {:?}", sk.constraints);
+        assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7 && (pt(&sk, "l.end").y.abs() - 12.0).abs() < 1e-7, "all of l is 12 from X");
+    }
+}
+
 /// An origin axis is `{"axis": "X"|"Y"|"Z"}`; lowercase `x`/`y` name the sketch's own axes, so
 /// `{"axis": "x"}` is refused and changes nothing.
 #[test]

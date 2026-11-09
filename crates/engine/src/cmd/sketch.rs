@@ -3627,26 +3627,10 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         new_id = id.clone();
         // The distance holds one end of the line; it stays parallel to the linked line so the
         // whole line keeps that distance, unless something already sets its direction.
-        if let Some((l, r)) = keep_parallel {
-            // The line's own ends, for Horizontal/Vertical set on its two points.
-            let ends = match sk.curves.get(l).map(|c| &c.kind) {
-                Some(CurveKind::Line { a, b }) => Some((*a, *b)),
-                _ => None,
-            };
-            let directed = sk.constraints.iter().filter(|c| !c.driven).any(|c| match c.kind {
-                ConstraintKind::HorizontalPoints { p, q } | ConstraintKind::VerticalPoints { p, q } => {
-                    ends.is_some_and(|(a, b)| (p == a && q == b) || (p == b && q == a))
-                }
-                ConstraintKind::Horizontal { l: x } | ConstraintKind::Vertical { l: x } | ConstraintKind::LineAngle { l: x, .. } => x == l,
-                ConstraintKind::Parallel { a, b }
-                | ConstraintKind::Collinear { a, b }
-                | ConstraintKind::Perpendicular { a, b }
-                | ConstraintKind::Angle { a, b, .. } => a == l || b == l,
-                _ => false,
-            });
-            if !directed {
-                sk.add_constraint(ConstraintKind::Parallel { a: l, b: r }, None)?;
-            }
+        if let Some((l, r)) = keep_parallel
+            && !direction_fixed(sk, l)
+        {
+            sk.add_constraint(ConstraintKind::Parallel { a: l, b: r }, None)?;
         }
         place_text(sk, &id, text_at);
         Ok((pname, name, measured(is_angle, cur)))
@@ -3716,6 +3700,58 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
 /// A dimension's measured value as reported, in the unit its expression is written in.
 fn measured(is_angle: bool, v: f64) -> (f64, &'static str) {
     if is_angle { (round6(v.to_degrees()), "deg") } else { (round6(v), "mm") }
+}
+
+/// Whether the sketch's constraints already fix line `l`'s direction: a Horizontal, Vertical or
+/// angle on it (or Horizontal/Vertical on its two ends), or a Parallel, Collinear, Perpendicular
+/// or Angle to a line whose direction is fixed or which is linked (an axis, a projected edge).
+/// A relation to free lines only makes them turn together, so it does not count.
+fn direction_fixed(sk: &Sketch, l: usize) -> bool {
+    let absolute = |x: usize| {
+        let ends = match sk.curves.get(x).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        };
+        sk.constraints.iter().filter(|c| !c.driven).any(|c| match c.kind {
+            ConstraintKind::HorizontalPoints { p, q } | ConstraintKind::VerticalPoints { p, q } => {
+                ends.is_some_and(|(a, b)| (p == a && q == b) || (p == b && q == a))
+            }
+            ConstraintKind::Horizontal { l: y } | ConstraintKind::Vertical { l: y } | ConstraintKind::LineAngle { l: y, .. } => y == x,
+            _ => false,
+        })
+    };
+    let linked = |x: usize| sk.curves.get(x).is_some_and(|c| c.link.is_some());
+    let mut seen = vec![l];
+    let mut next = vec![l];
+    while let Some(x) = next.pop() {
+        if absolute(x) || (x != l && linked(x)) {
+            return true;
+        }
+        for c in sk.constraints.iter().filter(|c| !c.driven) {
+            let other = match c.kind {
+                ConstraintKind::Parallel { a, b }
+                | ConstraintKind::Collinear { a, b }
+                | ConstraintKind::Perpendicular { a, b }
+                | ConstraintKind::Angle { a, b, .. } => {
+                    if a == x {
+                        Some(b)
+                    } else if b == x {
+                        Some(a)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(o) = other
+                && !seen.contains(&o)
+            {
+                seen.push(o);
+                next.push(o);
+            }
+        }
+    }
+    false
 }
 
 /// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
