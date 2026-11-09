@@ -169,10 +169,15 @@ pub fn upload_limit(extensions: &[&str]) -> Option<usize> {
     (!extensions.is_empty() && extensions.iter().all(image)).then_some(solidcraft_engine::doc::canvas::MAX_CANVAS_BYTES)
 }
 
-/// The file type a Save As dialog offers for `name`: (description, MIME type, extension).
-pub fn save_type(name: &str) -> (&'static str, &'static str, &'static str) {
-    let json = std::path::Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"));
-    if json { ("Plain JSON design", "application/json", ".json") } else { ("SolidCraft design", "application/octet-stream", ".solidcraft") }
+/// The file type a Save As dialog offers for `name`: (description, MIME type, extension). A
+/// design is `.sc` unless the name already has an older design extension, which it keeps.
+pub fn save_type(name: &str) -> (&'static str, &'static str, String) {
+    let ext = std::path::Path::new(name).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("json") => ("Plain JSON design", "application/json", ".json".into()),
+        Some(e) if solidcraft_engine::io::is_design_ext(e) => ("SolidCraft design", "application/octet-stream", format!(".{e}")),
+        _ => ("SolidCraft design", "application/octet-stream", format!(".{}", solidcraft_engine::io::DESIGN_EXT)),
+    }
 }
 
 /// Is this a cancelled dialog (the browser's `AbortError`)? Not an error to show.
@@ -264,7 +269,7 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"suggestedName".into(), &name.into());
         let (description, mime, extension) = save_type(name);
-        let _ = Reflect::set(&options, &"types".into(), &types(description, mime, extension));
+        let _ = Reflect::set(&options, &"types".into(), &types(description, mime, &extension));
         options
     }
 
@@ -349,7 +354,9 @@ mod web {
         let options = Object::new();
         let _ = Reflect::set(&options, &"multiple".into(), &JsValue::FALSE);
         let extensions = Array::new();
-        for e in [".solidcraft", ".solvecraft", ".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"] {
+        let designs = solidcraft_engine::io::DESIGN_EXTS.iter().map(|e| format!(".{e}"));
+        let others = [".json", ".step", ".stp", ".3mf", ".stl", ".obj", ".glb", ".gltf", ".fcstd", ".3dm", ".dxf", ".svg"].map(String::from);
+        for e in designs.chain(others) {
             extensions.push(&e.into());
         }
         let accept = Object::new();
@@ -460,7 +467,7 @@ mod web {
 
     async fn open_db() -> Result<IdbDatabase, String> {
         let factory = web_sys::window().ok_or("no window")?.indexed_db().map_err(err)?.ok_or("this browser has no IndexedDB")?;
-        let request: IdbOpenDbRequest = factory.open_with_u32(DB, 1).map_err(err)?;
+        let request: IdbOpenDbRequest = factory.open_with_u32(&crate::channel::key(DB), 1).map_err(err)?;
         let target = request.clone();
         let upgrade = Closure::once_into_js(move || {
             if let Ok(db) = target.result().and_then(|r| r.dyn_into::<IdbDatabase>()) {
@@ -546,7 +553,7 @@ mod web {
     /// Open a design remembered from an earlier session (a recent one, after a reload): ask once
     /// for access to the file (call in the click), read it into the engine's files and queue it
     /// to open. A file that is gone is forgotten and dropped from the recent designs.
-    pub fn restore(files: &Rc<Files>, path: &str) {
+    pub fn restore(files: &Rc<Files>, path: &str, on_opened: Option<Box<dyn FnOnce()>>) {
         let Some((id, name)) = parse(path) else { return };
         let (files, path, id, name) = (files.clone(), path.to_string(), id.to_string(), name.to_string());
         spawn_local(async move {
@@ -561,6 +568,9 @@ mod web {
                     files.opened.borrow_mut().push(path);
                     files.wake();
                     touch(&id).await;
+                    if let Some(done) = on_opened {
+                        done();
+                    }
                 }
                 Err(e) => {
                     let gone = e.contains("NotFoundError") || e.contains("could not be found") || e.contains("no longer remembers");
@@ -667,6 +677,7 @@ mod tests {
     #[test]
     fn only_design_opens_use_the_disk_dialog() {
         assert!(opens_design(&[]));
+        assert!(opens_design(&["sc"]));
         assert!(opens_design(&["solidcraft"]));
         assert!(opens_design(&["solvecraft"]));
         assert!(!opens_design(&["step", "stp"]));
@@ -710,9 +721,11 @@ mod tests {
 
     #[test]
     fn the_save_dialog_offers_the_type_of_the_name() {
-        assert_eq!(save_type("Plate.solidcraft").2, ".solidcraft");
+        assert_eq!(save_type("Plate.sc").2, ".sc");
         assert_eq!(save_type("Plate.JSON").2, ".json");
-        assert_eq!(save_type("Plate").2, ".solidcraft");
+        assert_eq!(save_type("Plate").2, ".sc");
+        // A design opened under an older extension keeps it.
+        assert_eq!(save_type("Plate.solidcraft").2, ".solidcraft");
     }
 
     #[test]

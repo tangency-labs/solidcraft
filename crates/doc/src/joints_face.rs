@@ -4,9 +4,11 @@
 //! A round origin's end is kept by the name of the face across the rim at that end, so it is the
 //! same end after the design changes; an x reference keeps the origin's turn about its axis.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::{Loop2, Mesh, Plane, Ring, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+use solidcraft_geom::{Mesh, Ring};
 use solidcraft_kernel::CylinderFace;
 
 use super::{Snap, XRef, component_bodies};
@@ -32,17 +34,16 @@ fn gone(name: &str) -> DocError {
 
 /// The face called `name` on the bodies of `component` nearest `pick` (an error when it is gone:
 /// a joint must not quietly attach elsewhere). Each body is looked at in its own coordinates, and
-/// a face the name finds exactly comes before a piece of it or a face it was merged into. Only the
-/// component's own bodies: the parts of one STEP import share their face names, and another
+/// the nearest of the faces the name finds is taken. Only the component's own bodies: the parts of one STEP import share their face names, and another
 /// part's face of that name can lie nearer the pick than this part's own.
 pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, component: u64, pick: Vec3, name: &str) -> Result<NamedFace<'a>> {
     let own = component_bodies(doc, st, component).into_iter().filter_map(|body| {
         let offset = doc.model_body_offset(body).copied().unwrap_or(IDENTITY);
-        let (face, at, inexact) = crate::naming::face_on_body(body, name, apply_point(&mat_inverse(&offset)?, pick))?;
+        let (face, at) = crate::naming::face_on_body(body, name, apply_point(&mat_inverse(&offset)?, pick))?;
         let point = apply_point(&offset, at);
-        Some(((inexact, point.dist(pick)), NamedFace { body, face, point, offset }))
+        Some((point.dist(pick), NamedFace { body, face, point, offset }))
     });
-    if let Some((_, nf)) = own.min_by(|(a, _), (b, _)| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1))) {
+    if let Some((_, nf)) = own.min_by(|(a, _), (b, _)| a.total_cmp(b)) {
         return Ok(nf);
     }
     // On none of them (the face's body has gone to another component since): wherever the name
@@ -53,7 +54,7 @@ pub(super) fn named_face<'a>(doc: &Document, st: &'a ModelState, component: u64,
         return Ok(NamedFace { body, face: hit.face, point: hit.point, offset: IDENTITY });
     };
     let inv = mat_inverse(&offset).ok_or_else(|| gone(name))?;
-    let (face, at, _) = crate::naming::face_on_body(body, name, apply_point(&inv, pick)).ok_or_else(|| gone(name))?;
+    let (face, at) = crate::naming::face_on_body(body, name, apply_point(&inv, pick)).ok_or_else(|| gone(name))?;
     Ok(NamedFace { body, face, point: apply_point(&offset, at), offset })
 }
 

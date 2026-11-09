@@ -33,6 +33,15 @@ service worker after the code that registered it is gone, so to switch it off de
 `apps/solidcraft-web/sw.js` unbuilt (as `trunk serve` builds do): it deletes what it kept and
 unregisters. A site without `build.json` is also safe: launches then go to the network.
 
+The site serves the web app three ways (`packaging/web-channels.sh`, run by `pages.yml`):
+`/app/` is the web zip attached to the latest release that is not a pre-release, `/app-rc/` the
+zip of the newest published `v*-rc.N` pre-release (a page saying there is none, when it is not
+newer than the release), and `/app-edge/` the build of `main`. Publishing a release or
+pre-release deploys the site again through `flatpak-pages.yml`. The directories are separate
+because a service worker controls everything beneath its own, and each pre-release channel keeps
+its browser storage under its own names (`apps/solidcraft-web/src/channel.rs`), so a design saved
+in one can't reach another. Nightly tags (`vX.Y.Z-nightly...`) are not release candidates.
+
 ## Nightly prereleases
 
 `release.yml` also runs at midnight in `America/New_York` (Eastern time, following daylight
@@ -71,10 +80,11 @@ deployment. The stable Flatpak repository is not automatically updated with nigh
    `Cargo.lock` (it changes only our own crates, never dependency versions, and needs no
    network). Inspect the diff: only `version = ` lines of workspace crates should change.
    SolidCraft does not currently implement `cargo xtask version set`.
-3. Fix the design format number: run `scripts/fold-format-pending.sh`. It moves the pending
-   format changes (`crates/doc/src/format/pending/*.rs`) into the next `crates/doc/src/format/v<N>/`
-   folder, so the release writes and reads that number for good, and does nothing when nothing
-   is pending. Commit the move with the version files. (CONTRIBUTING.md, "Changing the design
+3. Fix the file format numbers: run `scripts/fold-format-pending.sh`. It moves the pending
+   format changes of designs (`crates/doc/src/format/pending/*.rs`) and of drawings
+   (`crates/doc/src/drawing/format/pending/*.rs`) into each one's next `v<N>/` folder, so the
+   release writes and reads those numbers for good, and does nothing for a family with nothing
+   pending. Commit the move with the version files. (CONTRIBUTING.md, "Changing the design
    file format".)
 4. Run `cargo xtask ci` and the packaging checks in `.github/workflows/packaging-lint.yml`.
    Commit the version files through the normal review flow and land them on `main`.

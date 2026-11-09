@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a 5 mm deep pocket's rim edges chamfered 5.5: the legs run 0.5 past the walls' bottom, so it builds as if the walls went on below the floor, a groove 0.5 deep round the floor's edge",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each convex rim edge loses the triangle d^2/2 along its length (100 in all); at each pocket corner the two chamfers run on past it and meet in a mitre, the quadrant losing what both remove: points (s, t) past both walls with s + u < d and t + u < d (u the depth), int_0^d (d-u)^2 du = d^3/3: removed = 50 d^2 + (4/3) d^3. d = 5.5 runs 0.5 past the walls' bottom (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches or runs past a rim builds): the chamfers are built as if the walls went on below the floor and what they take is cut from the plate; the formula holds as it is, its section at depth u in [5, 5.5] being the ring between the floor's rectangle and the rectangle grown by d - u, a groove round the floor's edge (the floor's own rectangle is not part of the blends). Faces: the plate's 6, the floor, the 4 chamfers and the groove's 4 walls (the walls' planes from z = 4.5 to 5): 15. Removed 1734.333333. V = 19265.666667.",
+ "body_count": 1,
+ "volume_mm3": 19265.666666666668,
+ "faces": 15,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

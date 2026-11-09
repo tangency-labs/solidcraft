@@ -929,6 +929,7 @@ impl Slicer {
 
     /// Whether this is a PrusaSlicer old enough that its `--single-instance-on-url` does not hand a
     /// file over, by the version read when it was detected.
+    #[cfg(not(target_arch = "wasm32"))]
     fn url_flag_swaps(&self) -> bool {
         self.target().on_url_swap_below.is_some_and(|below| self.prusa_major.is_some_and(|v| v < below))
     }
@@ -946,11 +947,12 @@ impl Slicer {
     }
 
     pub(crate) fn ready_via(&self, busctl: &str, limit: std::time::Duration) -> Option<bool> {
-        let rule = self.waits_for_ready()?;
-        match bus_list(busctl, limit) {
-            Bus::Names(list) => Some(has_bus_name(&list, rule.bus_prefix)),
-            Bus::Slow => Some(false),
-            Bus::Unknown => None,
+        match (self.waits_for_ready()?, bus_list(busctl, limit)) {
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
+            (rule, Bus::Names(list)) => Some(has_bus_name(&list, rule.bus_prefix)),
+            #[cfg(all(unix, not(target_arch = "wasm32")))]
+            (_, Bus::Slow) => Some(false),
+            (_, Bus::Unknown) => None,
         }
     }
 }
@@ -984,8 +986,10 @@ pub const PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 #[derive(Debug, PartialEq, Eq)]
 enum Bus {
     /// The names, one line each.
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
     Names(String),
     /// `busctl` did not answer in time: nothing is known yet, which is not the same as "not up".
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
     Slow,
     /// `busctl` is missing, failed, or this is not a system that has it: it can't be told.
     Unknown,
@@ -1048,11 +1052,13 @@ fn bus_list(program: &str, limit: std::time::Duration) -> Bus {
 }
 
 /// The first column of each line: the bus names.
+#[cfg(any(test, all(unix, not(target_arch = "wasm32"))))]
 fn bus_names(list: &str) -> impl Iterator<Item = &str> {
     list.lines().filter_map(|l| l.split_whitespace().next())
 }
 
 /// Whether the list has a name that starts with `prefix`.
+#[cfg(any(test, all(unix, not(target_arch = "wasm32"))))]
 fn has_bus_name(list: &str, prefix: &str) -> bool {
     bus_names(list).any(|n| n.starts_with(prefix))
 }

@@ -15,6 +15,17 @@ pub(crate) fn transport_glyph(p: &egui::Painter, c: egui::Pos2, what: &str, col:
         }
         "back" => tri(-1.0, 0.0),
         "forward" => tri(1.0, 0.0),
+        // Play History: larger than the step arrows so it doesn't read as Forward, and two bars
+        // while it plays.
+        "play" => {
+            let pts = vec![pos2(c.x - 4.5, c.y - 7.0), pos2(c.x + 6.5, c.y), pos2(c.x - 4.5, c.y + 7.0)];
+            p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+        }
+        "pause" => {
+            for dx in [-3.0, 3.0] {
+                p.rect_filled(Rect::from_center_size(pos2(c.x + dx, c.y), vec2(3.0, 12.0)), 0.5, col);
+            }
+        }
         _ => {
             tri(1.0, -1.0);
             bar(5.0);
@@ -99,7 +110,7 @@ pub(crate) fn breadcrumb(p: &egui::Painter, c: egui::Pos2, col: Color32) {
 }
 
 pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
-    brand_mark_styled(p, c, 20.0, crate::theme::Tokens::get().logo, true);
+    brand_mark_styled(p, c, 20.0, solidcraft_theme::Tokens::get().logo, true);
 }
 
 /// The same original mark as a single quiet silhouette, without face seams or outlines.
@@ -116,7 +127,7 @@ fn brand_mark_styled(p: &egui::Painter, c: Pos2, height: f32, colours: [Color32;
     };
     // The faces are separated by gaps that show the application bar, not by white lines.
     let [light, mid, dark] = colours;
-    let edge_col = crate::theme::Tokens::get().app_bar;
+    let edge_col = solidcraft_theme::Tokens::get().app_bar;
     face(light, &[(3.5, 105.9), (177.0, 5.8), (263.4, 55.6), (263.8, 156.0), (177.0, 406.4)]);
     face(light, &[(177.0, 206.1), (263.8, 156.0), (350.5, 206.2), (350.5, 306.3), (177.0, 406.4)]);
     face(mid, &[(3.5, 105.9), (177.0, 206.1), (177.0, 406.4)]);

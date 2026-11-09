@@ -49,7 +49,7 @@ mod convert {
     pub(super) fn policy() -> DecodePolicy {
         DecodePolicy {
             mode: DecodeMode::Salvage,
-            limits: ResourceLimits { max_input_bytes: crate::MAX_STEP_BYTES as u64, ..ResourceLimits::service() },
+            limits: ResourceLimits { max_input_bytes: crate::limits::Kind::Step.limit(), ..ResourceLimits::service() },
         }
     }
 

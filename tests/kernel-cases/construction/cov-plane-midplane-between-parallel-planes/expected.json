@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the midplane of XY and a box's top",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): halfway between z = 0 and z = 20: z = 10",
+ "construction": {
+  "M": {
+   "plane": {
+    "through": [
+     5,
+     5,
+     10
+    ],
+    "normal": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}

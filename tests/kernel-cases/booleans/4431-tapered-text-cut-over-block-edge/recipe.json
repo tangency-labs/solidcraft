@@ -1,0 +1,69 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     105,
+     26
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 40
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      50,
+      13,
+      40
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.text",
+   "params": {
+    "text": "textvraiment tres long",
+    "at": [
+     -6,
+     20
+    ],
+    "height": 7.81
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Sketch2",
+    "distance": "-1 mm",
+    "operation": "cut",
+    "taper": "-5 deg"
+   }
+  }
+ ]
+}

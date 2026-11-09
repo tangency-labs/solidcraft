@@ -1,0 +1,447 @@
+{
+  "id": "95-plate-rounded-top-chamfer",
+  "name": "Workshop plate with four R10 corner rounds and full upper 2 mm chamfer",
+  "description": "100 x 80 x 20 mm workshop plate, Ø10 through-bores, four R10 vertical corner rounds and full upper perimeter 2 mm chamfer.",
+  "exercises": [
+    "extrude",
+    "hole_through_all",
+    "drawing_w23_acceptance",
+    "chamfer",
+    "fillet"
+  ],
+  "units": {
+    "length": "mm",
+    "angle": "deg",
+    "area": "mm2",
+    "volume": "mm3"
+  },
+  "conventions": {
+    "world": "right-handed; Z up. XY/XZ/YZ are the origin planes.",
+    "sketch_frame": "sketch-local 2D coords; world = plane.origin + x*plane.x_dir + y*plane.y_dir (origin in mm). Profile 'loops' list sketch entity ids.",
+    "point_refs": "'<id>.start' / '<id>.end' / '<id>.center' reuse (share) that existing sketch point; 'at' is its position when referenced.",
+    "extrude_direction": "positive = along sketch plane normal unless stated",
+    "selections": "selected faces/edges carry 'point': a world-space point on the face / the edge's parametric midpoint; pick the nearest face/edge to it."
+  },
+  "parameters": [
+    {
+      "name": "length",
+      "expression": "100 mm",
+      "unit": "mm"
+    },
+    {
+      "name": "width",
+      "expression": "80 mm",
+      "unit": "mm"
+    },
+    {
+      "name": "thickness",
+      "expression": "20 mm",
+      "unit": "mm"
+    },
+    {
+      "name": "bore1_d",
+      "expression": "10 mm",
+      "unit": "mm"
+    },
+    {
+      "name": "bore2_d",
+      "expression": "10 mm",
+      "unit": "mm"
+    }
+  ],
+  "features": [
+    {
+      "op": "sketch",
+      "name": "StockSketch",
+      "plane": {
+        "ref": "XY",
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "x_dir": [
+          1,
+          0,
+          0
+        ],
+        "y_dir": [
+          0,
+          1,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      },
+      "entities": [
+        {
+          "type": "line",
+          "start": {
+            "at": [
+              0,
+              0
+            ]
+          },
+          "end": {
+            "at": [
+              100,
+              0
+            ]
+          },
+          "id": "l1"
+        },
+        {
+          "type": "line",
+          "start": {
+            "ref": "l1.end",
+            "at": [
+              100,
+              0
+            ]
+          },
+          "end": {
+            "at": [
+              100,
+              80
+            ]
+          },
+          "id": "l2"
+        },
+        {
+          "type": "line",
+          "start": {
+            "ref": "l2.end",
+            "at": [
+              100,
+              80
+            ]
+          },
+          "end": {
+            "at": [
+              0,
+              80
+            ]
+          },
+          "id": "l3"
+        },
+        {
+          "type": "line",
+          "start": {
+            "ref": "l3.end",
+            "at": [
+              0,
+              80
+            ]
+          },
+          "end": {
+            "ref": "l1.start",
+            "at": [
+              0,
+              0
+            ]
+          },
+          "id": "l4"
+        },
+        {
+          "type": "circle",
+          "id": "bore_circle_1",
+          "center": {
+            "at": [
+              20,
+              20
+            ]
+          },
+          "radius": 5,
+          "construction": true
+        },
+        {
+          "type": "circle",
+          "id": "bore_circle_2",
+          "center": {
+            "at": [
+              60,
+              50
+            ]
+          },
+          "radius": 5,
+          "construction": true
+        }
+      ],
+      "constraints": [
+        {
+          "type": "coincident",
+          "refs": [
+            "l1.start",
+            "origin"
+          ]
+        },
+        {
+          "type": "horizontal",
+          "refs": [
+            "l1"
+          ]
+        },
+        {
+          "type": "vertical",
+          "refs": [
+            "l2"
+          ]
+        },
+        {
+          "type": "horizontal",
+          "refs": [
+            "l3"
+          ]
+        },
+        {
+          "type": "vertical",
+          "refs": [
+            "l4"
+          ]
+        }
+      ],
+      "dimensions": [
+        {
+          "type": "distance",
+          "refs": [
+            "l1.start",
+            "l1.end"
+          ],
+          "value": "length",
+          "unit": "mm",
+          "orientation": "horizontal"
+        },
+        {
+          "type": "distance",
+          "refs": [
+            "l2.start",
+            "l2.end"
+          ],
+          "value": "width",
+          "unit": "mm",
+          "orientation": "vertical"
+        },
+        {
+          "type": "diameter",
+          "refs": [
+            "bore_circle_1"
+          ],
+          "value": "bore1_d",
+          "unit": "mm"
+        },
+        {
+          "type": "diameter",
+          "refs": [
+            "bore_circle_2"
+          ],
+          "value": "bore2_d",
+          "unit": "mm"
+        }
+      ]
+    },
+    {
+      "op": "extrude",
+      "name": "Stock",
+      "operation": "new",
+      "profiles": [
+        {
+          "sketch": "StockSketch",
+          "loops": [
+            {
+              "outer": true,
+              "curves": [
+                "l1",
+                "l2",
+                "l3",
+                "l4"
+              ]
+            }
+          ]
+        }
+      ],
+      "extent": {
+        "type": "distance",
+        "distance": "thickness",
+        "direction": "positive"
+      },
+      "result_bodies": [
+        "Plate"
+      ]
+    },
+    {
+      "op": "hole",
+      "name": "Bore1",
+      "hole_type": "simple",
+      "face": {
+        "type": "plane",
+        "normal_at_point_on_face": [
+          0,
+          0,
+          1
+        ],
+        "plane_normal_outward": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          50,
+          40,
+          20
+        ]
+      },
+      "position": [
+        20,
+        20,
+        20
+      ],
+      "direction": "into the material (-Z)",
+      "diameter": "bore1_d",
+      "extent": "through_all"
+    },
+    {
+      "op": "hole",
+      "name": "Bore2",
+      "hole_type": "simple",
+      "face": {
+        "type": "plane",
+        "normal_at_point_on_face": [
+          0,
+          0,
+          1
+        ],
+        "plane_normal_outward": [
+          0,
+          0,
+          1
+        ],
+        "point": [
+          50,
+          40,
+          20
+        ]
+      },
+      "position": [
+        60,
+        50,
+        20
+      ],
+      "direction": "into the material (-Z)",
+      "diameter": "bore2_d",
+      "extent": "through_all"
+    },
+    {
+      "op": "fillet",
+      "name": "FourVerticalCornerRounds",
+      "type": "constant_radius",
+      "radius": 10,
+      "tangent_chain": false,
+      "edge_selection": "All four vertical exterior corner edges of the plate; far from both through bores",
+      "edges": [
+        {
+          "type": "line",
+          "start": [
+            0,
+            0,
+            0
+          ],
+          "end": [
+            0,
+            0,
+            20
+          ],
+          "point": [
+            0,
+            0,
+            10
+          ]
+        },
+        {
+          "type": "line",
+          "start": [
+            100,
+            0,
+            0
+          ],
+          "end": [
+            100,
+            0,
+            20
+          ],
+          "point": [
+            100,
+            0,
+            10
+          ]
+        },
+        {
+          "type": "line",
+          "start": [
+            100,
+            80,
+            0
+          ],
+          "end": [
+            100,
+            80,
+            20
+          ],
+          "point": [
+            100,
+            80,
+            10
+          ]
+        },
+        {
+          "type": "line",
+          "start": [
+            0,
+            80,
+            0
+          ],
+          "end": [
+            0,
+            80,
+            20
+          ],
+          "point": [
+            0,
+            80,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "op": "chamfer",
+      "name": "FullTopPerimeterChamfer",
+      "type": "equal_distance",
+      "distance": 2,
+      "tangent_chain": true,
+      "edge_selection": "Front top straight edge after all vertical corners are rounded; tangent follow the complete top loop",
+      "edges": [
+        {
+          "type": "line",
+          "start": [
+            10,
+            0,
+            20
+          ],
+          "end": [
+            90,
+            0,
+            20
+          ],
+          "point": [
+            50,
+            0,
+            20
+          ]
+        }
+      ]
+    }
+  ]
+}

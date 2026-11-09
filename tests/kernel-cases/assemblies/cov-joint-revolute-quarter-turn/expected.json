@@ -1,0 +1,44 @@
+{
+ "sources": [],
+ "what": "a revolute joint driven 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); revolute about z through the origin, driven to 90: (x,y) -> (-y,x), Arm's box becomes x -5..5, y 0..40",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       -5.0,
+       0.0,
+       0.0
+      ],
+      "max": [
+       5.0,
+       40.0,
+       10.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

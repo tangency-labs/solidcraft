@@ -15,13 +15,15 @@
 //! drawn triangles (#1064). Display only: the reference mesh the model reads, exports and the
 //! B-rep never change.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
 use solidcraft_engine::geom::tess::TessPlan;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).
 pub(crate) const TRIANGLE_BUDGET: usize = 6_000_000;
@@ -466,7 +468,15 @@ mod tests {
         let sag = mesh
             .triangles
             .iter()
-            .map(|t| t.map(|i| mesh.positions[i as usize]))
+            .zip(&mesh.tri_face)
+            // The side wall's own triangles: the flat caps have corners on the rim too.
+            .filter(|(_, f)| {
+                matches!(
+                    solidcraft_engine::kernel::face_surface(&b.body, **f as usize),
+                    Some(solidcraft_engine::kernel::FaceSurface::Cylinder { .. })
+                )
+            })
+            .map(|(t, _)| t.map(|i| mesh.positions[i as usize]))
             .filter(|t| t.iter().all(|p| (r(*p) - 10.0).abs() < 1e-9))
             .map(|[a, b, c]| 10.0 - r((a + b + c) * (1.0 / 3.0)))
             .fold(0.0, f64::max);

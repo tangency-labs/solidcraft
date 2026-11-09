@@ -1,0 +1,19 @@
+{
+ "sources": [],
+ "what": "the saddle edge of a tee: a branch R8 standing on a pipe R20, rounded r3",
+ "source": "analytic",
+ "method": "the ball's centre runs where the cylinders R23 and R11 meet, a quartic with no node: not rational, so the round is fitted (a B-spline within the fillet's tolerance). V0 = the pipes less the branch inside the pipe, integral over the branch's disc of sqrt(400 - y^2): 129767.064584659383; the round adds 62.888321009560, (1/3) of the flux of the position through the boundary of the material the round adds: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel), the spine written out by the branch's angle, (11 cos f, 11 sin f, sqrt(529 - 121 sin^2 f)).",
+ "body_count": 1,
+ "volume_mm3": 129829.95290566895,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "surface_types": [
+  "bspline",
+  "cylinder",
+  "plane"
+ ],
+ "continuity": {
+  "order": "g1"
+ }
+}

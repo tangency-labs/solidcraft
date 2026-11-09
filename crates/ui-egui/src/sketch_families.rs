@@ -10,6 +10,21 @@ pub struct Family {
 }
 
 pub const FAMILIES: &[Family] = &[
+    Family {
+        label: "Construction Line",
+        commands: &[
+            "sketch.construction_line",
+            "sketch.construction_line.horizontal",
+            "sketch.construction_line.vertical",
+            "sketch.construction_line.angle",
+            "sketch.construction_line.parallel",
+            "sketch.construction_line.perpendicular",
+            "sketch.construction_line.tangent_external",
+            "sketch.construction_line.tangent_at",
+            "sketch.construction_line.tangent_two",
+            "sketch.construction_line.bisector",
+        ],
+    },
     Family { label: "Line", commands: &["sketch.line", "sketch.line.midpoint"] },
     Family {
         label: "Rectangle",

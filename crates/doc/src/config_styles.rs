@@ -3,9 +3,10 @@ use super::Column;
 use crate::{DocError, Document, FeatureKind, ModelState, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
-pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcraft_geom::Plane>>) -> bool {
+pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcore_record::Plane>>) -> bool {
     let mut planes = planes.into_iter();
     let Some(Some(first)) = planes.next() else { return false };
     first.origin.is_finite() && first.x.is_finite() && first.y.is_finite() && planes.all(|plane| plane == Some(first))
@@ -279,13 +280,13 @@ impl Document {
             let count = body.body.face_sources().map_or(0, |sources| sources.len());
             let mut indices: Vec<_> = (0..count).filter(|index| side(*index, true)).collect();
             // A side drawn in collinear pieces is one face over all of them (#1788): a certificate
-            // made when the pieces were faces of their own finds it by the piece's name, which
-            // the joined face answers to.
+            // made when the pieces were faces of their own finds it by the piece's name, which is
+            // a name of the joined face too (one of its synonyms).
             if indices.is_empty() {
                 let names = crate::naming::names(body);
                 indices = (0..count)
                     .filter(|index| {
-                        side(*index, false) && crate::history_names::matches(&names, *index, &target.name) == Some(crate::history_names::Match::Alias)
+                        side(*index, false) && crate::history_names::matches(&names, *index, &target.name) == Some(crate::history_names::Match::Exact)
                     })
                     .collect();
             }

@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled trapezoidal Tr20x4 thread (ISO 2904) on a d20 shaft, six turns",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ISO 2904: 30 deg, H1 = P/2, crest flat P/2 (1 - tan15) = 0.366 P, external minor d3 = d - 2 (H1 + ac) = 15.5 (ac = 0.25 for P 2..5)",
+ "body_count": 1,
+ "volume_mm3": 6065.46543972,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

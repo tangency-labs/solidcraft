@@ -39,6 +39,7 @@ windows use the shared composition, including its header and fixed outer frame.
 | Feature forms, Parameters, material review, Redefine Sketch Plane | `dialogs`, `params_dialog`, `material_card_review`, `sketch_attachment_ui` → `Panel` | Adaptive feature surface; bounded anchors and pinned actions retained |
 | Sketch options | `sketch_palette` → `Panel` | Adaptive palette surface, preserving transparency |
 | Application bar, workspace and ribbon | `toolbar`, `shell` | Chrome hosts; adaptive card geometry comes from the shared policy |
+| Status bar | `status_bar` | Application-bar surface along the window's bottom edge; flat and full width in both layouts, allocated before History and the viewport and counted as covered by the shell |
 | Render settings | `render_workspace` | Panel host; existing right dock retained |
 | Preferences, managers, About, update/install/recovery/crash/issue prompts | `Window`, `Confirm` | System windows and modal sheets retain modality; these are not workspace sidebars |
 | BOM, Messages, mouse gestures, 3D mouse calibration | respective modules → `Window::show_body` | Shared header, tokenised frame and bounded body; native egui title bars/resize highlights and legacy report/width helpers removed |
@@ -47,7 +48,8 @@ windows use the shared composition, including its header and fixed outer frame.
 | Search, completions, colour and library popovers | `shortcut_box`, kit fields/choice/colour/table | Anchored popup containers; editor focus and completion semantics retained |
 | Dimension values, canvas placement values, canvas feedback and History resize seam | `dim_view`, `sketch_dims`, `canvas`, `timeline_left` | Model/control-anchored overlays; retain their coordinates rather than becoming docks |
 | Status and loading/progress messages | `viewport`, `open_meshing` | Notification surfaces independent of layout |
-| Navigation bar | `viewport` | Shared navigation surface; shell still computes its available canvas bounds |
+| Navigation bar | `navigation_bar_view` | Measured single-row Navigation surface; upward Popup menus use kit list rows; shell supplies the free canvas bounds |
+| Persistent viewport status items | `ui_kit::viewport_status` | Content-hugging ViewportStatus pill surface; anchored row and Popup key cards, independent of workspace docking |
 | OK and Cancel in the view's corner | `view_confirm` | Navigation surface in its own area; the viewport layout reserves its corner and the shell counts it as covered |
 | Home, model viewport, Render canvas and native Assistant window content | `home`, `lib`, `agent_chat/panel` | Central content hosts, not floating workspace panels |
 | Loading input shield | `file_load` | Explicit input shield; must remain interactive while CAD input is blocked |

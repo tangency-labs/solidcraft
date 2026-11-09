@@ -139,7 +139,7 @@ pub fn native_backends() -> wgpu::Backends {
     }
 }
 
-pub(crate) fn tier_of(t: wgpu::DeviceType) -> Tier {
+pub fn tier_of(t: wgpu::DeviceType) -> Tier {
     match t {
         wgpu::DeviceType::Cpu => Tier::Software,
         wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::VirtualGpu | wgpu::DeviceType::Other => Tier::Hardware,
@@ -169,7 +169,7 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
 }
 
 fn instance() -> wgpu::Instance {
-    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    let mut desc = crate::instance_descriptor_from_env();
     desc.backends = native_backends();
     wgpu::Instance::new(desc)
 }
@@ -201,18 +201,24 @@ pub fn survey(policy: Policy) -> Survey {
     Survey { backends: format!("{:?}", native_backends()), adapters: found, chosen, lands_on }
 }
 
-/// The Vulkan adapter `policy` picks among those `keep` accepts, with its report; `None` where
-/// the native backends (or `WGPU_BACKEND`) leave out Vulkan, as on macOS. The GPU path tracer
-/// runs on Vulkan only (#3217): D3D12 was never faster in our measurements and needs minutes to
-/// compile its shader at every start, where Vulkan keeps compiled pipelines between runs.
+/// The backends the GPU path tracer may use among the native ones: Vulkan, and Metal on macOS
+/// (D3D12 is out, #3217: it was never faster in our measurements and needs minutes to compile
+/// its shader at every start, where Vulkan keeps compiled pipelines between runs).
+pub fn path_backends() -> wgpu::Backends {
+    native_backends() & (wgpu::Backends::VULKAN | wgpu::Backends::METAL)
+}
+
+/// The path-tracer adapter `policy` picks among those `keep` accepts, with its report; `None`
+/// where `path_backends` is empty (`WGPU_BACKEND=dx12`) or no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn pick_vulkan(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> Option<(wgpu::Adapter, AdapterReport)> {
-    if !native_backends().contains(wgpu::Backends::VULKAN) {
+pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> Option<(wgpu::Adapter, AdapterReport)> {
+    let backends = path_backends();
+    if backends.is_empty() {
         return None;
     }
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-    desc.backends = wgpu::Backends::VULKAN;
-    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(wgpu::Backends::VULKAN));
+    desc.backends = backends;
+    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all.into_iter()
         .filter(|a| keep(&a.get_info()))
@@ -226,7 +232,15 @@ pub fn pick_vulkan(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) ->
 /// The adapter `policy` picks, with its report; `None` when no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    adapters(&instance())
+    pick_among(adapters(&instance()), policy)
+}
+
+/// The adapter `policy` picks among `found`, as [`pick`] picks among the native backends' (best
+/// first, the first whose tier the policy admits), with its report; `None` when none qualifies.
+/// For a caller with an instance of its own, such as the UI's offscreen tests.
+pub fn pick_among(mut found: Vec<wgpu::Adapter>, policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
+    found.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    found
         .into_iter()
         .map(|a| {
             let r = report(&a.get_info());

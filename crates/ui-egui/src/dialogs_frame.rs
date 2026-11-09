@@ -14,7 +14,7 @@ use crate::selection::{PROFILES, SKETCH_LINES, SelInput, SelectionExt as _};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 
 /// The anchors as `frame.member` names them, and their labels.
-const ANCHORS: [(&str, &str); 11] = [
+const ANCHORS: &[(&str, &str)] = &[
     ("origin", "Origin"),
     ("center", "Center"),
     ("centroid", "Centroid"),
@@ -70,7 +70,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 fn tr(text: &str) -> &str {
-    crate::i18n::tr_label(text)
+    solidcraft_ui_text::tr_label(text)
 }
 
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.

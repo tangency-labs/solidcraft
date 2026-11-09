@@ -7,7 +7,7 @@ use crate::Services;
 use crate::dialogs::{apply_commands, for_feature as edit_dialog};
 
 /// A 100 x 60 base flange on XY (2.5 mm steel).
-fn plate(mode: crate::shell::LayoutMode) -> SolveApp {
+fn plate(mode: crate::ui_kit::LayoutMode) -> SolveApp {
     let mut s = Session::default();
     s.execute("sketch.create", &json!({"plane": "XY", "name": "Base"})).unwrap();
     s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
@@ -21,7 +21,7 @@ fn plate(mode: crate::shell::LayoutMode) -> SolveApp {
 /// dialog's height, angle and bend position; Edit Feature brings the edges back.
 #[test]
 fn flange_follows_the_picks() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         let sk = app.session.doc.features[0].id;
         app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
@@ -95,7 +95,7 @@ fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.session.selection = edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).into_iter().collect();
@@ -133,7 +133,7 @@ fn hem_and_rules() {
 
 #[test]
 fn flat_exports_use_the_save_picker() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         use std::sync::{Arc, Mutex};
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
@@ -157,7 +157,7 @@ fn flat_exports_use_the_save_picker() {
 
 #[test]
 fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sketch.create", json!({"plane": "XY", "name": "Pocket"})).unwrap();
@@ -173,7 +173,7 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
         *data = Some(Ok(flat));
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("flat-pocket-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("flat-pocket-test")));
             assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), &dialog));
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -194,9 +194,38 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
     }
 }
 
+/// The Flat Pattern panel shows each side of the flat size, and the thickness, whole: on one row
+/// ("1250.00 mm × 1000.00 mm × 2.50 mm") the panel cut it off after the first side.
+#[test]
+fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
+    for layout in ["docked", "floating"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.call("ui.set", json!({"layout": layout}));
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1250, 1000]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        h.app.start("sheet.flat_pattern");
+        h.frames(4);
+        let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+            h.app.logic(ui.ctx());
+            h.app.ui(ui);
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).collect();
+        for (label, value) in [("Flat size X", "1250.00 mm"), ("Flat size Y", "1000.00 mm"), ("Thickness", "2.50 mm")] {
+            assert!(texts.iter().any(|t| t.galley.text() == label), "{layout}: no {label} row");
+            let shown = texts.iter().find(|t| t.galley.job.text == value).unwrap_or_else(|| panic!("{layout}: {label} {value} not painted"));
+            assert!(!shown.galley.elided, "{layout}: {label} is cut off");
+        }
+        assert!(!texts.iter().any(|t| t.galley.text().contains('×')), "{layout}: the sides are no longer run together");
+    }
+}
+
 #[test]
 fn flat_pattern_islands_fit_before_the_actual_command_panel() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sketch.create", json!({"plane": "XY", "name": "Retain"})).unwrap();
@@ -218,11 +247,11 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
         let viewport = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(1400.0, 832.0));
         let browser = Rect::from_min_max(viewport.min, viewport.min + vec2(250.0, 450.0));
         let history = Rect::from_min_max(pos2(viewport.left(), viewport.bottom() - 40.0), viewport.max);
-        if mode == crate::shell::LayoutMode::Floating {
+        if mode == crate::ui_kit::LayoutMode::Floating {
             app.shell.content = Some(Rect::from_min_max(pos2(browser.right(), viewport.top()), pos2(viewport.right(), history.top())));
         }
         let ctx = crate::fonts::test_context();
-        let id = egui::Id::new(("sc_dialog", "FLAT PATTERN"));
+        let id = egui::Id::unique(("sc_dialog", "FLAT PATTERN"));
         let mut output = egui::FullOutput::default();
         for _ in 0..3 {
             output =
@@ -233,7 +262,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
                         .show(ui.ctx(), |ui| {
                             ui.label("Flat size: 50 × 10 × 2.5 mm");
                         });
-                    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::new("island-fit")));
+                    let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("island-fit")));
                     assert!(overlay(
                         &mut app,
                         &painter,
@@ -257,7 +286,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
             outlines.iter().flat_map(|p| &p.points).all(|p| p.x <= panel.left() - 19.0),
             "both complete islands must remain exposed before the command panel: {panel:?}"
         );
-        if mode == crate::shell::LayoutMode::Floating {
+        if mode == crate::ui_kit::LayoutMode::Floating {
             assert!(
                 outlines.iter().flat_map(|p| &p.points).all(|p| !browser.contains(*p) && !history.contains(*p)),
                 "flat pattern fits clear of the shell cards"
@@ -268,7 +297,7 @@ fn flat_pattern_islands_fit_before_the_actual_command_panel() {
 
 #[test]
 fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch":"Base"})).unwrap();
         app.run("sketch.create", json!({"plane":"XY","name":"Retain"})).unwrap();
@@ -285,7 +314,7 @@ fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
         *data = Some(Ok(flat));
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("coincident-pocket-test")));
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("coincident-pocket-test")));
             assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), &dialog));
         });
         let labels: Vec<_> =
@@ -300,7 +329,7 @@ fn coincident_top_and_bottom_pocket_depths_share_a_readable_annotation() {
 
 #[test]
 fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         for (command, params) in [
@@ -337,7 +366,7 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn bend_table_picker_writes_the_current_body() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": 20})).unwrap();
@@ -365,7 +394,7 @@ fn bend_table_picker_writes_the_current_body() {
 /// made with it, and the dialog shows it the next time.
 #[test]
 fn rules_dialog_picks_the_corner_relief_shape() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app
@@ -382,7 +411,7 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         // The rounds in the base of the tray, and the shape the open dialog shows.
         let rounds = |app: &SolveApp| {
             let state = app.session.model.state();
-            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcraft_engine::geom::Seg2::Arc { .. })).count())
+            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
         };
         let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
             Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
@@ -418,7 +447,7 @@ fn rules_dialog_picks_the_corner_relief_shape() {
 /// of the part made with it, and the dialog shows it the next time.
 #[test]
 fn rules_dialog_sets_how_bend_angles_read() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "bend_radius": "1 mm", "active": true})).unwrap();
@@ -522,7 +551,7 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
 /// a shape and a size reach the feature, Edit Feature shows them again, and Rule takes them back.
 #[test]
 fn flange_dialog_picks_a_corner_relief_of_its_own() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app
@@ -576,7 +605,7 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
                 .state()
                 .sheets
                 .last()
-                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcraft_engine::geom::Seg2::Arc { .. })).count())
+                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
         };
         assert_eq!(arcs(&h.app), Some(1), "the round is cut at the one corner the two flanges make");
         // Edit Feature shows both again; Rule and an empty size take the feature back to the rule's relief.
@@ -598,7 +627,7 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
 
 #[test]
 fn pocket_depth_labels_follow_inches_without_changing_flat_data() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("document.units", json!({"units":"in"})).unwrap();
         assert_eq!(super::pocket_label(&app, &json!({"side":"top","depth_mm":25.4*0.1234})).as_deref(), Some("Top pocket: 0.1234 in deep"));
@@ -611,7 +640,7 @@ fn pocket_depth_labels_follow_inches_without_changing_flat_data() {
 /// brings them back and rebuilds the same flanges.
 #[test]
 fn edge_flanges_can_have_an_angle_and_a_height_of_their_own() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
@@ -674,7 +703,7 @@ fn edge_flanges_can_have_an_angle_and_a_height_of_their_own() {
 /// one flange command, one body and one undo step, and a bend with no height is refused.
 #[test]
 fn further_bends_in_the_flange_dialog_make_one_chained_flap() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
@@ -748,7 +777,7 @@ fn add_bend_and_remove_bend_buttons_work() {
 /// reaches the feature, and Edit Feature shows it again.
 #[test]
 fn flange_dialog_measures_the_height_from_the_chosen_datum() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
@@ -872,7 +901,7 @@ fn convert_takes_the_fixed_face_and_the_bend_edges() {
 /// and Edit Feature brings the edge and the path back.
 #[test]
 fn path_flange_dialog_follows_the_path() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         app.run("sheet.flange", json!({"edges": [[0, 30, 2.5]], "height": 30})).unwrap();
@@ -881,7 +910,7 @@ fn path_flange_dialog_follows_the_path() {
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Path"})).unwrap();
         app.run("sketch.line", json!({"points": [[0, 0], [a, -a], [a + 30.0, -a]], "ids": ["p1", "p2"]})).unwrap();
         app.run("sketch.finish", json!({})).unwrap();
-        let path = app.session.world_state().sketches.last().map(|ss| ss.feature);
+        let path = crate::open_meshing::session_world(&app.session).sketches.last().map(|ss| ss.feature);
         // A newer sketch with the same line ids: the picks name the path's sketch (#3726).
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 60], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Other"})).unwrap();
         app.run("sketch.line", json!({"points": [[50, 50], [60, 50], [60, 60]], "ids": ["p1", "p2"]})).unwrap();
@@ -920,7 +949,7 @@ fn path_flange_dialog_follows_the_path() {
 
 // ---- flat pattern navigation ----
 
-fn flat_app(preset: &str, mode: crate::shell::LayoutMode) -> SolveApp {
+fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
     let mut app = plate(mode);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
@@ -960,7 +989,7 @@ fn frame(app: &mut SolveApp, ctx: &egui::Context, time: &mut f64, mods: egui::Mo
 /// cursor. The flat view never orbits.
 #[test]
 fn flat_pattern_pans_and_zooms_like_the_design_viewport() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         use egui::{Event, Modifiers, PointerButton};
         let none = Modifiers::NONE;
         let chords = [none, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::ALT, Modifiers::SHIFT | Modifiers::ALT];
@@ -1020,8 +1049,13 @@ fn flat_pattern_pans_and_zooms_like_the_design_viewport() {
                 assert!(panned + zoomed >= 1, "{preset}: the preset has a pan or zoom drag");
                 // The wheel zooms (to the cursor when asked), identically.
                 let before = flat.flat_view.cam;
-                let wheel =
-                    Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+                let wheel = Event::MouseWheel {
+                    source: egui::MouseWheelSource::Unknown,
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: vec2(0.0, 3.0),
+                    modifiers: none,
+                    phase: egui::TouchPhase::Move,
+                };
                 for (app, ctx, t) in [(&mut flat, &flat_ctx, &mut ft), (&mut design, &design_ctx, &mut dt)] {
                     frame(app, ctx, t, none, vec![Event::PointerMoved(at)]);
                     frame(app, ctx, t, none, vec![wheel.clone()]);
@@ -1060,7 +1094,7 @@ impl IntoNav for egui::PointerButton {
 /// camera and selection alone.
 #[test]
 fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         use egui::{Event, Modifiers, PointerButton};
         let none = Modifiers::NONE;
         for preset in crate::prefs::NAV_PRESETS.iter().map(|p| p.id) {
@@ -1080,7 +1114,13 @@ fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
                     frame(&mut app, &ctx, &mut t, mods, vec![Event::PointerButton { pos: at, button, pressed: false, modifiers: mods }]);
                 }
             }
-            let wheel = Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 3.0), modifiers: none, phase: egui::TouchPhase::Move };
+            let wheel = Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit: egui::MouseWheelUnit::Line,
+                delta: vec2(0.0, 3.0),
+                modifiers: none,
+                phase: egui::TouchPhase::Move,
+            };
             frame(&mut app, &ctx, &mut t, none, vec![wheel]);
             frame(&mut app, &ctx, &mut t, none, vec![Event::Zoom(1.3)]);
             for _ in 0..30 {
@@ -1096,7 +1136,7 @@ fn design_camera_is_unchanged_while_the_flat_pattern_has_focus() {
 /// Fit and Home frame the flat pattern (not the model), and leave the Design camera alone.
 #[test]
 fn fit_and_home_frame_the_flat_pattern() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let ctx = crate::fonts::test_context();
         let mut app = flat_app("fusion", mode);
         let mut t = 0.0;
@@ -1132,7 +1172,7 @@ fn fit_and_home_frame_the_flat_pattern() {
 }
 
 fn perforated_flat() -> (SolveApp, Dialog) {
-    let mut app = plate(crate::shell::LayoutMode::Floating);
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     app.run("sheet.perforate", json!({"diameter": 3, "pitch": 6})).unwrap();
     let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
@@ -1148,7 +1188,7 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
     let ctx = crate::fonts::test_context();
     let input = egui::RawInput { screen_rect: Some(rect), ..Default::default() };
     let output = crate::test_support::frame(&ctx, input, |ui| {
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("perforation-test")));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("perforation-test")));
         assert!(overlay(app, &painter, rect, dialog));
     });
     output.shapes.into_iter().filter_map(|s| if let egui::Shape::Circle(c) = s.shape { Some(c) } else { None }).collect()
@@ -1157,7 +1197,7 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
 #[test]
 fn flat_perforations_match_export_centres_and_cutout_style() {
     let (mut app, dialog) = perforated_flat();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.last().unwrap();
     let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
@@ -1179,7 +1219,7 @@ fn flat_perforations_match_export_centres_and_cutout_style() {
     assert_eq!(flat_circles(&mut app, &dialog, rect).len(), 155);
     assert_eq!(app.flat_view.perforations.as_ptr(), cached, "navigation reuses the centres");
     app.run("sheet.perforate", json!({"diameter": 2, "pitch": 10})).unwrap();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.last().unwrap();
     let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).unwrap().len()).sum();
     assert!(expected > 155);
@@ -1211,7 +1251,7 @@ fn flat_perforations_cull_offscreen_and_subpixel_holes() {
 #[test]
 fn hem_handle_runs_along_the_hem_to_its_tip() {
     for flipped in [false, true] {
-        let mut app = plate(crate::shell::LayoutMode::Floating);
+        let mut app = plate(crate::ui_kit::LayoutMode::Floating);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         let body = app.session.model.state().sheets[0].body.clone();
         app.session.selection = vec![edge_sel(&app.session, Vec3::new(50.0, 0.0, 2.5)).unwrap()];
@@ -1224,7 +1264,7 @@ fn hem_handle_runs_along_the_hem_to_its_tip() {
         let commands = apply_commands(&app, &d).unwrap();
         run_all(&mut app, commands);
         // The 5 mm hem layer: its tip is the far end of the added layer, along the sheet.
-        let m = app.session.world_state().body(&body).unwrap().mesh();
+        let m = crate::open_meshing::session_world(&app.session).body(&body).unwrap().mesh();
         // The straight part of the layer, past the fold.
         let layer_z = |z: f64| if flipped { z > 2.505 } else { z < -0.01 };
         let tip_y = m.positions.iter().filter(|v| layer_z(v.z)).map(|v| v.y).fold(f64::NEG_INFINITY, f64::max);
@@ -1256,7 +1296,7 @@ fn inch_sheet_rule_edit_preserves_stored_lengths_and_dimensionless_k_factor() {
 
 #[test]
 fn perforate_toolbar_opens_without_running_empty_parameters() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut app = plate(mode);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         let features = app.session.doc.features.len();
@@ -1288,7 +1328,7 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
 #[test]
 fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
     for face in [false, true] {
-        let mut app = plate(crate::shell::LayoutMode::Docked);
+        let mut app = plate(crate::ui_kit::LayoutMode::Docked);
         app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         let body = app.session.model.state().sheets[0].body.clone();
         app.session.selection =
@@ -1309,7 +1349,7 @@ fn perforate_ok_targets_the_picked_sheet_and_updates_flat_data() {
 
 #[test]
 fn perforate_edit_restores_dimensions_pattern_and_target() {
-    let mut app = plate(crate::shell::LayoutMode::Docked);
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
     app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
     let body = app.session.model.state().sheets[0].body.clone();
     app.run("sheet.perforate", json!({"body": body, "diameter": "4 mm", "pitch": "9 mm", "margin": "5 mm", "pattern": "square"})).unwrap();
@@ -1320,5 +1360,25 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
     let params = &commands[0].1["params"];
     for (key, value) in [("body", body.as_str()), ("diameter", "4 mm"), ("pitch", "9 mm"), ("margin", "5 mm"), ("pattern", "square")] {
         assert_eq!(params[key], value, "{key} is restored");
+    }
+}
+
+#[test]
+fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
+    let ctx = crate::fonts::test_context();
+    let mut app = flat_app("fusion", crate::ui_kit::LayoutMode::Floating);
+    app.preferences.navigation_bar = serde_json::from_value(json!({
+        "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]
+    }))
+    .unwrap();
+    let mut time = 0.0;
+    crate::scenario::clear_handles();
+    frame(&mut app, &ctx, &mut time, egui::Modifiers::NONE, vec![]);
+    assert_eq!(crate::navigation_bar::canvas_caps(&app), crate::navigation::NavCaps { orbit: false, pick: false });
+    for slot in ["orbit", "spin", "look_at", "projection", "visual_style"] {
+        assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
+    }
+    for slot in ["pan", "zoom", "fit", "home", "display"] {
+        assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
     }
 }

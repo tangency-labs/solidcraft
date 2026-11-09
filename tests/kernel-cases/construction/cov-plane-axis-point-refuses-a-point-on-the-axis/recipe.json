@@ -1,0 +1,20 @@
+{
+ "commands": [
+  {
+   "command": "construct.plane.axis_point",
+   "params": {
+    "axis": {
+     "axis": "Z"
+    },
+    "point": {
+     "point": [
+      0,
+      0,
+      50
+     ]
+    },
+    "name": "P"
+   }
+  }
+ ]
+}

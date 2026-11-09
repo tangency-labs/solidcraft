@@ -70,6 +70,7 @@ impl ImageWork for RegradeTask {
                 return self.pending(done, total);
             }
             let request = ImageRequest {
+                studio_weights: None,
                 width,
                 height,
                 camera: Default::default(),
@@ -143,6 +144,7 @@ impl ImageWork for RegradeTask {
         }
         self.linear = None;
         let request = ImageRequest {
+            studio_weights: None,
             width,
             height,
             camera: Default::default(),

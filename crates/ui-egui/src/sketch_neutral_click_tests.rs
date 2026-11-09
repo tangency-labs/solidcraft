@@ -35,7 +35,7 @@ fn repeated_first_point_is_neutral_and_drawing_can_continue() {
             }
         }
         assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{command}: {:?}", h.app.status);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         assert!(!state.sketches[0].sketch.curves.is_empty(), "{command}: {:?}; {:?}", h.app.tool, h.app.status);
         assert_eq!(h.app.session.undo.len(), undo + 1, "{command}");
         h.app.run("edit.undo", json!({})).unwrap();

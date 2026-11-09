@@ -2,7 +2,7 @@
 """Replay a design's timeline in a running SolidCraft, for a screen recording (record_rover.sh).
 
     solidcraft --control 7878 &
-    python3 examples/demo/rover_replay.py --port 7878 Rover-recorded.solidcraft 
+    python3 examples/demo/rover_replay.py --port 7878 Rover-recorded.sc 
 
 Opens the design, frames the finished model, rolls the timeline back to its start and then
 forward in even steps (the History bar's roll-to, as `timeline.roll_to` over the control

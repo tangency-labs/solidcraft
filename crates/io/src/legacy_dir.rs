@@ -6,9 +6,13 @@
 use std::path::{Path, PathBuf};
 
 /// The Linux app id (Flatpak, desktop entry, AppStream, Wayland `app_id`).
-pub const APP_ID: &str = "ai.storyteller.solidcraft";
-/// The app id of releases before 0.8 (compatibility shim, docs/compatibility.md).
+pub const APP_ID: &str = "io.tangencylabs.solidcraft";
+/// The app id of releases before 0.8 (compatibility shim, docs/compatibility.md). eframe kept
+/// the window state under it, so it is also the old settings key.
 pub const LEGACY_APP_ID: &str = "ai.storyteller.solvecraft";
+/// Every earlier app id, newest first (compatibility shim, docs/compatibility.md): 0.8 until the
+/// move to Tangency Labs used `ai.storyteller.solidcraft`, releases before 0.8 `LEGACY_APP_ID`.
+pub const PREVIOUS_APP_IDS: [&str; 2] = ["ai.storyteller.solidcraft", LEGACY_APP_ID];
 
 /// Most files and nesting copied from a legacy folder (it holds preferences, autosaves and
 /// small caches; anything bigger is not ours).
@@ -27,23 +31,23 @@ pub fn adopt_legacy_dir(current: &Path, legacy: &Path) -> std::io::Result<bool> 
     Ok(true)
 }
 
-/// In the Flatpak sandbox, the same `path` under the pre-rename app's data folder: Flatpak keeps
-/// each app's XDG folders under `~/.var/app/<app id>`, so after the app id changed, settings and
-/// autosaves of earlier Flatpak releases sit under the old id. `None` outside the sandbox or for
-/// paths outside our own `~/.var/app` folder. Flatpak moves that folder itself when an install
-/// follows the end-of-life rebase; this covers installs made next to the old app, which reach it
-/// read-only through the manifest's `--filesystem` grant.
-pub fn legacy_flatpak_path(path: &Path) -> Option<PathBuf> {
-    flatpak_twin(path, &std::env::var_os("FLATPAK_ID")?, Path::new(&std::env::var_os("HOME")?))
+/// In the Flatpak sandbox, the same `path` under each earlier app id's data folder, newest first:
+/// Flatpak keeps each app's XDG folders under `~/.var/app/<app id>`, so after the app id changed,
+/// settings and autosaves of earlier Flatpak releases sit under the old id. Empty outside the
+/// sandbox or for paths outside our own `~/.var/app` folder. Flatpak moves that folder itself
+/// when an install follows the end-of-life rebase; this covers installs made next to the old
+/// app, which reach it read-only through the manifest's `--filesystem` grants.
+pub fn legacy_flatpak_paths(path: &Path) -> Vec<PathBuf> {
+    let (Some(id), Some(home)) = (std::env::var_os("FLATPAK_ID"), std::env::var_os("HOME")) else { return Vec::new() };
+    flatpak_twins(path, &id, Path::new(&home))
 }
 
-fn flatpak_twin(path: &Path, flatpak_id: &std::ffi::OsStr, home: &Path) -> Option<PathBuf> {
-    if flatpak_id != APP_ID {
-        return None;
-    }
+fn flatpak_twins(path: &Path, flatpak_id: &std::ffi::OsStr, home: &Path) -> Vec<PathBuf> {
     let apps = home.join(".var").join("app");
-    let rel = path.strip_prefix(apps.join(APP_ID)).ok()?;
-    Some(apps.join(LEGACY_APP_ID).join(rel))
+    match path.strip_prefix(apps.join(APP_ID)) {
+        Ok(rel) if flatpak_id == APP_ID => PREVIOUS_APP_IDS.iter().map(|old| apps.join(old).join(rel)).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn copy_tree(from: &Path, to: &Path, depth: usize, budget: &mut usize) -> std::io::Result<()> {
@@ -100,14 +104,32 @@ mod tests {
     }
 
     #[test]
-    fn flatpak_twin_maps_our_sandbox_data_to_the_old_app_id() {
+    fn flatpak_twins_map_our_sandbox_data_to_the_old_app_ids() {
         let home = Path::new("/home/u");
-        let ours = home.join(".var/app/ai.storyteller.solidcraft/data/solidcraft");
+        let ours = home.join(".var/app/io.tangencylabs.solidcraft/data/solidcraft");
         let id = std::ffi::OsStr::new(APP_ID);
-        assert_eq!(flatpak_twin(&ours, id, home), Some(home.join(".var/app/ai.storyteller.solvecraft/data/solidcraft")));
+        assert_eq!(
+            flatpak_twins(&ours, id, home),
+            [home.join(".var/app/ai.storyteller.solidcraft/data/solidcraft"), home.join(".var/app/ai.storyteller.solvecraft/data/solidcraft")]
+        );
         // Outside our sandbox folder, or in another app's sandbox, there is nothing to map.
-        assert_eq!(flatpak_twin(&home.join(".local/share/solidcraft"), id, home), None);
-        assert_eq!(flatpak_twin(&ours, std::ffi::OsStr::new("org.example.Other"), home), None);
+        assert!(flatpak_twins(&home.join(".local/share/solidcraft"), id, home).is_empty());
+        assert!(flatpak_twins(&ours, std::ffi::OsStr::new("org.example.Other"), home).is_empty());
+    }
+
+    #[test]
+    fn the_desktop_entry_is_named_after_the_app_id() {
+        // The window's Wayland app_id / X11 class is APP_ID; the desktop names it and its file
+        // name, so docks find the entry and its icon.
+        let linux = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/platforms/linux");
+        let desktop = std::fs::read_to_string(linux.join(format!("{APP_ID}.desktop"))).unwrap();
+        assert!(desktop.lines().any(|l| l == format!("StartupWMClass={APP_ID}")));
+        assert!(desktop.lines().any(|l| l == format!("Icon={APP_ID}")));
+        let metainfo = std::fs::read_to_string(linux.join(format!("{APP_ID}.metainfo.xml.in"))).unwrap();
+        assert!(metainfo.contains(&format!("<id>{APP_ID}</id>")));
+        for old in PREVIOUS_APP_IDS {
+            assert!(metainfo.contains(&format!("<id>{old}</id>")) && desktop.contains(&format!("{old}.desktop;")));
+        }
     }
 
     #[test]

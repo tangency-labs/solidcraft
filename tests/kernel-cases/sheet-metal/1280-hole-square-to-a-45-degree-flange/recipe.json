@@ -1,0 +1,74 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Steel (mm)",
+    "thickness": "2.5 mm",
+    "active": true,
+    "bend_radius": "2.5 mm",
+    "k_factor": 0.44
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     100,
+     60
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "edges": [
+     [
+      50,
+      0,
+      2.5
+     ]
+    ],
+    "height": 15,
+    "angle": 45
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     50,
+     -5.656854,
+     5.656854
+    ],
+    "diameter": 5
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

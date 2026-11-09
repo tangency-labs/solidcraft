@@ -208,7 +208,7 @@ mod tests {
     }
 
     fn folder(id: u64, features: &[u64], parent: Option<u64>) -> TimelineGroup {
-        TimelineGroup { id, name: format!("Folder{id}"), parent, features: features.to_vec() }
+        TimelineGroup { id, name: format!("Folder{id}"), parent, features: features.to_vec(), joints: vec![] }
     }
 
     /// The top-level rows as `(feature, slot, listed sketches as (sketch, reference))`.

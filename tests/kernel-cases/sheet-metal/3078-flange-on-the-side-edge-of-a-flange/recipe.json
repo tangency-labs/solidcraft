@@ -1,0 +1,86 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Sheet 2 mm",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5,
+    "gap": "0.5 mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     120,
+     90
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "edges": [
+     [
+      60,
+      0,
+      2
+     ]
+    ],
+    "height": "30 mm",
+    "angle": "90 deg"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "edges": [
+     [
+      120,
+      45,
+      2
+     ],
+     [
+      120,
+      2,
+      16.5
+     ]
+    ],
+    "height": "20 mm",
+    "angle": "90 deg",
+    "position": "inside",
+    "corner_relief_shape": "round",
+    "corner_relief": "4 mm"
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

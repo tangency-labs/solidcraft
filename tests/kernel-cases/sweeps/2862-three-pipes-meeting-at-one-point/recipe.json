@@ -1,0 +1,111 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.options",
+   "params": {
+    "sketch_3d": true
+   }
+  },
+  {
+   "command": "sketch.line3d",
+   "params": {
+    "points": [
+     [
+      20,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line3d",
+   "params": {
+    "points": [
+     [
+      0,
+      20,
+      0
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.line3d",
+   "params": {
+    "points": [
+     [
+      0,
+      0,
+      20
+     ],
+     [
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.pipe",
+   "params": {
+    "path_sketch": "P",
+    "path": [
+     "w1"
+    ],
+    "diameter": 4.4,
+    "body_name": "A"
+   }
+  },
+  {
+   "command": "solid.pipe",
+   "params": {
+    "path_sketch": "P",
+    "path": [
+     "w2"
+    ],
+    "diameter": 4.4,
+    "operation": "join",
+    "targets": [
+     "A"
+    ]
+   }
+  },
+  {
+   "command": "solid.pipe",
+   "params": {
+    "path_sketch": "P",
+    "path": [
+     "w3"
+    ],
+    "diameter": 4.4,
+    "operation": "join",
+    "targets": [
+     "A"
+    ]
+   }
+  }
+ ]
+}

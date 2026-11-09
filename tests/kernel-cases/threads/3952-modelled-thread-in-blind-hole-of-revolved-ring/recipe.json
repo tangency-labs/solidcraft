@@ -1,0 +1,90 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "Sketch1"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      12,
+      0
+     ],
+     [
+      30,
+      0
+     ],
+     [
+      30,
+      -30
+     ],
+     [
+      12,
+      -30
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Sketch1",
+    "axis": "Z"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": "30 mm",
+    "name": "Sketch2"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     21,
+     0
+    ],
+    "diameter": 2.5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Sketch2",
+    "profiles": "all",
+    "distance": 8,
+    "direction": "negative",
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     22.25,
+     0,
+     26
+    ],
+    "designation": "M3",
+    "modeled": true
+   }
+  }
+ ]
+}

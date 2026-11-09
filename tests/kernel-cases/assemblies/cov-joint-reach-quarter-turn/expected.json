@@ -1,0 +1,33 @@
+{
+ "sources": [],
+ "what": "joint.reach takes the arm's tip from (40,0,5) to (0,40,5)",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the tip turns about z through the origin at radius 40: (0,40,5) is reached at 90 degrees, error 0; Arm centre (0,20,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "reached": true,
+    "point": [
+     0.0,
+     40.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

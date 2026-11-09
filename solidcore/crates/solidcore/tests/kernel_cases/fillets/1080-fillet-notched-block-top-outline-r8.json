@@ -1,0 +1,217 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  40.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  0.0,
+                  10.0
+                ],
+                [
+                  40.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 2
+            },
+            {
+              "at": [
+                [
+                  40.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  0.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              0.0,
+              10.0
+            ],
+            [
+              40.0,
+              15.0,
+              10.0
+            ],
+            [
+              20.0,
+              30.0,
+              10.0
+            ],
+            [
+              0.0,
+              15.0,
+              10.0
+            ]
+          ],
+          "tolerance": 2.5505097567963926
+        },
+        "kind": "round",
+        "sizes": [
+          8.0,
+          8.0,
+          8.0,
+          8.0
+        ]
+      }
+    }
+  ],
+  "case": "1080-fillet-notched-block-top-outline-r8",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "block 12000 less the notch 75: 11925. The outline's mitred round takes (1-pi/4) r^2 (140 - 8c), c = r (10-3pi)/(3(4-pi)) (the prisms ending on the 45 deg mitres). R8 reaches z = 2, into the notch [35,40] x [0,5] x [0,3]: at z = 2 + t each round's strip is g = 8 - sqrt(64 - t^2) in from its face, the two strips' union in the notch's 5 x 5 square 2(5g - g^2/2); its part in the notch, Int_0^1 2(5g - g^2/2) dt = 0.208039, is not material and is not taken. V = 10198.718039",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1080"
+    ],
+    "volume_mm3": 10198.718038815705,
+    "what": "a 40 x 30 x 10 block with a 5 x 5 x 3 notch at a bottom corner, its top outline rounded R8: the round runs past the 7 mm wall over the notch into the notch and is cut by it"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 13,
+      "vertices": 19
+    }
+  },
+  "records": "1080-fillet-notched-block-top-outline-r8.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3282.3945991157125,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 13,
+      "vertices": 19,
+      "volume_mm3": 10198.718249145593
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1080"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a 40 x 30 x 10 block with a 5 x 5 x 3 notch at a bottom corner, its top outline rounded R8: the round runs past the 7 mm wall over the notch into the notch and is cut by it",
+  "why_not": []
+}

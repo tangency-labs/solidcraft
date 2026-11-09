@@ -1,0 +1,57 @@
+{
+ "commands": [
+  {
+   "command": "solid.torus",
+   "params": {
+    "major": 10,
+    "minor": 5,
+    "body_name": "Torus"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Tool"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     15,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "Z",
+    "angle": "360 deg",
+    "operation": "cut"
+   }
+  }
+ ]
+}

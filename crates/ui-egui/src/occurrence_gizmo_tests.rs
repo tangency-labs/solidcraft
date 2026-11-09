@@ -4,7 +4,9 @@ use crate::{
     scenario::Harness,
 };
 use serde_json::json;
-use solidcraft_engine::{Sel, doc, geom::Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{Sel, doc};
 
 #[test]
 fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_undo() {

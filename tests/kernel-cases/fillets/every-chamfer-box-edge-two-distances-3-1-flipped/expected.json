@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a box's top front edge chamfered by two distances, flipped: 3 down the front and 1 along the top",
+ "source": "analytic",
+ "method": "as every-chamfer-box-edge-two-distances-3-1 with `flip`: the front face first, so the triangle (0,20), (1,20), (0,17), area 1.5, V = 23940, its centroid (1/3, 19): centre of mass (20, (360000 - 20)/23940, (240000 - 60 * 19)/23940), graded to 0.0005 mm. Faces 7.",
+ "body_count": 1,
+ "volume_mm3": 23940.0,
+ "faces": 7,
+ "center_of_mass": [
+  20.0,
+  15.036758563074352,
+  9.977443609022556
+ ],
+ "tolerance": {
+  "abs_mm": 0.0005
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

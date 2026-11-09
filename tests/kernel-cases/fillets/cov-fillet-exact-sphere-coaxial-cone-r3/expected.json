@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a ball R10 and a frustum about z through its centre (R5 at z = 0 to R3 at z = 20) joined: the concave circle where the cone leaves the ball rounded r3",
+ "source": "analytic",
+ "method": "the ball's centre (outside both) runs on the sphere R13 and on the cone moved 3 out, both about z: a circle, so the round is the ball's arc turned about z: rational, of degrees (2, 2). V0 = the ball and the frustum less their overlap (the frustum below the edge at z = 9.1265, the ball's cap above it): 4597.853510151037; the round adds 2 pi times the first moment of its section: 9.688315962175.",
+ "body_count": 1,
+ "volume_mm3": 4607.541826113212,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "surface_types": [
+  "bspline",
+  "cone",
+  "plane",
+  "sphere"
+ ],
+ "splines": [
+  {
+   "degree": [
+    2,
+    2
+   ]
+  }
+ ],
+ "continuity": {
+  "order": "g1"
+ }
+}

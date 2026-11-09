@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#566"
+ ],
+ "what": "a 8x5 bar swept along a line-arc-line path (quarter circle r30 between two 30 mm legs), shelled 0.5 mm open at its start",
+ "source": "analytic",
+ "method": "path length L=30+15*pi+30. The section's centroid is on the path, so by Pappus V_bar=40*L. The cavity is the sweep of the 7x4 section (concentric offsets of the swept walls; the tightest radius 30-3.5 stays positive) from the open start to 0.5 mm short of the end: 28*(L-0.5). V=40*L-28*(L-0.5)",
+ "body_count": 1,
+ "volume_mm3": 1299.4866776461627
+}

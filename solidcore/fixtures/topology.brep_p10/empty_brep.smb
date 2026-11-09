@@ -1,0 +1,62 @@
+//Brep Starts
+1 0 0 - Color
+1e-6 - Brep Tolerance
+1 - Manifold
+0 - Allow Composites
+
+//Region Data
+2 Regions In Brep
+0 - Start Region
+//Index, Number Of Shells, First Shell, Is void Region
+0 0 0 1
+1 0 0 0
+
+//Shell Data
+0 Shells In Brep
+//Index, 0(Faceuse), Orientation, Number Of Faceuses, Start Faceuse
+//Index, 1(Wire Edge), Edge
+//Index, 2(Vertex), Vertex
+
+//Composite Face Data
+0 Composite Faces In Brep
+
+//Faceuse Data
+0 Faceuses In Brep
+//Index, Face, Orientation
+
+//Face Data
+0 Faces In Brep
+//Index, Tol, Surface, Outer Loop, # of Inner Loops, Naturally Trimmed
+//UMin, UMax, VMin, VMax
+
+//Loop Data
+0 Loops In Brep
+//Index, 0(Edgeuse), # Of Edgeuses, Start Edgeuse
+//Index, 1(Vertex), Vertex
+
+//Composite Edge Data
+0 Composite Edges In Brep
+
+//Edgeuse Data
+0 Edgeuses In Brep
+//Index, 0(Edge), Edge, Loop, Orientation, UV Curve, Next EU, Mate Next EU
+//Index, 1(Vertex), Vertex, Loop, Orientation, UV Curve
+//Index, 2(Wire Edge), Edge, Shell, Orientation, UV Curve
+//Index, 3(Vertex At Pole), Vertex, Loop, Orientation, UV Curve
+
+//Edge Data
+0 Edges In Brep
+//Index, Tol, Curve, Start Vertex, End Vertex, Primary Edgeuse, Param Min, Param Max
+
+//Vertex Data
+0 Vertices In Brep
+//Index, Tol, X, Y, Z
+
+// UV-Curve Data
+0 UV-Curves In Brep
+
+// 3D-Curve Data
+0 3D-Curves In Brep
+
+//Surface Data
+0 Surfaces In Brep

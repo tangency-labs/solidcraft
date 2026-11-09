@@ -6,7 +6,7 @@ state intended coverage, not a claim that every backend has passed.
 
 Native applications can register `solidcraft_gpu::path::host()` alongside the
 existing CPU image host. `render.backends` then exposes `builtin/gpu-path` with
-Preview, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
+Preview/Final, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
 Device discovery follows `SOLIDCRAFT_GPU` and `WGPU_BACKEND`; a device which cannot
 create the compute pipeline does not register an available path executor.
 The native UI retains a factory for the viewport's selected adapter at installation,
@@ -17,8 +17,13 @@ the pending/ready/failed host, and failures are not retried on each viewport ins
 It opens its independent job device on the viewport's selected adapter,
 so software fallback and safe mode do not rediscover a failing hardware driver.
 An incompatible explicit GPU policy leaves progressive rendering unavailable there.
-The path tracer runs on Vulkan only (#3217). A viewport on D3D12 is reopened on the
-same GPU through Vulkan. Where there is no Vulkan driver (macOS for now, Windows over
+A driver that crashes the process while it compiles the path pipeline (#9236) is beyond error
+scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its adapter key) in the
+settings folder and removes it when the setup answers or the app closes normally. A launch that
+finds it for the same adapter key leaves the setup failed with that explanation until the user
+chooses **Try again**; a driver update changes the key and so tries again.
+The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
+same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
 Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
 itself unavailable and images render on the CPU. On an RTX 4090, D3D12 was never faster:
 equal per sample with DXC and about 55% slower with FXC, and it compiles the path shader
@@ -30,20 +35,40 @@ checking or starting an image. These controls are transient image-job
 intent that can also be retained in typed saved setups. Each new saved concept
 uses the pending-format mechanism, without manually changing a version number.
 The canvas switches between live product preview and a large completed-image result,
-with Fit and 100% framing. Jobs report sample progress and export the completed PNG;
-partial accumulation buffers are not displayed on the canvas.
+with Fit and 100% framing. Fixed-sampling jobs publish an immutable PNG after every
+complete nonfinal production pass, using the same transport, denoising and finishing
+as the completed image. Partially computed passes are not displayed. The host retains
+at most two prepaid snapshots; pinned external snapshots may skip a publication without
+stalling final rendering, and this is counted in `preview_retention_skips`. Screen repaints may coalesce fast complete-pass updates.
+Provisional PNGs never become exportable results or retained linear EXR masters.
+Adaptive jobs also publish each complete pilot pass and production iteration. Pilot
+images show the pilot mean; those samples remain excluded from the final master.
+Production images normalize unfinished sums by their completed iteration count and
+retain already finished pixel means. Neither readback nor the optional preview
+denoiser writes the production accumulation. Progress labels distinguish pilots
+from production iterations because production counts vary per pixel. The host
+target includes pilots plus the configured maximum production count.
+
+Adaptive readback reserves one additional float4 plane (16 bytes per pixel). When
+denoising is selected, another independently reserved float4 plane supplies a
+normalized display input to the same filter; final denoising keeps its original
+production input. Final PNG and raw EXR remain identical with preview work disabled.
 
 ```json
 {"command":"render.start","params":{"settings":{"width":800,"height":600,"exposure_ev":0},"progressive":true,"samples":64,"max_depth":8,"seed":0}}
 ```
 
 `render.preflight` accepts the same input. It resolves the Progressive capability
-to the installed GPU host and performs admission without reserving memory. Start
-checks again and returns the existing session/serial/generation identity. Progress
+to the installed GPU host and validates the captured production representation
+under a temporary bounded work reservation. Check creates no job and releases the
+reservation afterward. Start validates the same conversions and certificates before
+assigning its session/serial/generation identity. Begin currently rebuilds immutable
+uploads and optical certificates; no preparation cache or cross-scene proof reuse
+is claimed. Progress
 reports complete samples per pixel; a partially computed sample is not counted.
 Cancel, status, retained-image ownership and atomic PNG export use the same host
 protocol as CPU jobs. Defaults are 64 samples, depth 8 and seed 0; the bounds are
-1–4096 samples and 1–16 bounces. Sampling controls require `progressive: true`.
+1–65,536 samples and 1–64 events. Sampling controls require `progressive: true`.
 
 Runtime request-only [glass overrides](render-transmission.md) and an optional
 [thin-lens camera](render-thin-lens.md) and [clear coat](render-clear-coat.md) are available through those same commands.
@@ -64,7 +89,7 @@ illumination.
 The original integrator uses software BVH traversal, opaque GGX/Smith/Schlick and
 the symmetric diffuse attenuation defined by `render::surface`. Each hit evaluates
 the three existing directional studio lights with shadow visibility. Continuation
-samples a mixture of cosine-weighted diffuse and GGX normals with the combined
+samples a mixture of cosine-weighted diffuse and visible GGX normals with the combined
 PDF; Russian roulette begins after four hits. There are indirect bounces, but no
 environment illumination in the default legacy lighting profile. All legacy opaque colors use
 linear-sRGB base color, metallic 0, roughness 0.5, IOR 1.5. Explicit face appearances
@@ -78,9 +103,13 @@ transmission record is rejected by the path executor. Runtime
 [area lights](render-studio-lighting.md), [sun/HDR environment lighting](render-environment.md)
 and [opaque planar color/normal maps](render-runtime-textures.md) are available
 through explicit job inputs. They do not add saved document fields. An optional bounded edge-aware a-trous
-[denoiser](render-denoise.md) filters the final output while preserving raw accumulation.
-Texture LOD/mipmap selection, EXR and Final mode remain unimplemented by this
-executor; a path-traced preview does not declare those capabilities.
+[denoiser](render-denoise.md) filters progressive and final display images while preserving
+raw accumulation. Optional raw scene-linear EXR masters are retained only for completed
+images, before display filters. Preview/Image and Final/Image select the same physical
+path producer and preserve authored sample/depth/effect settings. Final is a supported
+image mode, not an automatic quality preset or a convergence certificate. Optional
+`texture_filtering: true` enables the production mip/footprint sampler; omission
+preserves the original LOD0 behavior.
 
 Each job builds a BVH over its immutable captured meshes with a sixteen-bin
 surface-area heuristic on triangle centres; there is no cross-document cache to
@@ -155,3 +184,8 @@ fraction. This applies to the specular term and both diffuse transmission factor
 The existing actual-GPU BRDF oracle checks the limit at normal, oblique and grazing
 angles against the f64 surface, including mixed metallic values. Clear-coat and
 physical transmission contracts are unchanged by this base-lobe correction.
+
+The normal GPU Samples editor keeps the exact requested count, including values
+such as 17 or 31; every complete pass is published. Merely opening a saved setup
+does not round its count. **Use previous Render image defaults** retains the
+previous power-of-two rounding for an edited GPU Samples value.

@@ -86,8 +86,20 @@ pub(crate) fn cut_grid(
     // Traces on u = c (axis 0) are lines in u; on v = c, lines in v.
     let tu: Vec<&Trace> = traces.iter().filter(|t| t.axis == 0).collect();
     let tv: Vec<&Trace> = traces.iter().filter(|t| t.axis == 1).collect();
-    let (lu, pu) = lines(us, &tu.iter().map(|t| t.at).collect::<Vec<_>>())?;
-    let (lv, pv) = lines(vs, &tv.iter().map(|t| t.at).collect::<Vec<_>>())?;
+    // Room for the traces' lines among the grid's: the full lines are thinned (as the face's
+    // grid is) until the cells fit, rather than the face falling through to Delaunay, whose
+    // refinement budget a grid this size is past.
+    let (mut us, mut vs) = (us.to_vec(), vs.to_vec());
+    let cells = |us: &[f64], vs: &[f64]| (us.len() + tu.len()).saturating_sub(1).saturating_mul((vs.len() + tv.len()).saturating_sub(1));
+    for _ in 0..64 {
+        if cells(&us, &vs) <= super::grid::MAX_FACE_GRID || (us.len() <= 2 && vs.len() <= 2) {
+            break;
+        }
+        let cap = us.len().saturating_mul(vs.len()).saturating_mul(9) / 10;
+        super::grid::thin(&mut us, &mut vs, cap);
+    }
+    let (lu, pu) = lines(&us, &tu.iter().map(|t| t.at).collect::<Vec<_>>())?;
+    let (lv, pv) = lines(&vs, &tv.iter().map(|t| t.at).collect::<Vec<_>>())?;
     let (nu, nv) = (lu.at.len(), lv.at.len());
     let (cu, cv) = (nu - 1, nv - 1);
     let cells = cu.checked_mul(cv)?;

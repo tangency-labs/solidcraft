@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a d10 blind hole 10 deep, flat bottom",
+ "source": "analytic",
+ "method": "removed pi 5^2 10; + wall and floor",
+ "body_count": 1,
+ "volume_mm3": 47214.601836603,
+ "faces": 8
+}

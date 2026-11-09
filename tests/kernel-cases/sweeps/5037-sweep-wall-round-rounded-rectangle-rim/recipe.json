@@ -1,0 +1,240 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Floor"
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     -47,
+     -32
+    ],
+    "p1": [
+     47,
+     32
+    ],
+    "radius": 7
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Floor",
+    "distance": 2,
+    "direction": "negative",
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Rim",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -40,
+      -30
+     ],
+     [
+      40,
+      -30
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     40,
+     -30
+    ],
+    "through": [
+     43.535534,
+     -28.535534
+    ],
+    "end": [
+     45,
+     -25
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      45,
+      -25
+     ],
+     [
+      45,
+      25
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     45,
+     25
+    ],
+    "through": [
+     43.535534,
+     28.535534
+    ],
+    "end": [
+     40,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      40,
+      30
+     ],
+     [
+      -40,
+      30
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     -40,
+     30
+    ],
+    "through": [
+     -43.535534,
+     28.535534
+    ],
+    "end": [
+     -45,
+     25
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -45,
+      25
+     ],
+     [
+      -45,
+      -25
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     -45,
+     -25
+    ],
+    "through": [
+     -43.535534,
+     -28.535534
+    ],
+    "end": [
+     -40,
+     -30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -40,
+      0,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Wall",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -31,
+     0
+    ],
+    "p1": [
+     -29,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "Wall",
+    "path_sketch": "Rim",
+    "path": [
+     "l1",
+     "a1",
+     "l2",
+     "a2",
+     "l3",
+     "a3",
+     "l4",
+     "a4"
+    ],
+    "operation": "join",
+    "targets": [
+     "Box"
+    ]
+   }
+  }
+ ]
+}

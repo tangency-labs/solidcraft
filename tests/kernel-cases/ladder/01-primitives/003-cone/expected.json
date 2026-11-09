@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a cone r10 h30 (no cone primitive: a revolved right triangle, its axis a sketch line)",
+ "source": "analytic",
+ "method": "V = pi r^2 h / 3; A = pi r^2 + pi r sqrt(r^2 + h^2); a disk and the cone face",
+ "body_count": 1,
+ "volume_mm3": 3141.59265359,
+ "area_mm2": 1307.618091939,
+ "faces": 2,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   30
+  ]
+ }
+}

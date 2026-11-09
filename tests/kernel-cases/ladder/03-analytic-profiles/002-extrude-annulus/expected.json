@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "an annulus r20/r10 extruded 15",
+ "source": "analytic",
+ "method": "V = pi (20^2 - 10^2) 15; faces: two annuli, two cylinders",
+ "body_count": 1,
+ "volume_mm3": 14137.166941154,
+ "area_mm2": 4712.388980385,
+ "faces": 4
+}

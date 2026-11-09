@@ -1,0 +1,4491 @@
+{
+ "cases": [
+  {
+   "name": "smcurvetest_6053_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053 (IntersectConic, SM_ASSERT 1 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ],
+      [
+       -1.4835298641951802,
+       0,
+       0
+      ]
+     ]
+    },
+    "b": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6053_a_eval_-0.9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ],
+      [
+       -1.4835298641951802,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": -0.9,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6053_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ],
+      [
+       -1.4835298641951802,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6053_a_eval_0.4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ],
+      [
+       -1.4835298641951802,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.4,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6053_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ],
+      [
+       -1.4835298641951802,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6053_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ],
+      [
+       -1.4835298641951802,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6053_b_eval_-0.9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": -0.9,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6053_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6053_b_eval_0.4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.4,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6053_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6053_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6053",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6086_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086 (IntersectConic, SM_ASSERT 2 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6086_a_eval_-0.9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": -0.9,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_a_eval_0.4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.4,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6086_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6086_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6086",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6117_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117 (IntersectConic, SM_ASSERT 1 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ]
+     ]
+    },
+    "b": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6117_a_eval_-0.9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ]
+     ]
+    },
+    "t": -0.9,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6117_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6117_a_eval_0.4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ]
+     ]
+    },
+    "t": 0.4,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6117_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6117_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.17453292519943295,
+       -0.4,
+       -0.3
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6117_b_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6117_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6117_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6117_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6117_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6117",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6150_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150 (IntersectConic, SM_ASSERT 1 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "b": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.3490658503988659,
+       -0.3,
+       0.2
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6150_a_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6150_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6150_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6150_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.6
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6150_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.6
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6150_b_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.3490658503988659,
+       -0.3,
+       0.2
+      ]
+     ]
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6150_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.3490658503988659,
+       -0.3,
+       0.2
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6150_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.3490658503988659,
+       -0.3,
+       0.2
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6150_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.3490658503988659,
+       -0.3,
+       0.2
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6150_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6150",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.3490658503988659,
+       -0.3,
+       0.2
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6182_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182 (IntersectConic, SM_ASSERT 1 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": []
+    },
+    "b": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.17453292519943295,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6182_a_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": []
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6182_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6182_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6182_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6182_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 2,
+     "b": 0,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6182_b_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.17453292519943295,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6182_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.17453292519943295,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6182_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.17453292519943295,
+       0.3,
+       0.6
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6182_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.17453292519943295,
+       0.3,
+       0.6
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6182_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6182",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.17453292519943295,
+       0.3,
+       0.6
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6214_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214 (IntersectConic, SM_ASSERT 2 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "b": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.2617993877991494,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6214_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6214_b_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.2617993877991494,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.2617993877991494,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.2617993877991494,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6214_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.2617993877991494,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6214_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6214",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       -0.2617993877991494,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6247_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247 (IntersectConic, SM_ASSERT 2 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6247_a_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6247_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6247_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6247",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.1
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6279_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279 (IntersectConic, SM_ASSERT 4 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6279_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6279_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6279",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 0.5,
+     "b": 1.00000001,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6311_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311 (IntersectConic, SM_ASSERT 2 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6311_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6311_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6311",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 4,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6344_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344 (IntersectConic, SM_ASSERT 4 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "b": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6344_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6344_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6344",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6375_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375 (IntersectConic, SM_ASSERT 2 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 2,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6375_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6375_b_eval_-2",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 2,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": -2.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 2,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 2,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6375_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 2,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6375_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6375",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 2,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.4,
+       0.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6406_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406 (IntersectConic, SM_ASSERT 2 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6406_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6406_b_eval_-0.9",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": -0.9,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_b_eval_0.4",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    },
+    "t": 0.4,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6406_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6406_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6406",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       -0.3,
+       -0.4
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6437_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437 (IntersectConic, SM_ASSERT 4 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6437_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6437_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6437",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0.3,
+       0.5
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6468_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468 (IntersectConic, SM_ASSERT 4 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6468_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6468_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6468",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": [
+      [
+       0.5235987755982988,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6499_intersect",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499 (IntersectConic, SM_ASSERT 4 solutions)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6499_a_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_eval_0",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_eval_0.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_eval_1",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_eval_1.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 1.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_eval_2.5",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    },
+    "t": 2.5,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_implicit",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "smcurvetest_6499_b_state",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:6499",
+   "inputs": {
+    "op": "state",
+    "a": {
+     "type": 0,
+     "a": 1,
+     "b": 2,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "dupin_line1_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 1.414213562373095,
+     "b": 0,
+     "transforms": [
+      [
+       1.5707963267948966,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_line1_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 3,
+     "a": 1.414213562373095,
+     "b": 0,
+     "transforms": [
+      [
+       1.5707963267948966,
+       0,
+       0
+      ]
+     ]
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_line2_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 3,
+     "a": 1.414213562373095,
+     "b": 0,
+     "transforms": [
+      [
+       4.71238898038469,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_line2_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 3,
+     "a": 1.414213562373095,
+     "b": 0,
+     "transforms": [
+      [
+       4.71238898038469,
+       0,
+       0
+      ]
+     ]
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_ellipse_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": []
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_ellipse_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 0,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": []
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_hyp_right_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": []
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_hyp_right_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": []
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_hyp_left_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       3.141592653589793,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_hyp_left_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       3.141592653589793,
+       0,
+       0
+      ]
+     ]
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_hyp_top_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 1.414213562373095,
+     "transforms": [
+      [
+       1.5707963267948966,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_hyp_top_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 1.414213562373095,
+     "transforms": [
+      [
+       1.5707963267948966,
+       0,
+       0
+      ]
+     ]
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_hyp_bottom_eval",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       4.71238898038469,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 0.3,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "dupin_hyp_bottom_knots",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:1054 (MakeDupin)",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       4.71238898038469,
+       0,
+       0
+      ]
+     ]
+    },
+    "flags": 2
+   }
+  },
+  {
+   "name": "dupin_pair_0",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:611 (IntersectConic of Dupin curves)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": []
+    },
+    "b": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       3.141592653589793,
+       0,
+       0
+      ],
+      [
+       0.7,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "dupin_pair_1",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:611 (IntersectConic of Dupin curves)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 1,
+     "a": 1.414213562373095,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       3.141592653589793,
+       0,
+       0
+      ]
+     ]
+    },
+    "b": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 1.414213562373095,
+     "transforms": [
+      [
+       1.5707963267948966,
+       0,
+       0
+      ],
+      [
+       0.7,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "dupin_pair_2",
+   "upstream_ref": "source/SMLib/src/SmAdvSurfaceIntersector.cpp:611 (IntersectConic of Dupin curves)",
+   "inputs": {
+    "op": "intersect_conic",
+    "a": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 1.414213562373095,
+     "transforms": [
+      [
+       1.5707963267948966,
+       0,
+       0
+      ]
+     ]
+    },
+    "b": {
+     "type": 1,
+     "a": 0.7071067811865475,
+     "b": 0.7071067811865475,
+     "transforms": [
+      [
+       4.71238898038469,
+       0,
+       0
+      ],
+      [
+       0.7,
+       0,
+       0
+      ]
+     ]
+    },
+    "t": 1e-05
+   }
+  },
+  {
+   "name": "eval_ellipse_seam_left",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 1.0,
+    "n": 2,
+    "flags": 3
+   }
+  },
+  {
+   "name": "eval_ellipse_end",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 3.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "eval_three_derivs_fails",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 2,
+     "a": 1,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 0.5,
+    "n": 3,
+    "flags": 1
+   }
+  },
+  {
+   "name": "eval_unknown",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 4,
+     "a": 1,
+     "b": 1,
+     "transforms": [
+      [
+       0.3,
+       1,
+       2
+      ]
+     ]
+    },
+    "t": 0.5,
+    "n": 2
+   }
+  },
+  {
+   "name": "eval_empty_point",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate_point",
+    "a": {
+     "type": -1,
+     "a": 0,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 0.5
+   }
+  },
+  {
+   "name": "eval_hyperbola_near_pole",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 1,
+     "a": 1,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.999999,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "eval_parabola_vertex_zero_tangent_fix",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "evaluate",
+    "a": {
+     "type": 2,
+     "a": 1e-14,
+     "b": 0,
+     "transforms": []
+    },
+    "t": 0.0,
+    "n": 2,
+    "flags": 1
+   }
+  },
+  {
+   "name": "invert_hyperbola_vertex",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "invert",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "w": [
+     2,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "invert_ellipse_left",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "invert",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       0.5,
+       1,
+       1
+      ]
+     ]
+    },
+    "w": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "invert_line_rotated",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "invert",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": [
+      [
+       0.20943951023931956,
+       0.4,
+       0.3
+      ]
+     ]
+    },
+    "w": [
+     1,
+     1,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "knots_ellipse_partial",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "flags": 3,
+    "w": [
+     0,
+     3,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "knots_hyperbola_none",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "knots",
+    "a": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "flags": 3,
+    "w": [
+     -0.5,
+     0.5,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "continuities",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "continuities",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "t": 0.5
+   }
+  },
+  {
+   "name": "eq_self",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "flags": 1
+   }
+  },
+  {
+   "name": "eq_tiny_rotation",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": [
+      [
+       1e-13,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "eq_type_differs",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "eq",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "b": {
+     "type": 1,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "is_kind_of_conic",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "is_kind_of",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "n": 14020
+   }
+  },
+  {
+   "name": "is_kind_of_curve",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "is_kind_of",
+    "a": {
+     "type": 0,
+     "a": 2,
+     "b": 1,
+     "transforms": []
+    },
+    "n": 14001
+   }
+  },
+  {
+   "name": "type_strings",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "type_strings",
+    "a": {
+     "type": 3,
+     "a": 1,
+     "b": 0,
+     "transforms": []
+    }
+   }
+  },
+  {
+   "name": "read_db_ascii_upstream_layout",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "read_db",
+    "data": "2 SmConic conic type \n1.5 SmConic A of conic eqn \n0 SmConic B of conic eqn \n0.25 -0.5 SmConic origin of displaced conic curve \n0.75 SmConic rotation from X in radians of displaced conic curve\n"
+   }
+  },
+  {
+   "name": "read_db_binary",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "read_db",
+    "binary": true,
+    "data": "1 2.0 1.0 0.5 -0.25 1.25"
+   }
+  },
+  {
+   "name": "read_db_unknown_type",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "read_db",
+    "data": "4\n1\n1\n0 0\n0\n"
+   }
+  },
+  {
+   "name": "intersect_implicit_line_circle",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "intersect_implicit",
+    "a": {
+     "type": 3,
+     "a": 0.5,
+     "b": 0,
+     "transforms": []
+    },
+    "w": [
+     1,
+     0,
+     1,
+     0,
+     0,
+     -1
+    ]
+   }
+  },
+  {
+   "name": "intersect_unknown_rejected_by_both",
+   "upstream_ref": "source/SMLib/src/SmConic.cpp",
+   "inputs": {
+    "op": "implicit",
+    "a": {
+     "type": 4,
+     "a": 1,
+     "b": 1,
+     "transforms": []
+    }
+   }
+  }
+ ]
+}

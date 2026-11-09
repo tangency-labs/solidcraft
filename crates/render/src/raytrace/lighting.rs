@@ -2,7 +2,8 @@
 //! Colours are linear sRGB; intensity is relative radiance, not watts or illuminance.
 //! Visibility is supplied separately for every light by the ray-tracing consumer.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::surface::{OpaqueSurface, unit_direction};
 
@@ -86,18 +87,21 @@ impl Lighting {
     }
 
     pub fn preset(preset: StudioPreset) -> Result<Self> {
-        match preset {
-            StudioPreset::Neutral => Ok(Self::studio_default()),
-            StudioPreset::WarmCool => Self::new(vec![
-                DirectionalLight::new(Vec3::new(0.6, 0.0, 0.8), Vec3::new(1.0, 0.72, 0.48), 3.0)?,
-                DirectionalLight::new(Vec3::new(-0.8, 0.0, 0.6), Vec3::new(0.45, 0.65, 1.0), 1.0)?,
-                DirectionalLight::new(Vec3::new(0.0, -0.6, 0.8), Vec3::new(1.0, 1.0, 1.0), 1.5)?,
-            ]),
-            StudioPreset::KeyRim => Self::new(vec![
-                DirectionalLight::new(Vec3::new(0.6, -0.4, 0.8), Vec3::new(1.0, 1.0, 1.0), 3.0)?,
-                DirectionalLight::new(Vec3::new(-0.6, 0.4, 0.8), Vec3::new(0.6, 0.8, 1.0), 2.0)?,
-            ]),
-        }
+        let preset = match preset {
+            StudioPreset::Neutral => return Ok(Self::studio_default()),
+            StudioPreset::WarmCool => crate::job::LightingPreset::WarmCool,
+            StudioPreset::KeyRim => crate::job::LightingPreset::KeyRim,
+        };
+        let lights = preset
+            .directional_lights()
+            .into_iter()
+            .map(|light| {
+                let [x, y, z] = light.direction;
+                let [r, g, b] = light.color;
+                DirectionalLight::new(Vec3::new(x, y, z), Vec3::new(r, g, b), light.intensity)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Self::new(lights)
     }
 
     pub fn lights(&self) -> &[DirectionalLight] {

@@ -1,0 +1,20 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Sweeps, lofts (rails, multi-section blends), pipes, coils, ribs, surface lofts and sweeps, their
+# 3D sketch paths and the construction planes they run on.
+crates/doc/src/construct.rs
+crates/doc/src/eval_more.rs
+crates/doc/src/eval_surface.rs
+crates/doc/src/project3d.rs
+crates/engine/src/cmd/construct.rs
+crates/engine/src/cmd/features_more.rs
+crates/engine/src/cmd/sketch_3d.rs
+crates/engine/src/cmd/surface.rs
+crates/kernel/src/helix.rs
+crates/kernel/src/loft_blend.rs
+crates/kernel/src/loft_rails.rs
+crates/kernel/src/point_path.rs
+crates/kernel/src/splitface.rs
+crates/kernel/src/surfaces.rs
+crates/kernel/src/sweep_path.rs

@@ -114,7 +114,10 @@ completed drawings publish atomically. The browser still exports synchronously.
 - New Body extrusion and face-offset previews show completed intermediate geometry while a
   drag continues, then catch up to the exact final value. Changes to the selected geometry,
   operation or feature still discard obsolete results. Distance arrows and their value boxes
-  follow the current frame's input.
+  follow the current frame's input. When the selection changes while a preview computes (the
+  next edge picked for a fillet or chamfer), the new selection's preview starts at once: the
+  obsolete one is asked to stop and its result is dropped, with at most two left running
+  (#7167).
 - Large fine modelled threads use pitch-based helix resolution and tighter faceted
   reconstruction fallbacks, preserving thin crests and closed shells on large shafts.
 
@@ -147,6 +150,12 @@ completed drawings publish atomically. The browser still exports synchronously.
   texture rendering and expanded component families are not implemented by this entry.
 
 ## Render foundation
+
+- Wood surface images (#1345): native CPU and GPU opaque rendering share physical
+  repeat frames and filtered mip chains. Imported maps retain exact bytes and
+  declared provenance in the design, reopen offline, and expose grain-angle
+  controls. Scalar face appearances suppress body maps. Planar projection and
+  CPU encoding/optical limits remain explicit; see [portable surfaces](render-portable-surfaces-and-stages.md).
 
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](render-starter-appearances.md).
 
@@ -387,6 +396,10 @@ completed drawings publish atomically. The browser still exports synchronously.
   top/bottom heading are preserved. Diagonals include 45-degree edge and isometric corner views.
 - Navigation bar overhaul (#6585): the viewport's Fit, Home, camera tools, Spin, visual style, Grid, Ground
   shadow and bar visibility are registered `view.*` commands, and Fit/Home follow the active canvas.
+- Navigation bar slots (#6585): stored order and appearance, command-driven controls, canvas availability and
+  single-row overflow.
+- Navigation bar customisation (#6585): approved light/dark bar and settings geometry, live position preview,
+  accessible reordering and per-menu display options.
 
 ## Known limitations
 
@@ -397,6 +410,10 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 - Associative shell-face sketches require a unique certified planar source. Nested shell
   attachments and ambiguous coincident sources remain unsupported.
+- Print faces (#8429) are held like sketches on faces, so the same limit applies: after a shell
+  of a body that is already shelled, no face of that body has an exact name, and none can be
+  marked (`body.print_face` says so). Fixing it needs the shell to report its face history,
+  which is kernel work, done in `solidcore/` (CONTRIBUTING.md, "Kernel work goes in solidcore/").
 - G2 fillets: exact quintic blends of straight edges between planar faces, with one planar
   end face at each end, including sloped ends (#2708). The UI and `solid.fillet` expose
   `curvature` (alias `g2`); the size is an equivalent circular setback. Curved faces/edges,
@@ -648,7 +665,7 @@ and reference-object placement remain separate work, as do loft rails and center
   a seekable reader defers original blobs until after provisional display.
   See [container format](design-container.md) and [performance measurements](perf.md).
 - Warm saves with explicit `cache: true` can include a versioned native B-rep cache through SolidCraft-owned topology
-  and geometry records, with a separate truck adapter and bounded binary reader. Exact
+  and geometry records, with a separate kernel adapter and bounded binary reader. Exact
   face-source certificates and operation history survive codec round trips. A provisional
   picture can be generated before original blobs are read; editing and measurement wait
   for authoritative reconstruction. Cached metadata binds preview and reconstruction to

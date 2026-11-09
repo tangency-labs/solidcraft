@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 4,
+    "corner": [
+     20,
+     10,
+     3
+    ],
+    "operation": "cut",
+    "targets": [
+     "Block"
+    ]
+   }
+  }
+ ]
+}

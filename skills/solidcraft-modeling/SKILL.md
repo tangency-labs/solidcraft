@@ -47,19 +47,20 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
   - A fillet between two curved faces, such as a sphere joined to a cylinder: the shell then fails with `offset: only bodies with planes, cylinders, cones, spheres and tori`. Shell first. The inside corner then stays sharp, so the wall there is thinner than `thickness`.
 
 ## Verify
-- **Each stage:** run `measure {}` (about 0.9 KB per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
+- **Each stage:** run `measure {}` (about 0.9 KB per body; `{"summary":true}` keeps only name, volume, bbox, face count and `closed` per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
 - **Timeline health:** `inspect_design {"measure":false,"sketches":false}` shows each feature's `error` and `warning`.
-- **Parameter test:** run `set_parameter`. Expect `errors: []`, then `measure` again; the COM and bbox should move by the amounts you computed.
+- **Parameter test:** run `set_parameter`. Expect `errors: []`, then `measure` again; the COM and bbox should move by the amounts you computed. To try values without keeping them, `check_parameters {"set": {"L": "140 mm"}}` reports the volume, errors and cylinder axes and puts the design back.
 - **Positions:** `measure` does not say where a feature sits.
   - On an asymmetric part, check the COM shift you computed.
   - On a symmetric part (a mirrored or patterned layout) the COM does not move, so take a top-view screenshot and compare distances in pixels against a known size.
-  - `body_topology` is a last resort: it costs 25-45 KB and splits cylinders into half faces.
+  - For holes and bosses, `body_topology {"body":"Body1","faces":"cylinders"}`: one entry per cylinder (`radius`, `origin`, `axis`, `extent` along the axis, the merged faces' `names`), a few lines.
+  - The full `body_topology` is a last resort: it costs 25-45 KB and splits cylinders into half faces.
 - **Final look:** one `screenshot {"source":"model","view":"iso","width":480,"height":320}`. Use `"view":"top"` for features inside walls, which the iso view hides.
   - `width` and `height` apply only to model renders.
   - When the server is bridged, `source` defaults to the whole app window and `view` also turns the user's camera, so pass `"source":"model"` and leave out `view` unless the user wants the camera moved.
 
 ## Finish
-`export {path}` writes `.step` for CAD, `.3mf`/`.stl` for printing, or `.urdf` (an assembly with joints, for robot simulators). `save {path}` writes `.solidcraft`.
+`export {path}` writes `.step` for CAD, `.3mf`/`.stl` for printing, or `.urdf` (an assembly with joints, for robot simulators). `save {path}` writes `.sc` (`.solidcraft` files from earlier releases still open).
 
 ## Red flags
 

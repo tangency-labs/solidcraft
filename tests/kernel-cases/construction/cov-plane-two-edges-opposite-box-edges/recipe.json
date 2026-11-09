@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.plane.two_edges",
+   "params": {
+    "a": {
+     "edge": [
+      20,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "edge": [
+      20,
+      30,
+      20
+     ]
+    },
+    "name": "E"
+   }
+  }
+ ]
+}

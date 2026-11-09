@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a 60x40 profile with a semicircular end r20, extruded 20",
+ "source": "analytic",
+ "method": "A = 60*40 + pi 20^2 / 2; V = 20 A; sides: 3 planes and a half cylinder",
+ "body_count": 1,
+ "volume_mm3": 60566.370614359,
+ "area_mm2": 10513.274122872,
+ "faces": 6
+}

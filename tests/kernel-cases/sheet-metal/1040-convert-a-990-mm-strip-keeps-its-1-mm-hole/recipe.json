@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 990,
+    "width": 100,
+    "height": 1,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     100,
+     50,
+     1
+    ],
+    "diameter": 10
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     300,
+     50,
+     1
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     500,
+     50,
+     1
+    ],
+    "diameter": 2
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     700,
+     50,
+     1
+    ],
+    "diameter": 1
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Plate",
+    "face": [
+     480,
+     25,
+     1
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

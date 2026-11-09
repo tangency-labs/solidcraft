@@ -173,6 +173,13 @@ pub(crate) fn begin(total: usize) -> Evaluation {
 }
 
 impl Evaluation {
+    /// Whether the watcher asked to stop. A feature cut short then (a STEP import that stopped
+    /// part way) failed only because of it: its result must not be kept for the same inputs, as
+    /// the evaluation cache is shared with the model a preview was copied from (#7167).
+    pub(crate) fn cancelled(&self) -> bool {
+        CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+    }
+
     /// Feature `index` is next. True when the watcher asked to stop: skip it.
     pub(crate) fn step(&self, index: usize) -> bool {
         CURRENT.with(|c| {
@@ -216,7 +223,8 @@ impl Evaluation {
         if !due {
             return;
         }
-        let world = Arc::new(crate::world_state(doc, state));
+        // A world that cannot be placed is shown with the evaluation's own error, at its end.
+        let Ok(world) = crate::world_state(doc, state).map(Arc::new) else { return };
         if let Ok(mut p) = progress.partial.lock() {
             *p = (Some(Partial { features, world }), Some(web_time::Instant::now()));
         }
@@ -285,7 +293,7 @@ mod tests {
     fn partial_models_go_only_to_a_watcher_that_wants_them() {
         let mut doc = crate::Document::new("partial");
         let block = crate::FeatureKind::Box {
-            corner: crate::point_expr(solidcraft_geom::Vec3::ZERO),
+            corner: crate::point_expr(solidcore_record::Vec3::ZERO),
             length: "2 mm".into(),
             width: "3 mm".into(),
             height: "4 mm".into(),

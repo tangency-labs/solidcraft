@@ -30,7 +30,7 @@ const NOT_A_BUG = /^\s*\[(feat|feature|change|enhancement)|feature request|sugge
 const APP_TITLE = /^([A-Z][A-Z ]+|Modeling|Part|Sketch|Surface|Sheet Metal|Plastic|Mesh|Render):\s*\S/;
 // A report this long describes what it saw; only short ones are asked.
 const SHORT = 300;
-const ATTACHMENT = /user-attachments\/|\.solidcraft\b|repro\.json|\.(step|stp|3mf|stl)\b/i;
+const ATTACHMENT = /user-attachments\/|\.(sc|solidcraft)\b|repro\.json|\.(step|stp|3mf|stl)\b/i;
 const COMMAND = /["`][a-z_]+\.[a-z_][a-z_.]*["`]/;
 const VERSION = /\b\d+\.\d+\.\d+\b|\b[0-9a-f]{7,40}\b/i;
 
@@ -61,7 +61,7 @@ function askBody(asks) {
   const lines = ['Thanks for the report! To reproduce it we need a little more:'];
   lines.push(
     '- **Steps to reproduce**: what you clicked or typed, in order. For a problem on a particular design, ' +
-      '`solidcraft-cli script design.solidcraft --out repro.json` turns its history into a script; attach that, or the design.',
+      '`solidcraft-cli script design.sc --out repro.json` turns its history into a script; attach that, or the design.',
   );
   if (asks.includes('version')) lines.push('- **SolidCraft version** (Help → About) and your OS.');
   lines.push(

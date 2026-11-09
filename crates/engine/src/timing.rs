@@ -40,6 +40,20 @@ pub fn time<T>(profile: bool, f: impl FnOnce() -> T) -> (T, Step) {
     }
 }
 
+/// `SOLIDCRAFT_PROFILE` asks for the profiler from the start: `1`, `true`, `on` or `yes`.
+pub fn profile_env_on(value: Option<&str>) -> bool {
+    value.map(|v| v.trim().to_ascii_lowercase()).is_some_and(|v| matches!(v.as_str(), "1" | "true" | "on" | "yes"))
+}
+
+/// Start the profiler when `SOLIDCRAFT_PROFILE` asks for it (the apps call this at start-up);
+/// true when it is recording.
+pub fn profile_from_env() -> bool {
+    if profile_env_on(solidcraft_geom::env::var("PROFILE").as_deref()) {
+        solidcraft_profile::set_enabled(true);
+    }
+    solidcraft_profile::enabled()
+}
+
 /// Milliseconds to the microsecond, so the JSON stays readable.
 pub fn round_ms(ms: f64) -> f64 {
     if ms.is_finite() { (ms * 1000.0).round() / 1000.0 } else { 0.0 }
@@ -65,6 +79,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_profile_variable_takes_the_usual_yes_words() {
+        for v in ["1", "true", " ON ", "yes"] {
+            assert!(profile_env_on(Some(v)), "{v}");
+        }
+        for v in [None, Some(""), Some("0"), Some("off"), Some("2")] {
+            assert!(!profile_env_on(v), "{v:?}");
+        }
+    }
+
+    #[test]
     fn steps_report_their_time_and_profile_only_when_asked() {
         let (r, step) = time(false, || 7);
         assert_eq!(r, 7);
@@ -87,7 +111,7 @@ mod tests {
             {"command": "solid.box", "params": {"length": 4, "width": 4, "height": 30, "operation": "join"}},
         ]});
         let mut s = crate::Session::default();
-        let (results, t) = s.run_script_timed(&script, true).unwrap();
+        let (results, t) = s.run_script_timed(&script, true, &mut |_, _| {}).unwrap();
         assert_eq!(results.len(), 2);
         let rows = t["timings"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
@@ -100,12 +124,12 @@ mod tests {
         let total = t["total_ms"].as_f64().unwrap();
         assert!(total + 0.01 >= rows.iter().map(|r| r["ms"].as_f64().unwrap()).sum::<f64>(), "{t}");
         // Without profile: the same rows, no kernel split; the plain run is unchanged.
-        let (_, t) = crate::Session::default().run_script_timed(&script, false).unwrap();
+        let (_, t) = crate::Session::default().run_script_timed(&script, false, &mut |_, _| {}).unwrap();
         assert!(t["timings"][0].get("profile").is_none());
         assert_eq!(crate::Session::default().run_script(&script).unwrap().len(), 2);
         // A failing step still fails the run, with its step number.
         let bad = json!([{"command": "solid.box", "params": {"length": -1}}]);
-        let e = crate::Session::default().run_script_timed(&bad, true).unwrap_err().to_string();
+        let e = crate::Session::default().run_script_timed(&bad, true, &mut |_, _| {}).unwrap_err().to_string();
         assert!(e.contains("step 1"), "{e}");
     }
 }

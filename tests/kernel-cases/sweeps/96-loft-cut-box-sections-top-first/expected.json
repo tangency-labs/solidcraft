@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#122",
+  "tangency-labs/solidcraft#96"
+ ],
+ "what": "a loft cut through a 100 x 60 x 30 block from its whole 100 x 60 outline at z = 20 (edges flush with the side faces) down to a 10 x 10 pad in a corner at z = 11, sections given top first (the cut panicked for one order)",
+ "source": "analytic",
+ "method": "the loft is a ruled prismatoid between the 100 x 60 rectangle at z = 20 and the 10 x 10 square at z = 11 (corner at (2,2)..(12,12)): V = h/6 (A0 + 4 Am + A1) with h = 9, Am = (110/2) (70/2): V_loft = 20700.0. The top section covers the whole cross-section at z = 20, so the 10 mm slab above it is cut loose from the rest: two bodies, together 180000 - V_loft; the result must not depend on the order of the sections.",
+ "body_count": 2,
+ "volume_mm3": 159300.0
+}

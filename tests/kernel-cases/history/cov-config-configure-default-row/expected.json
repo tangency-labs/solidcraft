@@ -1,0 +1,43 @@
+{
+ "sources": [],
+ "what": "config.configure of a block's length W and its hole's suppression: a Default row with today's values",
+ "method": "W = 40, H = 10, the 10 mm hole through: V = 12000 - pi 25 10; faces 7; the Default row holds W's expression and the hole on",
+ "body_count": 1,
+ "volume_mm3": 11214.601836602551,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   10
+  ]
+ },
+ "results": [
+  {
+   "step": 5,
+   "json": {
+    "active": "Default",
+    "columns": [
+     "param:W",
+     "suppress:Hole"
+    ],
+    "matches": true,
+    "rows": [
+     {
+      "name": "Default",
+      "values": {
+       "param:W": "40 mm",
+       "suppress:Hole": "false"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "source": "analytic"
+}

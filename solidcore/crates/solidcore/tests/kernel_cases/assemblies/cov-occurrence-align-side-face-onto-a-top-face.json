@@ -1,0 +1,159 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                90.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                50.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                90.0,
+                40.0,
+                0.0
+              ],
+              "start": [
+                90.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.0,
+                40.0,
+                0.0
+              ],
+              "start": [
+                90.0,
+                40.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                50.0,
+                40.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-occurrence-align-side-face-onto-a-top-face",
+  "expected": {
+    "body_count": 2,
+    "method": "Base: box 40x40x10 from (50,0,0), grounded, top face z = 10; Peg: box 20x10x10 from the origin, end face x = 20 (normal +x) picked at (20,5,5), aligned to the top face at (70,20,10) (normal +z): faces meet facing each other, so +x turns to -z, a quarter turn about +y through (20,5,5), then (20,5,5) moves to (70,20,10). The centre (10,5,5) is (-10,0,0) from the pick, turned (0,0,10): (70,20,20); the 20 mm length stands along z: box (65,15,10)-(75,25,30)",
+    "results": [
+      {
+        "json": {
+          "total": {
+            "bbox": {
+              "max": [
+                75.0,
+                25.0,
+                30.0
+              ],
+              "min": [
+                65.0,
+                15.0,
+                10.0
+              ]
+            },
+            "center_of_mass": [
+              70.0,
+              20.0,
+              20.0
+            ]
+          }
+        },
+        "step": 8
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 18000.0,
+    "what": "occurrence.align of a block's end face onto another part's top face"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [
+    {
+      "body": "BaseBox",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5800.0,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 18000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "occurrence.align of a block's end face onto another part's top face",
+  "why_not": [
+    "body \"PegBox\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

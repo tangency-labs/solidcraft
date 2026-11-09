@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2528"
+  ],
+  "what": "a rounded slot (a box with a half-cylinder on each end) joined with a cylinder that overlaps one end: the cylinder walls meet along vertical seams and intersection edges, where wedge-shaped mis-tessellated facets showed up",
+  "source": "analytic",
+  "method": "12 mm tall. Plan: stadium (box 40x20 plus two r=10 half discs, centres (0,0) and (40,0)) area 800+100 pi, united with a r=8 disc centred (50,0). The two discs (r1=10, r2=8, centre distance d=10) overlap in a lens: a=(d^2+r1^2-r2^2)/(2d)=6.8 from the r1 centre, half-angles acos(a/r1)=0.82303 and acos((d-a)/r2)=1.15928, lens = sum of r^2 (phi - sin phi cos phi) = 83.1760. The peg's disc lies wholly at x>=42, so it only meets the right half disc. Plan area = 1114.159 + 201.062 - lens = 1232.045; V = 12 plan = 14784.542. Boundary length = 2*40 (flat sides) + 10 pi (left end) + (10 pi - 2 phi1 10) (right end outside the peg) + (16 pi - 16 psi) (peg outside the right end) = 158.088; A = 2 plan + 12 boundary = 4361.149.",
+  "body_count": 1,
+  "volume_mm3": 14784.542,
+  "area_mm2": 4361.149
+}
