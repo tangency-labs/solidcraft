@@ -9,7 +9,7 @@ use solidcore_record::Vec3;
 /// Lowest admitted perceptual roughness. Perfect delta mirrors need another integrator.
 pub const MIN_ROUGHNESS: f64 = 0.045;
 
-/// Original single-scattering GGX/Smith/Schlick preview model, with attenuated Lambert diffuse.
+/// Isotropic GGX/Smith/Schlick with attenuated Lambert diffuse and optional rough metal compensation.
 /// Private fields keep every instance finite and bounded; deserializers must use `new`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OpaqueSurface {
@@ -18,6 +18,7 @@ pub struct OpaqueSurface {
     roughness: f64,
     dielectric_ior: f64,
     clear_coat: Option<crate::clear_coat::ClearCoat>,
+    metal_energy_compensation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,7 +63,7 @@ impl OpaqueSurface {
         if !dielectric_ior.is_finite() || !(1.0..=3.0).contains(&dielectric_ior) {
             return Err(SurfaceError::DielectricIor);
         }
-        Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None })
+        Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None, metal_energy_compensation: false })
     }
 
     /// Bounded runtime optical finish, matching authored aging's 0.02..1 domain.
@@ -93,6 +94,16 @@ impl OpaqueSurface {
     }
     pub fn clear_coat(self) -> Option<crate::clear_coat::ClearCoat> {
         self.clear_coat
+    }
+
+    /// Enable the optional reciprocal residual lobe for rough isotropic conductors.
+    pub(crate) fn with_metal_energy_compensation(mut self, enabled: bool) -> Self {
+        self.metal_energy_compensation = enabled;
+        self
+    }
+
+    pub(crate) fn metal_energy_compensation(self) -> bool {
+        self.metal_energy_compensation
     }
 
     pub fn base_color(self) -> Vec3 {
@@ -147,17 +158,67 @@ impl OpaqueSurface {
         let fresnel = |cos: f64| self.specular_fresnel(cos);
         let f = fresnel(vh);
         // Symmetric entry/exit attenuation avoids adding a full Lambert substrate
-        // to grazing reflection. Internal reflection / multi-scattering is omitted.
+        // to grazing reflection. The separate compensation below applies to conductors.
         let fv = fresnel(nv);
         let fl = fresnel(nl);
         let diffuse = self.base_color * ((1.0 - self.metallic) / PI);
-        let base = Vec3::new(
+        let mut base = Vec3::new(
             f.x * specular + (1.0 - fv.x) * (1.0 - fl.x) * diffuse.x,
             f.y * specular + (1.0 - fv.y) * (1.0 - fl.y) * diffuse.y,
             f.z * specular + (1.0 - fv.z) * (1.0 - fl.z) * diffuse.z,
         );
+        if self.metal_energy_compensation && self.metallic > 0.0 && self.roughness > 0.35 {
+            base += metal_multiple_scattering(self.base_color, self.metallic, self.roughness, nv, nl);
+        }
         Ok(self.clear_coat.map_or(base, |coat| coat.layer(base, nv, nl, nh, vh)))
     }
+}
+
+/// Kulla and Conty's reciprocal residual lobe with the corrected Fresnel factor
+/// (SIGGRAPH 2017, appendix). The original fit below is for our separable Smith
+/// term, with perceptual roughness r in [0.35, 1]. It approximates 1 - E, where
+/// E is the directional hemispherical reflectance with unit Fresnel.
+const METAL_LOSS: [[f64; 6]; 8] = [
+    [0.266099230744, 0.234143736162, 0.030578608252, -0.006555488201, -0.001408821529, 0.000338338127],
+    [0.062815590935, 0.109326249066, -0.000168741912, -0.008651318409, -0.000234806591, 0.000537478808],
+    [-0.012483235801, 0.028318374577, 0.005800323841, -0.006920257497, 0.000309127847, 0.000486378250],
+    [-0.004382182237, -0.011917917997, 0.008966558426, -0.002826443547, -0.000881066054, 0.000652337664],
+    [0.004792378381, -0.005261311499, 0.000874914479, 0.001861663053, -0.001449625147, 0.000284442998],
+    [-0.001334206261, 0.003343183987, -0.002951722839, 0.001555479216, -0.000159594280, -0.000303749560],
+    [-0.000540498387, 0.000522348781, 0.000261748019, -0.000812746047, 0.000729308912, -0.000316627573],
+    [0.000576930968, -0.001089750952, 0.000855587383, -0.000437065280, 0.000037708235, 0.000134962401],
+];
+// Cosine-weighted moments of T_j(2*sqrt(mu)-1): 4 integral x^3 T_j(2*x-1) dx.
+const METAL_LOSS_MOMENTS: [f64; 8] =
+    [1.000000000000, 0.600000000000, -0.066666666667, -0.314285714286, -0.219047619048, -0.111111111111, -0.066666666667, -0.046464646465];
+
+fn chebyshev<const N: usize>(coefficients: &[f64; N], x: f64) -> f64 {
+    let (mut next, mut after) = (0.0, 0.0);
+    for &coefficient in coefficients.iter().skip(1).rev() {
+        (next, after) = (coefficient + (2.0 * x) * next - after, next);
+    }
+    coefficients[0] + x * next - after
+}
+
+fn metal_multiple_scattering(color: Vec3, metallic: f64, roughness: f64, nv: f64, nl: f64) -> Vec3 {
+    let roughness_coordinate = 2.0 * (roughness - 0.35) / 0.65 - 1.0;
+    let mut curve = METAL_LOSS.map(|row| chebyshev(&row, roughness_coordinate));
+    // Leave a small margin for fit error so a white conductor does not gain energy.
+    curve[0] -= 0.003;
+    let mean_loss: f64 = curve.iter().zip(METAL_LOSS_MOMENTS).map(|(c, w)| c * w).sum();
+    let view_loss = chebyshev(&curve, 2.0 * nv.sqrt() - 1.0);
+    let light_loss = chebyshev(&curve, 2.0 * nl.sqrt() - 1.0);
+    let t = ((roughness - 0.35) / 0.1).min(1.0);
+    let strength = t * t * (3.0 - 2.0 * t);
+    let lobe = metallic * strength * view_loss * light_loss / (PI * mean_loss);
+    let escape = 1.0 - mean_loss;
+    // Schlick averaged over cosine-weighted microfacet incidence. Every
+    // returned photon scatters at least twice and loses tint at each bounce.
+    let reflected = |f0: f64| {
+        let mean_fresnel = f0 + (1.0 - f0) / 21.0;
+        lobe * mean_fresnel * mean_fresnel * escape / (1.0 - mean_fresnel * mean_loss)
+    };
+    Vec3::new(reflected(color.x), reflected(color.y), reflected(color.z))
 }
 
 /// Exact piecewise sRGB decoding of an existing 8-bit color channel ([`solidcraft_color::srgb::decode8`]).
@@ -234,6 +295,51 @@ mod tests {
             assert_eq!(s.brdf(bad, Vec3::Z, Vec3::Z), Err(SurfaceError::Direction));
             assert_eq!(s.brdf(Vec3::Z, bad, Vec3::Z), Err(SurfaceError::Direction));
             assert_eq!(s.brdf(Vec3::Z, Vec3::Z, bad), Err(SurfaceError::Direction));
+        }
+    }
+
+    #[test]
+    fn compensated_rough_metal_white_furnace_is_reciprocal_and_nearly_lossless() {
+        let white = Vec3::new(1.0, 1.0, 1.0);
+        for roughness in [0.45, 0.6, 0.8, 1.0] {
+            let legacy = OpaqueSurface::new(white, 1.0, roughness, 1.5).unwrap();
+            let compensated = legacy.with_metal_energy_compensation(true);
+            for mu_view in [0.03_f64, 0.18, 0.5, 1.0] {
+                let view = Vec3::new((1.0 - mu_view * mu_view).sqrt(), 0.0, mu_view);
+                let light = Vec3::new(0.0, 0.6, 0.8);
+                let f = compensated.brdf(Vec3::Z, view, light).unwrap();
+                assert!((f - compensated.brdf(Vec3::Z, light, view).unwrap()).len() < 1e-12);
+                // Independent uniform midpoint quadrature of the complete BRDF.
+                // The fit integrates azimuth analytically and uses Gauss–Legendre nodes.
+                let (mut uncorrected, mut corrected) = (0.0, 0.0);
+                const MU: usize = 256;
+                const AZIMUTH: usize = 512;
+                for i in 0..MU {
+                    let mu = (i as f64 + 0.5) / MU as f64;
+                    let radius = (1.0 - mu * mu).sqrt();
+                    for j in 0..AZIMUTH {
+                        let phi = 2.0 * PI * (j as f64 + 0.5) / AZIMUTH as f64;
+                        let l = Vec3::new(radius * phi.cos(), radius * phi.sin(), mu);
+                        uncorrected += legacy.brdf(Vec3::Z, view, l).unwrap().x * mu;
+                        corrected += compensated.brdf(Vec3::Z, view, l).unwrap().x * mu;
+                    }
+                }
+                let measure = 2.0 * PI / (MU * AZIMUTH) as f64;
+                let legacy_energy = uncorrected * measure;
+                let energy = corrected * measure;
+                assert!((0.989..=1.001).contains(&energy), "roughness {roughness}, view {mu_view}: {energy}");
+                assert!(energy > legacy_energy);
+                if roughness == 1.0 && mu_view == 1.0 {
+                    assert!((legacy_energy - (1.0 - 2.0_f64.ln())).abs() < 1e-6);
+                }
+            }
+        }
+        let copper = surface(1.0, 1.0, 1.5);
+        let gain =
+            copper.with_metal_energy_compensation(true).brdf(Vec3::Z, Vec3::Z, Vec3::Z).unwrap() - copper.brdf(Vec3::Z, Vec3::Z, Vec3::Z).unwrap();
+        assert!(gain.x > gain.y && gain.y > gain.z && gain.z > 0.0);
+        for s in [surface(0.0, 1.0, 1.5), surface(1.0, 0.35, 1.5)] {
+            assert_eq!(s.brdf(Vec3::Z, Vec3::Z, Vec3::Z), s.with_metal_energy_compensation(true).brdf(Vec3::Z, Vec3::Z, Vec3::Z));
         }
     }
 

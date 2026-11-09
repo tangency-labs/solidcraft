@@ -1,0 +1,66 @@
+{
+  "ar": {
+    "render.caustics_area_lights": "تأثيرات الضوء المركّز من الأضواء المساحية",
+    "render.caustics_environment": "تأثيرات الضوء المركّز من البيئة",
+    "render.metal_energy_compensation": "استعادة انعكاس المعادن الخشنة",
+    "render.metal_energy_compensation_help": "عوّض الضوء الذي تفقده الأسطح المعدنية الخشنة بين أوجهها المجهرية. يتطلب معالج CPU إضاءة غير مباشرة.",
+    "render.texture_filtering": "ترشيح تفاصيل الخامات",
+    "render.texture_filtering_help": "استخدم مستويات التفاصيل والترشيح المتباين لتقليل تعرّج الخامات عند التصغير. يزيد استهلاك الذاكرة؛ يبقى الوضع القديم معطّلاً."
+  },
+  "de": {
+    "render.caustics_area_lights": "Kaustiken von Flächenlichtern",
+    "render.caustics_environment": "Kaustiken aus der Umgebung",
+    "render.metal_energy_compensation": "Reflexion rauer Metalle wiederherstellen",
+    "render.metal_energy_compensation_help": "Gleicht den Lichtverlust zwischen den Mikrofacetten rauer Metalle aus. Die CPU benötigt indirekte Beleuchtung.",
+    "render.texture_filtering": "Texturdetails filtern",
+    "render.texture_filtering_help": "Mip-Stufen und anisotrope Filterung verringern Flimmern verkleinerter Texturen. Benötigt zusätzlichen Speicher; ausgeschaltet bleibt die bisherige Filterung."
+  },
+  "en": {
+    "render.caustics_area_lights": "Area light caustics",
+    "render.caustics_environment": "Environment caustics",
+    "render.metal_energy_compensation": "Recover rough metal reflectance",
+    "render.metal_energy_compensation_help": "Compensate for light lost between rough metal microfacets. CPU rendering needs Indirect lighting.",
+    "render.texture_filtering": "Filter texture detail",
+    "render.texture_filtering_help": "Use mip levels and anisotropic filtering to reduce texture aliasing under minification. Uses more memory; off retains the previous filtering."
+  },
+  "he": {
+    "render.caustics_area_lights": "קאוסטיקה מתאורת שטח",
+    "render.caustics_environment": "קאוסטיקה מתאורת הסביבה",
+    "render.metal_energy_compensation": "שחזור ההחזר של מתכת מחוספסת",
+    "render.metal_energy_compensation_help": "מפצה על האור שאובד בין הפאות המיקרוסקופיות של מתכת מחוספסת. עיבוד במעבד דורש תאורה עקיפה.",
+    "render.texture_filtering": "סינון פרטי מרקם",
+    "render.texture_filtering_help": "שימוש ברמות פירוט ובסינון אנאיזוטרופי מפחית שינון במרקמים מוקטנים. דורש יותר זיכרון; כשהאפשרות כבויה נשמר הסינון הקודם."
+  },
+  "ja": {
+    "render.caustics_area_lights": "面光源のコースティクス",
+    "render.caustics_environment": "環境光のコースティクス",
+    "render.metal_energy_compensation": "粗い金属の反射を補正",
+    "render.metal_energy_compensation_help": "粗い金属の微小面間で失われる光を補います。CPU レンダリングには間接照明が必要です。",
+    "render.texture_filtering": "テクスチャの細部をフィルタリング",
+    "render.texture_filtering_help": "ミップレベルと異方性フィルタリングで縮小時のちらつきを抑えます。メモリ使用量が増えます。オフでは従来のフィルタリングを維持します。"
+  },
+  "ko": {
+    "render.caustics_area_lights": "면광원 집광 효과",
+    "render.caustics_environment": "환경광 집광 효과",
+    "render.metal_energy_compensation": "거친 금속의 반사 복원",
+    "render.metal_energy_compensation_help": "거친 금속의 미세면 사이에서 손실되는 빛을 보정합니다. CPU 렌더링에는 간접 조명이 필요합니다.",
+    "render.texture_filtering": "텍스처 세부 필터링",
+    "render.texture_filtering_help": "밉 레벨과 비등방성 필터링으로 축소 시 텍스처 계단 현상을 줄입니다. 메모리를 더 사용하며 끄면 기존 필터링을 유지합니다."
+  },
+  "vi": {
+    "render.caustics_area_lights": "Tụ quang từ đèn diện tích",
+    "render.caustics_environment": "Tụ quang từ ánh sáng môi trường",
+    "render.metal_energy_compensation": "Khôi phục phản xạ của kim loại nhám",
+    "render.metal_energy_compensation_help": "Bù ánh sáng thất thoát giữa các vi diện của kim loại nhám. Kết xuất CPU cần chiếu sáng gián tiếp.",
+    "render.texture_filtering": "Lọc chi tiết kết cấu",
+    "render.texture_filtering_help": "Dùng các mức mip và lọc bất đẳng hướng để giảm răng cưa khi thu nhỏ kết cấu. Tốn thêm bộ nhớ; tắt để giữ cách lọc trước đây."
+  },
+  "zh": {
+    "render.caustics_area_lights": "面光源焦散",
+    "render.caustics_environment": "环境光焦散",
+    "render.metal_energy_compensation": "恢复粗糙金属的反射",
+    "render.metal_energy_compensation_help": "补偿粗糙金属微表面之间损失的光能。CPU 渲染需要间接照明。",
+    "render.texture_filtering": "过滤纹理细节",
+    "render.texture_filtering_help": "使用多级纹理和各向异性过滤，减少纹理缩小时的锯齿。需要更多内存；关闭时保留原有过滤方式。"
+  }
+}
