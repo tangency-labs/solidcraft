@@ -107,7 +107,7 @@ pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub mod keymap;
 #[cfg(test)]
-mod kit_gallery;
+mod kit_gallery_tests;
 mod length_input;
 mod linked_source;
 #[cfg(test)]
