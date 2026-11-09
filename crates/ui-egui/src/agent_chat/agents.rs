@@ -513,7 +513,9 @@ mod tests {
             && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
             && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Cheaper Inference" && key_safe_for(p.base_url)));
-        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Standard Compute" && key_safe_for(p.base_url)));
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Standard Compute"
+            && p.base_url == "https://api.stdcmpt.com/v1"
+            && key_safe_for(p.base_url)));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
             assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");
