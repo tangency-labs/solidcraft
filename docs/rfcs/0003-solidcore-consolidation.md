@@ -28,10 +28,10 @@ Sizes are non-test lines on main `1c8fdde4ba` (tests in brackets). "Callers" cou
 
 | Job | SolidCraft copy (lines) | Layer | solidcore counterpart | Better, by measurement | Callers |
 |---|---|---|---|---|---|
-| Meshing | `kernel/src/tess/` (6.2k [1.1k]); `geom/src/tess.rs` + `tess/` (1.6k: plan, fast evaluator, partials) | tess | `solidcore-tess` (same planner, 15k with tests) | Tie on triangles (2,471 of 2,530 runs match, none >5% apart). solidcore-tess is more robust (meshes `rod_doubled_edge`, reports empty faces) and 10–60x slower on spline bodies (`eval::collapse`, #13655). Decided: solidcore-tess | `Body::mesh`/`mesh_plan`: engine 50, kernel 37, ui-egui 30, doc 23, io 3, gpu 2 |
+| Meshing | `kernel/src/tess/` (6.2k [1.1k]); `geom/src/tess.rs` + `tess/` (1.6k: plan, fast evaluator, partials) | tess | `solidcore-tess` (same planner, 15k with tests) | Tie on triangles (2,471 of 2,530 runs match, none >5% apart). solidcore-tess is more robust (meshes `rod_doubled_edge`, reports empty faces) and 10–60x slower on spline bodies (`eval::collapse`, #13655). Base: SolidCraft's tess; add solidcore-tess's robustness (`rod_doubled_edge`, empty-face reports) | `Body::mesh`/`mesh_plan`: engine 50, kernel 37, ui-egui 30, doc 23, io 3, gpu 2 |
 | Mesh simplification | `geom/src/simplify.rs` (0.55k) | tess | `solidcore-tess/src/simplify.rs` | Not measured | gpu 1, ui-egui 1 |
 | Second (u, v) grid mesher | none in SolidCraft | tess | `nurbs-grid-mesh` (2.3k) | Loses: T-junctions on ~60% of closed bodies, over the chord on 70 bodies vs 5. Keep `deviation` as a test checker; delete after a 300 x 300-pole test | none |
-| STEP read | `crates/step` (7.3k [1.8k]); `kernel/src/step_in` (1.7k [3.1k]) | record (model, parser), ops (build) | `solidcore-record::step`, `step-import`, `step-brep` (11k) | Core opens 218 vs 196 and refuses 0 vs 23, closes 12 bodies SC leaves open. SC is 3x faster (median 0.14 s vs 0.43 s), opens `ap203/rear` (core times out), matched 22 of 23 reference volumes vs 21. Placements (`cylinder_twice`) fixed on `kernel` by #13582. Decided: core topology-first | kernel 1 (import), engine 1 |
+| STEP read | `crates/step` (7.3k [1.8k]); `kernel/src/step_in` (1.7k [3.1k]) | record (model, parser), ops (build) | `solidcore-record::step`, `step-import`, `step-brep` (11k) | Core opens 218 vs 196 and refuses 0 vs 23, closes 12 bodies SC leaves open. SC is 3x faster (median 0.14 s vs 0.43 s), opens `ap203/rear` (core times out), matched 22 of 23 reference volumes vs 21. Placements (`cylinder_twice`) fixed on `kernel` by #13582. Base: SolidCraft's reader; add core's topology-first reading (0 refused, the 12 bodies it closes) | kernel 1 (import), engine 1 |
 | STEP write | `kernel/src/step_out.rs` + `step/src/write*.rs` (1.6k) | record (writer), ops (from a body) | `step-export` (2.3k) | Not measured | kernel |
 | Record↔kernel conversion | `smlib/src/core/convert.rs`, `import.rs`, `import/analytic.rs`, `export.rs`, `flat.rs`, `pcurves.rs` (5.9k) | convert | `solidcore-convert` (2.4k) | Parity on the corpus not yet shown (#13666); flat-array labels lose a far-off sphere (#13668) | smlib only |
 | Modelling calls (booleans, fillet, chamfer, shell, offset, sweeps, split, trim, merge, history, check) | rest of `crates/smlib` (9.9k [6.7k]) | ops | `solidcore-ops` (12.4k): the same port of the C API's logic | Same port; the switch commit decides | `crates/kernel` only (ADR 0002) |
@@ -85,18 +85,18 @@ Every PR uses the gates below, plus the gate named in its row.
 | 0.2 | `solidcore/docs/jobs.toml` and `cargo xtask jobs`: each job names its one crate and module; the duplicates in §1a are listed with the PR that removes them, and the list only shrinks | fails on a new public entry point outside its job's module |
 | 0.3 | The seam check also fails on a new use of `solidcraft-geom`'s evaluator, tess or mesh queries from a crate that does not already use them | ledger counts unchanged |
 
-### Phase 1: jobs solidcore already wins or ties
+### Phase 1: jobs both sides have (SolidCraft's code as the base)
 
 | PR | What | Branch | Gate | Parallel |
 |---|---|---|---|---|
-| 1.1 | solidcore-tess speed (#13655): cache `eval::collapse` per surface or boundary row, or port SolidCraft's evaluator (`EvalSurface::derivs`, `basis_ders_into`, `degenerate_within`) as tess's private, display-only evaluator | kernel | Speed: no body more than 1.2x SolidCraft's tess on the 1,267-body corpus; triangle counts unchanged | 1.2, 1.4 |
-| 1.2 | solidcore-tess flat faces with no size cap (port of #13266 into `planner/size.rs`) | kernel | the 20 x 10 x 5 box exports 12 triangles; tessellation cases | 1.1 |
-| 1.3 | SolidCraft meshes through `solidcore-tess`; delete `kernel/src/tess/`, `geom/src/tess.rs` and `tess/`, `geom/src/simplify.rs` if solidcore's simplify ties | main | display-mesh and export tests; triangle counts within 5% of the bake-off; cracks no more than in the bake-off (3 of 1,176) | after 1.1, 1.2 |
+| 1.1 | SolidCraft's mesher (`kernel/src/tess/`, `geom/src/tess.rs` and `tess/`, with its fast evaluator and the #13266 flat-face fix) moves into `solidcore-tess` as its base | kernel | bake-off speed and triangle counts match SolidCraft's tess on the 1,267-body corpus; the 20 x 10 x 5 box exports 12 triangles; tessellation cases | 1.4, 1.5 |
+| 1.2 | Add solidcore-tess's wins to the merged crate: meshes `rod_doubled_edge`, reports empty faces; one planner and one evaluator remain | kernel | the two bodies above; no slower and no more cracks than 1.1 on the corpus | after 1.1 |
+| 1.3 | SolidCraft meshes through the merged `solidcore-tess`; delete `kernel/src/tess/`, `geom/src/tess.rs` and `tess/`, `geom/src/simplify.rs` if solidcore's simplify ties | main | display-mesh and export tests; triangle counts within 5% of the bake-off; cracks no more than in the bake-off (3 of 1,176) | after 1.1, 1.2 |
 | 1.4 | `nurbs-grid-mesh`: the 300 x 300-pole test, `deviation` kept as a test checker, crate deleted | kernel | the test recorded on #13625 | any |
-| 1.5 | STEP reader: fix the `ap203/rear` timeout (to be filed) and close the speed gap by its root cause | kernel | `rear` opens; median within 1.5x of 0.14 s on the 320 files | 1.1–1.4 |
-| 1.6 | SolidCraft reads STEP through `solidcore-record` + ops build; delete `crates/step` reading and `kernel/src/step_in` | main | `tests/step-conformance`, `tests/step-regressions`, `kernel-cases/import` unchanged or better; bake-off: opens ≥218, refuses 0, ≥22 of 23 volumes | after 1.5 |
-| 1.7 | STEP write: measure both writers by round trip on the corpus, keep one, delete the other | main or kernel by the survivor | round-trip volumes and face counts | after 1.6 |
-| 1.8 | Evaluation: SolidCraft's callers of `geom::brep::{eval, form, normal_section}` move to ops and tess queries over `solidcore::eval`; the geom copies are deleted | main | Rig; record checks unchanged | after 1.3 |
+| 1.5 | STEP reader: SolidCraft's reader (`crates/step`, `kernel/src/step_in`) moves into `solidcore-record` (model, parser) and ops (build) as the base | kernel | `tests/step-conformance`, `tests/step-regressions` unchanged; median 0.14 s held; `rear` opens | 1.1–1.4 |
+| 1.6 | Add core's topology-first reading to the merged reader (refuses 0, closes the 12 bodies); SolidCraft reads STEP through it; delete `crates/step` reading and `kernel/src/step_in` | main | `tests/step-conformance`, `tests/step-regressions`, `kernel-cases/import` unchanged or better; bake-off: opens ≥218, refuses 0, ≥22 of 23 volumes | after 1.5 |
+| 1.7 | STEP write: SolidCraft's writer is the base; measure both by round trip on the corpus and add `step-export`'s wins | main or kernel by the survivor | round-trip volumes and face counts | after 1.6 |
+| 1.8 | Evaluation: one `solidcore::eval`, SolidCraft's `geom::brep::{eval, form, normal_section}` as the base plus solidcore's pole handling; callers move to ops and tess queries; the geom copies are deleted | main | Rig; record checks unchanged | after 1.3 |
 | 1.9 | IGES: model and parser into `solidcore-record`, building into ops, the same split as STEP; delete `kernel/src/iges_*` | kernel, then main for the callers | the IGES import tests and `kernel-cases/import` unchanged or better | after 1.6 |
 
 ### Phase 2: ops recipes (stage 3b)
@@ -160,13 +160,14 @@ The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster 
 
 ## 3. Rules for the agents doing it
 
+- **SolidCraft's code is the base.** Where both sides have a job, start from SolidCraft's implementation, add what measures better in solidcore's, and land the result as one crate in `solidcore/`.
 - **Literature first.** Show the problem, read the papers that solve it, and say in the issue how the design follows them (solidcore `AGENTS.md` §1).
 - **No fallbacks or try-chains.** One construction per job. An old path is deleted when its replacement lands, never kept behind it (§4b).
 - **One topic per PR**: one job moved, its callers switched, the old copy deleted, its ledger lines removed.
 - **ops stays general.** Nothing SolidCraft-specific goes in it: no defaults, command ids, UI or document types. SolidCraft passes those in as parameters.
 - **Branches.** Kernel-only PRs (`solidcore/` alone) target `kernel`. PRs that also touch SolidCraft's crates target `main`.
 - **No compatibility flags.** No switch between old and new, no `UpstreamFixes` field, no preference for the old result.
-- **Claim first** on the job's tracking issue, and name the surviving copy with its measurement.
+- **Claim first** on the job's tracking issue, and name what is added from the other copy, with its measurement.
 - **Naming survives topology changes.** When a move changes a body's topology (as truck's split cylinder sides did in R70), add the face-name mapping in SolidCraft's naming layer (`crates/doc/src/naming.rs`, `history_names.rs`) so saved references resolve. Never bend the kernel's topology to match the old names.
 - **Tests move with the code**, into the layer's test files; kernel cases go in `solidcore/crates/solidcore/tests/kernel_cases/`.
 
