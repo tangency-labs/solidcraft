@@ -17,7 +17,7 @@ use std::f64::consts::PI;
 use common::edge_at;
 use solidcore_ops::blend::{blend, Blend, Corners};
 use solidcore_ops::boolean::boolean;
-use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel};
+use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
 
 const LENGTH: f64 = 10.0;
 
@@ -313,4 +313,26 @@ fn full_length_convex_rollover_builds() {
         - LENGTH * r1 * r1 * (1.0 - PI / 4.0)
         - LENGTH * removed_area(w - r1, r1, r);
     assert!((v - e).abs() < 1e-6, "control: {v}, expected {e}");
+}
+/// A convex round larger than the convex round beyond the top's flat cannot roll onto it: its
+/// ball, inside the material, would have to fit inside that round, and it does not (that round's
+/// offset by the ball folds). The rollover declines it, and it is refused as without the
+/// rollover: too large, fitting the flat the rim's round leaves (less the fit margin).
+#[test]
+fn a_convex_round_larger_than_the_round_beyond_is_not_rolled_over() {
+    fixes();
+    for &(w, r1, r) in &[(3.0, 1.0, 2.5), (3.0, 2.0, 2.4)] {
+        let b = block(w);
+        let e = edge_at(&b, [w, 0.0, LENGTH / 2.0]);
+        blend(&b, Blend::Round, &[e], &[r1], &[], Corners::Filled).unwrap();
+        let e = edge_at(&b, [0.0, 0.0, LENGTH / 2.0]);
+        let flat = w - r1;
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::TooLarge { size, .. }) => assert!(
+                size < flat && size > flat - 0.02,
+                "w {w} r1 {r1} r {r}: fit {size}, the flat {flat}"
+            ),
+            other => panic!("w {w} r1 {r1} r {r}: {other:?}"),
+        }
+    }
 }

@@ -181,6 +181,15 @@ pub fn tangent_rollover_supports(
             let Some(&beyond) = edge::faces(target, e, None)?.iter().find(|&&f| f != face) else {
                 continue;
             };
+            // the face beyond must carry the ball: its offset by the ball's offset (signed by the
+            // normals across the edge) may not fold across the edge, or no ball rolls on it (a
+            // convex round larger than the convex round beyond); the side is then left to the
+            // refusals as before
+            let offset_beyond = if opposite_normals { -offset } else { offset };
+            let far_point = m + x * t.0 + y * t.1;
+            if offset_folds(k, target, beyond, far_point, d, offset_beyond)? {
+                continue;
+            }
             *slot = Some(Rollover {
                 edge: e,
                 face: beyond,
@@ -190,4 +199,44 @@ pub fn tangent_rollover_supports(
         }
     }
     Ok(out)
+}
+
+/// Whether the offset of `face`'s surface by `offset` (along its surface normal) folds across the
+/// direction square to `along` at the point of the face nearest `at`: `1 - kappa offset <= 0`, with
+/// `kappa` the surface's normal curvature in that direction (`II(t, t) / I(t, t)`). A ball of that
+/// signed offset cannot roll on the face there. A point the face does not take, or a degenerate
+/// frame, counts as folding (the rollover is then not attempted).
+fn offset_folds(
+    k: &Kernel,
+    target: &Brep,
+    face: FaceId,
+    at: Point3,
+    along: Vec3,
+    offset: f64,
+) -> Result<bool> {
+    let surface = crate::topology::face::p2::surface(target, face)?
+        .ok_or_else(|| SolidError::sm_err(OP))?
+        .clone_for_evaluation()?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let dropped = surface.drop_point::<NoObject>(k, at, &domain, &DropPointOptions::default())?;
+    if !dropped.success {
+        return Ok(true);
+    }
+    let uv = dropped.result_uv;
+    let [_, du, dv, duv, duu, dvv] = surface.evaluate_2nd_derivatives(k, uv, true, true)?;
+    let n = surface.evaluate_normal(k, uv, KnotSide::Left, KnotSide::Left)?;
+    let Ok(t) = n.cross(along).unitize() else {
+        return Ok(true);
+    };
+    // t = a du + b dv, by the first fundamental form
+    let (g11, g12, g22) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let det = g11 * g22 - g12 * g12;
+    if det.is_nan() || det <= 0.0 {
+        return Ok(true);
+    }
+    let (r1, r2) = (t.dot(du), t.dot(dv));
+    let a = (g22 * r1 - g12 * r2) / det;
+    let b = (g11 * r2 - g12 * r1) / det;
+    let kappa = (duu * (a * a) + duv * (2.0 * a * b) + dvv * (b * b)).dot(n);
+    Ok(1.0 - kappa * offset <= 0.0)
 }
