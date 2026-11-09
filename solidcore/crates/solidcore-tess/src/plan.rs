@@ -77,21 +77,45 @@ impl TessPlan {
                 Vec::with_capacity(f.uv.len()),
                 Vec::with_capacity(f.uv.len()),
             );
+            // The first node the kernel's evaluator refuses, with its reason: the face is refused
+            // there, not meshed with a normal made up for it. Its pole nodes have their own rule
+            // below ([`crate::pole::apply`]).
+            let mut failure: Option<String> = None;
             for (k, uv) in f.uv.iter().enumerate() {
                 let (p, n) = match surface {
-                    Some(s) => solidcore_convert::record_pair(
-                        s.regular(uv[0], uv[1]).unwrap_or_else(|| {
-                            let k =
+                    Some(s) => {
+                        solidcore_convert::record_pair(if let Some(pn) = s.regular(uv[0], uv[1]) {
+                            pn
+                        } else {
+                            let ks =
                                 kernel.get_or_insert_with(|| crate::mesher::poles::kernel_form(s));
-                            k.eval(uv[0], uv[1])
-                                .unwrap_or_else(|_| s.eval(uv[0], uv[1]))
-                        }),
-                    ),
+                            ks.eval(uv[0], uv[1]).unwrap_or_else(|e| {
+                                if failure.is_none()
+                                    && !f.poles.iter().any(|p| p.node as usize == k)
+                                {
+                                    failure = Some(format!(
+                                        "node {k} at ({}, {}): {}",
+                                        uv[0],
+                                        uv[1],
+                                        crate::eval_message(e)
+                                    ));
+                                }
+                                s.eval(uv[0], uv[1])
+                            })
+                        })
+                    }
                     None => (Vec3::ZERO, f.normals.get(k).copied().unwrap_or(Vec3::Z)),
                 };
                 let p = f.fixed.get(k).copied().unwrap_or(p);
                 positions.push(p);
                 normals.push(if f.flip { -n } else { n });
+            }
+            if let Some(reason) = failure {
+                refused.push(crate::RefusedFace {
+                    face: f.face as usize,
+                    reason,
+                });
+                continue;
             }
             // At the poles of higher order the plan names: one copy per triangle with its limit
             // normal, or the mean of the triangles' normals, by the kernel's evaluator.

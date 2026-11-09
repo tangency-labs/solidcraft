@@ -313,12 +313,13 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
             return Err(unsupported(format!("face {fi}: missing")));
         };
         let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
-        let (fp, stats) = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused)?;
+        let result = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused);
         // A point whose poles the kernel could not tell refuses the face: nothing is taken for
-        // its answer.
+        // its answer. Read before the plan's own error, which may be a later symptom of it.
         if let Some(why) = eval.refusal() {
             return Err(unsupported(format!("face {fi} ({}): {why}", kind(&face.surface))));
         }
+        let (fp, stats) = result?;
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
