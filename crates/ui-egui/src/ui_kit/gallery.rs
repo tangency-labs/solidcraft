@@ -34,6 +34,7 @@ macro_rules! element {
 }
 pub(crate) use element;
 
+#[cfg(test)]
 fn navigation_sample(ui: &mut Ui, size: NavigationSize) {
     let metrics = NavigationMetrics::for_size(size);
     let inset = NAV_PADDING + NAV_BORDER;
@@ -57,6 +58,7 @@ fn navigation_sample(ui: &mut Ui, size: NavigationSize) {
 }
 
 // One entry per element/variant: names, rendering and geometry expectations stay together.
+#[cfg(test)]
 pub(crate) const ELEMENTS: &[Element] = &[
     element!("theme_mode_segments", |ui, _| {
         theme_segments(
@@ -2087,6 +2089,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
 ];
 
+#[cfg(test)]
 pub(crate) fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&'static str>) {
     let mut sample = Sample { value: "12 mm".into(), second: "25 mm".into(), selected: 0, checked: true };
     let rect = ui.scope(|ui| (element.draw)(ui, &mut sample)).response.rect;
@@ -2109,6 +2112,7 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
 
 /// Every element of `elements` publishes finite geometry and its handle, keeps its paint inside
 /// its allocation, and keeps the row height of a form row, in both themes.
+#[cfg(test)]
 pub(crate) fn check_elements(elements: &[Element]) {
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
@@ -2608,6 +2612,7 @@ fn cards_size_to_their_container_and_survive_hostile_sizes() {
     // 400 wide: two arrows and their gaps leave 332, which fits three 88-wide items with gaps.
 }
 
+#[cfg(test)]
 fn sample_card<'a>(label: &'a str, selected: bool, enabled: bool) -> super::preferences_cards::Card<'a> {
     super::preferences_cards::Card {
         label,
