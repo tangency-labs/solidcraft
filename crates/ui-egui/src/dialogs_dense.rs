@@ -427,6 +427,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         crate::dialogs_move::type_row(app, d, ui);
         let n = d.inputs.len();
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::AnglePlane { .. }) {
+        // Plane, then optional Offset, then Axis / Through / Pivot (#12038).
+        enter |= angle_plane_input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -900,6 +903,23 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     enter
 }
 
+/// Plane at Angle: Plane, then optional Offset (empty = none / 0), then Axis and Through (#12038).
+fn angle_plane_input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) -> bool {
+    let mut enter = false;
+    crate::dialogs::input_rows_range(d, ui, s, names, 0..1);
+    let through = angle_through_point(d).is_some();
+    if let Kind::AnglePlane { offset, .. } = &mut d.kind
+        && !through
+    {
+        // Hint "0": leave empty for no offset before the turn.
+        enter |= hint_row(ui, "Offset", offset, "0");
+    }
+    if d.inputs.len() > 1 {
+        crate::dialogs::input_rows_range(d, ui, s, names, 1..d.inputs.len());
+    }
+    enter
+}
+
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some() || angle_through_point(d).is_some();
@@ -985,12 +1005,10 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle, offset, direction_only } => {
+        Kind::AnglePlane { angle, direction_only, .. } => {
+            // Offset sits under Plane in `angle_plane_input_rows` so the form order matches
+            // resolve order: offset/through first, then the turn (#12038).
             enter |= expr_row(ui, "Angle", angle);
-            // Optional distance before the turn (#12038); Through point hides it like Offset Plane.
-            if !through_point {
-                enter |= expr_row(ui, "Offset", offset);
-            }
             ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
             const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
             set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
