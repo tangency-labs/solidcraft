@@ -3933,13 +3933,10 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
 pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
+        let snaps = crate::dialogs_assembly::takes_snaps(d);
         return hits.iter().find_map(|h| {
-            d.candidate_on(&app.session, h, snap.as_ref()).map(|s| {
-                (
-                    h.clone(),
-                    crate::dialogs_assembly::woken_pick(app, crate::dialogs_assembly::takes_snaps(d), crate::dialogs_move::component_pick(app, h, s)),
-                )
-            })
+            d.candidate_on(&app.session, h, snap.as_ref())
+                .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
         });
     }
     hits.iter().filter(|h| pick_allowed(app, h)).find_map(|h| hit_candidate(app, h))
@@ -3951,19 +3948,12 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
         // The face under the cursor is looked up once for every sketch point a face place may
         // snap to, before Select Other caps its rows.
         let snap = d.face_snap(&app.session, hits);
+        let snaps = crate::dialogs_assembly::takes_snaps(d);
         return hits
             .iter()
             .filter_map(|h| {
-                d.candidate_on(&app.session, h, snap.as_ref()).map(|s| {
-                    (
-                        h.clone(),
-                        crate::dialogs_assembly::woken_pick(
-                            app,
-                            crate::dialogs_assembly::takes_snaps(d),
-                            crate::dialogs_move::component_pick(app, h, s),
-                        ),
-                    )
-                })
+                d.candidate_on(&app.session, h, snap.as_ref())
+                    .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
             })
             .collect();
     }
@@ -4046,7 +4036,11 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         return;
     }
     let sel = crate::dialogs_move::from_shown(app, sel);
+    // A joint origin picked among a hovered face's points remembers the face (#11476).
+    let snaps = app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps);
+    let from_face = crate::dialogs_assembly::face_point_source(app, snaps, &sel);
     let Some(mut d) = app.dialog.take() else { return };
+    let target = d.active;
     // With several holes on a face (Preferences), a Single hole's pick adds a hole or takes one
     // out; with holes moving by clicking, a Single hole picked again on its face moves there.
     // With Placement handles on, a Cylinder held by one reference edge moves along it on a pick.
@@ -4063,10 +4057,10 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             // window stays on the input it was on (#11700).
             let on = d.active;
             d.active = 0;
-            d.pick(&app.session, sel);
+            d.pick(&app.session, sel.clone());
             d.active = on;
         }
-        crate::hole_place::PickMove::No => d.pick(&app.session, sel),
+        crate::hole_place::PickMove::No => d.pick(&app.session, sel.clone()),
         crate::hole_place::PickMove::Moved | crate::hole_place::PickMove::Spent => {
             d.focus = true;
             d.awaiting_pick = false;
@@ -4078,6 +4072,12 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
             d.awaiting_pick = false;
             d.pick_refused = None;
             d.refuse(app, why.to_string());
+        }
+    }
+    if let Some(input) = d.inputs.get_mut(target) {
+        input.from_face.retain(|(x, ..)| x != &sel && input.items.contains(x));
+        if let Some((kind, from)) = from_face.filter(|_| input.items.contains(&sel)) {
+            input.from_face.push((sel, kind, from));
         }
     }
     if let crate::dialogs::Kind::PathPlane { sketch, .. } = &mut d.kind {
@@ -4303,6 +4303,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     serde_json::to_string(&selected).unwrap_or_default().hash(&mut h);
     hover_drawn(&app.viewport.hover).hash(&mut h);
+    hover_drawn(&crate::snap_wake::lit_face(app)).hash(&mut h);
     hovered_body(app).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
@@ -5041,8 +5042,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
     }
-    // Hover (pre-highlight).
-    match hover {
+    // Hover (pre-highlight). In a joint origin input, the face whose point or edge is under the
+    // pointer is lit: the face a pick there lies on (#11476).
+    let lit = crate::snap_wake::lit_face(app);
+    match lit.as_ref().or(hover) {
         Some(Hit::Face { body, index, .. })
             if body_hover.as_ref() != Some(body)
                 && !replaced(body)
