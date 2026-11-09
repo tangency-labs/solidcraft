@@ -20,7 +20,7 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 | Direction 2 | The way the second row runs. Leave it empty for a single row. | The Y axis for a grid. |
 | Quantity 2 | How many along the second direction, counting the original. 1 means a single row. | 3 rows. |
 | Spacing 2 | Centre-to-centre distance in the second direction. | 0.75 in. |
-| Alignment and Alignment 2 (Features only) | Flip direction runs the copies the other way. Center spreads them evenly on both sides of the original. | Flip when the row runs off the end of the part. |
+| Alignment and Alignment 2 (Features only) | Flip direction runs the copies the other way. Center puts copies on both sides of the original: an odd Quantity splits evenly, an even Quantity puts one extra copy on one side, and Flip moves the extra copy to the other side. Quantity 4 with Center gives copies at 0, +1, −1 and +2 spacings. | Flip when the row runs off the end of the part. |
 
 #### Try it: a 5 × 3 grid of holes
 
@@ -36,6 +36,7 @@ Repeat a hole, a pocket or a whole body in a row or a grid: a row of tapped hole
 - **Do** count the original in Quantity. Five holes in a row is Quantity 5, not 4.
 - **Do** read Spacing as hole-to-hole pitch, the way the print dimensions it, not the total length of the row.
 - **Do** pattern the Hole feature rather than the body when the holes are all in one part. Change the hole size once and every copy follows.
+- **Don't** forget to check Alignment if the copies land off the part. Flip direction or Center left on from an earlier pattern moves the whole grid.
 - **Don't** leave Quantity 2 at 1 and expect a grid. With Quantity 2 at 1 you get a single row even if Direction 2 is picked.
 
 #### See also
