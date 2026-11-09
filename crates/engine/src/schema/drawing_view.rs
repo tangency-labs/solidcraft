@@ -264,7 +264,7 @@ impl JsonSchema for ExplodedParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Which state of the assembly the view draws: \"assembled\" (as the design places its parts), or one of the design's exploded views by its name or id. The design never changes.",
+            "description": "Which state of the assembly the view draws: \"assembled\" (as the design places its parts), or one of the design's exploded views by its name or id. \"assembled\" in any case is the assembly: choose an exploded view of that name by its id. The design never changes.",
             "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
         })
     }

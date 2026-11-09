@@ -2136,6 +2136,9 @@ fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
     let e =
         s.execute("drawing.balloon.add", &json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]})).unwrap_err().to_string();
     assert!(e.contains("not supported yet: balloons on an exploded view"), "{e}");
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
+    let e = s.execute("drawing.note.add", &note).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
 
     // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
     edit_view(&mut s, view, json!({"exploded": "assembled"}));
