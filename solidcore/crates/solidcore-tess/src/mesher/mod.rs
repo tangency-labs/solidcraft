@@ -190,7 +190,16 @@ pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         .collect::<Result<_>>()?;
     let (evals, params): (Vec<EvalSurface>, Vec<surface::Params>) = evals.into_iter().unzip();
     // Each face's surface with the kernel's form of it, whose classifier decides its poles.
-    let evals: Vec<poles::Face> = evals.into_iter().map(poles::Face::new).collect();
+    // A face's tolerance: the largest of its edges' and their vertices', as the record carries
+    // them (a STEP file's uncertainty, an edge's own); 0 where none is given.
+    let face_tol = |f: &brep::Face| {
+        face_edges(f)
+            .filter_map(|oe| b.edges.get(oe.edge as usize))
+            .flat_map(|e| std::iter::once(e.tolerance).chain(e.vertices.iter().filter_map(|v| b.vertices.get(*v as usize)).map(|v| v.tolerance)))
+            .filter(|t| t.is_finite())
+            .fold(0.0f64, f64::max)
+    };
+    let evals: Vec<poles::Face> = evals.into_iter().zip(faces).map(|(e, f)| poles::Face::new(e, face_tol(f))).collect();
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
     let sizes: Vec<(f64, [f64; 2])> =
         crate::par::map("face sizes", &evals, curved >= PARALLEL_SIZES, |s| Ok(size::face_size(s, &uv::domain(s), &rules)))
