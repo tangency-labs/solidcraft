@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.ui.palette": "Search Commands" },
+  "de": { "cmd.ui.palette": "Befehle suchen" },
+  "ar": { "cmd.ui.palette": "البحث في الأوامر" },
+  "he": { "cmd.ui.palette": "חיפוש פקודות" },
+  "ja": { "cmd.ui.palette": "コマンドを検索" },
+  "ko": { "cmd.ui.palette": "명령 검색" },
+  "vi": { "cmd.ui.palette": "Tìm kiếm lệnh" },
+  "zh": { "cmd.ui.palette": "搜索命令" }
+}
