@@ -225,6 +225,8 @@ pub struct TreeState {
     /// The Redefine Sketch Plane panel (sketch id).
     pub redefine: Option<u64>,
     pub redefine_draft: Option<crate::sketch_attachment_ui::Draft>,
+    /// What the rows of linked components show about their files.
+    pub(crate) links: crate::browser_links::LinkBadges,
     /// Components picked in the tree (they have no viewport selection).
     pub picked_components: Vec<u64>,
     /// The last folder label clicked, for V; independent of the geometry selection.
@@ -1795,7 +1797,8 @@ fn component_rows_inner(
     let visible = id == 0 || bodies.is_empty() || bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
     let faded = app.session.active_component != 0 && !app.session.doc.component_within(id, app.session.active_component) && !active;
     let name = &root.name;
-    let badges: &[&str] = if root.grounded { &["pin"] } else { &[] };
+    let link = app.tree.links.get(id).cloned();
+    let badges = &crate::browser_links::with_link(root.grounded, link.as_ref());
     let appearance = crate::render_workspace::scene::decoration(app, bodies);
     // A search never matches the design itself: it is the matches' parent, dimmed.
     let searching = app.tree.search.on();
@@ -1829,6 +1832,11 @@ fn component_rows_inner(
                 || placement_drag(d).is_some_and(|d| occurrence_can_land(app, d, id)))
     };
     let r = node_row(rows, Spec { key, drops: panel::Drops { before: false, into: true }, accept: Some(&accept), ..Default::default() }, row);
+    if let (Some(resp), Some(link)) = (&r.resp, &link) {
+        resp.clone().backing_on_hover_ui(|ui| {
+            ui.label(link.tooltip());
+        });
+    }
     if r.fold {
         toggle(app, key, true);
     }
@@ -1966,6 +1974,7 @@ fn occurrence_rows_inner(
     let faded = app.session.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(path));
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
+    let link = app.tree.links.get(placement.component).cloned();
     let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
     let emphasis = app.tree.search.hits().filter(|_| matches).and_then(|h| h.span(&placement.label));
     app.tree.remember(key);
@@ -2031,6 +2040,9 @@ fn occurrence_rows_inner(
         let inherited = if own_visible && !visible { "\nHidden by a parent placement. Show the parent to reveal this instance." } else { "" };
         resp.clone().backing_on_hover_ui(|ui| {
             ui.label(&placement.tooltip);
+            if let Some(link) = &link {
+                ui.label(link.tooltip());
+            }
             if !inherited.is_empty() {
                 ui.label(inherited.trim_start());
             }

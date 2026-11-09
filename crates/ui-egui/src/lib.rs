@@ -21,6 +21,7 @@ pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 mod browser_defects;
+pub mod browser_links;
 pub mod browser_prompts;
 pub mod browser_search;
 #[cfg(test)]

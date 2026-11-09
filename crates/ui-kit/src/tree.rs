@@ -437,7 +437,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let mut bx = (x + lw + 6.0 + name_action_width).min(if eye_end && row.eye.is_some() { end } else { r.right() } - 16.0);
     for b in row.badges {
         let br = Rect::from_center_size(pos2(bx + 6.0, cy), vec2(t.space_12, t.space_12));
-        badge(ui.painter(), br, b, t.text_dim);
+        badge(ui.painter(), br, b, if *b == "link_warning" { t.warning } else { t.text_dim });
         bx += 15.0;
     }
     // The name's action button sits right after the label; a press on it is not a press on the row.
