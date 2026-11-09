@@ -183,6 +183,15 @@ fn each_pcurve(
     for (w, l) in loops.iter().enumerate() {
         let mut pcs = Vec::new();
         for (i, u) in l.iter().enumerate() {
+            // A use's interval is finite and not empty, whether its pcurve is given or made: a
+            // given pcurve is checked against it, which a NaN end would pass.
+            let [t0, t1] = u.interval;
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing
+            if !(t0.is_finite() && t1.is_finite() && t0 < t1) {
+                return Err(Error::Invalid(format!(
+                    "loop {w} use {i}: interval [{t0}, {t1}]"
+                )));
+            }
             if let Some(given) = u.given {
                 pcs.push(Ok(own_pcurve(given, u.interval)
                     .map_err(|e| Error::Invalid(format!("loop {w} use {i}: {e}")))?));

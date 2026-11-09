@@ -531,10 +531,11 @@ impl Lexer<'_> {
 /// Part 21 short entity names (the short-name form ISO 10303-21 allows, which some AP203 writers
 /// use, STEP Tools' among them) of the entities a B-rep, its representation, product and units
 /// are read from, with their long names. The first eleven are `step-import`'s table (#2582); the
-/// rest are the AP203 names of the product structure, representations and units those files
-/// use.
-const SHORT_NAMES: [(&str, &str); 29] = [
+/// rest are the AP203 names of the topology, product structure, representations and units
+/// such files use.
+const SHORT_NAMES: [(&str, &str); 35] = [
     ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+    ("ADVFC", "ADVANCED_FACE"),
     ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
     ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
     ("CLSSHL", "CLOSED_SHELL"),
@@ -543,19 +544,20 @@ const SHORT_NAMES: [(&str, &str); 29] = [
     ("CRTPNT", "CARTESIAN_POINT"),
     ("DMNEXP", "DIMENSIONAL_EXPONENTS"),
     ("DRCTN", "DIRECTION"),
+    ("EDGCRV", "EDGE_CURVE"),
+    ("EDGLP", "EDGE_LOOP"),
     ("FBSR", "FACETED_BREP_SHAPE_REPRESENTATION"),
+    ("FCBND", "FACE_BOUND"),
     ("FCOTBN", "FACE_OUTER_BOUND"),
     ("FCSRF", "FACE_SURFACE"),
     ("FCTBR", "FACETED_BREP"),
-    (
-        "GBSSR",
-        "GEOMETRICALLY_BOUNDED_SURFACE_SHAPE_REPRESENTATION",
-    ),
     ("GMRPCN", "GEOMETRIC_REPRESENTATION_CONTEXT"),
     ("GMTST", "GEOMETRIC_SET"),
     ("LMWU", "LENGTH_MEASURE_WITH_UNIT"),
     ("LNGUNT", "LENGTH_UNIT"),
+    ("MNSLBR", "MANIFOLD_SOLID_BREP"),
     ("NMDUNT", "NAMED_UNIT"),
+    ("ORNEDG", "ORIENTED_EDGE"),
     ("PAMWU", "PLANE_ANGLE_MEASURE_WITH_UNIT"),
     ("PLYLP", "POLY_LOOP"),
     ("PRDCT", "PRODUCT"),
@@ -566,6 +568,7 @@ const SHORT_NAMES: [(&str, &str); 29] = [
     ("SHRPRL", "SHAPE_REPRESENTATION_RELATIONSHIP"),
     ("TRMCRV", "TRIMMED_CURVE"),
     ("UMWU", "UNCERTAINTY_MEASURE_WITH_UNIT"),
+    ("VRTPNT", "VERTEX_POINT"),
 ];
 
 /// An entity name as its long form where it is one of [`SHORT_NAMES`].
@@ -891,12 +894,14 @@ mod tests {
     #[test]
     fn short_entity_names_read_as_their_long_names() {
         let ex = parse(&data(
-            "#1=CRTPNT('',(0.,1.,2.));#2=PLYLP('',(#1));#3=SOME_SHRT('');",
+            "#1=CRTPNT('',(0.,1.,2.));#2=PLYLP('',(#1));#3=SOME_SHRT('');#4=VRTPNT('',#1);#5=FCBND('',#2,.T.);",
         ))
         .unwrap();
         let name = |id: u64| ex.get(id).map(|e| e.name().to_string());
         assert_eq!(name(1).as_deref(), Some("CARTESIAN_POINT"));
         assert_eq!(name(2).as_deref(), Some("POLY_LOOP"));
+        assert_eq!(name(4).as_deref(), Some("VERTEX_POINT"));
+        assert_eq!(name(5).as_deref(), Some("FACE_BOUND"));
         // A name outside the table is kept as written.
         assert_eq!(name(3).as_deref(), Some("SOME_SHRT"));
     }
