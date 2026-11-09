@@ -17,12 +17,12 @@ Repeat a hole, a boss or a whole body around an axis: the bolt circle on a flang
 | Axis | The line the copies turn about. Clicking a round edge or a cylinder face uses its centre line. | The Z axis, or the face of the centre bore. |
 | Quantity | How many in total, counting the original. | 6 for a 6-hole bolt circle. |
 | Total angle | The angle the pattern covers. At 360 deg the copies are spaced evenly all the way round. Under 360 deg, the first and last copies sit at the two ends of the angle. | 360 deg for a full bolt circle. 90 deg with Quantity 4 puts holes at 0, 30, 60 and 90 deg. |
-| Alignment (Features only) | Flip direction turns the pattern the other way. Center spreads it evenly on both sides of the original. | Flip a partial pattern that went the wrong way round. |
+| Alignment (Features only) | Flip direction turns the pattern the other way. Center puts copies on both sides of the original: an odd Quantity splits evenly, an even Quantity puts one extra copy on one side, and Flip moves the extra copy to the other side. Quantity 4 over 90 deg with Center gives −30, 0, 30 and 60 deg. | Flip a partial pattern that went the wrong way around. |
 
 #### Try it: a 6-hole bolt circle
 
 1. Make a flange: sketch a 4 in circle on the XY plane at the origin and Extrude it 0.5 in.
-2. Sketch a point on the top face, 1.5 in from the centre on the X axis (a 3 in bolt circle). Click Hole, set Placement to Multiple and pick the point. Set Diameter to 0.281 in and Extents to All.
+2. Sketch a point on the top face, 1.5 in from the centre on the X axis (a 3 in bolt circle). Click Hole, set Placement to Multiple and pick the point. Set Diameter to 0.281 in and Extents to All, then click OK. The Hole must be finished so it shows in the History.
 3. Click Circular Pattern. Set Object Type to Features and click the Hole step in the History.
 4. Click Axis, then click the Z axis.
 5. Set Quantity to 6 and Total angle to 360 deg. Click OK. There are 6 holes, 60° apart.
