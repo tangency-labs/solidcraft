@@ -86,7 +86,8 @@ impl Face {
         let mut on = w;
         for (k, x) in on.iter_mut().enumerate() {
             if let Some((lo, hi)) = self.kernel.interval(k) {
-                *x = x.clamp(lo.min(hi), lo.max(hi));
+                // Max then min: `f64::clamp` panics on a NaN bound.
+                *x = x.max(lo.min(hi)).min(lo.max(hi));
             }
         }
         if on == w {
