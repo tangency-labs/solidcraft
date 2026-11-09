@@ -35,10 +35,8 @@ solid.replace_face
 solid.shell
 solid.thread
 surface.blend
-surface.extend
 surface.extrude
 surface.loft
 surface.patch
 surface.revolve
 surface.ruled
-surface.trim
