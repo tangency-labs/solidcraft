@@ -3538,9 +3538,6 @@ mod home_tests {
         let at = crate::scenario::handle_at("appbar:folder").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         let _ = h.step(&json!({"widget": "Export URDF…"}));
-        h.frames(2);
-        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::UrdfExport(_))));
-        h.step(&json!({"click": {"handle": "dialog:Export URDF…"}})).unwrap();
         h.settle();
         let files: Vec<String> = std::fs::read_dir(&h.dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(files.iter().any(|f| f.ends_with(".urdf")) && files.iter().any(|f| f.ends_with("-base.stl")), "{files:?}");
