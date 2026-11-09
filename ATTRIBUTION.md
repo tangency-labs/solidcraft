@@ -843,6 +843,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/locales/pending/drag-to-zoom.json | SolidCraft contributors | Original drag-to-zoom labels and translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/hole-group-folder.json` | SolidCraft contributors | Original Hole grouping preference labels and translations | MIT OR Apache-2.0 |
 | assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
+| docs/layers/layers.svg | SolidCraft contributors | original diagram of SolidCraft's crate layers for docs/layers.md, written as SVG in solidcore's docs/layers diagram style | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

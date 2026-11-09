@@ -143,6 +143,12 @@ pub struct SetbackCorner {
     /// rails of the rounds beside it cross (`sm_SbSetBacks`'s `rvLeast`); a setback below it
     /// is too short.
     pub least: Vec<f64>,
+    /// Not the fork (solidcore#2343 (d)): beside a curved face, the spring curves the corner
+    /// checked against its faces' other edges, one per face, at the setbacks it is built
+    /// with (`corner_springs`, made again where the fill is kept, from the same vertices);
+    /// empty elsewhere, and where they are not made. The fill's spring edges are these
+    /// curves; only tests read them.
+    pub springs: Vec<SpringCurve>,
     /// `m_pFill`: the fill, from the edge geometry until the patches take it.
     pub fill: Option<Fill>,
     /// `m_bSetBackOpen` (the fork's ef57570, smlib#125): an open G1 corner, its spring
@@ -164,6 +170,7 @@ impl Default for SetbackCorner {
             overflows: false,
             room: Vec::new(),
             least: Vec::new(),
+            springs: Vec::new(),
             fill: None,
             open: false,
             definition: None,
@@ -1880,16 +1887,36 @@ fn normal_turn(face: &Face, x: Point3, v: Vec3) -> Option<Vec3> {
     }
 }
 
-/// The unit direction of the rail on `face` of the round of radius `r` along `edge_id`, at
-/// its end `p` on `face` whose other end is `q` on `other` (the round's two contact points in
-/// one section), turned toward the corner's vertex (`sign` `+1` at a convex corner, `-1` at a
-/// concave one). In closed form, not from the rail as traced, which runs only from the
-/// setback the corner was made at outward: the ball's centre is `c = p - sign r n(p)` and
-/// runs along `n(p) x m(q)` (n, m the faces' normals, constant along their normal lines), the
-/// rail is `c + sign r n(c)`, so its direction is that of the centre's plus `sign r` times the
-/// normal's turn along it ([`normal_turn`]). Toward the vertex: the side the edge runs on to
-/// the vertex at its setback (as `gather_ends` takes the corner's side of an end section).
+/// The unit direction (either way) of the rail on `face` of the round of radius `r`, at its
+/// end `p` on `face` whose other end is `q` on `other` (the round's two contact points in one
+/// section; `sign` `+1` at a convex corner, `-1` at a concave one). In closed form, not from
+/// the rail as traced, which runs only from the setback the corner was made at outward: the
+/// ball's centre is `c = p - sign r n(p)` and runs along `n(p) x m(q)` (n, m the faces'
+/// normals, constant along their normal lines), the rail is `c + sign r n(c)`, so its
+/// direction is that of the centre's plus `sign r` times the normal's turn along it
+/// ([`normal_turn`]). Where the centre runs along a principal direction of `face` (a round
+/// along a line or circle of a cylinder, any round on a sphere) the turn only scales it.
 /// `None` where the faces' normals are parallel there, or a normal's turn is not defined.
+fn rail_direction(
+    face: &Face,
+    p: Point3,
+    other: &Face,
+    q: Point3,
+    r: f64,
+    sign: f64,
+) -> Option<Vec3> {
+    let (_, n) = face.distance(p);
+    let (_, m) = other.distance(q);
+    let centre = p - n * (sign * r);
+    let along = n.cross(m);
+    let turn = normal_turn(face, centre, along)?;
+    (along + turn * (sign * r)).unitize().ok()
+}
+
+/// [`rail_direction`] at the round along `edge_id`, turned toward the corner's vertex: the
+/// side the edge runs on to the vertex at its setback (as `gather_ends` takes the corner's
+/// side of an end section). `None` where the direction is not found, or it runs square to
+/// the edge there.
 #[allow(clippy::too_many_arguments)]
 fn rail_toward_vertex(
     k: &Kernel,
@@ -1905,14 +1932,7 @@ fn rail_toward_vertex(
 ) -> Result<Option<Vec3>> {
     let nul = || SolidError::null_pointer(OP_FILL);
     let vtx = corner.vertex.ok_or_else(nul)?;
-    let (_, n) = face.distance(p);
-    let (_, m) = other.distance(q);
-    let centre = p - n * (sign * r);
-    let along = n.cross(m);
-    let Some(turn) = normal_turn(face, centre, along) else {
-        return Ok(None);
-    };
-    let Ok(t) = (along + turn * (sign * r)).unitize() else {
+    let Some(t) = rail_direction(face, p, other, q, r, sign) else {
         return Ok(None);
     };
     let setback = corner.set_back_dist_along(target, edge_id)?;
@@ -2039,24 +2059,32 @@ fn springs_on_faces(
     Ok(Springs::Clear)
 }
 
+/// How many times [`springs_refusal`] halves the last cell of its grid of thousandths at
+/// most: a thousandth of a setback of a metre is halved below 1e-9 in 30.
+const REFINE: usize = 30;
+
 /// What a setback that takes a spring curve off its face does, for [`setback_too_long`].
 const SPRING_LEAVES: &str =
     "takes a setback corner's spring curve off its face (it comes within the tolerances of another edge of the face, or is not shown not to)";
 
 /// solidcore#2343 (d): where a spring curve leaves its face at the corner's setbacks
-/// ([`springs_on_faces`]), the refusal naming the largest common scale of them on the grid of
-/// thousandths at which every spring curve stays inside its face. It is found by the growth's
-/// bisection ([`bisect_thousandths`], each trial placing the setback vertices again as the
-/// growth does), between 1 and the least scale at which every setback reaches its edge's
-/// least, where the rails cross; the search assumes a spring curve on its face at a scale
-/// stays on it at every smaller one (the curve shrinks toward the vertex with its setbacks),
-/// as the growth assumes certification monotone: checked on the cases, not proved. One asked
-/// for is refused as [`BlendRefusal::SetbackTooLong`] naming that scale times it; the
-/// rule's, naming those setbacks. None at or above the least: no setback builds. A trial
-/// whose vertices are not placed counts as off its face, so the scale named is at worst
-/// smaller than need be, never one off its face; whether the fill certifies there is the
-/// fill's to say when that setback is asked. `None` where every spring curve stays on its
-/// face, or one is not made (the fill says why).
+/// ([`springs_on_faces`]), the refusal naming the largest common scale of them at which every
+/// spring curve stays inside its face, to the corner's tolerance. The growth's bisection on
+/// the grid of thousandths ([`bisect_thousandths`], each trial placing the setback vertices
+/// again as the growth does) brackets it between 1 and the least scale at which every setback
+/// reaches its edge's least, where the rails cross; the last grid cell is then halved until
+/// it is shorter than the tolerance along every edge ([`REFINE`] halvings at most). Each
+/// search assumes a spring curve on its face at a scale stays on it at every smaller one (the
+/// curve shrinks toward the vertex with its setbacks), as the growth assumes certification
+/// monotone: checked on the cases, not proved. The scale named is always one the check itself
+/// found clear (the bisection's `hi - 1` is an index it was asked about and cleared, or `lo`;
+/// each halving keeps its cleared end), so it is sound even where that assumption fails: it
+/// can only be smaller than need be. One asked for is refused as
+/// [`BlendRefusal::SetbackTooLong`] naming that scale times it; the rule's, naming those
+/// setbacks. None at or above the least: no setback builds. A trial whose vertices are not
+/// placed counts as off its face, which again can only make the scale named smaller; whether
+/// the fill certifies there is the fill's to say when that setback is asked. `None` where
+/// every spring curve stays on its face, or one is not made (the fill says why).
 #[allow(clippy::too_many_arguments)]
 fn springs_refusal<S: SetbackSolvers>(
     k: &Kernel,
@@ -2092,22 +2120,35 @@ fn springs_refusal<S: SetbackSolvers>(
         most: vec![BIG_DOUBLE; base.len()],
         base,
     };
-    let mut leaves = |i: i32| -> Result<bool> {
-        Ok(
-            match growth.place(pseudo, corner, solvers, f64::from(i) / 1000.0)? {
-                Some(_) => {
-                    springs_on_faces(k, target, pseudo, corner, planes, tol)? != Springs::Clear
-                }
-                None => true,
-            },
-        )
+    let longest = growth.base.iter().fold(0.0f64, |m, &s| smax(m, s));
+    let mut leaves_at = |scale: f64| -> Result<bool> {
+        Ok(match growth.place(pseudo, corner, solvers, scale)? {
+            Some(_) => springs_on_faces(k, target, pseudo, corner, planes, tol)? != Springs::Clear,
+            None => true,
+        })
     };
     let lo = (1..1000).find(|&i| f64::from(i) >= 1000.0 * least_scale);
     let fit = match lo {
-        Some(lo) if !leaves(lo)? => Some(bisect_thousandths(lo, 1000, &mut leaves)? - 1),
+        Some(lo) if !leaves_at(f64::from(lo) / 1000.0)? => {
+            // hi - 1: lo, or an index the bisection asked about and found clear
+            let hi = bisect_thousandths(lo, 1000, |i| leaves_at(f64::from(i) / 1000.0))?;
+            let (mut clear, mut off) = (f64::from(hi - 1) / 1000.0, f64::from(hi) / 1000.0);
+            for _ in 0..REFINE {
+                if (off - clear) * longest <= tol {
+                    break;
+                }
+                let mid = 0.5 * (clear + off);
+                if leaves_at(mid)? {
+                    off = mid;
+                } else {
+                    clear = mid;
+                }
+            }
+            Some(clear)
+        }
         _ => None,
     };
-    let Some(fit) = fit.map(|i| f64::from(i) / 1000.0) else {
+    let Some(fit) = fit else {
         return Ok(Some(SetbackRefusal::no_room(
             "Fillet Error: no setback at or above where the rails cross keeps the setback corner's spring curves on their faces",
             Some(0.0),
@@ -2403,6 +2444,11 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             set_edge_curve(pseudo.brep_mut(), e, Some(Curve::from(best)))?;
         }
     }
+    let springs = if curved {
+        corner_springs(k, target, pseudo, corner, &planes)?.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let definition = match worst {
         Some(worst) if k.fixes.fillet_round_as_definition => Some(keep_definition(
             k,
@@ -2419,6 +2465,7 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     if let Some(sb) = corner.setback.as_mut() {
         sb.fill = Some(fill);
         sb.definition = definition;
+        sb.springs = springs;
     }
     Ok(Ok(()))
 }
@@ -2694,4 +2741,85 @@ pub fn create_setback_patches(
         corner.surface_faces.push(face);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blend::blend_setback::FaceKind;
+
+    /// The rail of a ball of radius `r` rolling between `face` and the plane through `q` with
+    /// unit normal `m` (its centre `c` at `r` from both, `sign` as in [`rail_direction`]),
+    /// stepped `h` along the centre's curve (Newton on the two offsets, in the plane of their
+    /// normals): the rail's point there.
+    fn rail_point(face: &Face, c: Point3, m: Vec3, q: Point3, r: f64, sign: f64, h: f64) -> Point3 {
+        let (_, n) = face.distance(c);
+        let mut x = c + n.cross(m).unitize().unwrap() * h;
+        for _ in 0..50 {
+            let (df, nf) = face.distance(x);
+            let dg = (x - q).dot(m);
+            let (f1, f2) = (df + sign * r, dg + sign * r);
+            // x += a nf + b m with nf . (a nf + b m) = -f1, m . (a nf + b m) = -f2
+            let c12 = nf.dot(m);
+            let det = 1.0 - c12 * c12;
+            let a = (-f1 + c12 * f2) / det;
+            let b = (-f2 + c12 * f1) / det;
+            x += nf * a + m * b;
+        }
+        let (_, n) = face.distance(x);
+        x + n * (sign * r)
+    }
+
+    /// `rail_direction` against the rail's direction by central differences, where the round
+    /// runs obliquely to the face's principal directions (the other face a tilted plane), so
+    /// that `normal_turn` turns it: a convex cylinder, a cone, a sphere, and a concave corner
+    /// beside a bore (`sign` -1, the material outside the cylinder).
+    #[test]
+    fn a_rails_direction_in_closed_form_is_its_derivative() {
+        let r = 1.5;
+        let tilt = Vec3::new(0.3, 0.6, 0.74).unitize().unwrap();
+        let quadric = |kind, slope: f64, side: f64| Face {
+            point: Point3::ZERO,
+            normal: Vec3::X,
+            kind,
+            axis: Vec3::Z,
+            radius: 10.0,
+            slope,
+            side,
+        };
+        for (name, face, sign) in [
+            ("cylinder", quadric(FaceKind::Cylinder, 0.0, 1.0), 1.0),
+            ("cone", quadric(FaceKind::Cone, -0.4, 1.0), 1.0),
+            ("sphere", quadric(FaceKind::Sphere, 0.0, 1.0), 1.0),
+            ("bore", quadric(FaceKind::Cylinder, 0.0, -1.0), -1.0),
+        ] {
+            // a point of the face off its axis, its ball's centre, and the plane the ball
+            // touches with normal `tilt`
+            let p0 = Point3::new(6.0, 7.0, 2.0);
+            let (d, n) = face.distance(p0);
+            let p = p0 - n * d;
+            let (_, n) = face.distance(p);
+            let c = p - n * (sign * r);
+            let q = c + tilt * (sign * r);
+            let ours = rail_direction(&face, p, &Face::plane(q, tilt), q, r, sign).unwrap();
+            let h = 1e-5;
+            let fd = rail_point(&face, c, tilt, q, r, sign, h)
+                - rail_point(&face, c, tilt, q, r, sign, -h);
+            let fd = fd.unitize().unwrap();
+            let turned = ours.cross(fd).length();
+            // the centre's own direction differs from the rail's wherever the face is curved
+            // across it: the test would not see a turn left out
+            let centre_off = n.cross(tilt).unitize().unwrap().cross(fd).length();
+            assert!(
+                turned <= 1e-8,
+                "{name}: closed form off the derivative by {turned}"
+            );
+            if face.kind != FaceKind::Sphere {
+                assert!(
+                    centre_off > 1e-3,
+                    "{name}: the turn is not exercised ({centre_off})"
+                );
+            }
+        }
+    }
 }

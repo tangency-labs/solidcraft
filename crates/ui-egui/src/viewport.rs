@@ -3216,10 +3216,16 @@ fn changed_faces(app: &SolveApp, id: u64, now: &solidcraft_engine::doc::ModelSta
             continue;
         }
         let (Some(now_body), Some(old)) = (now.body(&b.name), before.body(&b.name)) else { continue };
-        let tol = (b.body.size() * 1e-3).max(1e-4);
-        let (Ok(new_faces), Ok(old_faces)) = (b.body.faces(tol), old.body.faces(tol)) else { continue };
         let names = solidcraft_engine::doc::naming::face_names(b);
         let old_names = solidcraft_engine::doc::naming::face_names(old);
+        // A body the feature left as it was (same record, same face names) has no face it
+        // changed. Skip it before `faces`, which meshes the body each time: a picked sketch
+        // comes here on every highlight rebuild, and with hundreds of bodies that took seconds.
+        if b.body.same(&old.body) && names == old_names {
+            continue;
+        }
+        let tol = (b.body.size() * 1e-3).max(1e-4);
+        let (Ok(new_faces), Ok(old_faces)) = (b.body.faces(tol), old.body.faces(tol)) else { continue };
         for (i, name) in names.iter().enumerate() {
             let Some(new) = new_faces.get(i) else { continue };
             // A face the feature moved takes a new name (Offset Face); a face it only trimmed
@@ -8875,6 +8881,30 @@ mod tests {
         assert_eq!(lit(&h.app), 0, "another feature picked");
         h.app.session.selection.clear();
         assert_eq!(lit(&h.app), 0, "nothing is picked");
+    }
+
+    /// A picked sketch made no faces, so its highlight compares the states either side of it;
+    /// the bodies it left alone are skipped without meshing them again. Each hover change
+    /// rebuilds the highlight, and on a design of 250 bodies re-meshing them took 1–2 s a time.
+    #[test]
+    fn a_picked_sketch_rebuilds_its_highlight_without_meshing_the_bodies() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.set_origin_shown(false);
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0]})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Outline"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[60,0],"p1":[70,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let id = h.app.session.doc.find_feature("Outline").unwrap().id;
+        h.app.session.selection = vec![Sel::Feature { id }];
+        h.frames(2);
+        let ((), work) = solidcraft_engine::kernel::profile::capture(|| {
+            for _ in 0..3 {
+                build_highlight(&h.app);
+            }
+        });
+        assert_eq!(work.tessellate_ms, 0.0, "the picked sketch's highlight meshed the bodies again: {work:?}");
+        assert!(feature_geometry(&h.app, id).is_empty(), "a sketch lights no body or face");
     }
 
     #[test]

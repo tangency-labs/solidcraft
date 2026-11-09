@@ -12,3 +12,5 @@
 | shared | `color`, `ui-registry`, `ui-text`, `theme`, `mcp-server`, `control`, `control-egui`, `viewport`, `viewport-gpu`, `viewport-egui` | crates other front ends use: they depend only on other shared crates, solidcore and external crates (UI toolkits included), any crate may use them, and `cargo xtask shared` builds and tests each one on its own. The viewport renderer is three: `viewport` (camera, pictures, CPU rasterizer, shading), `viewport-gpu` (its wgpu pipelines and plan evaluation) and `viewport-egui` (the viewport in an egui window). A crate below L5 reaches no UI toolkit or wgpu through them, or any other way: `cargo xtask layers` follows workspace dependencies to check it |
 | apps | `solidcraft`, `solidcraft-cli` | desktop app, headless CLI |
 <!-- ANCHOR_END: architecture -->
+
+How the layers, the shared crates and the solidcore seam fit together, with what enforces each rule: [layers.md](layers.md).
