@@ -4,13 +4,13 @@
 //! - `SOLIDCRAFT_GPU` (`auto`, `hardware`, `software`, `cpu`): the [`Policy`] that picks the
 //!   adapter headless pictures, the CLI and the path tracer draw with; `auto` when unset.
 //! - `SOLIDCRAFT_CPU_TESS`: set, bodies are built on the CPU on any device (the `force_cpu` of
-//!   [`solidcraft_viewport::gpu::view::tessellation`]).
+//!   [`solidcraft_viewport_gpu::view::tessellation`]).
 //!
 //! `WGPU_BACKEND` and `WGPU_DX12_COMPILER` are wgpu's own and are read where wgpu reads them.
 
-use solidcraft_viewport::gpu::capture::Headless;
-use solidcraft_viewport::gpu::select::Policy;
-use solidcraft_viewport::gpu::{GpuError, TessGpu};
+use solidcraft_viewport_gpu::capture::Headless;
+use solidcraft_viewport_gpu::select::Policy;
+use solidcraft_viewport_gpu::{GpuError, TessGpu};
 
 /// The variable naming the adapter policy.
 pub const POLICY: &str = "SOLIDCRAFT_GPU";
@@ -53,9 +53,9 @@ pub fn explain(e: &GpuError) -> String {
     }
 }
 
-/// What draws this process's headless pictures under `SOLIDCRAFT_GPU` ([`solidcraft_viewport::gpu::capture::headless`]).
+/// What draws this process's headless pictures under `SOLIDCRAFT_GPU` ([`solidcraft_viewport_gpu::capture::headless`]).
 pub fn headless() -> Result<Headless, String> {
-    solidcraft_viewport::gpu::capture::headless(policy()?).map_err(explain)
+    solidcraft_viewport_gpu::capture::headless(policy()?).map_err(explain)
 }
 
 /// A picture of `scene` drawn as [`headless`] draws it ([`Headless::rgba`]).
@@ -107,11 +107,12 @@ mod tests {
         assert_eq!(explain(&GpuError::DeviceLost), GpuError::DeviceLost.to_string());
     }
 
-    /// The shared viewport crate reads no variable of SolidCraft's and names neither SolidCraft nor
-    /// its CLI, in its code or its tests: what the app wants, it passes in.
+    /// The shared viewport crates read no variable of SolidCraft's and name neither SolidCraft nor
+    /// its CLI, in their code or their tests: what the app wants, it passes in.
     #[test]
     fn the_viewport_crate_reads_no_variable_of_the_apps() {
-        let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../viewport")];
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut dirs = ["viewport", "viewport-gpu", "viewport-egui"].map(|c| crates.join(c)).to_vec();
         let mut scanned = 0;
         while let Some(dir) = dirs.pop() {
             for entry in std::fs::read_dir(&dir).unwrap() {

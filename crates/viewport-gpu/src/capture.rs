@@ -1,4 +1,4 @@
-//! Pictures of a [`Scene`] drawn offscreen with the viewport's pipelines ([`crate::gpu::view`]): the
+//! Pictures of a [`Scene`] drawn offscreen with the viewport's pipelines ([`crate::view`]): the
 //! same shading, edges, silhouettes, section cap and surface analysis the viewport shows, read
 //! back as RGBA. A host's command-line snapshots, screenshots and thumbnails draw through it, on
 //! the application's device ([`Capturer::new`]) or on a headless one
@@ -7,18 +7,18 @@
 //! renderer that drew it (`gpu`, `gpu-software` or `cpu`); `hardware` and `software` fail with an
 //! error that names the policy.
 
-use crate::vec::Vec3Ops;
+use solidcraft_viewport::vec::Vec3Ops;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::hatch::Hatch;
-use crate::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
 use solidcore_record::Vec3;
+use solidcraft_viewport::hatch::Hatch;
+use solidcraft_viewport::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
 use wgpu::util::DeviceExt;
 
-use crate::gpu::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
-use crate::gpu::{GpuError, Result, caught, error_scopes};
+use crate::view::{AccessMap, DrawStats, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
+use crate::{GpuError, Result, caught, error_scopes};
 
 /// The colour format pictures are drawn in: sRGB bytes as they are, like the viewport's usual
 /// (non-sRGB) target.
@@ -41,7 +41,7 @@ pub struct Capturer {
     /// The adapter is a GPU driver running on the CPU (llvmpipe, lavapipe, WARP).
     software: bool,
     samples: u32,
-    /// The depth format: 32-bit float (reversed depth) where the device has it ([`crate::gpu::depth_format`]).
+    /// The depth format: 32-bit float (reversed depth) where the device has it ([`crate::depth_format`]).
     depth: wgpu::TextureFormat,
     max_side: u32,
     state: Mutex<State>,
@@ -61,7 +61,7 @@ struct State {
 impl Capturer {
     /// The pipelines on an existing device (the application's).
     pub fn new(adapter: &wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Result<Self> {
-        let depth = crate::gpu::depth_format(&device, true);
+        let depth = crate::depth_format(&device, true);
         Self::with_depth(adapter, device, queue, depth)
     }
 
@@ -123,10 +123,10 @@ impl Capturer {
     }
 
     /// A device of its own, without a window (native only): the adapter `policy` picks
-    /// ([`crate::gpu::select`]).
+    /// ([`crate::select`]).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless(policy: crate::gpu::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::gpu::open_headless(policy)?;
+    pub fn headless(policy: crate::select::Policy) -> Result<Self> {
+        let (adapter, device, queue) = crate::open_headless(policy)?;
         // Errors are caught per picture (error scopes); anything else is logged, never a panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
@@ -135,8 +135,8 @@ impl Capturer {
 
     /// As [`Capturer::headless`], drawing with the depth format `depth` ([`Capturer::with_depth`]).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless_with_depth(policy: crate::gpu::select::Policy, depth: wgpu::TextureFormat) -> Result<Self> {
-        let (adapter, device, queue) = crate::gpu::open_headless(policy)?;
+    pub fn headless_with_depth(policy: crate::select::Policy, depth: wgpu::TextureFormat) -> Result<Self> {
+        let (adapter, device, queue) = crate::open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
         Ok(Self::with_depth(&adapter, device, queue, depth)?.watching(lost))
@@ -145,10 +145,10 @@ impl Capturer {
     /// As [`Capturer::headless`], without multisampling: one sample per pixel, as the viewport
     /// draws where 4× isn't available (some browsers and devices, or MSAA turned off).
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn headless_single_sample(policy: crate::gpu::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::gpu::open_headless(policy)?;
+    pub fn headless_single_sample(policy: crate::select::Policy) -> Result<Self> {
+        let (adapter, device, queue) = crate::open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
-        let depth = crate::gpu::depth_format(&device, true);
+        let depth = crate::depth_format(&device, true);
         let lost = watch_lost(&device);
         Ok(Self::with_samples(&adapter, device, queue, depth, 1)?.watching(lost))
     }
@@ -262,7 +262,7 @@ impl Capturer {
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &depth_view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(crate::gpu::view::far_depth(crate::gpu::view::reversed_depth(Some(self.depth)))),
+                            load: wgpu::LoadOp::Clear(crate::view::far_depth(crate::view::reversed_depth(Some(self.depth)))),
                             store: wgpu::StoreOp::Discard,
                         }),
                         stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
@@ -326,7 +326,7 @@ impl Capturer {
     /// [`Capturer::rgba`] as PNG bytes.
     pub fn png(&self, scene: &Scene, cam: &Camera, width: u32, height: u32) -> Result<Vec<u8>> {
         let rgba = self.rgba(scene, cam, width, height)?;
-        crate::png(width as usize, height as usize, rgba).ok_or_else(|| GpuError::Render("PNG encoding failed".into()))
+        solidcraft_viewport::png(width as usize, height as usize, rgba).ok_or_else(|| GpuError::Render("PNG encoding failed".into()))
     }
 }
 
@@ -334,7 +334,7 @@ impl Capturer {
 /// picks and kept, whatever later calls pass; the error when no adapter qualifies or the device
 /// fails (not retried). A host passes the same policy every time.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn shared(policy: crate::gpu::select::Policy) -> std::result::Result<&'static Capturer, &'static GpuError> {
+pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Capturer, &'static GpuError> {
     static SHARED: std::sync::OnceLock<Result<Capturer>> = std::sync::OnceLock::new();
     SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
 }
@@ -350,8 +350,8 @@ pub enum Headless {
 /// [`Headless`] under `policy`; the error when the policy is `hardware` or `software` and no
 /// adapter of that tier opens.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn headless(policy: crate::gpu::select::Policy) -> std::result::Result<Headless, &'static GpuError> {
-    use crate::gpu::select::Policy;
+pub fn headless(policy: crate::select::Policy) -> std::result::Result<Headless, &'static GpuError> {
+    use crate::select::Policy;
     if policy == Policy::Cpu {
         return Ok(Headless::Cpu);
     }
@@ -376,7 +376,7 @@ impl Headless {
                 if !(1..=MAX_SIDE).contains(&width) || !(1..=MAX_SIDE).contains(&height) {
                     return Err(format!("a picture is 1 to {MAX_SIDE} pixels a side, not {width} × {height}"));
                 }
-                let canvas = crate::render(scene, cam, width as usize, height as usize);
+                let canvas = solidcraft_viewport::render(scene, cam, width as usize, height as usize);
                 Ok((canvas.rgba, "cpu"))
             }
         }
@@ -386,7 +386,7 @@ impl Headless {
 /// `scene` drawn by [`headless`] under `policy` ([`Headless::rgba`]).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn headless_rgba(
-    policy: crate::gpu::select::Policy,
+    policy: crate::select::Policy,
     scene: &Scene,
     cam: &Camera,
     width: u32,
@@ -429,7 +429,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         outline: true,
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
-        ao_samples: crate::gpu::view::AO_SAMPLES,
+        ao_samples: crate::view::AO_SAMPLES,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [0.0; 3],
@@ -442,7 +442,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// A scene's meshes and lines as the viewport's model scene: faces in their colours (smooth
 /// normals; a face normal where a vertex has none), lines as wide lines (over everything when
 /// `on_top`), the grid under everything. A body whose appearance is see-through
-/// ([`crate::SceneMesh::glass`]) goes into the scene's glass, drawn as the viewport
+/// ([`solidcraft_viewport::SceneMesh::glass`]) goes into the scene's glass, drawn as the viewport
 /// draws glass: far sides first, then near sides, so what lies inside it shows through. When the
 /// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
 /// of its own, carrying its hatch.
@@ -615,7 +615,7 @@ fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::Texture
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::view::TRI_SIZE;
+    use crate::view::TRI_SIZE;
     use solidcore_tess::Mesh;
     use std::sync::Arc;
 
@@ -633,7 +633,7 @@ mod tests {
     /// The colour of a triangle `scene_geometry` wrote (its first vertex's palette entry).
     fn color(scene: &GpuScene, bytes: &[u8]) -> Option<[u8; 4]> {
         let index = bytes.get(TRI_SIZE - 4..TRI_SIZE)?.try_into().ok().map(u32::from_le_bytes)?;
-        scene.palette.get(crate::gpu::view::PaletteIndex(index))
+        scene.palette.get(crate::view::PaletteIndex(index))
     }
 
     /// A body the design draws see-through goes into the scene's glass, at its own alpha, and
@@ -668,13 +668,13 @@ mod tests {
         assert_eq!(color(&trace, &trace.glass).map(|c| c[3]), Some(13), "0.05 of 255");
     }
 
-    /// Bodies dragged as a layer of their own ([`crate::gpu::view::MovingLayer`]) are drawn moved by
+    /// Bodies dragged as a layer of their own ([`crate::view::MovingLayer`]) are drawn moved by
     /// its transform: the picture is the one of the bodies built where they were moved to, and
     /// the bodies go back to the model scene when the drag ends (on this machine's GPU, skipped
     /// without one).
     #[test]
     fn a_moving_layer_is_drawn_moved_by_its_transform() {
-        let Ok(capturer) = Capturer::headless_single_sample(crate::gpu::test_env::policy()) else {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -699,7 +699,7 @@ mod tests {
         // Drawn where it was, moved by the layer; the model scene empty.
         let mut layered = frame(&Scene::default(), &cam, size, 2, None);
         let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift.x as f32, shift.y as f32, shift.z as f32, 1.0]];
-        layered.moving = Some(crate::gpu::view::MovingLayer { key: 3, slot: slot(scene_geometry(&at(Vec3::ZERO))), transform });
+        layered.moving = Some(crate::view::MovingLayer { key: 3, slot: slot(scene_geometry(&at(Vec3::ZERO))), transform });
         let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
         let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
         assert!(differ <= 4, "{differ} pixels differ from the body drawn where it was moved to");
@@ -715,7 +715,7 @@ mod tests {
     /// placements moved.
     #[test]
     fn a_moving_layers_instances_are_drawn_moved_by_its_transform() {
-        let Ok(capturer) = Capturer::headless_single_sample(crate::gpu::test_env::policy()) else {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
             eprintln!("skipping: no GPU adapter");
             return;
         };
@@ -726,14 +726,14 @@ mod tests {
         let size = [64, 64];
         let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
         for (k, mesh) in [flat, smooth].iter().enumerate() {
-            let tris = Arc::new(crate::gpu::view::SharedTris::new(mesh));
+            let tris = Arc::new(crate::view::SharedTris::new(mesh));
             assert_eq!(tris.flat, k == 0);
             let placed_at = |[x, y, z]: [f32; 3]| {
-                let mut inst = crate::gpu::view::InstancedMesh {
+                let mut inst = crate::view::InstancedMesh {
                     key: 1,
                     tris: tris.clone(),
                     instances: Vec::new(),
-                    look: crate::gpu::view::InstanceLook::Opaque,
+                    look: crate::view::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
                 };
@@ -752,7 +752,7 @@ mod tests {
             // Placed where it was, in the layer moved by the drag; the model scene empty.
             let mut layered = frame(&Scene::default(), &cam, size, key + 2, None);
             let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift[0], shift[1], shift[2], 1.0]];
-            layered.moving = Some(crate::gpu::view::MovingLayer { key: key + 3, slot: placed_at([0.0; 3]), transform });
+            layered.moving = Some(crate::view::MovingLayer { key: key + 3, slot: placed_at([0.0; 3]), transform });
             let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
             let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where it was moved to", k == 0);

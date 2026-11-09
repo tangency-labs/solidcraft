@@ -8,12 +8,12 @@ use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::view::{self, Guides, colors};
-use solidcraft_viewport::gpu::GpuError;
-use solidcraft_viewport::gpu::capture::{self, Capturer};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine};
+use solidcraft_viewport_gpu::GpuError;
+use solidcraft_viewport_gpu::capture::{self, Capturer};
 
 fn capturer() -> Option<&'static Capturer> {
-    match solidcraft_viewport::gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             eprintln!("GPU: {} ({}x MSAA)", c.adapter_name(), c.samples());
             Some(c)
@@ -63,7 +63,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
     eprintln!("OpenGL regression: {:?}", adapter.get_info());
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: solidcraft_viewport::gpu::depth_features(&adapter),
+        required_features: solidcraft_viewport_gpu::depth_features(&adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         ..Default::default()
     }))
@@ -383,13 +383,13 @@ fn bad_picture_sizes_are_errors() {
 fn pictures_read_back_while_another_thread_uses_the_device() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let policy = solidcraft_gpu::env::policy().unwrap();
-    let Some((adapter, _)) = solidcraft_viewport::gpu::select::pick(policy) else {
+    let Some((adapter, _)) = solidcraft_viewport_gpu::select::pick(policy) else {
         assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "no GPU adapter under the {} policy", policy.name());
         eprintln!("skipping: no GPU adapter under the {} policy", policy.name());
         return;
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: solidcraft_viewport::gpu::depth_features(&adapter),
+        required_features: solidcraft_viewport_gpu::depth_features(&adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         ..Default::default()
     }))

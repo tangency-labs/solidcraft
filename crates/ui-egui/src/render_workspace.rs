@@ -20,7 +20,7 @@ use solidcraft_viewport::Camera;
 use crate::SolveApp;
 use crate::gpu::{Frame, GpuScene, SceneSlot};
 use solidcraft_theme::Tokens;
-use solidcraft_viewport::egui::ViewportCallback;
+use solidcraft_viewport_egui::ViewportCallback;
 
 // Vertex payload only, not an OS/GPU peak-memory promise. Native viewport
 // uploads are already chunked by the installed device's buffer limit.
@@ -3148,7 +3148,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.hover = None;
     }
     let background = preview_background(app);
-    solidcraft_viewport::egui::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
+    solidcraft_viewport_egui::paint_background(ui.painter(), viewport, background.viewport_top, background.viewport_bottom);
     if live::has_picture(app) {
         live::paint(app, ui, rect);
         if live::picking_current(app) {
@@ -3183,7 +3183,7 @@ fn paint_product_feedback(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rec
 fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera: Camera, image: Option<egui::Rect>, feedback: bool) {
     let background = preview_background(app);
     if !feedback {
-        solidcraft_viewport::egui::paint_background(ui.painter(), rect, background.viewport_top, background.viewport_bottom);
+        solidcraft_viewport_egui::paint_background(ui.painter(), rect, background.viewport_top, background.viewport_bottom);
     }
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
@@ -3277,7 +3277,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             outline: false,
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
-            ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
+            ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
             sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
@@ -3290,7 +3290,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             moving: None,
         };
         if feedback {
-            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport::egui::ProductHighlightCallback(frame)));
+            ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, solidcraft_viewport_egui::ProductHighlightCallback(frame)));
         } else {
             crate::blur::viewport(ui.painter(), rect, ViewportCallback(frame), rect, [background.viewport_top, background.viewport_bottom]);
         }

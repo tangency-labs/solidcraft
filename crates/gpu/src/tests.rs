@@ -4,10 +4,10 @@ use solidcraft_kernel::{Body, BoolOp};
 
 use solidcore::eval::EvalSurface;
 use solidcore_tess::TessPlan;
-use solidcraft_viewport::gpu::{GpuError, PackedPlans, SHADER, TessGpu, VERTEX_STRIDE, open_headless};
+use solidcraft_viewport_gpu::{GpuError, PackedPlans, SHADER, TessGpu, VERTEX_STRIDE, open_headless};
 
 /// The adapter policy this crate's GPU tests run under: the host's, from its environment.
-pub(crate) fn policy() -> solidcraft_viewport::gpu::select::Policy {
+pub(crate) fn policy() -> solidcraft_viewport_gpu::select::Policy {
     crate::env::policy().unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -110,7 +110,7 @@ fn no_shader_mixes_shifts_and_bitwise_operators_without_parentheses() {
             }
         }
     }
-    assert!(shaders.iter().any(|p| p.ends_with("crates/viewport/shaders/viewport.wgsl")), "{shaders:?}");
+    assert!(shaders.iter().any(|p| p.ends_with("crates/viewport-gpu/shaders/viewport.wgsl")), "{shaders:?}");
     let mut found = Vec::new();
     for path in &shaders {
         for (n, line) in ok(std::fs::read_to_string(path)).lines().enumerate() {

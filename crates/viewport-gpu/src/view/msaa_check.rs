@@ -1,6 +1,6 @@
 //! A startup probe of the installed viewport, including highlights, depth, resolve, and blit.
 use super::*;
-use crate::gpu::{GpuError, Result};
+use crate::{GpuError, Result};
 
 /// The startup check never changes a setting unless a working 1x replacement is proven.
 #[derive(Debug, PartialEq, Eq)]
@@ -29,7 +29,7 @@ impl Renderer {
         let mut replacement = Self::with_window_target(device, GpuTarget { samples: 1, ..self.target }, self.window, None);
         let mut error = None;
         for scope in scopes.into_iter().rev() {
-            if let Some(e) = crate::gpu::popped(scope.pop()) {
+            if let Some(e) = crate::popped(scope.pop()) {
                 error.get_or_insert(e);
             }
         }
@@ -71,7 +71,7 @@ impl Renderer {
         self.cached = None;
         let mut error = None;
         for scope in scopes.into_iter().rev() {
-            if let Some(e) = crate::gpu::popped(scope.pop()) {
+            if let Some(e) = crate::popped(scope.pop()) {
                 error.get_or_insert(e);
             }
         }
@@ -121,7 +121,7 @@ impl Renderer {
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
-            ao_samples: crate::gpu::view::AO_SAMPLES,
+            ao_samples: crate::view::AO_SAMPLES,
             sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],

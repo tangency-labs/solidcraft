@@ -1,5 +1,6 @@
-//! The viewport's GPU work: its render pipelines ([`view`]), pictures drawn with them
-//! offscreen ([`capture`]), and display tessellation plans evaluated in a compute shader.
+//! The shared viewport renderer's GPU work on wgpu (the camera, pictures and shading are
+//! `solidcraft-viewport`): its render pipelines ([`view`]), pictures drawn with them offscreen
+//! ([`capture`]), and display tessellation plans evaluated in a compute shader.
 //!
 //! Plan evaluation: the surface point and normal at every vertex's parameters, in a compute
 //! shader (`tess.wgsl`), the GPU twin of [`TessPlan::evaluate`]. Shared edge nodes keep their
@@ -10,6 +11,8 @@
 //! the GPU: [`TessGpu::prepare`] uploads it, [`TessGpu::record`] adds the evaluation to the
 //! frame's command encoder, and the render pass reads [`GpuMesh::vertices`] as its vertex buffer
 //! with [`GpuMesh::indices`]; nothing comes back to the CPU.
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![forbid(unsafe_code)]
 use solidcore::eval::{EvalCurve, EvalSurface};
 use solidcore_record::Vec3;
 #[cfg(not(target_arch = "wasm32"))]

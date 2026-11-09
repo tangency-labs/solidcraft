@@ -1,4 +1,4 @@
-//! SolidCraft's GPU work on top of the shared viewport renderer (`solidcraft_viewport::gpu`): the
+//! SolidCraft's GPU work on top of the shared viewport renderer (`solidcraft_viewport_gpu`): the
 //! path tracer ([`path`]) and SolidCraft's GPU environment ([`env`]), which the app reads and passes
 //! to the viewport's GPU code.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]

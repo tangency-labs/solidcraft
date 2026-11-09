@@ -4254,6 +4254,7 @@ dependencies = [
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
  "solidcraft-viewport",
+ "solidcraft-viewport-gpu",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
@@ -4279,6 +4280,7 @@ dependencies = [
  "solidcraft-kernel",
  "solidcraft-mcp",
  "solidcraft-viewport",
+ "solidcraft-viewport-gpu",
 ]
 
 [[package]]
@@ -4407,6 +4409,7 @@ dependencies = [
  "solidcraft-kernel",
  "solidcraft-render",
  "solidcraft-viewport",
+ "solidcraft-viewport-gpu",
  "thiserror 2.0.21",
  "wgpu",
 ]
@@ -4469,6 +4472,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-mcp-server",
  "solidcraft-viewport",
+ "solidcraft-viewport-gpu",
 ]
 
 [[package]]
@@ -4595,6 +4599,8 @@ dependencies = [
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
  "solidcraft-viewport",
+ "solidcraft-viewport-egui",
+ "solidcraft-viewport-gpu",
  "syn 2.0.119",
  "tiny-skia",
  "toml",
@@ -4625,19 +4631,39 @@ dependencies = [
 name = "solidcraft-viewport"
 version = "0.40.0-rc.3"
 dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "solidcore-record",
+ "solidcore-tess",
+ "solidcraft-color",
+]
+
+[[package]]
+name = "solidcraft-viewport-egui"
+version = "0.40.0-rc.3"
+dependencies = [
  "egui",
  "egui-wgpu",
- "image",
+ "log",
+ "solidcraft-viewport-gpu",
+ "wgpu",
+]
+
+[[package]]
+name = "solidcraft-viewport-gpu"
+version = "0.40.0-rc.3"
+dependencies = [
  "log",
  "naga",
  "pollster 0.4.0",
  "serde",
- "serde_json",
  "solidcore",
  "solidcore-convert",
  "solidcore-record",
  "solidcore-tess",
  "solidcraft-color",
+ "solidcraft-viewport",
  "thiserror 2.0.21",
  "wgpu",
 ]

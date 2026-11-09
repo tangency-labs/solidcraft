@@ -1,11 +1,13 @@
-//! The viewport in egui: its pipelines ([`crate::gpu::view`]) drawn in `egui_wgpu` paint
+//! The viewport in egui: its pipelines ([`solidcraft_viewport_gpu::view`]) drawn in `egui_wgpu` paint
 //! callbacks, on the host's device and render pass, over a background the host paints first. The
-//! same pipelines draw headless pictures ([`crate::gpu::capture`]), so a window and a picture
+//! same pipelines draw headless pictures ([`solidcraft_viewport_gpu::capture`]), so a window and a picture
 //! shade alike.
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+#![forbid(unsafe_code)]
 
 use std::sync::Arc;
 
-use crate::gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer};
+use solidcraft_viewport_gpu::view::{DrawStatsHandle, Frame, GpuTarget, Renderer};
 
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
@@ -28,7 +30,7 @@ pub fn paint_background(painter: &egui::Painter, rect: egui::Rect, top: egui::Co
 }
 
 /// The GPU plan evaluation compiling beside the window: there once it is ready ([`install`]).
-pub type TessReady = Arc<std::sync::OnceLock<crate::gpu::TessGpu>>;
+pub type TessReady = Arc<std::sync::OnceLock<solidcraft_viewport_gpu::TessGpu>>;
 
 /// Create the pipelines in `rs`'s callback resources. Call once with the host's render state, the
 /// scene target's depth/stencil/MSAA settings, and the target of the pass the picture is shown in.
@@ -50,9 +52,14 @@ pub fn install(
     // The evaluation shader compiles beside the window, which does not wait for it: on D3D12 it
     // takes seconds, most of the start (#4860). Bodies are built on the CPU until it is ready.
     #[cfg(not(target_arch = "wasm32"))]
-    let later = gpu_meshing.then(|| crate::gpu::view::TessLater::start(&rs.adapter, &rs.device, &rs.queue, crate::gpu::SHADER, force_cpu));
+    let later = gpu_meshing
+        .then(|| solidcraft_viewport_gpu::view::TessLater::start(&rs.adapter, &rs.device, &rs.queue, solidcraft_viewport_gpu::SHADER, force_cpu));
     #[cfg(target_arch = "wasm32")]
-    let tess = if gpu_meshing { crate::gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, crate::gpu::SHADER, force_cpu) } else { None };
+    let tess = if gpu_meshing {
+        solidcraft_viewport_gpu::view::tessellation(&rs.adapter, &rs.device, &rs.queue, solidcraft_viewport_gpu::SHADER, force_cpu)
+    } else {
+        None
+    };
     #[cfg(not(target_arch = "wasm32"))]
     let tess = None;
     let (scene, window) = (GpuTarget { tess: tess.is_some(), ..scene }, GpuTarget { tess: tess.is_some(), ..window });

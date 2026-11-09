@@ -119,7 +119,7 @@ impl Renderer {
         self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false);
         let mut failed = None;
         for scope in scopes.into_iter().rev() {
-            if let Some(error) = crate::gpu::popped(scope.pop()) {
+            if let Some(error) = crate::popped(scope.pop()) {
                 failed.get_or_insert(error.to_string());
             }
         }

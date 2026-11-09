@@ -1059,14 +1059,14 @@ impl SolveApp {
         #[cfg(target_arch = "wasm32")]
         let force_cpu = false;
         let (mut installed, stats, tess_ready) =
-            solidcraft_viewport::egui::install(rs, scene, window, !self.cpu_meshing, force_cpu, gpu::report_gpu_error);
+            solidcraft_viewport_egui::install(rs, scene, window, !self.cpu_meshing, force_cpu, gpu::report_gpu_error);
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
             let mut renderer = rs.renderer.write();
             if let Some(res) = renderer.callback_resources.get_mut::<gpu::Renderer>() {
                 match res.check_msaa(&rs.device, &rs.queue) {
-                    Ok(solidcraft_viewport::gpu::view::MsaaCheck::Passed) => {}
-                    Ok(solidcraft_viewport::gpu::view::MsaaCheck::Fallback) => {
+                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::Passed) => {}
+                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
                         installed.samples = 1;
                         self.msaa_compatibility = true;
                         eprintln!(
@@ -1074,7 +1074,7 @@ impl SolveApp {
                             scene.samples
                         );
                     }
-                    Ok(solidcraft_viewport::gpu::view::MsaaCheck::FailedAtOne) => {
+                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
                         eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                     }
                     Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),

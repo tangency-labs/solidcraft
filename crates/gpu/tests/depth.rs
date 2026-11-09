@@ -12,13 +12,13 @@ use solidcraft_engine::Session;
 use solidcraft_engine::geom::Mesh;
 use solidcraft_engine::view::{self, Guides};
 use solidcraft_geom::prelude::*;
-use solidcraft_viewport::gpu::GpuError;
-use solidcraft_viewport::gpu::capture::{self, Capturer};
 use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine, SceneMesh, StandardView};
+use solidcraft_viewport_gpu::GpuError;
+use solidcraft_viewport_gpu::capture::{self, Capturer};
 use std::sync::{Arc, OnceLock};
 
 /// The adapter policy the app's environment names (`SOLIDCRAFT_GPU`).
-fn policy() -> solidcraft_viewport::gpu::select::Policy {
+fn policy() -> solidcraft_viewport_gpu::select::Policy {
     solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -35,7 +35,7 @@ fn or_skip(c: Result<&'static Capturer, &'static GpuError>) -> Option<&'static C
 
 /// The device's own depth, then the 24-bit fallback (the same device kind, its own instance).
 fn capturers() -> Vec<(&'static str, &'static Capturer)> {
-    static FALLBACK: OnceLock<solidcraft_viewport::gpu::Result<Capturer>> = OnceLock::new();
+    static FALLBACK: OnceLock<solidcraft_viewport_gpu::Result<Capturer>> = OnceLock::new();
     let Some(own) = or_skip(capture::shared(policy())) else { return Vec::new() };
     let Some(fallback) = or_skip(FALLBACK.get_or_init(|| Capturer::headless_with_depth(policy(), wgpu::TextureFormat::Depth24PlusStencil8)).as_ref())
     else {
@@ -46,7 +46,7 @@ fn capturers() -> Vec<(&'static str, &'static Capturer)> {
 }
 
 fn reversed(c: &Capturer) -> bool {
-    solidcraft_viewport::gpu::view::reversed_depth(Some(c.depth_format()))
+    solidcraft_viewport_gpu::view::reversed_depth(Some(c.depth_format()))
 }
 
 /// RGBA pixels as `[r, g, b, a]`.
@@ -199,8 +199,8 @@ fn an_edge_on_a_face_draws_whole_at_any_angle() {
 
 /// A selected edge's highlight from `a` to `b` on a face of normal `n`, in a highlight scene of
 /// its own: a 3 px core in a 6 px halo (`GpuScene::lifted_line`).
-fn highlight(a: Vec3, b: Vec3, n: Vec3) -> solidcraft_viewport::gpu::view::GpuScene {
-    let mut sc = solidcraft_viewport::gpu::view::GpuScene::default();
+fn highlight(a: Vec3, b: Vec3, n: Vec3) -> solidcraft_viewport_gpu::view::GpuScene {
+    let mut sc = solidcraft_viewport_gpu::view::GpuScene::default();
     let red = sc.color([255, 0, 0, 255]);
     sc.lifted_line(a.to_f32(), b.to_f32(), red, 6.0, [n.to_f32(), n.to_f32()]);
     sc
@@ -669,7 +669,7 @@ fn a_visible_edge_beside_a_face_seen_edge_on_has_no_hidden_copy() {
                 let scene =
                     Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh.clone()), Rgb(160, 165, 175))], lines, radius: 40.0, ..Default::default() };
                 let hidden = |keep: &dyn Fn(&(Vec3, Vec3, [Vec3; 2])) -> bool| {
-                    let mut sc = solidcraft_viewport::gpu::view::GpuScene::default();
+                    let mut sc = solidcraft_viewport_gpu::view::GpuScene::default();
                     let col = sc.color([0, 255, 0, 255]);
                     for e in edges.iter().filter(|e| keep(e)) {
                         sc.hidden_line(e.0.to_f32(), e.1.to_f32(), col, 1.0);

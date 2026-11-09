@@ -161,7 +161,7 @@ fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
 }
 
 fn instance() -> wgpu::Instance {
-    let mut desc = crate::gpu::instance_descriptor_from_env();
+    let mut desc = crate::instance_descriptor_from_env();
     desc.backends = native_backends();
     wgpu::Instance::new(desc)
 }

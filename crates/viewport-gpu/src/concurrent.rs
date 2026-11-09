@@ -71,10 +71,10 @@ fn threaded(backend: wgpu::Backend, fxc: impl FnOnce() -> bool) -> bool {
     }
 }
 
-/// D3D12 compiles with FXC: the compiler every instance starts with ([`crate::gpu::dx12_compiler`]).
+/// D3D12 compiles with FXC: the compiler every instance starts with ([`crate::dx12_compiler`]).
 #[cfg(not(target_arch = "wasm32"))]
 fn dx12_compiles_with_fxc() -> bool {
-    matches!(crate::gpu::dx12_compiler(), wgpu::Dx12Compiler::Fxc)
+    matches!(crate::dx12_compiler(), wgpu::Dx12Compiler::Fxc)
 }
 
 impl<'scope, 'env> Jobs<'scope, 'env> {
@@ -126,9 +126,9 @@ impl<T, F> Drop for Job<'_, T, F> {
 /// again on the calling thread, where the error may not recur).
 #[cfg(not(target_arch = "wasm32"))]
 fn checked<T>(device: &wgpu::Device, work: impl Fn() -> T) -> Option<T> {
-    let scopes = crate::gpu::error_scopes(device);
+    let scopes = crate::error_scopes(device);
     let built = work();
-    match crate::gpu::caught(scopes) {
+    match crate::caught(scopes) {
         Some(e) => {
             log::warn!("GPU pipelines built again on the calling thread: {e}");
             None
@@ -167,17 +167,17 @@ mod tests {
         // never a `dxcompiler.dll` Windows would find on PATH. wgpu does not trim the value: " fxc "
         // is a value it does not know.
         for setting in [None, Some("auto"), Some("AUTO"), Some(""), Some("unknown"), Some(" fxc ")] {
-            assert!(is_fxc(&crate::gpu::dx12_compiler_for(setting, None)), "{setting:?} without DXC beside the program: FXC");
-            assert!(beside_program(&crate::gpu::dx12_compiler_for(setting, beside())), "{setting:?} with DXC beside the program: that one");
+            assert!(is_fxc(&crate::dx12_compiler_for(setting, None)), "{setting:?} without DXC beside the program: FXC");
+            assert!(beside_program(&crate::dx12_compiler_for(setting, beside())), "{setting:?} with DXC beside the program: that one");
         }
         // Named compilers stay as wgpu reads them; `dxc` keeps loading the DLL by name.
         for setting in [Some("fxc"), Some("FXC")] {
-            assert!(is_fxc(&crate::gpu::dx12_compiler_for(setting, beside())), "{setting:?} keeps FXC even with DXC beside the program");
+            assert!(is_fxc(&crate::dx12_compiler_for(setting, beside())), "{setting:?} keeps FXC even with DXC beside the program");
         }
         for setting in [Some("dxc"), Some("DynamicDxc")] {
-            assert!(by_name(&crate::gpu::dx12_compiler_for(setting, None)), "{setting:?} loads dxcompiler.dll by name");
+            assert!(by_name(&crate::dx12_compiler_for(setting, None)), "{setting:?} loads dxcompiler.dll by name");
         }
-        assert!(matches!(crate::gpu::dx12_compiler_for(Some("staticdxc"), None), wgpu::Dx12Compiler::StaticDxc));
+        assert!(matches!(crate::dx12_compiler_for(Some("staticdxc"), None), wgpu::Dx12Compiler::StaticDxc));
     }
 
     /// A buffer wgpu refuses: mapped for reading and for writing at once.
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn jobs_hand_back_what_they_built() {
-        let Ok((_, device, _)) = crate::gpu::open_headless(crate::gpu::test_env::policy()) else {
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
             eprintln!("skipped: no GPU adapter");
             return;
         };
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn an_error_on_a_job_reaches_the_callers_error_scope() {
-        let Ok((_, device, _)) = crate::gpu::open_headless(crate::gpu::test_env::policy()) else {
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
             eprintln!("skipped: no GPU adapter");
             return;
         };
@@ -229,7 +229,7 @@ mod tests {
             });
             drop(job.join());
         });
-        let error = crate::gpu::popped(caller.pop());
+        let error = crate::popped(caller.pop());
         assert!(error.is_some(), "the caller's scope catches the job's error");
         let expected = if threaded(device.adapter_info().backend, dx12_compiles_with_fxc) { 2 } else { 1 };
         assert_eq!(runs.load(Ordering::Relaxed), expected, "the job ran again on the calling thread");
@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn a_job_dropped_unjoined_whose_thread_panicked_does_not_panic_the_scope() {
-        let Ok((_, device, _)) = crate::gpu::open_headless(crate::gpu::test_env::policy()) else {
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
             eprintln!("skipped: no GPU adapter");
             return;
         };
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn a_job_whose_thread_panicked_runs_again_on_the_calling_thread() {
-        let Ok((_, device, _)) = crate::gpu::open_headless(crate::gpu::test_env::policy()) else {
+        let Ok((_, device, _)) = crate::open_headless(crate::test_env::policy()) else {
             eprintln!("skipped: no GPU adapter");
             return;
         };

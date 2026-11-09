@@ -8,7 +8,7 @@ use solidcraft_engine::geom::Aabb3;
 use solidcraft_geom::MeshGeom;
 use solidcraft_gpu as gpu;
 use solidcraft_viewport::Camera;
-use solidcraft_viewport::gpu::view::{Frame, GpuScene, GpuTarget, Renderer};
+use solidcraft_viewport_gpu::view::{Frame, GpuScene, GpuTarget, Renderer};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -21,7 +21,7 @@ fn measure_ground_ao_renderer_cost() -> Result<(), Box<dyn std::error::Error>> {
     ao_comparison(1)
 }
 fn ao_comparison(ground: u32) -> Result<(), Box<dyn std::error::Error>> {
-    let (adapter, _) = solidcraft_viewport::gpu::select::pick(gpu::env::policy().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
+    let (adapter, _) = solidcraft_viewport_gpu::select::pick(gpu::env::policy().map_err(std::io::Error::other)?).ok_or("no matching adapter")?;
     let info = adapter.get_info();
     let features = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
     if !adapter.features().contains(features) {
@@ -228,7 +228,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         outline: false,
         eye: [0.0; 4],
         ao_radius: 0.0,
-        ao_samples: solidcraft_viewport::gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
         hatch: Default::default(),
@@ -239,7 +239,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
 }
 
 fn receiver(sc: &mut GpuScene, b: Aabb3, cam: &Camera, radius: f64) {
-    sc.ground_ao = solidcraft_viewport::gpu::view::GroundAo::new(
+    sc.ground_ao = solidcraft_viewport_gpu::view::GroundAo::new(
         solidcraft_render::view_bounds(&b),
         b.min.z - 0.001 * (1.0 + b.diagonal()),
         cam.up,

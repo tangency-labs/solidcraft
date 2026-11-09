@@ -12,7 +12,7 @@ fn ground_ao_shares_the_selected_ground_plane_in_both_up_axes() {
             app.preferences.ground_shadow_follows_model = follows_model;
             // A 3 x 4 x 12 box has diagonal 13: the original ground offset is .014 mm.
             let bounds = Aabb3 { min: Vec3::new(-1.5, -2.0, bottom), max: Vec3::new(1.5, 2.0, bottom + 12.0) };
-            let ground = solidcraft_viewport::gpu::view::GroundAo::new(
+            let ground = solidcraft_viewport_gpu::view::GroundAo::new(
                 solidcraft_engine::render::view_bounds(&bounds),
                 ground_height(&app, bounds),
                 cam.up,
@@ -33,7 +33,7 @@ fn ground_ao_shares_the_selected_ground_plane_in_both_up_axes() {
     }
     for (bounds, radius) in [(Aabb3::EMPTY, 2.0), (Aabb3 { min: Vec3::ZERO, max: Vec3::X }, f32::NAN)] {
         assert!(
-            solidcraft_viewport::gpu::view::GroundAo::new(
+            solidcraft_viewport_gpu::view::GroundAo::new(
                 solidcraft_engine::render::view_bounds(&bounds),
                 ground_height(&app, bounds),
                 Camera::default().up,
@@ -134,7 +134,7 @@ fn ground_ao_draws_contact_pixels_without_an_ellipse_and_disappears_when_disable
                 app.cam.back().to_f32(),
                 [eye[0], eye[1], eye[2], 0.0],
                 256,
-                tess.then_some(solidcraft_viewport::gpu::SHADER),
+                tess.then_some(solidcraft_viewport_gpu::SHADER),
                 radius,
             )
         };
