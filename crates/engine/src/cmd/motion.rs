@@ -1298,11 +1298,29 @@ pub(crate) fn shows_exploded_view(s: &Session) -> bool {
 }
 
 /// What exploded view `v` moves: (occurrence, its placement, the translation the view adds). Moves
-/// of occurrences no longer in the design, or not finite (a hostile design file), are left out;
+/// of occurrences no longer in the design, not finite, or under a parent placed by a singular
+/// matrix (a hostile design file), are left out;
 /// a later move of one occurrence replaces an earlier one.
+///
+/// The view stores world translations, and an occurrence's placement is relative to its parent
+/// component, so each translation is turned into the parent's frame: a part inside a turned
+/// component moves the way the view gives, not along the component's axes (#13939). A component
+/// placed more than once shares its parts' placements, so there a part moves the way given in
+/// the component's first placement ([`solidcraft_doc::joints::occurrence_world`]).
 fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
-    let placed: std::collections::BTreeMap<u64, Mat> = s.doc.occurrences.iter().map(|o| (o.id, o.transform)).collect();
-    v.moves.iter().filter(|(_, t)| t.len() < 1e7).filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect()
+    let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
+    v.moves
+        .iter()
+        .filter(|(_, t)| t.len() < 1e7)
+        .filter_map(|(o, t)| {
+            let (transform, parent) = *placed.get(o)?;
+            let Some(frame) = (parent != 0).then(|| s.doc.occurrence_of(parent)).flatten() else {
+                return Some((*o, transform, *t));
+            };
+            let to_parent = solidcraft_doc::mat_inverse(&solidcraft_doc::joints::occurrence_world(&s.doc, frame.id))?;
+            Some((*o, transform, solidcraft_doc::apply_vector(&to_parent, *t)))
+        })
+        .collect()
 }
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
