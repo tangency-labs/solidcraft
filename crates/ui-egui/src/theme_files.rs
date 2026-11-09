@@ -1223,9 +1223,13 @@ fn svg_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) {
         for amount in [0.0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.0] {
             let candidate = ink.lerp_to_gamma(t.svg_curve, amount);
             if backgrounds.into_iter().all(|background| {
-                [background, solidcraft_theme::composite(t.svg_region_fill, background), solidcraft_theme::composite(t.svg_region_fill_nested, background)]
-                    .into_iter()
-                    .all(|fill| solidcraft_theme::contrast_ratio(candidate, fill) >= 3.0)
+                [
+                    background,
+                    solidcraft_theme::composite(t.svg_region_fill, background),
+                    solidcraft_theme::composite(t.svg_region_fill_nested, background),
+                ]
+                .into_iter()
+                .all(|fill| solidcraft_theme::contrast_ratio(candidate, fill) >= 3.0)
             }) {
                 return candidate;
             }

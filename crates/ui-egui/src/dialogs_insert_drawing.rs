@@ -318,7 +318,8 @@ fn diagnostic_reply(options: &mut SvgOptions, result: Result<Value, String>) {
 fn refresh_diagnostics(app: &SolveApp, ui: &egui::Ui, p: &mut Place) {
     let params = diagnostic_params(p);
     if let Some(slot) = p.svg.reply.as_ref() {
-        let reply = slot.lock().map(|mut slot| slot.take()).unwrap_or_else(|_| Some(Err(solidcraft_ui_text::tr("ui.svg_diagnostics_failed").to_string())));
+        let reply =
+            slot.lock().map(|mut slot| slot.take()).unwrap_or_else(|_| Some(Err(solidcraft_ui_text::tr("ui.svg_diagnostics_failed").to_string())));
         if let Some(reply) = reply {
             if p.svg.requested.as_ref() == Some(&params) {
                 diagnostic_reply(&mut p.svg, reply);
@@ -727,7 +728,10 @@ fn readiness_ladder(app: &SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     let summary = if p.svg.repair {
         solidcraft_ui_text::format("ui.svg_curves_adjusted", &[("outlines", &adjusted.to_string()), ("issues", &remaining.to_string())])
     } else {
-        solidcraft_ui_text::format("ui.svg_curves_unchanged", &[("issues", &p.svg.diagnostics.len().to_string()), ("outlines", &outlines.to_string())])
+        solidcraft_ui_text::format(
+            "ui.svg_curves_unchanged",
+            &[("issues", &p.svg.diagnostics.len().to_string()), ("outlines", &outlines.to_string())],
+        )
     };
     solidcraft_ui_registry::publish_count("svg_diagnostics", p.svg.diagnostics.len() as f64);
     solidcraft_ui_registry::publish_count("svg_diagnostic_outlines", outlines as f64);
@@ -1067,7 +1071,8 @@ fn review_rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
                 continue;
             };
             let Some(group) = groups.get(index) else { continue };
-            let name = solidcraft_ui_text::format("ui.svg_review_outline", &[("path", &group.path.to_string()), ("subpath", &group.subpath.to_string())]);
+            let name =
+                solidcraft_ui_text::format("ui.svg_review_outline", &[("path", &group.path.to_string()), ("subpath", &group.subpath.to_string())]);
             let count = solidcraft_ui_text::format("ui.svg_review_change_count", &[("count", &group.segments.len().to_string())]);
             let selected = p.svg.selected.is_some_and(|selected| group.segments.contains(&selected));
             let (state, tone) =
@@ -1088,8 +1093,10 @@ fn review_rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     let mut next = index;
     ui.add_space(t_gap());
     ui.horizontal(|ui| {
-        let shown =
-            solidcraft_ui_text::format("ui.svg_review_segment", &[("position", &(position + 1).to_string()), ("count", &group.segments.len().to_string())]);
+        let shown = solidcraft_ui_text::format(
+            "ui.svg_review_segment",
+            &[("position", &(position + 1).to_string()), ("count", &group.segments.len().to_string())],
+        );
         ui.label(egui::RichText::new(shown).font(crate::ui_kit::type_face::semibold(t.font_label)));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_4;

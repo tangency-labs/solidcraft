@@ -590,10 +590,15 @@ fn button_widget(label: egui::WidgetText, options: Button) -> impl egui::Widget 
             Button::Link => {
                 let t = Tokens::get();
                 egui::Button::new(
-                    RichText::new(label.text()).font(crate::ui_kit::type_face::semibold(t.font_body)).underline()
-                        .color(if ui.is_enabled() { t.form_primary } else { t.form_dim }),
-                ).frame(false).min_size(vec2(0.0, t.control_height))
-            },
+                    RichText::new(label.text()).font(crate::ui_kit::type_face::semibold(t.font_body)).underline().color(if ui.is_enabled() {
+                        t.form_primary
+                    } else {
+                        t.form_dim
+                    }),
+                )
+                .frame(false)
+                .min_size(vec2(0.0, t.control_height))
+            }
             Button::SmallSelected => styled_button(ui, label, ButtonTone::Selected).small(),
             _ => styled_button(ui, label, ButtonTone::Normal),
         };
