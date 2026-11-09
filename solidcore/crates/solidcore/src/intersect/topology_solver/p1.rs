@@ -481,9 +481,6 @@ pub struct TopologySolver<'t, 'a, O> {
     pub objects: &'a dyn TopologyObjects<O>,
     /// `m_pLocalSolver`: the local solver of the running tree solve.
     pub local_solver: Option<LocalSolver<'a, O>>,
-    /// Faces whose upper bounds must be checked against a global point query's
-    /// final feasible candidate. `None` keeps direct local solves self-contained.
-    pub(super) deferred_projected_faces: Option<Vec<O>>,
 }
 
 impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
@@ -543,7 +540,6 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
             kernel,
             objects,
             local_solver: None,
-            deferred_projected_faces: None,
         }
     }
 
@@ -847,10 +843,8 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
                 kernel: self.kernel,
                 objects: self.objects,
                 local_solver: None,
-                deferred_projected_faces: self.deferred_projected_faces.take(),
             };
             let result = scoped.solve_trees(&object_tree, tree2, local);
-            self.deferred_projected_faces = scoped.deferred_projected_faces;
             self.restore_base(scoped.base, tree2);
             result?;
         }
@@ -1727,26 +1721,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                         self.point,
                         &mut current.base,
                     )?;
-                    if let Some(faces) = &mut current.deferred_projected_faces {
-                        super::projected_bound::certify_candidate(
-                            k,
-                            objects,
-                            face,
-                            self.point,
-                            &current.base,
-                        )?;
-                        if !faces.contains(&face) {
-                            faces.push(face);
-                        }
-                    } else {
-                        super::projected_bound::certify(
-                            k,
-                            objects,
-                            face,
-                            self.point,
-                            &current.base,
-                        )?;
-                    }
+                    super::projected_bound::certify(k, objects, face, self.point, &current.base)?;
                 }
                 // The local vertex-face maximum has its own whole-face proof.
                 // Merge only afterward, preserving the global retention policy.

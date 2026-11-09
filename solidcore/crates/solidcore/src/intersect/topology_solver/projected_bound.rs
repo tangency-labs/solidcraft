@@ -49,8 +49,9 @@ pub(super) fn certify<O: crate::geom::solution_array::SolutionObject>(
     Ok(())
 }
 
-/// Check a candidate before it can supply a feasible bound for tree pruning.
-/// The whole-face upper bound may be checked against a later, better candidate.
+/// The candidate checks of [`certify`] without its whole-face bound, so tests
+/// can tell a refused candidate from a refused bound.
+#[cfg(test)]
 pub(super) fn certify_candidate<O: crate::geom::solution_array::SolutionObject>(
     k: &Kernel,
     objects: &dyn super::p1::TopologyObjects<O>,
