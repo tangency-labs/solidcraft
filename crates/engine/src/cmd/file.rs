@@ -4290,7 +4290,12 @@ mod tests {
         for f in formats::FORMATS {
             if let Some(import) = &f.import {
                 for o in import.options {
-                    for id in ["doc.open", if import.target == formats::ImportTarget::Mesh { "file.insert_mesh" } else { "file.insert_step" }] {
+                    let ids: &[&str] = match import.target {
+                        formats::ImportTarget::Mesh => &["doc.open", "file.insert_mesh"],
+                        formats::ImportTarget::Kicad => &["doc.open"],
+                        _ => &["doc.open", "file.insert_step"],
+                    };
+                    for id in ids {
                         assert!(params_of(id).contains(o.param), "{}: `{}` is not a documented parameter of {id}", f.id, o.param);
                     }
                 }

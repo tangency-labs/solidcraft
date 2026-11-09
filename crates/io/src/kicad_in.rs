@@ -1461,7 +1461,7 @@ fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<solidcraft_g
     let bodies = extrude_regions_bodies(regions, z0, z1)?;
     let mut out = solidcraft_geom::Mesh::default();
     for body in &bodies {
-        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).map_err(|e| IoError::Invalid(format!("KiCad mesh: {e}")))?;
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).map_err(|e| IoError::Invalid(format!("KiCad mesh: {e}")))?;
         out.append(&mesh, 0);
     }
     Ok(out)

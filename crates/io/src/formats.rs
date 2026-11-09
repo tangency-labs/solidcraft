@@ -22,6 +22,8 @@ pub enum ImportTarget {
     Design,
     /// B-rep CAD read as an Import base feature (`doc.open` / `file.insert_step`).
     Brep,
+    /// A KiCad board read as a design of its own (`doc.open`).
+    Kicad,
     /// Mesh read as a MeshImport feature (`doc.open` / `file.insert_mesh`).
     Mesh,
     /// A reference scan, separate from model bodies (`doc.open` / `pointcloud.insert`).
@@ -245,7 +247,7 @@ pub static FORMATS: &[FormatSpec] = &[
         label: "KiCad PCB",
         extensions: &["kicad_pcb", "kicad_pro"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Brep, options: KICAD_IMPORT, native_only: false }),
+        import: Some(ImportSpec { target: ImportTarget::Kicad, options: KICAD_IMPORT, native_only: false }),
         export: None,
     },
     FormatSpec {
@@ -440,6 +442,7 @@ pub fn import_filters(native: bool) -> Vec<(&'static str, Vec<&'static str>)> {
             ImportTarget::Design => add("SolidCraft design (container or JSON)", f.extensions),
             ImportTarget::Brep if import.native_only => add("FreeCAD and Rhino", f.extensions),
             ImportTarget::Brep => add(f.label, f.extensions),
+            ImportTarget::Kicad => add(f.label, f.extensions),
             ImportTarget::Mesh => add("Mesh (3MF, STL, OBJ, glTF)", f.extensions),
             ImportTarget::PointCloud => add("Point cloud (PLY, XYZ, PTS)", f.extensions),
             ImportTarget::Sketch => add("Sketch drawings (DXF, SVG)", f.extensions),
@@ -480,6 +483,9 @@ mod tests {
         }
         for e in ["step", "stp", "igs", "iges", "fcstd", "3dm"] {
             assert!(with_target(ImportTarget::Brep).contains(&e), "registry misses B-rep .{e}");
+        }
+        for e in with_target(ImportTarget::Kicad) {
+            assert!(crate::is_kicad_path(&format!("board.{e}")), "is_kicad_path misses .{e}");
         }
         for e in with_target(ImportTarget::Mesh) {
             assert!(crate::is_mesh_path(&format!("part.{e}")), "is_mesh_path misses .{e}");

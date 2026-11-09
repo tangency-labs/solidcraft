@@ -69,7 +69,7 @@ fn the_board_stands_with_its_lower_left_corner_at_the_origin() {
     let mut s = Session::default();
     let r = run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
     assert_eq!(r["board_solid"], json!(true), "{r}");
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let bbox = world
         .bodies
         .iter()
