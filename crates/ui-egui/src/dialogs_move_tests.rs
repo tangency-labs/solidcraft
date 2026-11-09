@@ -453,20 +453,7 @@ fn a_body_pick_goes_on_to_the_point_or_axis() {
 #[test]
 fn ctrl_or_shift_click_adds_bodies_after_move_has_gone_on() {
     for mode in [POINT_TO_POINT, POINT_TO_POSITION, ROTATE] {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        for (x, name) in [(0, "A"), (30, "B"), (60, "C")] {
-            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "body_name": name})).unwrap();
-        }
-        h.app.run("select.clear", json!({})).unwrap();
-        h.call("ui.view", json!({"view": "top"}));
-        h.app.fit_view();
-        h.settle();
-        h.app.start("solid.move");
-        let d = h.app.dialog.as_mut().unwrap();
-        d.kind = kind(mode, &h.app.session.doc);
-        d.inputs = inputs(mode);
-        d.active = 0;
+        let mut h = three_bodies_in_move(mode);
         let body = |name: &str| Sel::Body { name: name.into() };
         let (a, b, c) = (body("A"), body("B"), body("C"));
         h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
@@ -486,6 +473,65 @@ fn ctrl_or_shift_click_adds_bodies_after_move_has_gone_on() {
         assert_eq!(d.inputs[0].items, vec![a, c], "{}: the plain click picked no body", TYPES[mode]);
         assert_eq!(d.inputs[1].items.len(), 1, "{}: it picked {}", TYPES[mode], d.inputs[1].label);
     }
+}
+
+/// Boxes A, B and C (20 wide, at x 0, 30 and 60) seen from the top, and Move open on `mode`
+/// with Bodies active.
+fn three_bodies_in_move(mode: usize) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (x, name) in [(0, "A"), (30, "B"), (60, "C")] {
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "body_name": name})).unwrap();
+    }
+    h.app.run("select.clear", json!({})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.fit_view();
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(mode, &h.app.session.doc);
+    d.inputs = inputs(mode);
+    d.active = 0;
+    h
+}
+
+/// #14205: with Shift adding only (Preferences), a Shift click on a body Move has picked already
+/// keeps it in Bodies, while a Ctrl click still takes it out.
+#[test]
+fn an_add_only_shift_click_keeps_a_picked_body_in_move() {
+    let mut h = three_bodies_in_move(POINT_TO_POINT);
+    h.app.preferences.selection_shift_add_only = true;
+    let body = |name: &str| Sel::Body { name: name.into() };
+    h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "shift": true })).unwrap();
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "shift": true })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![body("A"), body("B")], "Shift adds only");
+    assert_eq!(d.active, 1, "and Move stays on {}", d.inputs[1].label);
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![body("A")], "Ctrl still takes it out");
+}
+
+/// #14205: while OK computes, a Ctrl or Shift click leaves Bodies as it is, as other picks do.
+#[test]
+fn a_ctrl_or_shift_click_holds_bodies_while_move_computes() {
+    let mut h = three_bodies_in_move(POINT_TO_POINT);
+    h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
+    let (_finish, done) = std::sync::mpsc::channel();
+    h.app.applying = Some(crate::dialogs::Applying {
+        done,
+        ready: None,
+        seen: true,
+        started: crate::now_ms(),
+        cmds: Vec::new(),
+        progress: Default::default(),
+        quality: Default::default(),
+    });
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+    h.step(&json!({ "click": { "world": [10, 10, 10] }, "shift": true })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "A".into() }]);
+    assert_eq!(d.active, 1);
 }
 
 /// #8265: input queued while the window is busy arrives together, so one frame can carry the

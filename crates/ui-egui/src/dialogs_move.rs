@@ -195,9 +195,14 @@ pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Se
 /// A Ctrl or Shift click (adding to the selection, as in the view) on a body once Point to
 /// Point, Point to Position or Rotate has gone on to From, Point or Axis (#6170): the body joins
 /// Bodies, or leaves it if picked already, and the window stays on the input it was on. So
-/// several bodies are picked without clicking back into Bodies each time (#14205). False when
-/// the click is not such a pick, which then goes to the active input as usual.
-pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit]) -> bool {
+/// several bodies are picked without clicking back into Bodies each time (#14205). With Shift
+/// adding only (`allow_toggle` false, Preferences), a picked body stays picked. False when the
+/// click is not such a pick, which then goes to the active input as usual, and while OK computes,
+/// when the inputs hold.
+pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit], allow_toggle: bool) -> bool {
+    if app.applying.is_some() {
+        return false;
+    }
     let Some(d) = app.dialog.as_mut() else { return false };
     let Kind::Move { mode, .. } = d.kind else { return false };
     if !matches!(mode, ROTATE | POINT_TO_POINT | POINT_TO_POSITION) || d.active == 0 || d.inputs.first().is_none_or(|i| i.accept & BODIES == 0) {
@@ -207,7 +212,7 @@ pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit]) 
     let on = std::mem::replace(&mut d.active, 0);
     let body = crate::viewport::candidate(app, hits).map(|(_, sel)| sel);
     let Some(mut d) = app.dialog.take() else { return false };
-    if let Some(body) = body.clone() {
+    if let Some(body) = body.clone().filter(|b| allow_toggle || d.inputs.first().is_none_or(|i| !i.items.contains(b))) {
         d.pick(&app.session, body);
     }
     d.active = on;
