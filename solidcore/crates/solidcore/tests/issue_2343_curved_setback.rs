@@ -172,6 +172,8 @@ struct Rounded {
     refusal: Option<BlendRefusal>,
     /// The spring curves the corner checked against its faces' other edges.
     springs: Vec<SpringCurve>,
+    /// The corner's tolerance (`approx_tol_3d`), `0.0` where the corner was not found.
+    tol: f64,
 }
 
 /// The vertex of `b` at `v`.
@@ -237,8 +239,12 @@ fn round_asked(
         }
         let result = s.do_filleting(k, None);
         let (mut setbacks, mut room, mut springs) = (Vec::new(), Vec::new(), Vec::new());
+        let mut tol = 0.0;
         for c in s.fillet_corners().unwrap() {
             let fc = s.corner(c).unwrap();
+            if this == Some(c) {
+                tol = fc.approx_tol_3d;
+            }
             if let Some(sb) = fc.setback.as_ref() {
                 eprintln!("setbacks {:?}", sb.setbacks);
                 if this == Some(c) {
@@ -262,6 +268,7 @@ fn round_asked(
             room,
             refusal,
             springs,
+            tol,
         }
     };
     if rounded.ok {
@@ -1489,7 +1496,9 @@ fn top_spring_least_rho(s: f64) -> f64 {
 /// setback whose spring curve stays on the face and that lies within 1e-3 of that limit: the
 /// root, not the last point of a grid of thousandths below it (0.918 x 8.5 = 7.803, 3.8e-3
 /// short). The spring curve clears the bore there by the check's gap, the tolerances, which
-/// costs about 6e-4 of setback. Asked that, the corner builds, graded as the corners above.
+/// costs about 6e-4 of setback. It is the largest to the corner's tolerance: asked a
+/// tolerance more, the corner is refused. Asked it, the corner builds, graded as the corners
+/// above.
 #[test]
 fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() {
     let (bore, asked) = (6.9, 8.5);
@@ -1533,6 +1542,18 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
     assert!(
         named < limit && named > limit - 1e-3,
         "{named} against the limit {limit}"
+    );
+    // the largest to the corner's tolerance: a tolerance more takes the spring curve off
+    let more = named + r.tol;
+    assert!(r.tol > 0.0, "{}", r.tol);
+    let (mut k, mut b, edges, _) = d_prism_eight_case(Some(bore), 14);
+    let r = round_asked(&mut k, &mut b, &edges, &[1.0, 1.5, 2.0], case.v, Some(more));
+    assert!(!r.ok, "asked {more}: built");
+    assert!(
+        matches!(r.refusal, Some(BlendRefusal::SetbackTooLong { .. })),
+        "asked {more}: {:?}, {}",
+        r.refusal,
+        r.reason
     );
     let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
     let r = round_asked(
