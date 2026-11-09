@@ -1,0 +1,23 @@
+{
+ "base": "../../12-sheet-metal/001-base-flange",
+ "commands": [
+  {
+   "command": "sheet.fold",
+   "params": {
+    "points": [
+     [
+      70,
+      0,
+      2.0
+     ],
+     [
+      70,
+      60.0,
+      2.0
+     ]
+    ],
+    "angle": 90
+   }
+  }
+ ]
+}

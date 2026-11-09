@@ -47,6 +47,9 @@
 //! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`. Chrome comes from
 //! `CHROME` or the usual install locations; `cargo xtask ci` skips this test when there is none.
 //!
+//! A real build's copies each get a file of their own, as successive deployments have files
+//! named differently.
+//!
 //! The stand-in app has a content-named script, a `shared.js` whose name is the same in every
 //! build (a page must get its own build's), more files under `icons/` than the browser asks for
 //! at once, and an on-demand file under `fonts/` (not kept).
@@ -174,6 +177,17 @@ const API_TEST: &str = r#"(async () => {
     check(settled.filter(r => r.status === 'rejected' && r.reason instanceof Error && r.reason.message.includes('pending')).length === 1,
         'queue limit rejects excess work');
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
+    // A host page keeps the design itself (#8517): out, changed, and back in its place.
+    const kept = await app.request('document.export');
+    check(kept.format === 'json' && kept.dirty === true && kept.text.includes('Browser API box'), 'export gives the design as its file holds it');
+    check((await app.request('document.saved', {revision: kept.revision})).dirty === false, 'the host saved that revision');
+    await app.execute('solid.box', {length: 10, width: 10, height: 10, body_name: 'Second box'});
+    await rejects(() => app.request('document.saved', {revision: kept.revision}), 'changed since');
+    await rejects(() => app.request('document.import', {text: 'not a design'}), '');
+    check((await app.inspect()).bodies.length === 2, 'a refused import leaves the design as it was');
+    check((await app.request('document.import', {text: kept.text})).errors === 0, 'import evaluates the kept design');
+    check((await app.inspect()).bodies.length === 1, 'import puts the kept design back');
+    check((await app.request('document.export')).dirty === false, 'an imported design opens saved');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
     // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
@@ -221,7 +235,8 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.documents', {action: 'switch', index: 0});
     check((await app.execute('component.links')).links[0].component === linked.component, 'assembly remains in its tab');
     return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected',
-        dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage'};
+        dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage',
+        host: 'exported, saved and imported back'};
 })()"#;
 
 /// Run the test; `required: false` (from `cargo xtask ci`) skips it when Chrome is missing.
@@ -240,6 +255,10 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             check_site(root, Path::new(dir), &work.0.join("check"))?;
             for (to, build) in &builds {
                 copy_dir(Path::new(dir), to)?;
+                // Trunk names files after their contents, so two real deployments differ in more
+                // than `index.html`; copies of one build don't. A file of its own per copy lets
+                // a step hold back what one build has and the next lacks (step 13).
+                std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
@@ -443,7 +462,7 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     // Chrome sends a server at most six requests at once: a build with more files has the rest
     // wait for the first ones. v6 is deployed once all of v5's are asked for (any asked later
     // would get v6's file, which rightly ends v5's download, but that isn't this step).
-    server.wait_asked_slowly(asked + only_in(&v5, &v6)?)?;
+    server.wait_asked_slowly(asked + file_count(&v5)?)?;
     server.set(Mode::Serve(v6));
     // v5's files are still held while v6 launches; they come once v6 has started.
     let t = launch(&mut cdp, "v6")?;
@@ -516,20 +535,22 @@ const STATE_JS: &str = "(async () => {
   }
   const filling = (await navigator.locks.query()).held.map((l) => l.name).filter((n) => n.startsWith(prefix));
   return { search: location.search, ready: document.readyState, build: document.documentElement.dataset.build ?? null,
+    scriptStartedBuild: document.documentElement.dataset.started ?? null,
+    scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
     registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
 })()";
 
-/// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
-/// How many files `build` keeps that `other` doesn't have.
-fn only_in(build: &Path, other: &Path) -> Result<usize, String> {
+/// Every file this build downloads, including names shared with the next build.
+fn file_count(build: &Path) -> Result<usize, String> {
     let path = build.join("build.json");
     let json: Value =
         std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or_else(|| format!("{}: not readable", path.display()))?;
     let files = json["files"].as_array().into_iter().flatten().filter_map(|f| f["file"].as_str());
-    Ok(files.filter(|f| !other.join(f).exists()).count())
+    Ok(files.count())
 }
 
+/// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
 fn cache_name(path: &str, version: &str) -> String {
     format!("solidcraft-app {path} {version}")
 }
@@ -810,9 +831,13 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, seen: &Counters, elsewher
         Mode::Flaky(dir) => (dir, true, false),
         Mode::SlowCheck(dir) => (dir, false, true),
         Mode::SlowFiles(dir, next) => {
-            if !small && file.is_some_and(|f| !next.join(f).exists()) {
+            if !small && file.is_some() {
+                // Count shared names too: switching builds before their requests arrive would
+                // serve the next build's bytes and correctly cancel this download's hash check.
                 seen.slow.fetch_add(1, Ordering::SeqCst);
-                seen.gate.pass();
+                if file.is_some_and(|f| !next.join(f).exists()) {
+                    seen.gate.pass();
+                }
             }
             (dir, false, false)
         }

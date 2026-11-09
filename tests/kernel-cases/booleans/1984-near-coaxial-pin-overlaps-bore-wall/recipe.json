@@ -1,0 +1,46 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 5,
+    "height": 9.65,
+    "body_name": "Bush"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 9.65,
+    "operation": "cut",
+    "targets": [
+     "Bush"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 3,
+    "height": 9.65,
+    "base": [
+     0.00056,
+     0,
+     0
+    ],
+    "body_name": "Pin"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Bush",
+    "tools": [
+     "Pin"
+    ],
+    "operation": "intersect"
+   }
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a quarter-cylinder sheet r 10, 20 high, with a square window cut through it at 45 degrees, untrimmed in place: the cylinder face whole again",
+ "source": "analytic",
+ "method": "the window's loop is projected onto the cylinder along the sketch normal (1,1,0)/sqrt2 and cut out; untrimming every hole leaves the quarter cylinder: A = (pi/2) 10 20 = 314.16, one cylinder face with 4 free edges (two arcs, two rulings)",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 314.1592653589793,
+ "surface_types": [
+  "cylinder"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   20
+  ]
+ }
+}

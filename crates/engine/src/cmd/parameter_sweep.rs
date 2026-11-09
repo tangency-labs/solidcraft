@@ -4,16 +4,29 @@
 //! design, many sizes) can be checked across its whole range before it is trusted, and the
 //! report says what moved where, so a lost face or a flipped joint is found before a part is.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_};
+use crate::schema::parameter_sweep::{
+    FeatureFailed, FeatureWarned, JointFlipped, JointLost, JointSide, MAX_VALUES, ParameterSweep, ParameterSweepParams, SketchFailed, SketchFlipped,
+    SweepChanges, SweepResult, SweepSummary,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.parameter_sweep", "Parameter Sweep", sweep).icon("params").noundo().params(
+const CONTRACT: TypedContract<ParameterSweepParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.parameter_sweep", "Parameter Sweep", crate::checked!("inspect.parameter_sweep", sweep))
+    .icon("params")
+    .noundo()
+    .contract(&CONTRACT)
+    .output(output_schema_for::<ParameterSweep>)
+    .params(
     "parameter: name; values: [number | expression] (at most 200) | from, to: numbers, steps? (default 10, at most 199: steps + 1 values) → \
      for each value, in a copy of the design (the design itself is not changed): {value, ms (the rebuild), ok, failed: [{feature, name, error}], warned: [{feature, name, warning}] \
      (features that build at the current value and fail or warn at this one), joints_lost: [{joint, name, origin?: a|b, why}], joints_flipped: [{joint, name, origin: a|b, degrees}] \
@@ -22,9 +35,6 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.parameter_swee
      (or {value, ms, ok: false, error} where the parameter takes no such value); \
      summary: {values, ok, slowest_ms, failed, joints_lost, joints_flipped, sketches_flipped, sketches_failed} (how many values show each)",
 )];
-
-/// Values swept by one command, at most.
-const MAX_VALUES: usize = 200;
 
 /// A frame's origin and z axis, in its occurrence's coordinates.
 type Frame = (Vec3, Vec3);
@@ -84,29 +94,29 @@ fn degrees(a: Vec3, b: Vec3) -> Option<f64> {
 }
 
 /// What changed from `base` (the design as it is) to `at` (at one value).
-fn compare(base: &Look, at: &Look) -> Value {
-    let failed: Vec<Value> = at
+fn compare(base: &Look, at: &Look) -> SweepChanges {
+    let failed = at
         .errors
         .iter()
         .filter(|(id, _)| !base.errors.contains_key(id))
-        .map(|(id, (name, e))| json!({"feature": id, "name": name, "error": e}))
+        .map(|(id, (name, e))| FeatureFailed { feature: *id, name: name.clone(), error: e.clone() })
         .collect();
-    let warned: Vec<Value> = at
+    let warned = at
         .warnings
         .iter()
         .filter(|(id, (_, w))| base.warnings.get(id).is_none_or(|(_, b)| b != w) && !at.errors.contains_key(id))
-        .map(|(id, (name, w))| json!({"feature": id, "name": name, "warning": w}))
+        .map(|(id, (name, w))| FeatureWarned { feature: *id, name: name.clone(), warning: w.clone() })
         .collect();
-    let mut lost = Vec::new();
-    let mut flipped = Vec::new();
+    let mut joints_lost = Vec::new();
+    let mut joints_flipped = Vec::new();
     for (id, (name, a, b)) in &at.joints {
         let Some((_, a0, b0)) = base.joints.get(id) else { continue };
-        for (side, now, was) in [("a", a, a0), ("b", b, b0)] {
+        for (side, now, was) in [(JointSide::A, a, a0), (JointSide::B, b, b0)] {
             match (now, was) {
-                (Err(why), Ok(_)) => lost.push(json!({"joint": id, "name": name, "origin": side, "why": why})),
+                (Err(why), Ok(_)) => joints_lost.push(JointLost { joint: *id, name: name.clone(), origin: Some(side), why: why.clone() }),
                 (Ok(f), Ok(f0)) => {
                     if let Some(d) = degrees(f.1, f0.1).filter(|d| *d > 90.0) {
-                        flipped.push(json!({"joint": id, "name": name, "origin": side, "degrees": (d * 10.0).round() / 10.0}));
+                        joints_flipped.push(JointFlipped { joint: *id, name: name.clone(), origin: side, degrees: (d * 10.0).round() / 10.0 });
                     }
                 }
                 _ => {}
@@ -116,7 +126,7 @@ fn compare(base: &Look, at: &Look) -> Value {
             && a.is_ok()
             && b.is_ok()
         {
-            lost.push(json!({"joint": id, "name": name, "why": why}));
+            joints_lost.push(JointLost { joint: *id, name: name.clone(), origin: None, why: why.clone() });
         }
     }
     let mut sketches_flipped = Vec::new();
@@ -124,15 +134,13 @@ fn compare(base: &Look, at: &Look) -> Value {
     for (id, (name, n, failing, folded)) in &at.sketches {
         let Some((_, n0, failing0, folded0)) = base.sketches.get(id) else { continue };
         if let Some(d) = degrees(*n, *n0).filter(|d| *d > 90.0) {
-            sketches_flipped.push(json!({"sketch": id, "name": name, "degrees": (d * 10.0).round() / 10.0}));
+            sketches_flipped.push(SketchFlipped { sketch: *id, name: name.clone(), degrees: (d * 10.0).round() / 10.0 });
         }
         if (!failing.is_empty() && failing0.is_empty()) || (!folded.is_empty() && folded0.is_empty()) {
-            sketches_failed.push(json!({"sketch": id, "name": name, "failing": failing, "folded": folded}));
+            sketches_failed.push(SketchFailed { sketch: *id, name: name.clone(), failing: failing.clone(), folded: folded.clone() });
         }
     }
-    let ok = failed.is_empty() && lost.is_empty() && flipped.is_empty() && sketches_flipped.is_empty() && sketches_failed.is_empty();
-    json!({"ok": ok, "failed": failed, "warned": warned, "joints_lost": lost, "joints_flipped": flipped,
-           "sketches_flipped": sketches_flipped, "sketches_failed": sketches_failed})
+    SweepChanges { failed, warned, joints_lost, joints_flipped, sketches_flipped, sketches_failed }
 }
 
 /// The values to sweep.
@@ -174,37 +182,36 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let values = values(p, cmd)?;
     let base = look(s);
     let mut results = Vec::new();
-    let mut count: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut slowest: f64 = 0.0;
-    for v in values {
+    let mut summary =
+        SweepSummary { values: 0, ok: 0, slowest_ms: 0.0, failed: 0, joints_lost: 0, joints_flipped: 0, sketches_flipped: 0, sketches_failed: 0 };
+    for value in values {
         let mut x = s.scratch();
         let t0 = std::time::Instant::now();
-        let changed = x.execute("parameters.change", &json!({"name": name, "expression": v}));
+        let changed = x.execute("parameters.change", &json!({"name": name, "expression": value}));
         let ms = (t0.elapsed().as_secs_f64() * 1e4).round() / 10.0;
-        slowest = slowest.max(ms);
-        let mut r = match changed {
-            Ok(_) => compare(&base, &look(&x)),
-            Err(e) => json!({"ok": false, "error": e.to_string()}),
-        };
-        for key in ["failed", "joints_lost", "joints_flipped", "sketches_flipped", "sketches_failed"] {
-            if r[key].as_array().is_some_and(|a| !a.is_empty()) {
-                *count.entry(key).or_default() += 1;
+        summary.slowest_ms = summary.slowest_ms.max(ms);
+        let r = match changed {
+            Ok(_) => {
+                let c = compare(&base, &look(&x));
+                summary.failed += usize::from(!c.failed.is_empty());
+                summary.joints_lost += usize::from(!c.joints_lost.is_empty());
+                summary.joints_flipped += usize::from(!c.joints_flipped.is_empty());
+                summary.sketches_flipped += usize::from(!c.sketches_flipped.is_empty());
+                summary.sketches_failed += usize::from(!c.sketches_failed.is_empty());
+                let ok = c.failed.is_empty()
+                    && c.joints_lost.is_empty()
+                    && c.joints_flipped.is_empty()
+                    && c.sketches_flipped.is_empty()
+                    && c.sketches_failed.is_empty();
+                SweepResult { value, ms, ok, error: None, changes: Some(c) }
             }
-        }
-        if r["ok"] == json!(true) {
-            *count.entry("ok").or_default() += 1;
-        }
-        r["value"] = v;
-        r["ms"] = json!(ms);
+            Err(e) => SweepResult { value, ms, ok: false, error: Some(e.to_string()), changes: None },
+        };
+        summary.ok += usize::from(r.ok);
         results.push(r);
     }
-    let get = |k: &str| count.get(k).copied().unwrap_or(0);
-    Ok(json!({
-        "parameter": name,
-        "results": results,
-        "summary": {"values": results.len(), "ok": get("ok"), "slowest_ms": slowest, "failed": get("failed"), "joints_lost": get("joints_lost"),
-                    "joints_flipped": get("joints_flipped"), "sketches_flipped": get("sketches_flipped"), "sketches_failed": get("sketches_failed")},
-    }))
+    summary.values = results.len();
+    serde_json::to_value(ParameterSweep { parameter: name, results, summary, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }
 
 #[cfg(test)]

@@ -1,0 +1,41 @@
+{
+  "area": "crashes",
+  "bodies": {},
+  "calls": [],
+  "case": "5022-snap-fit-near-zero-thickness",
+  "expected": {
+    "method": "a 1e-9 mm wall is no solid: the right answer is a clean refusal, never a panic",
+    "outcome": "refused",
+    "refusal": "the snap fit's thickness must be at least 0.01 mm",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#5022"
+    ],
+    "what": "a snap fit 1e-9 mm thick on a box: it got past validation and panicked in the kernel ('tolerance must be no less than 1e-6')"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (plastic.snap_fit): the snap fit's thickness must be at least 0.01 mm (got 1e-9 mm)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (plastic.snap_fit): the snap fit's thickness must be at least 0.01 mm (got 1e-9 mm)",
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5022"
+  ],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a snap fit 1e-9 mm thick on a box: it got past validation and panicked in the kernel ('tolerance must be no less than 1e-6')",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (plastic.snap_fit): the snap fit's thickness must be at least 0.01 mm (got 1e-9 mm)"
+  ]
+}

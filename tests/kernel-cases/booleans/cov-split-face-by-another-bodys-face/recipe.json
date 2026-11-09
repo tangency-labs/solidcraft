@@ -1,0 +1,47 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     20,
+     15,
+     10
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cutter"
+   }
+  },
+  {
+   "command": "solid.split_face",
+   "params": {
+    "faces": [
+     [
+      5,
+      5,
+      10
+     ]
+    ],
+    "body": "Block",
+    "tool": {
+     "body": "Cutter",
+     "point": [
+      25,
+      15,
+      15
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,7 +1,7 @@
 //! Boss: the marker moves the boss across the model and snaps to sketch points, so a screw boss
 //! lands on the centre of a circle drawn for it. A boss is round: no ring.
 
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::{Spec, circle, len};
 use crate::SolveApp;

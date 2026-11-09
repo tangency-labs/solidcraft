@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="600" viewBox="0 0 1000 600">
+  <title>branch-point</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1000 0 L1000 600 L0 600 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 50)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Where n1 × n2 = 0: a tangent curve and a branch point</tspan></text>
+    <text transform="matrix(1 0 0 1 70 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Tangent curve (cross-section)</tspan></text>
+    <path d="M70 300 L450 300" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M90 170 C203.333 343.333 316.667 343.333 430 170" fill="none" stroke="#555555" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g>
+      <g>
+        <path d="M259.25 300 L259.25 294 C259.25 293.586 259.586 293.25 260 293.25 C260.414 293.25 260.75 293.586 260.75 294 L260.75 300 C260.75 300.414 260.414 300.75 260 300.75 C259.586 300.75 259.25 300.414 259.25 300 M259.25 290 L259.25 284 C259.25 283.586 259.586 283.25 260 283.25 C260.414 283.25 260.75 283.586 260.75 284 L260.75 290 C260.75 290.414 260.414 290.75 260 290.75 C259.586 290.75 259.25 290.414 259.25 290 M259.25 280 L259.25 274 C259.25 273.586 259.586 273.25 260 273.25 C260.414 273.25 260.75 273.586 260.75 274 L260.75 280 C260.75 280.414 260.414 280.75 260 280.75 C259.586 280.75 259.25 280.414 259.25 280 M259.25 270 L259.25 264 C259.25 263.586 259.586 263.25 260 263.25 C260.414 263.25 260.75 263.586 260.75 264 L260.75 270 C260.75 270.414 260.414 270.75 260 270.75 C259.586 270.75 259.25 270.414 259.25 270 M259.25 260 L259.25 254 C259.25 253.586 259.586 253.25 260 253.25 C260.414 253.25 260.75 253.586 260.75 254 L260.75 260 C260.75 260.414 260.414 260.75 260 260.75 C259.586 260.75 259.25 260.414 259.25 260 M259.25 250 L259.25 244 C259.25 243.586 259.586 243.25 260 243.25 C260.414 243.25 260.75 243.586 260.75 244 L260.75 250 C260.75 250.414 260.414 250.75 260 250.75 C259.586 250.75 259.25 250.414 259.25 250 M259.25 240 L259.25 234 C259.25 233.586 259.586 233.25 260 233.25 C260.414 233.25 260.75 233.586 260.75 234 L260.75 240 C260.75 240.414 260.414 240.75 260 240.75 C259.586 240.75 259.25 240.414 259.25 240 M259.25 230 L259.25 224 C259.25 223.586 259.586 223.25 260 223.25 C260.414 223.25 260.75 223.586 260.75 224 L260.75 230 C260.75 230.414 260.414 230.75 260 230.75 C259.586 230.75 259.25 230.414 259.25 230 M259.25 220 L259.25 214 C259.25 213.586 259.586 213.25 260 213.25 C260.414 213.25 260.75 213.586 260.75 214 L260.75 220 C260.75 220.414 260.414 220.75 260 220.75 C259.586 220.75 259.25 220.414 259.25 220" fill="#999999"/>
+        <path d="M260 207.9 L263 213.9 L260 212.1 L257 213.9 Z" fill="#999999"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 268 222)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">n1 = n2</tspan></text>
+    <path d="M254 300 C254 296.686 256.686 294 260 294 C263.314 294 266 296.686 266 300 C266 303.314 263.314 306 260 306 C256.686 306 254 303.314 254 300 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 420 322)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S1</tspan></text>
+    <text transform="matrix(1 0 0 1 300 250)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">S2</tspan></text>
+    <text transform="matrix(1 0 0 1 268 322)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">T</tspan></text>
+    <path d="M100 380 L420 380 L420 520 L100 520 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 110 400)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">UV of S1</tspan></text>
+    <path d="M120 462 C200 440 320 470 400 450" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 130 505)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">tangent curve: n1 × n2 = 0 along it</tspan></text>
+    <text transform="matrix(1 0 0 1 70 565)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">No marching direction anywhere along a tangent curve.</tspan></text>
+    <text transform="matrix(1 0 0 1 520 100)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">Branch point (in the tangent plane)</tspan></text>
+    <path d="M560 220 C680 260 800 326.667 920 420" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M570 420 C683.333 336.667 796.667 260 910 190" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M695 300 C695 275.147 715.147 255 740 255 C764.853 255 785 275.147 785 300 C785 324.853 764.853 345 740 345 C715.147 345 695 324.853 695 300 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 4"/>
+    <path d="M734 300 C734 296.686 736.686 294 740 294 C743.314 294 746 296.686 746 300 C746 303.314 743.314 306 740 306 C736.686 306 734 303.314 734 300 Z" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 850 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">branch 1</tspan></text>
+    <text transform="matrix(1 0 0 1 830 175)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">branch 2</tspan></text>
+    <text transform="matrix(1 0 0 1 560 165)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">probe circle</tspan></text>
+    <path d="M620 172 L706 266" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 760 520)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="14" fill="#000000"><tspan x="0" y="0">B: n1 ∥ n2</tspan></text>
+    <path d="M775 505 L744 308" fill="none" stroke="#999999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text transform="matrix(1 0 0 1 520 565)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Four directions leave B; each branch ends at B, reported as a vertex.</tspan></text>
+  </g>
+</svg>

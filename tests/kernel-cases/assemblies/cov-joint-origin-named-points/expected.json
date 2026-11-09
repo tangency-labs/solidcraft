@@ -1,0 +1,32 @@
+{
+ "sources": [],
+ "what": "a revolute between two named joint origins, driven 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); joint.origin 'Pivot A' on Base and 'Pivot B' on Arm, both at the origin with z up; the joint between them turns Arm to (0,20,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 11,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

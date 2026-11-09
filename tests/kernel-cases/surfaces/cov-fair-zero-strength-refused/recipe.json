@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Wave"
+   }
+  },
+  {
+   "command": "sketch.spline.control_point",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      13,
+      8
+     ],
+     [
+      27,
+      -8
+     ],
+     [
+      40,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "Wave",
+    "curves": [
+     "s1"
+    ],
+    "distance": 20,
+    "body_name": "Wave"
+   }
+  },
+  {
+   "command": "surface.fair",
+   "params": {
+    "body": "Wave",
+    "strength": 0
+   }
+  }
+ ]
+}

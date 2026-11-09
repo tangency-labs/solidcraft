@@ -1,0 +1,105 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      10.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Shell"
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     0,
+     -40
+    ],
+    "through": [
+     40,
+     0
+    ],
+    "end": [
+     0,
+     40
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      40
+     ],
+     [
+      0,
+      18.5
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     0,
+     18.5
+    ],
+    "through": [
+     18.5,
+     0
+    ],
+    "end": [
+     0,
+     -18.5
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      -18.5
+     ],
+     [
+      0,
+      -40
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "y",
+    "angle": "360 deg",
+    "operation": "new"
+   }
+  }
+ ]
+}

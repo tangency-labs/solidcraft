@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "two d10 through holes whose axes cross: vertical and along Y at z=10",
+ "source": "analytic",
+ "method": "equal radii, crossing axes: the common part is the Steinmetz solid 16 r^3 / 3; removed pi r^2 (20 + 40) - 16 r^3/3. Faces: the stock's 6 and two per hole. With equal radii the walls cross along two ellipses that meet at the two points where the walls are tangent (x = 25 and 35, y = 20, z = 10), so each wall is left in two pieces (the vertical one above and below the other hole, the horizontal one either side of the vertical hole) that touch only at those points: no edge joins them, so they are separate faces",
+ "body_count": 1,
+ "volume_mm3": 43954.277686282,
+ "faces": 10
+}

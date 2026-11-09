@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a trough whose floor falls 1 deg from its edges to a central drain (four faces meet at each bottom corner and at the drain), a tab joined on one end, shelled 2 mm open at the top",
+ "source": "analytic",
+ "method": "The floor below z = 0 is a pyramid, apex at the centre h = 30 tan 1 deg = 0.523652 below: two triangular prisms (a triangle on XZ swept along y, one on YZ swept along x) intersected. Trough 100 x 60 x 40 plus the pyramid 100 60 h/3, plus the tab 20^3 at x 100..120, y 20..40, z 20..40. The shell moves every face 2 in, the offset faces extended to meet (sharp inner corners, as every shell in the ladder's tier 09): the cavity is x 2..98, y 2..58 from the four facets moved 2 up (z >= max of the moved planes, which no longer meet in one point) to the open top, Int (40 - max) dA exactly over the cells where each plane is highest = 205325.031680, and the tab's 20 x 16 x 18 = 5760. V = 37962.272215",
+ "body_count": 1,
+ "volume_mm3": 37962.27221527102,
+ "tolerance": {
+  "rel": 1e-05
+ }
+}

@@ -46,6 +46,17 @@ impl FeatureKind {
         found
     }
 
+    /// Bodies the feature works on (by name).
+    pub fn input_bodies(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        self.walk_refs(&mut |r| {
+            if let Ref::Body(name) = r {
+                v.push(name.as_ref().to_string());
+            }
+        });
+        v
+    }
+
     /// Point references to sketches and features (both by id) at their copies, and references
     /// that are still keyed by name at a feature's new name (`timeline.rename`).
     pub fn remap_refs(&mut self, ids: &BTreeMap<u64, u64>, names: &BTreeMap<String, String>) {

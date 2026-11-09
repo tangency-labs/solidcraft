@@ -13,9 +13,9 @@ fn empty(p: &Value, command: &str) -> Result<()> {
 }
 pub(super) fn aging(_: &mut Session, p: &Value) -> Result<Value> {
     empty(p, "render.aging.describe")?;
-    Ok(json!({"maximum_layers":8,"storage":"GPU saved job.options.aging","order":"bottom to top; later layers modify earlier surface results",
+    Ok(json!({"maximum_layers":8,"storage":"CPU/GPU saved job.options.aging","order":"bottom to top; later layers modify earlier surface results",
         "presets":AgingKind::ALL.map(AgingLayer::preset),"target":"all eligible opaque bodies or stable definition/feature/component/occurrence identity; capture indices are resolved only for the runtime job; passive stages and glass are excluded",
-        "coordinate_space":"world millimetres, explicit origin and 4096-cell periodic field; not object-following motion",
+        "coordinate_space":"world millimetres, explicit origin; 4096-cell periodic noise with directional Scratch bands; not object-following motion",
         "preserves":["engineering geometry","mass and physical material cards","pose","source textures","visibility"],
         "limitations":["authored optical weathering, not measured corrosion or age prediction","no geometric grooves or edge-curvature detection","no aging on glass or participating-medium boundaries","stack changes transport and requires a new render"],
         "airborne":"use the separately validated finite homogeneous GPU medium; it is not deposited surface dust or a physical lunar atmosphere"}))

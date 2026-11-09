@@ -25,24 +25,63 @@ pub(super) struct Node {
     pub folders: [Option<Folder>; 3],
 }
 
+/// A row of a folder or group: an item, or a group with its own rows.
+pub(super) enum Row {
+    Item(Box<Entry>),
+    Group(Group),
+}
+
+impl Row {
+    pub fn count(&self) -> usize {
+        match self {
+            Row::Item(_) => 1,
+            Row::Group(g) => g.count,
+        }
+    }
+}
+
 pub(super) struct Group {
     pub id: u64,
     pub key: String,
     pub label: String,
-    pub items: Vec<Entry>,
+    /// How many items it holds, groups inside it included.
+    pub count: usize,
+    pub rows: Vec<Row>,
+}
+
+fn collect<'a>(rows: &'a [Row], out: &mut Vec<&'a Entry>) {
+    for r in rows {
+        match r {
+            Row::Item(e) => out.push(e),
+            Row::Group(g) => collect(&g.rows, out),
+        }
+    }
+}
+
+impl Group {
+    /// Everything in the group, groups inside it included, in display order.
+    pub fn entries(&self) -> Vec<&Entry> {
+        let mut all = Vec::new();
+        collect(&self.rows, &mut all);
+        all
+    }
 }
 
 #[derive(Default)]
 pub(super) struct Folder {
     pub key: String,
-    pub groups: Vec<Group>,
-    pub loose: Vec<Entry>,
-    pub loose_keys: Vec<String>,
+    pub rows: Vec<Row>,
+    /// The top-level rows as drawn: the order a drop among them keeps.
+    pub top_order: Vec<solidcraft_engine::doc::BrowserEntry>,
+    /// How many items the folder holds, groups included.
+    pub count: usize,
 }
 
 impl Folder {
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
-        self.groups.iter().flat_map(|g| &g.items).chain(&self.loose)
+        let mut all = Vec::new();
+        collect(&self.rows, &mut all);
+        all.into_iter()
     }
 }
 
@@ -166,7 +205,15 @@ impl Cache {
             "sketches" => &model.sketches,
             _ => &model.planes,
         };
-        let Some(indices) = indices.get(&component) else { return Folder::default() };
+        // A folder that holds only groups (a New Group made before anything is in it) is still
+        // drawn, or the group can't be seen or filled (#10526).
+        let grouped = doc.browser_groups.iter().any(|g| g.component == component && g.folder == folder);
+        let none = Vec::new();
+        let indices = match indices.get(&component) {
+            Some(indices) => indices,
+            None if grouped => &none,
+            None => return Folder::default(),
+        };
         let mut all = Vec::with_capacity(indices.len());
         for i in indices {
             let entry = match folder {
@@ -187,19 +234,18 @@ impl Cache {
                 all.push(entry);
             }
         }
-        if all.is_empty() {
+        if all.is_empty() && !grouped {
             return Folder::default();
         }
-        let (groups, loose) = arrange(&doc, component, folder, all);
-        let loose_keys = loose.iter().map(|e| e.key.clone()).collect();
-        let groups = groups
-            .into_iter()
-            .map(|(group, items)| {
-                let key = format!("{prefix}/g{}", group.id);
-                let label = format!("{} ({})", group.name, items.len());
-                Group { id: group.id, key, label, items }
+        let rows = arrange(&doc, component, folder, &prefix, all);
+        let top_order = rows
+            .iter()
+            .map(|r| match r {
+                Row::Item(e) => solidcraft_engine::doc::BrowserEntry::item(&e.key),
+                Row::Group(g) => solidcraft_engine::doc::BrowserEntry::Group(g.id),
             })
             .collect();
-        Folder { key: format!("{prefix}/{folder}"), groups, loose, loose_keys }
+        let count = rows.iter().map(Row::count).sum();
+        Folder { key: format!("{prefix}/{folder}"), rows, top_order, count }
     }
 }

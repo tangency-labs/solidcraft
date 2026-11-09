@@ -63,6 +63,8 @@ pub enum StopReason {
     ResidualTolerance,
     NoImprovement,
     IterationLimit,
+    /// A status-only solve gave up: the iteration stalled far from a solution.
+    Stalled,
     /// The shared frame-work budget was exhausted after evaluating the initial residual.
     WorkBudget,
 }
@@ -310,7 +312,7 @@ pub(crate) fn trial(record: Trial) {
 mod tests {
     use super::*;
     use crate::{Analysis, ConstraintKind, Hold, Sketch, solve_with};
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     fn distance(x: f64) -> Sketch {
         let mut sk = Sketch::new();

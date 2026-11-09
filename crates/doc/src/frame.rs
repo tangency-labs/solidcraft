@@ -13,10 +13,11 @@
 //! of the profile's bounding box at the origin. The outline runs counter-clockwise and holes
 //! clockwise, as [`Region2`] expects.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
 use crate::{DocError, Expr, Result};

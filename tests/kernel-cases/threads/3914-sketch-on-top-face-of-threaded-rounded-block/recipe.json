@@ -1,0 +1,109 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 20,
+    "width": 20,
+    "height": 20,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     10,
+     10,
+     20
+    ],
+    "diameter": 5,
+    "depth": 20
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     12.5,
+     10,
+     10
+    ],
+    "designation": "M6",
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      10
+     ],
+     [
+      20,
+      0,
+      10
+     ],
+     [
+      20,
+      20,
+      10
+     ],
+     [
+      0,
+      20,
+      10
+     ]
+    ],
+    "radius": 2
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      5,
+      5,
+      20
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     3,
+     3
+    ],
+    "p1": [
+     7,
+     7
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 5,
+    "operation": "join",
+    "targets": [
+     "Block"
+    ]
+   }
+  }
+ ]
+}

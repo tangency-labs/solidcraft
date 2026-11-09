@@ -1,0 +1,166 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.999999999999999,
+                  0.0,
+                  8.000000000000002
+                ],
+                [
+                  5.999999999999999,
+                  0.0,
+                  8.000000000000002
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              -5.999999999999999,
+              -1.1102230246251565e-15,
+              8.000000000000002
+            ]
+          ],
+          "tolerance": 1.485082207965583
+        },
+        "kind": "round",
+        "sizes": [
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-exact-coaxial-cones-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "both cones turn about z: the ball's centre runs on a circle about z, so the round is the ball's arc turned about z: rational, of degrees (2, 2). V0 = the frusta, pi h (R^2 + R r + r^2) / 3; the round removes 2 pi times the first moment about z of its section (the ball R2 tangent to both profile lines): 5.065333649310.",
+    "source": "analytic",
+    "sources": [],
+    "splines": [
+      {
+        "degree": [
+          2,
+          2
+        ]
+      }
+    ],
+    "surface_types": [
+      "bspline",
+      "cone",
+      "plane"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 1681.969921328409,
+    "what": "two coaxial frusta joined, R10 to 6 over z 0..8 and R6 to 1 over z 8..9: the convex circle between their cones rounded r2"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 7,
+      "faces": 5,
+      "vertices": 4
+    }
+  },
+  "records": "cov-fillet-exact-coaxial-cones-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Top",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 873.4225444865307,
+      "body_count": 1,
+      "edges": 7,
+      "faces": 5,
+      "vertices": 4,
+      "volume_mm3": 1681.9699213454383
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "two coaxial frusta joined, R10 to 6 over z 0..8 and R6 to 1 over z 8..9: the convex circle between their cones rounded r2",
+  "why_not": []
+}

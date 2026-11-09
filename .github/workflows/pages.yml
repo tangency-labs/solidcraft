@@ -1,5 +1,6 @@
 # The documentation site on GitHub Pages: the book (docs/book) at https://docs.solidcraft.io/
-# and the bundled web app at /app/. Needs Settings → Pages → Source = GitHub Actions; skipped while the
+# and the web app at /app/ (the latest release), /app-rc/ (the newest release candidate) and
+# /app-edge/ (this commit). Needs Settings → Pages → Source = GitHub Actions; skipped while the
 # repository is private.
 name: Pages
 
@@ -66,7 +67,10 @@ jobs:
           mkdir -p site
           cp -r target/book/. site/
           bash docs/book/seo.sh site  # canonical links, robots.txt, sitemap.xml
-          cp -r dist/web site/app
+      - name: Add the web app channels (stable and release candidate from their releases, edge from this build)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash packaging/web-channels.sh site dist/web
       - uses: actions/configure-pages@v5
         id: pages
       - name: Install Flatpak repository tools

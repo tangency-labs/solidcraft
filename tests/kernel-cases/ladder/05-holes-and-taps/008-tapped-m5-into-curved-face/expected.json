@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "an M5 tapped hole drilled radially through a cylinder r20 lying along X",
+ "source": "analytic",
+ "method": "tap drill 5 - 0.8 = 4.2; the hole (axis Z) crosses the cylinder (axis X, R=20): V_int = int_-r^r 2 sqrt(r^2 - y^2) 2 sqrt(R^2 - y^2) dy = 553.412299039",
+ "body_count": 1,
+ "volume_mm3": 74844.811387116,
+ "faces": 4
+}

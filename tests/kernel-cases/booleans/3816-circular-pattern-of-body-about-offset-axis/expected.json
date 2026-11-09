@@ -1,0 +1,14 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3816"
+  ],
+  "what": "circular pattern of a body about an axis {origin,dir} that does not pass through the world origin",
+  "source": "analytic",
+  "method": "a 4x4x4 box centred at (39.5,15,-48), 22 mm from the vertical axis through (17.5,15,-48); nine copies 40 deg apart (chord 15 mm > the box diagonal 5.7, no overlap): V = 9*64 = 576. By the 9-fold symmetry the centre of mass lies on the axis: (17.5, 15, -48)",
+  "volume_mm3": 576.0,
+  "center_of_mass": [
+    17.5,
+    15.0,
+    -48.0
+  ]
+}

@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#190",
+  "tangency-labs/solidcraft#318"
+ ],
+ "what": "an R2.5 round of the top rim of a disc R13 x 2: the round runs past the bottom of its 2 mm wall (a cliff) and is built as if the wall went on, cut by the bottom face",
+ "source": "analytic",
+ "method": "the round's circle in (rho, z): centre (10.5, -0.5), radius 2.5 (tangent to the top z = 2 and the wall rho = 13). Above z = 0 the disc keeps rho <= 10.5 + sqrt(6.25 - (z+0.5)^2); with z + 0.5 = 2.5 sin t (t from asin(0.2) to pi/2) the part taken is pi Int (169 - rho^2) dz = pi Int (169 - (10.5 + 2.5 cos t)^2) 2.5 cos t dt = 104.166078. V = pi 338 - that. The bottom face is left a disc of radius 10.5 + sqrt(6) = 12.949: the wall is used up.",
+ "body_count": 1,
+ "volume_mm3": 957.6922389452784,
+ "continuity": {
+  "order": "g1"
+ }
+}

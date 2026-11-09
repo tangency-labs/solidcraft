@@ -101,6 +101,25 @@ fn segmented_click_changes_selection_and_keeps_all_choices_visible() {
     }
 }
 
+/// A segment shows its option in the user's language, as the dropdown it falls back to does, and
+/// keeps the option as passed in its handle.
+#[test]
+fn segments_show_their_options_translated() {
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 120.0));
+    let _japanese = solidcraft_ui_text::scope("ja");
+    let mut selected = 0;
+    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+        row(ui, "Section", |ui| segmented(ui, &mut selected, &["Circular", "Square"], Default::default()));
+    });
+    output.textures_delta.clear();
+    let painted = |text: &str| output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == text));
+    for (option, shown) in [("Circular", "円形"), ("Square", "正方形")] {
+        assert!(painted(shown) && !painted(option), "{option} shows as {shown}");
+        assert!(scenario::handle_at(&format!("dialog:Section:{option}")).is_some(), "{option} keeps its handle");
+    }
+}
+
 #[test]
 fn optional_field_keeps_empty_default_and_options_use_two_columns() {
     let ctx = crate::fonts::test_context();
@@ -128,7 +147,7 @@ fn optional_field_keeps_empty_default_and_options_use_two_columns() {
 /// really is too narrow.
 #[test]
 fn segments_stay_segments_when_a_scrollbar_appears_and_disappears() {
-    let options = ["Origin", "View centre", "Point under the cursor"];
+    let options = ["Origin", "View center", "Point under the cursor"];
     let solid = egui::style::ScrollStyle::solid();
     let scrollbar = solid.allocated_width();
     assert!(scrollbar > 0.0);
@@ -165,18 +184,18 @@ fn segments_stay_segments_when_a_scrollbar_appears_and_disappears() {
 
 #[test]
 fn beveled_segments_share_fill_corners_at_internal_joins() {
-    use crate::theme::Tokens;
     use egui::{Color32, Shape};
+    use solidcraft_theme::Tokens;
     let mut t = Tokens::light();
     t.control_radius = 8;
-    t.borders.bevel = Some(crate::theme::Bevel {
+    t.borders.bevel = Some(solidcraft_theme::Bevel {
         width: 0.5,
         highlight: Color32::WHITE,
         light: Color32::LIGHT_GRAY,
         shadow: Color32::GRAY,
         dark_shadow: Color32::BLACK,
     });
-    let _restore = crate::theme::scoped_tokens(t);
+    let _restore = solidcraft_theme::scoped_tokens(t);
     for selected in 0..3 {
         let ctx = crate::fonts::test_context();
         let mut selected = selected;
@@ -212,7 +231,7 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
     let ctx = crate::fonts::test_context();
     let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 120.0));
     for language in ["en", "ja", "zh", "de", "ko"] {
-        let locale = crate::i18n::Locale::for_language(language);
+        let locale = solidcraft_ui_text::Locale::for_language(language);
         let labels: Vec<_> = ["render.stage_look", "render.stage_light", "render.stage_frame", "render.stage_output"]
             .iter()
             .map(|key| locale.text(key).to_string())
@@ -222,8 +241,8 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
                 StageBar::row(ui, bounds, false, |ui| StageBar::header(ui, selected, &labels.iter().map(String::as_str).collect::<Vec<_>>(), &[]));
             });
             output.textures_delta.clear();
-            let search = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("sc_ribbon_search"))).unwrap();
-            assert!((search.right() - (bounds.right() - crate::theme::Tokens::get().space_6)).abs() < 1.0);
+            let search = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::unique("sc_ribbon_search"))).unwrap();
+            assert!((search.right() - (bounds.right() - solidcraft_theme::Tokens::get().space_6)).abs() < 1.0);
             for label in &labels {
                 assert!(
                     output
@@ -240,10 +259,10 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
 #[test]
 fn thumbnail_choice_states_share_geometry_and_publish_modified_and_running_indicators() {
     let ctx = crate::fonts::test_context();
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
-        crate::theme::apply(&ctx);
+        solidcraft_theme::set_dark(dark);
+        solidcraft_theme::apply(&ctx);
         let mut dimensions = Vec::new();
         for (selected, modified, progress) in [(false, false, None), (true, false, None), (true, true, Some(0.4))] {
             scenario::clear_handles();
@@ -257,7 +276,7 @@ fn thumbnail_choice_states_share_geometry_and_publish_modified_and_running_indic
         assert!(dimensions.iter().all(|size| *size == dimensions[0]));
         assert_eq!(dimensions[0].y, 38.0);
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -295,7 +314,7 @@ fn save_shot_dashes_leave_rounded_corners_at_the_chip_radius() {
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         rect = add_choice(ui, "Save Shot").rect;
     });
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let mut points = Vec::new();
     for shape in &output.shapes {
         endpoints(&shape.shape, t.control_border, &mut points);
@@ -333,10 +352,10 @@ fn segmented_unavailable_choices_remain_visible_and_cannot_change_selection() {
 #[test]
 fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes() {
     for dark in [false, true] {
-        let tokens = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() };
-        let _restore = crate::theme::scoped_tokens(tokens);
+        let tokens = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() };
+        let _restore = solidcraft_theme::scoped_tokens(tokens);
         for language in ["en", "ja", "zh", "de", "ko"] {
-            let locale = crate::i18n::Locale::for_language(language);
+            let locale = solidcraft_ui_text::Locale::for_language(language);
             let ctx = crate::fonts::test_context();
             let mut enabled = true;
             let mut clicked = false;
@@ -347,6 +366,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                         settings_choice_row(
                             ui,
                             &SettingsChoice {
+                                icon: None,
                                 key: "test:output:radio",
                                 title: locale.text("render.size_full_hd"),
                                 summary: "1920 × 1080",
@@ -376,7 +396,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                 ui.add_enabled_ui(enabled, |ui| {
                     clicked |= settings_choice_row(
                         ui,
-                        &SettingsChoice { key: "test:output:radio", title: "4K", summary: "3840 × 2160", detail: "Over budget" },
+                        &SettingsChoice { icon: None, key: "test:output:radio", title: "4K", summary: "3840 × 2160", detail: "Over budget" },
                         false,
                     )
                     .clicked();

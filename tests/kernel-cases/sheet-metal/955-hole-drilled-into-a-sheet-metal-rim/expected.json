@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#955"
+ ],
+ "what": "a 2 mm hole drilled 10 mm deep into the rim of a 4 mm sheet, along the panel; it is a bore the panel keeps",
+ "source": "analytic",
+ "method": "T = 4: V = 60*40*4 - pi*1^2*10 = 9600 - 10*pi (the bore lies inside the 4 mm rim, 1 mm radius at mid thickness)",
+ "body_count": 1,
+ "volume_mm3": 9568.584073464102
+}

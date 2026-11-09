@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1295",
+  "tangency-labs/solidcraft#1338"
+ ],
+ "what": "a 100 x 60 sheet with a 45 degree 40 mm flange and a slot cut across the flange just past its bend: the rest of the flange keeps no material joining it to the base",
+ "source": "analytic",
+ "method": "T = 2.5, R = 2.5, setback s = (R+T)tan(22.5 deg) = 2.0711: base 100*(60 - s)*2.5, leg 100*(40 - s)*2.5, bend (pi/4)((R+T)^2 - R^2)*100/2; V0 = 24700.7. The slot (110 x 1.5 drawn, 100 x 1.5 over the sheet) lies in the flat flange panel past the bend zone and removes 100*1.5*2.5 = 375. A cut keeps every piece of material it leaves, so the rest of the flange stays in the body as a shell of its own: V = V0 - 375 (valid is false because the body then has two shells)",
+ "body_count": 1,
+ "volume_mm3": 24325.77687225237,
+ "valid": false
+}

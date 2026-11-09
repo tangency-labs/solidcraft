@@ -1,0 +1,14 @@
+{
+ "sources": [],
+ "what": "prism over a 45 degree triangle, apex edge round 2",
+ "source": "analytic",
+ "method": "prism over a triangle with a 45 degree apex, sides 20, 30 long: V0 = 200 sin(a) * 30. The apex edge rounded r 2 removes r^2 (cot(a/2) - (pi - a)/2) along 30. V = 4094.306729046",
+ "body_count": 1,
+ "volume_mm3": 4094.306729046054,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

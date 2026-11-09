@@ -3,7 +3,7 @@ use std::f64::consts::{PI, TAU};
 use serde_json::json;
 
 use super::*;
-use crate::{Loop2, MAX_BEZIER_CTRL};
+use solidcore_record::{Loop2, MAX_BEZIER_CTRL};
 
 fn p(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)

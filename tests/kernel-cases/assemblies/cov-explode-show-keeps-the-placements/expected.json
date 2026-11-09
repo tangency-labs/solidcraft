@@ -1,0 +1,91 @@
+{
+ "sources": [],
+ "what": "an exploded view shown, then the arm's properties and Capture Position: the design keeps its placements",
+ "source": "analytic",
+ "method": "Arm: box 40x10x10 from (0,-5,0), centre (20,0,5), volume 4000. explode.show is shown only (the design keeps its placements), so occurrence.properties reports the arm where the design places it before the view is shown (step 8), while it is shown (step 11) and after Capture Position (step 12, which has no move of the design's to keep: 0 captured) and the assembled view (step 14): centre (20,0,5), box (0,-5,0)..(40,5,10)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       5.0,
+       10.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       5.0,
+       10.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "captured": 0
+   }
+  },
+  {
+   "step": 14,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       5.0,
+       10.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  }
+ ]
+}

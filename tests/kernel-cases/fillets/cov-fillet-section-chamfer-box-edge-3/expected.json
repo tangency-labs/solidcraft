@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a box's top back edge chamfered 3: the chord between the faces' contact lines, a crease with each face",
+ "source": "analytic",
+ "method": "box 40x30x20, the top back edge (y = 30, z = 20, 40 long) between the planar end faces x = 0 and 40, set back s = 3 along both faces (square to each other): the chord cuts s^2/2 = 4.5 off the corner: V = 24000 - 40 * 4.5 = 23820. Faces 7; both seams of the chamfer with the faces G0, and not G1 (45 degrees).",
+ "body_count": 1,
+ "volume_mm3": 23820.0,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g0",
+  "exact": true
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

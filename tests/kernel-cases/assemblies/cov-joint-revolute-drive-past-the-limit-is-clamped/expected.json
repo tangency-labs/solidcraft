@@ -1,0 +1,32 @@
+{
+ "sources": [],
+ "what": "a revolute with limits -30..30 driven to 90",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); a drive past a joint's limits is clamped to them: 90 -> 30, centre (20 cos30, 20 sin30, 5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 30.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      17.320508,
+      10.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,7 +1,9 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
-use crate::{icons, theme::Tokens};
+use crate::icons;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn navigation_popup_frame() -> egui::Frame {
     Container::menu_frame().inner_margin(egui::Margin::same(NAV_POPUP_PADDING))
@@ -41,7 +43,7 @@ impl<'a> NavigationMenuRow<'a> {
     pub(crate) fn show(self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_ROW), Sense::hover());
-        let response = ui.interact(rect, ui.id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
+        let response = ui.interact(rect, ui.scope_id().with(self.id), if self.enabled { Sense::click() } else { Sense::hover() });
         let ink = if self.selected { t.form_primary } else { t.form_ink };
         let bg = if self.selected {
             Some(t.selected_bg)
@@ -58,23 +60,27 @@ impl<'a> NavigationMenuRow<'a> {
                 Rect::from_center_size(pos2(rect.left() + NAV_MENU_INSET + NAV_MENU_ICON / 2.0, rect.center().y), vec2(NAV_MENU_ICON, NAV_MENU_ICON));
             icons::paint_ink(ui.painter(), icon, self.icon, if self.selected { ink } else { t.form_dim });
         }
-        let font = if self.selected { crate::fonts::semibold(NAV_TEXT) } else { FontId::proportional(NAV_TEXT) };
-        ui.painter().text(
-            pos2(rect.left() + NAV_MENU_INSET + NAV_MENU_ICON + NAV_ROW_GAP, rect.center().y),
-            Align2::LEFT_CENTER,
-            self.label,
-            font,
-            ink,
-        );
+        let font = if self.selected { crate::ui_kit::type_face::semibold(NAV_TEXT) } else { FontId::proportional(NAV_TEXT) };
+        // The label ends before the detail and the check or chevron: one that doesn't fit is cut
+        // with an ellipsis and shown whole on hover, as a long name in a list is (#8700).
+        let mut end = rect.right() - NAV_MENU_INSET - if self.selected || self.submenu { t.space_14 + t.space_4 } else { 0.0 };
         if let Some(detail) = self.detail {
-            ui.painter().text(
-                pos2(rect.right() - NAV_MENU_INSET - if self.submenu { NAV_CHEVRON + t.space_4 } else { 0.0 }, rect.center().y),
+            let at = rect.right() - NAV_MENU_INSET - if self.submenu { NAV_CHEVRON + t.space_4 } else { 0.0 };
+            let detail = ui.painter().text(
+                pos2(at, rect.center().y),
                 Align2::RIGHT_CENTER,
                 detail,
                 FontId::proportional(if self.enabled { t.font_body } else { t.font_small }),
                 if self.enabled { t.form_dim } else { t.nav_dim },
             );
+            end = end.min(detail.left() - t.space_8);
         }
+        let left = rect.left() + NAV_MENU_INSET + NAV_MENU_ICON + NAV_ROW_GAP;
+        let mut job = egui::text::LayoutJob::simple_singleline(self.label.to_owned(), font, ink);
+        job.wrap = egui::text::TextWrapping::truncate_at_width((end - left).max(0.0));
+        let galley = ui.painter().layout_job(job);
+        let cut = galley.elided;
+        ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, ink);
         let tail = Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         if self.selected {
             super::checks::paint_check_glyph(ui.painter(), tail, false, t.form_primary);
@@ -83,15 +89,15 @@ impl<'a> NavigationMenuRow<'a> {
                 Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - NAV_CHEVRON / 2.0, rect.center().y), vec2(NAV_CHEVRON, NAV_CHEVRON));
             icons::paint_ink(ui.painter(), arrow, "chevron", t.form_dim);
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
-        response
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
+        if cut { response.backing_on_hover_text(self.label) } else { response }
     }
 }
 
 pub(crate) fn navigation_menu_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), NAV_MENU_HEADING), Sense::hover());
-    let mut format = egui::TextFormat::simple(crate::fonts::semibold(NAV_HEADING_TEXT), t.form_dim);
+    let mut format = egui::TextFormat::simple(crate::ui_kit::type_face::semibold(NAV_HEADING_TEXT), t.form_dim);
     format.extra_letter_spacing = NAV_HEADING_TEXT * NAV_HEADING_TRACKING;
     let galley = ui.painter().layout_job(egui::text::LayoutJob::single_section(title.to_uppercase(), format));
     ui.painter().galley(rect.min + vec2(t.space_8, t.space_6), galley, t.form_dim);
@@ -103,7 +109,9 @@ pub(crate) fn navigation_menu_separator(ui: &mut Ui) {
     ui.painter().hline(rect.shrink2(vec2(t.space_2, 0.0)).x_range(), rect.center().y, egui::Stroke::new(NAV_BORDER, t.dialog_rule));
 }
 
-pub(crate) fn navigation_tooltip(response: &Response, top: f32, label: &str, shortcut: Option<&str>) {
+/// A tip beyond `along` (the bar, or the row it names): above it, or below it for a bar on the
+/// view's top edge.
+pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: NavigationEdge, label: &str, shortcut: Option<&str>) {
     let ctx = &response.ctx;
     let id = response.id.with("nav_tooltip_delay");
     if !response.hovered() {
@@ -123,14 +131,17 @@ pub(crate) fn navigation_tooltip(response: &Response, top: f32, label: &str, sho
         .area(response.id.with("nav_tooltip"))
         .order(egui::Order::Tooltip)
         .interactable(false)
-        .pivot(Align2::CENTER_BOTTOM)
-        .fixed_pos(pos2(response.rect.center().x, top - NAV_POPUP_GAP))
+        .pivot(if edge == NavigationEdge::Top { Align2::CENTER_TOP } else { Align2::CENTER_BOTTOM })
+        .fixed_pos(match edge {
+            NavigationEdge::Bottom => pos2(response.rect.center().x, along.top() - NAV_POPUP_GAP),
+            NavigationEdge::Top => pos2(response.rect.center().x, along.bottom() + NAV_POPUP_GAP),
+        })
         .show(ctx, |ui| {
             Container::new(ctx, Surface::Popup).show_frame(ui, frame, ui.max_rect(), |ui| {
                 ui.spacing_mut().item_spacing.x = t.space_8;
                 ui.spacing_mut().interact_size.y = 0.0;
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(label).font(crate::fonts::medium(t.font_body)).color(t.nav_tip_ink));
+                    ui.label(egui::RichText::new(label).font(crate::ui_kit::type_face::medium(t.font_body)).color(t.nav_tip_ink));
                     if let Some(key) = shortcut {
                         egui::Frame::NONE
                             .stroke(egui::Stroke::new(NAV_BORDER, t.nav_tip_key_border))

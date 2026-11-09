@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled internal M10 thread in a d8.5 (tap drill) hole through a 30x30x20 block",
+ "source": "analytic",
+ "method": "ISO 68-1 internal basic profile: groove P/8 wide at the major diameter, growing 2 tan30 per mm inward; the drilled hole r4.25 is above the minor r4.188, so the groove removes 2 pi int_4.25^5 r g(r) dr per mm; screw motion argument as in 001; both ends run out",
+ "body_count": 1,
+ "volume_mm3": 16688.181199219,
+ "tolerance": {
+  "rel": 0.005
+ }
+}

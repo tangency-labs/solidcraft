@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a counterbored hole (d5, d9 x 3) patterned 6 times round a disk r30 h10",
+ "source": "analytic",
+ "method": "each removes pi 2.5^2 7 + pi 4.5^2 3; 3 faces each",
+ "body_count": 1,
+ "volume_mm3": 26304.555288507,
+ "faces": 21
+}

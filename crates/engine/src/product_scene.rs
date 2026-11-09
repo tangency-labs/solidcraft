@@ -3,6 +3,7 @@
 use crate::geom::Aabb3;
 use crate::render::{FaceAppearance, ProductMesh, ProductScene};
 use crate::{EngineError, Result, Session};
+use solidcraft_geom::MeshGeom;
 
 pub const MAX_PRODUCT_BODIES: usize = solidcraft_render::job::MAX_CPU_BODIES;
 
@@ -12,7 +13,7 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
     if s.model.is_stale() {
         return Err(EngineError::Other("render scene is stale; finish the modelling gesture before previewing".into()));
     }
-    let world = s.world_state();
+    let world = s.world_state()?;
     let mut scene = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
     for body in world.bodies.iter().filter(|b| s.body_visible(&b.name)) {
         if scene.meshes.len() >= MAX_PRODUCT_BODIES {
@@ -55,9 +56,10 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
 mod tests {
     use super::*;
     use crate::Sel;
-    use crate::geom::Vec3;
     use crate::render::*;
     use serde_json::json;
+    use solidcore_record::Vec3;
+    use solidcraft_viewport::{Camera, UpAxis};
     use std::sync::Arc;
 
     #[test]
@@ -80,7 +82,7 @@ mod tests {
             assert_eq!(m.color, [32, 160, 128]);
             assert_eq!(m.opacity, 0.4);
             assert!(m.faces.iter().any(|f| f.color == [255, 0, 0] && f.opacity == 0.7));
-            assert!(Arc::ptr_eq(&m.mesh, &s.world_state().body(&m.name).unwrap().mesh()));
+            assert!(Arc::ptr_eq(&m.mesh, &s.world_state().unwrap().body(&m.name).unwrap().mesh()));
         }
         s.selection = vec![Sel::Body { name: first.meshes[0].name.clone() }];
         s.section = Some((Vec3::ZERO, Vec3::X));

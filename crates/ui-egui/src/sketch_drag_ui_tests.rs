@@ -2,8 +2,9 @@
 //! brings the model up to date in the drag's one undo step, and the grab stays on the geometry.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 use crate::test_support::play;
@@ -54,6 +55,69 @@ fn text_move_drag_is_one_editable_unit_and_escape_restores_the_gesture() {
     }
 }
 
+/// A drag from inside the selected text's frame moves the text, also from the space between its
+/// letters, where only a press on a letter did before: one undo step, no selection box (#8835).
+#[test]
+fn a_selected_text_moves_when_dragged_from_between_its_letters() {
+    let (mut h, gap) = two_letters(true);
+    let undo = h.app.session.undo.len();
+    let a = screen(&mut h, gap.x, gap.y);
+    let b = screen(&mut h, gap.x + 3.0, gap.y + 2.0);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    assert!(h.app.viewport.text_drag.is_some() && h.app.viewport.boxsel.is_none());
+    release(&mut h, b);
+    assert!(text_at(&h).dist(Vec2::new(3.0, 2.0)) < 0.02, "{:?}", text_at(&h));
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+}
+
+/// Empty space outside a selected text's frame, and between the letters of a text that isn't
+/// selected, still starts a selection box, and the text stays where it is.
+#[test]
+fn elsewhere_a_drag_from_empty_space_draws_a_selection_box() {
+    for selected in [true, false] {
+        let (mut h, gap) = two_letters(selected);
+        let from = if selected { gap + Vec2::new(12.0, 0.0) } else { gap };
+        let a = screen(&mut h, from.x, from.y);
+        let b = screen(&mut h, from.x + 3.0, from.y + 2.0);
+        let mut path = vec![a];
+        path.extend(steps(a, b, 6));
+        press_and_move(&mut h, &path);
+        assert!(h.app.viewport.boxsel.is_some() && h.app.viewport.text_drag.is_none(), "selected: {selected}");
+        release(&mut h, b);
+        assert_eq!(text_at(&h), Vec2::ZERO, "selected: {selected}");
+    }
+}
+
+/// "II" (10 mm) seen from the top, selected or not, and the middle of its outlines: the space
+/// between the two letters.
+fn two_letters(selected: bool) -> (Harness, Vec2) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "sketch.create", json!({"plane":"XY"}));
+    let text = h.app.run("sketch.text", json!({"text":"II","at":[0,0],"height":10})).expect("the text");
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 35.0;
+    if selected {
+        h.app.session.selection = vec![Sel::SketchCurve { id: text["curves"][0].as_str().expect("a letter").into(), sketch: None }];
+    }
+    h.frames(3);
+    let sk = h.app.session.doc.sketch(1).expect("the sketch");
+    let outline: Vec<Vec2> = sk.link_curves(text["link"].as_str().expect("its link")).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
+    let first = outline.first().copied().expect("outlines");
+    let (lo, hi) =
+        outline.iter().fold((first, first), |(lo, hi), p| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y))));
+    (h, (lo + hi) * 0.5)
+}
+
+/// Where the text of sketch 1 is placed.
+fn text_at(h: &Harness) -> Vec2 {
+    let sk = h.app.session.doc.sketch(1).expect("the sketch");
+    let solidcraft_engine::sketch::LinkSource::Text { at, .. } = &sk.links[0].source else { panic!("a text") };
+    *at
+}
+
 fn run(h: &mut Harness, id: &str, p: Value) {
     if let Err(e) = h.app.run(id, p.clone()) {
         panic!("{id} {p}: {e}");
@@ -67,7 +131,7 @@ fn screen(h: &mut Harness, x: f64, y: f64) -> egui::Pos2 {
 
 fn point(h: &Harness, id: &str) -> Vec2 {
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(sid).expect("the sketch").sketch;
     sk.resolve_point(id).and_then(|i| sk.point(i)).unwrap_or_else(|| panic!("no point {id}"))
 }
@@ -237,7 +301,7 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     h.app.cam.distance = 65.0;
     h.frames(3);
     let sid = h.app.session.active_sketch.unwrap();
-    let original = h.app.session.world_state().sketch(sid).unwrap().sketch.clone();
+    let original = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     let source = original.curve_index("s1").unwrap();
     let derived = original.curve_index(&output).unwrap();
     let source_points = original.curves[source].kind.point_ids();
@@ -280,7 +344,7 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
         play(&mut h);
         assert!(h.app.viewport.point_drag.is_some());
         assert!(h.app.session.model.is_stale(), "the drag has not been released");
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(sid).unwrap().sketch;
         assert!(sk.points[source_points[1]].pos.dist(target) < 0.1, "source follows the held pointer: {:?}", sk.points[source_points[1]].pos);
         assert_ne!(sk.exact_segs(derived), original.exact_segs(derived), "the offset follows before release");
@@ -303,11 +367,11 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     assert_eq!(h.app.session.doc.to_json(), before);
     run(&mut h, "edit.redo", json!({}));
     run(&mut h, "sketch.offset.break", json!({"curve":output}));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(sid).unwrap().sketch;
     assert!(sk.curves[derived].kind.point_ids().iter().all(|i| solidcraft_engine::view::sketch_point_visible(sk, *i)));
     run(&mut h, "edit.undo", json!({}));
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(sid).unwrap().sketch;
     assert!(sk.curves[derived].kind.point_ids().iter().all(|i| !solidcraft_engine::view::sketch_point_visible(sk, *i)));
 }
@@ -324,7 +388,7 @@ fn dragging_a_selected_line_moves_the_whole_selection() {
     run(&mut h, "sketch.dimension", json!({"entities": ["l4"], "value": 5}));
     run(&mut h, "sketch.line", json!({"points": [[80, 10], [80, 30]], "connect": false}));
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let before = h.app.session.world_state().sketch(sid).expect("the sketch").sketch.clone();
+    let before = h.app.session.world_state().unwrap().sketch(sid).expect("the sketch").sketch.clone();
     let lines = ["l1", "l2", "l3", "l4"];
     let mut selected: Vec<usize> = lines.iter().flat_map(|l| before.curves[before.curve_index(l).unwrap()].kind.point_ids()).collect();
     selected.sort_unstable();
@@ -340,7 +404,7 @@ fn dragging_a_selected_line_moves_the_whole_selection() {
     path.extend(steps(a, b, 8));
     press_and_move(&mut h, &path);
     release(&mut h, b);
-    let after = &h.app.session.world_state().sketch(sid).expect("the sketch").sketch.clone();
+    let after = &h.app.session.world_state().unwrap().sketch(sid).expect("the sketch").sketch.clone();
     for &p in &selected {
         let moved = after.points[p].pos - before.points[p].pos;
         assert!(moved.dist(Vec2::new(10.0, -10.0)) < 0.05, "{} moved by {moved:?}", before.points[p].id);
@@ -369,7 +433,7 @@ fn a_window_selected_circle_still_takes_its_radius_from_a_drag_on_its_edge() {
     release(&mut h, b);
     assert!(point(&h, "c1.center").dist(Vec2::new(20.0, 20.0)) < 1e-9);
     let sid = h.app.session.active_sketch.expect("sketch mode");
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(sid).expect("the sketch").sketch;
     let r = sk.radius(sk.curve_index("c1").expect("the circle")).expect("a radius");
     assert!((r - 15.0).abs() < 0.05, "{r}");
@@ -397,4 +461,68 @@ fn a_freed_circle_centre_on_the_origin_drags_instead_of_the_origin() {
     release(&mut h, b);
     assert!(point(&h, "c1.center").dist(Vec2::new(15.0, 10.0)) < 0.05, "{:?}", point(&h, "c1.center"));
     assert!(point(&h, "origin").dist(Vec2::new(0.0, 0.0)) < 1e-9);
+}
+
+/// A centre rectangle's centre held on the origin stays there when dragged, and the rectangle
+/// keeps its size. The press lands on the middle of the rectangle's diagonal as well as on the
+/// centre; the drag took the diagonal by its middle and turned and stretched it about the held
+/// centre, resizing the rectangle (#10510).
+#[test]
+fn a_centre_rectangles_centre_held_on_the_origin_keeps_the_rectangle_when_dragged() {
+    let mut h = Harness::new();
+    run(&mut h, "sketch.create", json!({"plane": "XY"}));
+    run(&mut h, "sketch.rectangle.center", json!({"center": [3, 2], "corner": [13, 9]}));
+    run(&mut h, "sketch.constraint.coincident", json!({"a": "p5", "b": "origin"}));
+    run(&mut h, "sketch.options", json!({"snap": false, "show_dimensions": false, "show_constraints": false}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 150.0;
+    h.frames(3);
+    let corners = ["p1", "p2", "p3", "p4"].map(|p| point(&h, p));
+    assert!(point(&h, "p5").len() < 1e-9, "{:?}", point(&h, "p5"));
+    // A press a little off the centre, as a hand presses.
+    let a = screen(&mut h, 0.3, 0.2);
+    let b = screen(&mut h, 12.0, 8.0);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
+    h.frames(4);
+    release(&mut h, b);
+    assert!(point(&h, "p5").len() < 1e-6, "the centre left the origin: {:?}", point(&h, "p5"));
+    for (p, was) in ["p1", "p2", "p3", "p4"].into_iter().zip(corners) {
+        assert!(point(&h, p).dist(was) < 1e-6, "{p} moved from {was:?} to {:?}", point(&h, p));
+    }
+}
+
+/// A selected rectangle with a corner on the origin, dragged by its right side or its top,
+/// stretches as far as the pointer goes. The grab followed the average of the moving corners,
+/// one of which the origin held back, and each frame's catch-up took the side nearly twice as
+/// far as the pointer.
+#[test]
+fn a_selected_rectangle_held_at_a_corner_stretches_with_the_pointer() {
+    for (grab, to) in [(Vec2::new(30.0, 10.0), Vec2::new(40.0, 10.0)), (Vec2::new(15.0, 20.0), Vec2::new(15.0, 30.0))] {
+        let mut h = Harness::new();
+        run(&mut h, "sketch.create", json!({"plane": "XY"}));
+        run(&mut h, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+        let sid = h.app.session.active_sketch.expect("sketch mode");
+        let corner =
+            h.app.session.doc.sketch(sid).expect("the sketch").points.iter().find(|p| p.id != "origin" && p.pos.len() < 1e-9).map(|p| p.id.clone());
+        run(&mut h, "sketch.constraint.coincident", json!({"a": corner.expect("a corner on the origin"), "b": "origin"}));
+        run(&mut h, "sketch.options", json!({"show_dimensions": false, "show_constraints": false}));
+        h.app.session.selection = ["l1", "l2", "l3", "l4"].iter().map(|l| Sel::SketchCurve { id: (*l).into(), sketch: None }).collect();
+        h.call("ui.view", json!({"view": "top"}));
+        h.app.cam.distance = 150.0;
+        h.frames(3);
+        let a = screen(&mut h, grab.x, grab.y);
+        let b = screen(&mut h, to.x, to.y);
+        let mut path = vec![a];
+        path.extend(steps(a, b, 6));
+        press_and_move(&mut h, &path);
+        release(&mut h, b);
+        let st = h.app.session.world_state().unwrap();
+        let sk = &st.sketch(sid).expect("the sketch").sketch;
+        let far = sk.points.iter().map(|p| p.pos).fold(Vec2::ZERO, |m, p| Vec2::new(m.x.max(p.x), m.y.max(p.y)));
+        let want = Vec2::new(30.0, 20.0) + (to - grab);
+        assert!(far.dist(want) < 0.05, "dragged {:?}: the far corner went to {far:?}, not {want:?}", to - grab);
+    }
 }

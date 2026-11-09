@@ -1,0 +1,167 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b21": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b27",
+        "b28"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "5146-join-m23x1-threaded-shaft-onto-wider-base",
+  "expected": {
+    "body_count": 1,
+    "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Base R = 13, h = 10; shaft R = 11.5, z 10..30, M23x1 (P = 1) over its whole length, both ends free (the bottom one then lies on the base's top face, which closes it): the shaft's end face lies on the base's top face, so the join is one solid, V = pi 13^2 10 + pi 11.5^2 20 - 20 x 21.577558 = 13187.2530 mm3, within the case's timeout (modelled threads are slow: 600 s). Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#5146"
+    ],
+    "timeout_s": 600,
+    "tolerance": {
+      "rel": 0.01
+    },
+    "volume_mm3": 13187.253,
+    "what": "a O23 shaft with a modelled M23x1 thread joined onto the O26 cylinder it stands on: SolidCraft ended without a clean exit during the combine"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 358,
+      "faces": 149,
+      "vertices": 212
+    }
+  },
+  "records": "5146-join-m23x1-threaded-shaft-onto-wider-base.bodies.json.gz",
+  "result": [
+    {
+      "body": "Base",
+      "made": "b29"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4167.63052210902,
+      "body_count": 1,
+      "edges": 255,
+      "faces": 88,
+      "vertices": 170,
+      "volume_mm3": 13187.252317942448
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#5146"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a O23 shaft with a modelled M23x1 thread joined onto the O26 cylinder it stands on: SolidCraft ended without a clean exit during the combine",
+  "why_not": []
+}

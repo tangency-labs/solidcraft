@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 30x40x20 half with a d10 hole mirrored about x=30 and joined: the faces at x=30 coincide",
+ "source": "analytic",
+ "method": "the stock with two holes at x=20 and 40; the mirror face merges away",
+ "body_count": 1,
+ "volume_mm3": 44858.40734641,
+ "faces": 8
+}

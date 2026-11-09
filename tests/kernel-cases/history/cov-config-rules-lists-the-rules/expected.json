@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "config.rule adds two rules in one step; config.rules lists them in order",
+ "method": "Long: W = 60 > 50, Big suppresses the hole and Small does not match: V = 18000; 6 faces",
+ "body_count": 1,
+ "volume_mm3": 18000.0,
+ "faces": 6,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "active": "Long",
+    "rules": [
+     {
+      "id": "big"
+     },
+     {
+      "id": "small"
+     }
+    ]
+   }
+  }
+ ],
+ "source": "analytic"
+}

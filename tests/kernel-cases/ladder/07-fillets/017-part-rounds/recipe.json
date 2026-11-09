@@ -1,0 +1,49 @@
+{
+ "base": "../../05-holes-and-taps/013-part-holes",
+ "commands": [
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      10
+     ],
+     [
+      60,
+      0,
+      10
+     ]
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      30,
+      30,
+      35
+     ]
+    ],
+    "radius": 3
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      23,
+      15,
+      20
+     ]
+    ],
+    "radius": 1
+   }
+  }
+ ]
+}

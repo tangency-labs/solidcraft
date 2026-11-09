@@ -1,0 +1,17 @@
+[
+  {"note": "A mirror line that is itself among the entities (a chain or profile picked in one action) is not rejected: the command leaves the line in place and mirrors the rest."},
+  {"queued": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+  {"queued": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}}},
+  {"expect": {"errors": 0, "sketch_curves": {"own": 4}}},
+
+  {"note": "One click inside the rectangle selects the whole profile (including its left edge)."},
+  {"start": "sketch.mirror"},
+  {"click": {"sketch": [20, 15]}},
+  {"expect": {"dialog": "SketchModify(Mirror"}},
+
+  {"note": "Pick the rectangle's own left edge as the mirror line and OK: the left edge stays put and the other three sides reflect (4 -> 7)."},
+  {"click": {"handle": "dialog:Mirror line"}},
+  {"click": {"sketch": [0, 15]}},
+  {"click": {"handle": "dialog:OK"}},
+  {"expect": {"dialog": null, "errors": 0, "sketch_curves": {"own": 7}}}
+]

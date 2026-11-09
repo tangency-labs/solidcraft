@@ -18,8 +18,8 @@ use egui::{Rect, pos2};
 use serde::{Deserialize, Serialize};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit::{Container, Surface};
+use solidcraft_theme::Tokens;
 
 /// Where command dialogs open (Preferences › Interface › Dialogs).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +65,7 @@ pub(crate) fn rect(app: &SolveApp, available: Rect, width: f32) -> Rect {
     let translucent = panel.floating() && app.preferences.browser_float;
     if app.ui.show_browser && !stacked && !translucent {
         let from = if history { right + gap } else { left };
-        let collapsed = history && app.preferences.timeline_left_browser_collapsed;
+        let collapsed = history && app.preferences.timeline_left_browser_collapsed && !crate::browser::reveals(app);
         right = from + if collapsed { crate::browser::collapsed_width() } else { browser_width };
     }
     let bottom = app.shell.history.filter(|_| app.ui.show_timeline && !app.preferences.timeline_left).map_or(available.bottom(), |h| h.top()) - gap;

@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "plastic.snap_fit 15 long, 2 thick, 6 wide with a 1 x 3 catch and its base reaching 2 below the face, joined to a 40 x 40 x 4 box",
+ "source": "analytic",
+ "method": "the arm's side profile is t x (l + base_height) plus the catch's triangle cd*cl/2; joined, the 2 mm below the face lies inside the box and adds nothing: V = 40*40*4 + (2*15 + 1*3/2)*6 = 6589.0. The arm stands from x 20 - 2 to the catch at 20 + 1 (hook +x), its top at z 4 + 15",
+ "body_count": 1,
+ "volume_mm3": 6589.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   19
+  ]
+ }
+}

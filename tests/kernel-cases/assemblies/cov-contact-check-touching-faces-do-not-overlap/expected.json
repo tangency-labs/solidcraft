@@ -1,0 +1,39 @@
+{
+ "sources": [],
+ "what": "contact.check of two blocks touching face to face, then a drive in that set",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Arm stands on Base's top face (z = 0, a 10x10 patch): touching is not passing through, so contact.check lists nothing and a drive to 90 is not stopped",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 11,
+   "json": {
+    "collisions": []
+   }
+  },
+  {
+   "step": 12,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     }
+    ],
+    "stopped_by_contact": null
+   }
+  },
+  {
+   "step": 13,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

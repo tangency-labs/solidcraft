@@ -1,8 +1,9 @@
 //! Where a primitive goes, typed in its dialog (#5638). The Box is placed by its corner or its
 //! centre, the Cylinder and Cone by the centre of their base, the Sphere and Torus by their
 //! centre, as X, Y and Z fields that take expressions and units like the size fields. A point
-//! picked in the view (a vertex, a point on an edge or face, the origin) fills the fields of the
-//! Box, Sphere and Torus.
+//! picked in the view (a vertex, a point on an edge or face, the origin, a point of a shown
+//! sketch) fills the fields of the Box, Sphere and Torus; one selected before the window opens
+//! places them there (#9403).
 //!
 //! The placement lives in the dialog's extra parameters under the command's own key (`corner`,
 //! `center` or `base`). It is written there only once a field or the choice changes, so a new
@@ -10,14 +11,15 @@
 //! feature's stored point goes back unchanged.
 
 use serde_json::{Map, Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::PlaneGeom as _;
 
-use crate::i18n::tr;
-use crate::selection::{EDGES, FACES, ORIGIN, SelInput, VERTICES};
+use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};
 use crate::ui_kit::{self, choice_row, expr_row};
 use solidcraft_engine::Sel;
+use solidcraft_ui_text::tr;
 
 /// The placement keys a primitive's dialog offers, the choice's first option first.
 fn keys(cmd: &str) -> &'static [&'static str] {
@@ -33,10 +35,13 @@ fn keys(cmd: &str) -> &'static [&'static str] {
 const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 
 /// The selection inputs of a primitive's dialog: the Box takes a point for its corner or centre,
-/// the Sphere and Torus for their centre.
+/// the Sphere and Torus for their centre. It takes the points of every shown sketch, each with
+/// its sketch (#9403).
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
-        "solid.box" | "solid.sphere" | "solid.torus" => vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN, false)],
+        "solid.box" | "solid.sphere" | "solid.torus" => {
+            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN | POINTS | EXTERNAL_POINTS, false).tip("dialog.primitive_point_tip")]
+        }
         _ => Vec::new(),
     }
 }
@@ -96,26 +101,40 @@ pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<St
     enter
 }
 
-/// A coordinate of a picked point as a field shows it, in millimetres.
-fn mm(v: f64) -> String {
+/// A coordinate of a picked point (mm) as a field shows it and OK sends it: in the design's
+/// length unit, kept to the micrometre in every unit, so a vertex at 38.1 mm reads "1.5 in", not
+/// "1.5000000000000002 in", and one in a metre design does not move by a rounded millimetre.
+fn coord(s: &Session, v: f64) -> String {
     let v = (v * 1e6).round() / 1e6;
     // No "-0 mm".
     let v = if v == 0.0 { 0.0 } else { v };
-    format!("{v} mm")
+    s.doc.design_length(v).1
+}
+
+/// Where a pick is in the world: a vertex, or a point on an edge or face, where it was picked; a
+/// sketch point where its sketch puts it (one without a sketch is the open sketch's).
+pub(crate) fn world_point(s: &Session, sel: &Sel) -> Option<Vec3> {
+    let (sketch, id) = match sel {
+        Sel::Vertex { point, .. } | Sel::Face { point, .. } | Sel::Edge { point, .. } => return Some(*point),
+        Sel::ExternalSketchPoint { sketch, id } => (*sketch, id),
+        Sel::SketchPoint { id } => (s.active_sketch?, id),
+        _ => return None,
+    };
+    let st = s.world_state().ok()?;
+    let ss = st.sketch(sketch)?;
+    let at = ss.sketch.resolve_point(id).and_then(|i| ss.sketch.point(i))?;
+    Some(ss.plane.to_world(at))
 }
 
 /// A point picked into the Box's input: it goes into the X, Y and Z of the current placement
 /// (the corner or the centre), replacing a pre-selected face or vertex.
 pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>)>, extra: &mut Map<String, Value>, sel: Option<&Sel>) {
-    let point = match sel {
-        Some(Sel::Vertex { point, .. } | Sel::Face { point, .. } | Sel::Edge { point, .. }) => *point,
-        _ => return,
-    };
+    let Some(point) = sel.and_then(|sel| world_point(s, sel)) else { return };
     if !point.is_finite() || inputs(cmd).is_empty() {
         return;
     }
     let Some((index, _)) = current(s, cmd, extra) else { return };
-    store(cmd, extra, index, &[mm(point.x), mm(point.y), mm(point.z)]);
+    store(cmd, extra, index, &[coord(s, point.x), coord(s, point.y), coord(s, point.z)]);
     *at = None;
 }
 

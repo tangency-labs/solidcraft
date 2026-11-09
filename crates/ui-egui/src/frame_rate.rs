@@ -2,13 +2,14 @@
 //! (#2548): a graph of the last frames' times with the triangles drawn over it, a histogram of
 //! frame times, and what the GPU drew. Click the readout to show or hide the details.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::VecDeque;
 
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 
 use crate::SolveApp;
-use crate::i18n::tr;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
+use solidcraft_ui_text::tr;
 
 /// Weight of the newest frame in the running mean (roughly the last 20 frames count).
 const NEWEST: f64 = 0.05;
@@ -191,8 +192,8 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     {
         r = r.translate(vec2(0.0, nav.top() - 6.0 - r.bottom()));
     }
-    let id = egui::Id::new("sc_frame_rate");
-    let clicked = ui.interact(r, id, Sense::click()).on_hover_text(tr("perf.click_for_details")).clicked();
+    let id = egui::Id::unique("sc_frame_rate");
+    let clicked = ui.interact(r, id, Sense::click()).backing_on_hover_text(tr("perf.click_for_details")).clicked();
     if clicked {
         app.preferences.frame_rate_details = !app.preferences.frame_rate_details;
     }

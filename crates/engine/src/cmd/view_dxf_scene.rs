@@ -2,13 +2,15 @@
 //! triangle hierarchy per shared mesh. Per-placement node bounds are small; projected
 //! triangle coordinates are evaluated only in visited leaves. Covered line intervals prune
 //! subsequent nodes and instances, including the entire query once coverage is complete.
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use web_time::Instant;
 
+use solidcore_record::Vec3;
 use solidcraft_doc::apply_point;
-use solidcraft_geom::{Aabb3, Mesh, Vec3};
-use solidcraft_render::Camera;
+use solidcraft_geom::{Aabb3, Mesh};
+use solidcraft_viewport::Camera;
 
 use super::super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
 use super::super::progress::Stage;
@@ -617,7 +619,7 @@ mod tests {
     }
 
     fn canonical(lines: Vec<Line>) -> Vec<([i64; 2], [i64; 2], bool)> {
-        let k = |p: solidcraft_geom::Vec2| [(p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64];
+        let k = |p: solidcore_record::Vec2| [(p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64];
         let mut result = lines
             .into_iter()
             .map(|l| {
@@ -656,7 +658,7 @@ mod tests {
 
     #[test]
     fn repeated_surface_over_one_million_triangles_keeps_one_mesh_and_exports_all_placements() {
-        use solidcraft_render::StandardView;
+        use solidcraft_viewport::StandardView;
         use std::sync::Arc;
         let mut mesh = Mesh::default();
         for y in 0..=100 {

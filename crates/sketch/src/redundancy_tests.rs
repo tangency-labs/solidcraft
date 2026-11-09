@@ -80,7 +80,7 @@ fn sparse_and_dense_rows_match_over_seeded_mixed_rank_matrices() {
 #[test]
 fn real_sketch_jacobians_keep_redundant_blocks_and_support() {
     use crate::ConstraintKind;
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     for seed in 0..8 {
         let mut sk = Sketch::new();

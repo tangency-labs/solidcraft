@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a vertical outer corner edge of an 80 x 50 x 30 box shelled 2 mm open at the top with a 1 x 2 lip raised on its rim, chamfered 3: wider than the wall but clear of the inside corner, its top end on the lip (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): corpus/modern-plastic, Body1 F1:+y|F1:-x edge.chamfer)",
+ "source": "analytic",
+ "method": "shelled: 80*50*30 - 76*46*28 = 22112; the lip is the band along the rim's inner edge (76 x 46 to 78 x 48), raised 2: 496 (as cov-lip-inside-on-a-shelled-box): V0 = 22608. The chamfer's plane x + (50 - y) = 3 stays clear of the inside corner (2, 48), where x + 50 - y = 4, so its triangle (legs 3, area 4.5) lies in the wall and floor all the way up: it takes 4.5 x 30 = 135. At the top the triangle reaches under the lip's corner, whose part x + 50 - y < 3 (the half square (1, 48), (1, 49), (2, 49), 0.5 x 2 = 1) goes or stays by where the chamfer ends on the lip's walls: V = 22473 or 22472, graded as 22472.5 (both within 1e-3)",
+ "body_count": 1,
+ "volume_mm3": 22472.5
+}

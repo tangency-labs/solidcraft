@@ -5,13 +5,14 @@
 //! vertices nothing else used, so an edge that is one straight line was drawn (and lit on hover)
 //! as many pieces, and a sketch on such a face projected every piece.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::kernel::{FaceSurface, face_surface};
-use solidcraft_engine::geom::Vec3;
 
 fn design() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/action_matrix/designs/crazy-geom-cuts.sc")
@@ -48,11 +49,11 @@ fn key(v: Vec3) -> [i64; 3] {
 fn straight_edges_are_one_edge_after_many_cuts() {
     for (what, s) in [("as saved", open(&design())), ("built from scratch", rebuilt())] {
         assert_eq!(errors(&s), vec![], "{what}: every feature evaluates");
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let bodies: Vec<_> = st.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
         assert_eq!(bodies.len(), 1, "{what}: one body");
         let body = &bodies[0].body;
-        let mesh = body.tessellate(0.01).unwrap();
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         // Every edge is drawn as one polyline; a straight one as one segment.
         let mut at: HashMap<[i64; 3], Vec<usize>> = HashMap::new();
         for (i, e) in mesh.edges.iter().enumerate() {
