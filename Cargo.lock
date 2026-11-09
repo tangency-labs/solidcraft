@@ -4520,8 +4520,8 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-geom",
- "sysinfo",
  "solidcraft-viewport",
+ "sysinfo",
  "web-time",
  "weezl 0.1.12",
 ]
