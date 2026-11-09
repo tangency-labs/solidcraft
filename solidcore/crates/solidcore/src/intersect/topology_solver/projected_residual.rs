@@ -23,113 +23,38 @@ const MAX_DEGREE: usize = 8;
 const MAX_CELLS: usize = 4096;
 const MAX_DEPTH: usize = 64;
 
-// MSRV 1.85; standard next_up/down require 1.86. The sign branches prevent
-// integer wrap: positive finite bits are below +infinity, negative nonzero bits
-// are above the sign bit. NaNs and infinity never enter finite arithmetic.
-fn next_up(x: f64) -> f64 {
-    if x.is_nan() || x == f64::INFINITY {
-        x
-    } else if x == 0.0 {
-        f64::from_bits(1)
-    } else if x > 0.0 {
-        f64::from_bits(x.to_bits() + 1)
-    } else {
-        f64::from_bits(x.to_bits() - 1)
-    }
-}
+// Every operation here is one of `Ivl`'s one-ulp `*_ulp` operations, not its
+// `+ - * /` operators: their relative 2.3e-16|x| step and 1e-300 floor on exact
+// zeros stop bounds attained exactly (a plane's corner, N = 0) from closing.
 
-fn finite(x: Ivl) -> bool {
-    x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi
-}
-
-fn outward(lo: f64, hi: f64) -> Ivl {
-    if lo.is_finite() && hi.is_finite() && lo <= hi {
-        Ivl::new(-next_up(-lo), next_up(hi))
-    } else {
-        Ivl::whole()
-    }
-}
-
-fn add(a: Ivl, b: Ivl) -> Ivl {
-    if !finite(a) || !finite(b) {
-        Ivl::whole()
-    } else if a == Ivl::from(0.0) {
-        b
-    } else if b == Ivl::from(0.0) {
-        a
-    } else {
-        outward(a.lo + b.lo, a.hi + b.hi)
-    }
-}
-
-fn sub(a: Ivl, b: Ivl) -> Ivl {
-    if !finite(a) || !finite(b) {
-        Ivl::whole()
-    } else if a.lo == a.hi && a == b {
-        Ivl::from(0.0)
-    } else if b == Ivl::from(0.0) {
-        a
-    } else {
-        outward(a.lo - b.hi, a.hi - b.lo)
-    }
-}
-
-fn mul(a: Ivl, b: Ivl) -> Ivl {
-    if !finite(a) || !finite(b) {
-        return Ivl::whole();
-    }
-    if a == Ivl::from(0.0) || b == Ivl::from(0.0) {
-        return Ivl::from(0.0);
-    }
-    if a == Ivl::from(1.0) {
-        return b;
-    }
-    if b == Ivl::from(1.0) {
-        return a;
-    }
-    let products = [a.lo * b.lo, a.lo * b.hi, a.hi * b.lo, a.hi * b.hi];
-    outward(
-        products.into_iter().fold(f64::INFINITY, f64::min),
-        products.into_iter().fold(f64::NEG_INFINITY, f64::max),
-    )
-}
-
-fn div_positive(a: Ivl, b: Ivl) -> Ivl {
-    if !finite(a) || !finite(b) || b.lo <= 0.0 {
-        return Ivl::whole();
-    }
-    if a == Ivl::from(0.0) || b == Ivl::from(1.0) {
-        return a;
-    }
-    if a.lo == a.hi && a == b {
-        return Ivl::from(1.0);
-    }
-    let values = [a.lo / b.lo, a.lo / b.hi, a.hi / b.lo, a.hi / b.hi];
-    outward(
-        values.into_iter().fold(f64::INFINITY, f64::min),
-        values.into_iter().fold(f64::NEG_INFINITY, f64::max),
-    )
-}
-
+/// `a x b`. `projected_metric::projected` uses `Ivl`'s operators (see above).
 fn cross(a: [Ivl; 3], b: [Ivl; 3]) -> [Ivl; 3] {
     let [ax, ay, az] = a;
     let [bx, by, bz] = b;
     [
-        sub(mul(ay, bz), mul(az, by)),
-        sub(mul(az, bx), mul(ax, bz)),
-        sub(mul(ax, by), mul(ay, bx)),
+        ay.mul_ulp(bz).sub_ulp(az.mul_ulp(by)),
+        az.mul_ulp(bx).sub_ulp(ax.mul_ulp(bz)),
+        ax.mul_ulp(by).sub_ulp(ay.mul_ulp(bx)),
     ]
 }
 
-// Convex interpolation: the caller proves the exact fraction is in [0,1].
-// Equal interval operands can remain unchanged even if their exact values differ.
+// Convex interpolation `(1-f) a + f b`; the caller proves the exact fraction is
+// in [0,1]. A fraction of exactly 0 or 1 is an exact double, so it gives its end
+// exactly. Equal operands are not special-cased: an interval that is not a point
+// is not one exact double, so `a == b` does not make the result exactly `a`.
 fn lerp(a: Ivl, b: Ivl, fraction: Ivl) -> Ivl {
-    if fraction == Ivl::from(0.0) || a == b {
+    // (1 - f) x + f y with x, y in one interval and f in [0, 1] is a convex
+    // combination, so it lies in that interval: equal ends return it unwidened.
+    let convex = fraction.lo >= 0.0 && fraction.hi <= 1.0;
+    if fraction == Ivl::from(0.0) || (a == b && convex) {
         a
     } else if fraction == Ivl::from(1.0) {
         b
     } else {
-        add(mul(sub(Ivl::from(1.0), fraction), a), mul(fraction, b))
+        Ivl::from(1.0)
+            .sub_ulp(fraction)
+            .mul_ulp(a)
+            .add_ulp(fraction.mul_ulp(b))
     }
 }
 
@@ -168,11 +93,14 @@ fn blossom(
             } else if t == right {
                 Ivl::from(1.0)
             } else {
-                let value = div_positive(
-                    sub(Ivl::from(t), Ivl::from(left)),
-                    sub(Ivl::from(right), Ivl::from(left)),
-                );
-                if !finite(value) {
+                // Ivl's quotient is the whole line unless right - left excludes 0. The
+                // point operands t, left, right are knots and exact doubles, and t lies
+                // strictly between left and right here, so neither difference is the
+                // `[x, x] - [x, x]` identity.
+                let value = Ivl::from(t)
+                    .sub_ulp(Ivl::from(left))
+                    .div_ulp(Ivl::from(right).sub_ulp(Ivl::from(left)));
+                if !value.is_finite() {
                     return None;
                 }
                 Ivl::new(value.lo.max(0.0), value.hi.min(1.0))
@@ -251,19 +179,17 @@ fn product(a: &[Ivl], b: &[Ivl], p: usize, q: usize) -> Option<Vec<Ivl>> {
             let mut sum = Ivl::from(0.0);
             for ai in i.saturating_sub(p)..=i.min(p) {
                 let bi = i.checked_sub(ai)?;
-                let wu = div_positive(
-                    mul(Ivl::from(choose(p, ai)?), Ivl::from(choose(p, bi)?)),
-                    Ivl::from(choose(2 * p, i)?),
-                );
+                let wu = Ivl::from(choose(p, ai)?)
+                    .mul_ulp(Ivl::from(choose(p, bi)?))
+                    .div_ulp(Ivl::from(choose(2 * p, i)?));
                 for aj in j.saturating_sub(q)..=j.min(q) {
                     let bj = j.checked_sub(aj)?;
-                    let wv = div_positive(
-                        mul(Ivl::from(choose(q, aj)?), Ivl::from(choose(q, bj)?)),
-                        Ivl::from(choose(2 * q, j)?),
-                    );
+                    let wv = Ivl::from(choose(q, aj)?)
+                        .mul_ulp(Ivl::from(choose(q, bj)?))
+                        .div_ulp(Ivl::from(choose(2 * q, j)?));
                     let av = *a.get(ai.checked_mul(q.checked_add(1)?)?.checked_add(aj)?)?;
                     let bv = *b.get(bi.checked_mul(q.checked_add(1)?)?.checked_add(bj)?)?;
-                    sum = add(sum, mul(mul(wu, wv), mul(av, bv)));
+                    sum = sum.add_ulp(wu.mul_ulp(wv).mul_ulp(av.mul_ulp(bv)));
                 }
             }
             result.push(sum);
@@ -283,34 +209,36 @@ fn residual(
     let normal = [normal.x, normal.y, normal.z].map(Ivl::from);
     let query = [point.x, point.y, point.z].map(Ivl::from);
     let mut weights = Vec::new();
-    let mut projected = [Vec::new(), Vec::new(), Vec::new()];
+    let mut projections = [Vec::new(), Vec::new(), Vec::new()];
     for &[x, y, z, w] in controls {
-        if !finite(w) || w.lo <= 0.0 {
+        if !w.is_finite() || w.lo <= 0.0 {
             return None;
         }
         weights.push(w);
         let mut delta = [Ivl::from(0.0); 3];
         for ((out, coordinate), query) in delta.iter_mut().zip([x, y, z]).zip(query) {
-            *out = sub(coordinate, mul(query, w));
+            // A coordinate and q w can be the same point; their difference is
+            // then exactly 0 (see `Ivl::sub_ulp`).
+            *out = coordinate.sub_ulp(query.mul_ulp(w));
         }
-        for (out, coordinate) in projected
+        for (out, coordinate) in projections
             .iter_mut()
             .zip(cross(cross(normal, delta), normal))
         {
             out.push(coordinate);
         }
     }
-    let upper_squared = mul(Ivl::from(upper), Ivl::from(upper));
+    let upper_squared = Ivl::from(upper).mul_ulp(Ivl::from(upper));
     let mut result = product(&weights, &weights, p, q)?;
     for value in &mut result {
-        *value = mul(*value, upper_squared);
+        *value = value.mul_ulp(upper_squared);
     }
-    for coordinate in projected {
+    for coordinate in projections {
         for (value, squared) in result
             .iter_mut()
             .zip(product(&coordinate, &coordinate, p, q)?)
         {
-            *value = sub(*value, squared);
+            *value = value.sub_ulp(squared);
         }
     }
     Some(result)
@@ -430,7 +358,7 @@ pub(super) fn maximum_is_bounded(
             while let Some(cell) = pending.pop() {
                 k.check_cancelled(OP)?;
                 visited += 1;
-                if visited > MAX_CELLS || cell.coefficients.iter().any(|&x| !finite(x)) {
+                if visited > MAX_CELLS || cell.coefficients.iter().any(|&x| !x.is_finite()) {
                     return Ok(false);
                 }
                 if cell.coefficients.iter().all(|x| x.lo >= 0.0) {
