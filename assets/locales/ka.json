@@ -1939,6 +1939,7 @@
   "material.editor.preserved_appearance": "შენარჩუნებული იერსახე",
   "material.editor.public_reference": "საჯარო წყარო",
   "material.editor.reference": "საცნობარო",
+  "material.editor.remove": "წაშლა",
   "material.editor.save_or_discard": "მასალის მინიჭებამდე შეინახეთ ან გააუქმეთ მასალის მონახაზი.",
   "material.editor.saved": "მასალა შენახულია. სხეულებზე მინიჭებები არ შეცვლილა.",
   "material.editor.scope": "შენახვა ამ მასალას ინახავს სხეულებზე მინიჭების გარეშე. ცარიელი თვისებები და პირობები უცნობად რჩება. ბარათის სიმკვრივე არ ცვლის მინიჭებულ სიმკვრივეს ან მასას.",

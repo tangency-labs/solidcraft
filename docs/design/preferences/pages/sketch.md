@@ -39,6 +39,7 @@ Two columns of checkboxes.
 |---|---|---|---|---|---|---|
 | Sketching on a part's face makes that part active | Checkbox | `Prefs.sketch_face_activates_part` | `false` | Existing `prefs.sketch_face_activates_part_note`: activate the other component before creating the sketch; it stays active. Off keeps the active component. | none | Retained newer control; first row, immediately before turn-to-face. |
 | Turn to face a sketch when it opens | Checkbox | `Prefs.sketch_open_look_at` | `true` | none | none | |
+| Double Esc finishes the sketch | Checkbox | `Prefs.escape_twice_finishes_sketch` | `true` | `prefs.sketch.escape_twice_finishes_note`: two quick presses of Esc end the sketch; off, Esc only cancels the tool or the selection. | none | #12069; immediately after turn-to-face. |
 | When a sketch ends: Return to the view before / Keep (default) / Unless turned (return if not rotated) | Three picture cards (196 x 152.5), a before / sketch / after trio each | `Prefs.sketch_exit_view` (`SketchExitView`: Previous, Keep, UnlessRotated) | Keep | none | `sketch-exit-previous`, `sketch-exit-keep`, `sketch-exit-unless-turned` | Card labels: "Return to the view before" / "Keep" with sub-label "default" / "Unless turned" with sub-label "return if not rotated". The 30x30 panels are nested SVGs inside the figure. |
 
 ## Marks in the sketch

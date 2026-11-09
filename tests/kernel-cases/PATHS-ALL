@@ -4,6 +4,9 @@
 #
 # The kernel: solidcore's wrapper and the schema 4 record bridge.
 crates/smlib/**
+# The kernel itself, vendored in this repository (SolidCore): a change to its source reruns every
+# area, as a solidcore pin change did before it was vendored (#13153).
+solidcore/**
 # The geometry every body is made of: B-rep record, curves, surfaces, meshes.
 crates/geom/**
 # The kernel's core, which every case goes through: bodies, extrude/revolve/primitives, booleans

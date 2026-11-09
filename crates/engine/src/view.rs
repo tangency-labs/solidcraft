@@ -6,8 +6,9 @@ use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use solidcore_record::{Plane, Vec3};
+use solidcraft_color::AnalysisColors;
 use solidcraft_geom::Aabb3;
-use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
+use solidcraft_render::{Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 use solidcraft_sketch::Sketch;
 
 use crate::{Result, Sel, Session};

@@ -212,15 +212,27 @@ impl RenderSetup {
                 ));
             }
             job.validate(&self.camera, self.exposure_ev)?;
+            if let RenderJob::GpuPath { options, .. } = job {
+                solidcraft_render::job::supersampled_dimensions(self.width, self.height, options.supersampling)
+                    .map_err(|e| DocError::Invalid(e.to_string()))?;
+            }
             if let RenderJob::CpuRaytrace { options, .. } = job {
-                if options.denoise {
-                    solidcraft_render::job::validate_cpu_denoise_image(self.width, self.height).map_err(|e| DocError::Invalid(e.to_string()))?;
+                // Existing native-size Workstation intent remains readable. X2
+                // uses the bounded 8K output envelope and pays for its internal grid.
+                let (trace_width, trace_height) = if options.supersampling == 1 && !options.denoise && !options.denoise_diagnostics {
+                    (self.width, self.height)
+                } else {
+                    solidcraft_render::job::supersampled_dimensions(self.width, self.height, options.supersampling)
+                        .map_err(|e| DocError::Invalid(e.to_string()))?
+                };
+                if options.denoise || options.denoise_diagnostics {
+                    solidcraft_render::job::validate_cpu_denoise_image(trace_width, trace_height).map_err(|e| DocError::Invalid(e.to_string()))?;
                 }
                 options
                     .budget
                     .validate_image(
-                        self.width,
-                        self.height,
+                        trace_width,
+                        trace_height,
                         solidcraft_render::job::cpu_camera_sampling(options.progressive, options.adaptive, options.budget)
                             .map_err(|e| DocError::Invalid(e.to_string()))?,
                     )
@@ -670,7 +682,7 @@ mod tests {
         gpu(3840, 2160).validate().unwrap();
         gpu(3840, 2160).validate_for_gpu().unwrap();
         let message = gpu(8193, 8193).validate().unwrap_err().to_string();
-        assert!(message.contains("(8192 pixels per side, 16777216 pixels in all)"), "{message}");
+        assert!(message.contains("(8192 pixels per side, 33554432 pixels in all)"), "{message}");
         assert!(!message.contains("CPU resource profile"), "{message}");
     }
 
@@ -883,7 +895,7 @@ mod tests {
             json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"hdr","path":"not-portable.hdr"}}}}),
             json!({"job":{"method":"gpu_path","options":{"exposure_ev":0}}}),
             json!({"job":{"method":"gpu_path","options":{"samples":0}}}),
-            json!({"job":{"method":"gpu_path","options":{"max_depth":17}}}),
+            json!({"job":{"method":"gpu_path","options":{"max_depth":65}}}),
             json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky","intensity":101}}}}),
             json!({"job":{"method":"gpu_path","options":{"lighting":{"environment":[-1,0,0]}}}}),
             json!({"camera":Camera { fov: 0.0, ..Default::default() },"job":{"method":"gpu_path","options":{"lens":{"aperture_radius_mm":1,"focus_distance_mm":10}}}}),
@@ -1021,7 +1033,7 @@ mod cpu_budget_tests {
         let old = CpuJob::default();
         assert!(old.path.is_none());
         assert!(serde_json::to_value(&old).unwrap().get("path").is_none());
-        for depth in [1, 8, 16] {
+        for depth in [1, 8, 16, 64] {
             let setup:RenderSetup=serde_json::from_value(json!({"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"path":{"max_depth":depth},"progressive":{"samples_per_pixel":7,"seed":9}}}})).unwrap();
             setup.validate().unwrap();
             let mut document = crate::Document::default();
@@ -1032,7 +1044,7 @@ mod cpu_budget_tests {
         }
         for raw in [
             json!({"path":{"max_depth":0},"progressive":{"samples_per_pixel":7,"seed":9}}),
-            json!({"path":{"max_depth":17},"progressive":{"samples_per_pixel":7,"seed":9}}),
+            json!({"path":{"max_depth":65},"progressive":{"samples_per_pixel":7,"seed":9}}),
             json!({"path":{"max_depth":8}}),
             json!({"path":{"max_depth":8},"progressive":{"samples_per_pixel":7,"seed":9},"shadows":false}),
         ] {
@@ -1073,7 +1085,7 @@ fn cpu_denoise_saved_flag_roundtrips_offline_and_keeps_false_omitted() {
     setup.validate().unwrap();
     let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else { panic!("CPU job expected") };
     options.denoise = true;
-    assert!(setup.validate().unwrap_err().to_string().contains("CPU denoising"));
+    assert_eq!(setup.validate().unwrap_err(), DocError::Invalid("LimitExceeded: output requires 1..8192 sides and at most 33554432 pixels".into()),);
 }
 
 #[cfg(test)]
@@ -1220,7 +1232,9 @@ mod cpu_adaptive_saved_tests {
             serde_json::from_value::<RenderSetup>(cap).unwrap().validate().is_err(),
             "16 pilots cannot be hidden outside Compact's 64-sample cap"
         );
-        for (budget, maximum) in [(CpuBudget::Compact, 64), (CpuBudget::Studio, 1024), (CpuBudget::Workstation, 4096)] {
+        for (budget, maximum) in
+            [(CpuBudget::Compact, 64), (CpuBudget::Studio, 1024), (CpuBudget::Workstation, solidcraft_render::job::MAX_CPU_SAMPLES_PER_PIXEL)]
+        {
             let mut runtime = runtime.clone();
             runtime.budget = budget;
             runtime.progressive = Some(CpuProgressiveOptions { samples_per_pixel: maximum - 16, seed: 81 });
@@ -1384,4 +1398,40 @@ mod cpu_celestial_saved_tests {
         let defaults = serde_json::to_value(CpuJob::default()).unwrap();
         assert!(defaults.get("sun").is_none() && defaults.get("sky").is_none());
     }
+}
+
+#[test]
+fn render_quality_saved_intent_preserves_output_size_and_validates_the_internal_grid() {
+    let gpu: RenderSetup = serde_json::from_value(serde_json::json!({
+        "width":7680,"height":4320,"job":{"method":"gpu_path","options":{
+            "samples":128,"supersampling":2,"denoise":true,"denoise_diagnostics":true,
+            "denoise_settings":{"passes":2,"strength":0.5,"firefly_suppression":false}
+        }}
+    }))
+    .unwrap();
+    gpu.validate().unwrap();
+    let reopened: RenderSetup = serde_json::from_value(serde_json::to_value(&gpu).unwrap()).unwrap();
+    assert_eq!(reopened, gpu);
+    assert_eq!((reopened.width, reopened.height), (7680, 4320));
+    let mut cpu: RenderSetup = serde_json::from_value(serde_json::json!({
+        "width":7680,"height":4320,"job":{"method":"cpu_raytrace","options":{
+            "threads":4,"budget":"workstation","progressive":{"samples_per_pixel":128},"supersampling":2
+        }}
+    }))
+    .unwrap();
+    cpu.validate().unwrap();
+    assert_eq!((cpu.width, cpu.height), (7680, 4320));
+    cpu.width = 1024;
+    cpu.height = 1024;
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut cpu.job else { panic!("expected CPU job") };
+    options.budget = solidcraft_render::job::CpuBudget::Compact;
+    options.progressive.as_mut().unwrap().samples_per_pixel = 8;
+    assert!(cpu.validate().is_err(), "X2 must charge four million internal pixels to Compact's progressive limit");
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &mut cpu.job else { panic!("expected CPU job") };
+    options.supersampling = 1;
+    cpu.validate().unwrap();
+    let mut invalid = gpu;
+    invalid.width = 8193;
+    invalid.height = 1;
+    assert!(invalid.validate().is_err());
 }

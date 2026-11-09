@@ -1,0 +1,7 @@
+{
+  "unit": "nlib.srf_fit",
+  "cases": [
+    {"name": "fuzz00345_input_preparation_failed_nurbs_crv_fit", "origin": "fuzz-out/n2000/nlib.srf_fit/fuzz00345.json (panic: cpp runner: attempt to add with overflow at crates/solidcore/src/nurbs/crv_fit/p1.rs:264)", "cpp": "harness: input preparation failed: nurbs::crv_fit::p1::interp_knot_vector: invalid input: index arithmetic overflow", "rust": "harness: input preparation failed: nurbs::crv_fit::p1::interp_knot_vector: invalid input: index arithmetic overflow", "inputs": {"grid": [[[-0.887, 3.15, -0.213]]], "op": "interp", "p": 9223372036854775807, "ptp": 1, "q": 4}},
+    {"name": "fuzz01307_alloc_alloc", "origin": "fuzz-out/n2000/nlib.srf_fit/fuzz01307.json (enomem: rust: fit_arrays::alloc sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: input preparation failed: nurbs::crv_fit::p1::interp_knot_vector: NLib error Memory (15)", "rust": "harness: input preparation failed: nurbs::crv_fit::p1::interp_knot_vector: NLib error Memory (15)", "inputs": {"grid": [[[8.49, -4.46, 1.0]]], "op": "interp", "p": 0, "ptp": 2, "q": 2147483648}}
+  ]
+}

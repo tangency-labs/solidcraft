@@ -7,10 +7,11 @@ mod surface_import;
 
 use super::{ImageMethod, materials, setups};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{SolveApp, theme::Tokens, ui_kit};
+use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::doc::Document;
+use solidcraft_theme::Tokens;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Weak},
@@ -182,7 +183,7 @@ fn refresh(app: &mut SolveApp, view: &mut View) -> Result<(), String> {
         view.next = None;
     } else {
         let reply = app.run("render.library.list", json!({"kind":view.kind,"query":view.query,"offset":view.offset,"limit":48,"availability":if view.kind=="physical_profiles" {"all"} else {&view.availability}}))?;
-        view.entries = reply["items"].as_array().cloned().ok_or_else(|| crate::i18n::tr("render.error_library_reply").to_string())?;
+        view.entries = reply["items"].as_array().cloned().ok_or_else(|| solidcraft_ui_text::tr("render.error_library_reply").to_string())?;
         // Capture authored optical parameters once per page; selection remains read-only.
         for entry in &mut view.entries {
             if let Some(id) = entry["id"].as_str() {
@@ -513,12 +514,12 @@ pub(super) fn card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect) {
                 ui,
                 &mut mode,
                 &[
-                    ui_kit::IconSegment { key: "render:library-grid", icon: "grid", tip: crate::i18n::tr("render.library_grid").into() },
-                    ui_kit::IconSegment { key: "render:library-list", icon: "list", tip: crate::i18n::tr("render.library_list").into() },
+                    ui_kit::IconSegment { key: "render:library-grid", icon: "grid", tip: solidcraft_ui_text::tr("render.library_grid").into() },
+                    ui_kit::IconSegment { key: "render:library-list", icon: "list", tip: solidcraft_ui_text::tr("render.library_list").into() },
                     ui_kit::IconSegment {
                         key: "render:library-panel",
                         icon: "library",
-                        tip: crate::i18n::tr("render.stage_panels.surfaces_references").into(),
+                        tip: solidcraft_ui_text::tr("render.stage_panels.surfaces_references").into(),
                     },
                 ],
                 &[],
@@ -806,7 +807,7 @@ fn selected_light_reason(app: &SolveApp, view: &View) -> Option<String> {
             .filter_map(Value::as_f64)
             .fold(0.0, f64::max);
         if maximum > 64.0 {
-            return Some(crate::i18n::format("render.cpu_studio_radiance_limit", &[("radiance", &maximum.to_string())]));
+            return Some(solidcraft_ui_text::format("render.cpu_studio_radiance_limit", &[("radiance", &maximum.to_string())]));
         }
     }
     None
@@ -1020,7 +1021,7 @@ fn browse_contents(app: &mut SolveApp, ui: &mut egui::Ui, stage_card: bool) {
     } else {
         view.total
     };
-    let hint = crate::i18n::format("render.search_appearances", &[("count", &count.to_string())]);
+    let hint = solidcraft_ui_text::format("render.search_appearances", &[("count", &count.to_string())]);
     let query = if view.collection == 0 { &mut view.query } else { &mut view.collection_query };
     let search = ui_kit::search_field(ui, ui.scope_id().with("render_library_search"), query, &hint);
     query.truncate(query.char_indices().nth(128).map_or(query.len(), |(at, _)| at));
@@ -1388,7 +1389,7 @@ pub(super) fn inspect(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui.small(format!(
                         "{}: {}",
                         app.tr("render.library_omitted"),
-                        item.as_str().unwrap_or(crate::i18n::tr("render.property_unknown"))
+                        item.as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown"))
                     ));
                 }
             }
@@ -1422,7 +1423,7 @@ fn source_preview(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id: &s
             let reply = app.run("render.library.preview", json!({"id":id}))?;
             let bytes: Vec<u8> = serde_json::from_value(reply["bytes"].clone()).map_err(|e| e.to_string())?;
             if bytes.len() > 2 * 1024 * 1024 {
-                return Err(crate::i18n::tr("render.error_source_preview").into());
+                return Err(solidcraft_ui_text::tr("render.error_source_preview").into());
             }
             let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
             let mut limits = image::Limits::default();
@@ -1644,19 +1645,19 @@ fn physical_controls(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, id:
     ui.small(resource["reference_state"].as_str().unwrap_or(""));
     if let Some(properties) = resource["properties"].as_array() {
         for (index, property) in properties.iter().enumerate() {
-            let name = property["quantity"].as_str().unwrap_or(crate::i18n::tr("render.property_fallback"));
+            let name = property["quantity"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_fallback"));
             let title = format!("{}: {} {}", name, property["value"], property["unit"].as_str().unwrap_or(""));
             ui_kit::section(ui, ("physical_property", id, index), &title, false, |ui| {
-                ui.small(crate::i18n::format(
+                ui.small(solidcraft_ui_text::format(
                     "render.property_source",
                     &[("id", property["source_id"].as_str().unwrap_or("")), ("locator", property["source_locator"].as_str().unwrap_or(""))],
                 ));
-                ui.small(crate::i18n::format(
+                ui.small(solidcraft_ui_text::format(
                     "render.property_qualifier",
-                    &[("value", property["qualifier"].as_str().unwrap_or(crate::i18n::tr("render.property_unknown")))],
+                    &[("value", property["qualifier"].as_str().unwrap_or(solidcraft_ui_text::tr("render.property_unknown")))],
                 ));
-                ui.small(crate::i18n::format("render.property_conditions", &[("value", &property["conditions"].to_string())]));
-                ui.small(crate::i18n::format("render.property_uncertainty", &[("value", &property["uncertainty"].to_string())]));
+                ui.small(solidcraft_ui_text::format("render.property_conditions", &[("value", &property["conditions"].to_string())]));
+                ui.small(solidcraft_ui_text::format("render.property_uncertainty", &[("value", &property["uncertainty"].to_string())]));
                 ui.small(property["note"].as_str().unwrap_or(""));
             });
         }

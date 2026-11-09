@@ -95,6 +95,23 @@ fn a_real_curve_named_like_an_axis_wins() {
     assert!((start.x + end.x - 10.0).abs() < 1e-7, "mirrored about x = 5: {start:?} {end:?}");
 }
 
+/// Tangent also takes a curve's end point (#12092), but `x` and `y` still name the axes before
+/// their lines exist: a point called `x` does not take the axis's place.
+#[test]
+fn a_point_named_like_an_axis_leaves_tangent_on_the_axis() {
+    for (a, b) in [("c", "x"), ("x", "c")] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.point", json!({"point": [3, 7], "id": "x", "connect": false}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 4], "radius": 2, "id": "c"}));
+        run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        let sk = sketch(&s);
+        assert_eq!(axis_lines(&sk).iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["x"], "{a}, {b}: the x axis's line");
+        let CurveKind::Circle { c: centre, r } = sk.curves[sk.curve_index("c").unwrap()].kind else { panic!() };
+        assert!((sk.point(centre).unwrap().y.abs() - r).abs() < 1e-7, "{a}, {b}: tangent to x");
+        assert!(pt(&sk, "x").dist(Vec2::new(3.0, 7.0)) < 1e-9, "{a}, {b}: the point called x moved");
+    }
+}
+
 #[test]
 fn a_rectangle_centred_on_the_origin_keeps_one_profile() {
     let mut s = on(json!("XY"));

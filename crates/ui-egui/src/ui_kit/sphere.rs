@@ -1,7 +1,7 @@
 //! Small deterministic material previews; no textures, jobs or graphics device.
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Color32, Mesh, Rect, Response, Sense, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 use std::{collections::VecDeque, sync::Arc};
 
 const CACHE_ENTRIES: usize = 64;
@@ -171,8 +171,8 @@ pub fn sphere_thumbnail(ui: &mut Ui, id: &str, sphere: Sphere, size: f32) -> Res
     let side = f32::from(sphere.key(size).side);
     let (rect, response) = ui.allocate_exact_size(vec2(side, side), Sense::hover());
     paint_sphere(ui, rect, sphere);
-    scenario::publish_rect(id, rect);
-    scenario::publish_handle(id, rect.center());
+    solidcraft_ui_registry::publish_rect(id, rect);
+    solidcraft_ui_registry::publish_handle(id, rect.center());
     response
 }
 
@@ -205,7 +205,7 @@ pub(crate) fn sphere_preview_with_source<R>(
                 ui.spacing_mut().item_spacing.y = t.space_4;
                 ui.add_sized(
                     vec2(text_width, t.space_16),
-                    egui::Label::new(egui::RichText::new(name).font(crate::fonts::semibold(t.font_label)).color(t.form_ink))
+                    egui::Label::new(egui::RichText::new(name).font(crate::ui_kit::type_face::semibold(t.font_label)).color(t.form_ink))
                         .truncate()
                         .halign(egui::Align::Min),
                 )
@@ -221,16 +221,16 @@ pub(crate) fn sphere_preview_with_source<R>(
                 );
                 source_ui.set_clip_rect(ui.clip_rect().intersect(source_rect));
                 let source = source(&mut source_ui);
-                scenario::publish_rect(&format!("{id}:chip:0"), source.rect.intersect(source_rect));
+                solidcraft_ui_registry::publish_rect(&format!("{id}:chip:0"), source.rect.intersect(source_rect));
                 let mut usage_ui = ui.new_child(
                     egui::UiBuilder::new().id_salt("sample_usage").max_rect(usage_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
                 );
                 usage_ui.set_clip_rect(ui.clip_rect().intersect(usage_rect));
                 let response = super::workspace_chip(&mut usage_ui, usage);
-                scenario::publish_rect(&format!("{id}:chip:1"), response.rect.intersect(usage_rect));
+                solidcraft_ui_registry::publish_rect(&format!("{id}:chip:1"), response.rect.intersect(usage_rect));
             });
             let response = ui.vertical(action);
-            scenario::publish_target(&format!("{id}:replace"), response.response.rect);
+            solidcraft_ui_registry::publish_target(&format!("{id}:replace"), response.response.rect);
             response.inner
         });
         row.inner
@@ -252,9 +252,9 @@ pub(crate) struct SphereTile<'a> {
 impl SphereTile<'_> {
     pub(crate) fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
-        let accent = crate::theme::TabAccent::current(ui.ctx());
+        let accent = solidcraft_theme::TabAccent::current(ui.ctx());
         let side = t.control_height + t.space_6;
-        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&crate::fonts::semibold(t.font_small)));
+        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&crate::ui_kit::type_face::semibold(t.font_small)));
         let height = t.space_16 + side + t.space_6 + line_height * 2.0 + t.space_3;
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let response = ui.interact(rect, ui.make_persistent_id(self.id), Sense::click_and_drag());
@@ -271,31 +271,31 @@ impl SphereTile<'_> {
                 cell.left_top() + vec2(t.space_4, t.space_4),
                 egui::Align2::LEFT_TOP,
                 badge,
-                crate::fonts::semibold(t.font_badge),
+                crate::ui_kit::type_face::semibold(t.font_badge),
                 t.form_dim,
             );
         }
         if self.users > 0 {
             let text = if self.users > 99 { "99+".into() } else { self.users.to_string() };
-            let galley = ui.painter().layout_no_wrap(text, crate::fonts::semibold(t.font_badge), t.on_accent);
+            let galley = ui.painter().layout_no_wrap(text, crate::ui_kit::type_face::semibold(t.font_badge), t.on_accent);
             let width = (galley.size().x + t.space_8).max(t.space_16);
             let badge = Rect::from_min_size(pos2(cell.right() - t.space_4 - width, cell.top() + t.space_2), vec2(width, t.space_16));
             ui.painter().rect_filled(badge, t.radius_lg, accent.ink);
             ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
         }
         let label = Rect::from_min_max(pos2(rect.left() + t.space_3, preview.bottom() + t.space_6), rect.max - vec2(t.space_3, t.space_3));
-        let font = if self.selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let font = if self.selected { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
         let mut job = egui::text::LayoutJob::simple(self.name.to_owned(), font, t.form_ink, label.width());
         job.halign = egui::Align::Center;
         job.wrap.max_rows = 2;
         job.wrap.break_anywhere = false;
         let galley = ui.painter().layout_job(job);
         let label_pos = pos2(label.center().x - galley.rect.center().x, label.top() - galley.rect.top());
-        scenario::publish_rect(&format!("{}:label", self.id), label);
-        scenario::publish_rect(&format!("{}:galley", self.id), galley.rect.translate(label_pos.to_vec2()));
+        solidcraft_ui_registry::publish_rect(&format!("{}:label", self.id), label);
+        solidcraft_ui_registry::publish_rect(&format!("{}:galley", self.id), galley.rect.translate(label_pos.to_vec2()));
         ui.painter().with_clip_rect(ui.clip_rect().intersect(label)).galley(label_pos, galley, t.form_ink);
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), self.selected, self.name));
-        scenario::publish_target(self.id, rect);
+        solidcraft_ui_registry::publish_target(self.id, rect);
         let mut tip = egui::Tooltip::for_enabled(&response);
         tip.popup = tip.popup.frame(super::Container::new(ui.ctx(), super::Surface::Toast).tooltip_frame(ui.ctx()));
         crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
