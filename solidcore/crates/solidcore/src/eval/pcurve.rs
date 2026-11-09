@@ -952,7 +952,7 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
 /// Whether `uv` is at a pole along each direction, or within `reach` of one, by the surface's
 /// speeds there: a speed below 10⁻⁹ of the other's, or one that moves the point no more than
 /// `reach` over half the period (or the whole range) of its parameter.
-fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
+pub(crate) fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
     let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else {
         return [false; 2];
     };
