@@ -22,15 +22,16 @@ pub struct BoxParams {
     pub max: [f64; 3],
 }
 
-/// The cutting shape a tool has. Only `flat` is cut; the others are listed and reported as not
-/// simulated yet.
+/// The cutting shape a tool has. `flat`, `ball` and `bull` are cut; the others are listed and reported
+/// as not simulated yet.
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ShapeName {
     #[default]
     Flat,
+    /// Corner radius equal to the tool radius.
     Ball,
-    /// Needs `corner_radius`.
+    /// Needs `corner_radius`, above 0 and below the tool radius.
     Bull,
     /// Needs `tip_diameter` and `angle`.
     Cone,
@@ -52,7 +53,7 @@ pub struct ToolParams {
     /// The shape (default `flat`).
     #[serde(default)]
     pub shape: Option<ShapeName>,
-    /// `bull`: the corner radius, mm.
+    /// `bull`: the corner radius, mm, above 0 and below the tool radius.
     #[serde(default)]
     pub corner_radius: Option<f64>,
     /// `cone`: the tip diameter, mm.

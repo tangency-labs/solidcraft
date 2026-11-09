@@ -147,6 +147,19 @@ fn hostile_sim_params_are_refused_not_panicked() {
         ("tool negative flute", with("tools", json!([{"id": 0, "diameter": 6, "flute_length": -1}]))),
         ("unknown shape", with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "hexagon"}]))),
         ("bull without a corner radius", with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull"}]))),
+        ("bull with a zero corner radius", with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": 0}]))),
+        (
+            "bull with a negative corner radius",
+            with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": -1}])),
+        ),
+        (
+            "bull with a corner radius at the tool radius",
+            with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": 3}])),
+        ),
+        (
+            "bull with a corner radius above the tool radius",
+            with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": 1e9}])),
+        ),
         ("cone without an angle", with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "cone", "tip_diameter": 0}]))),
         ("corner radius on a ball", with("tools", json!([{"id": 0, "diameter": 6, "flute_length": 20, "shape": "ball", "corner_radius": 1}]))),
         ("tool listed twice", with("tools", json!([flat(0), flat(0)]))),
@@ -438,6 +451,55 @@ fn a_flat_tool_accepts_a_zero_corner_radius() {
     let mut s = Session::default();
     call(&mut s, "sim.setup", &params);
     assert_eq!(call(&mut s, "sim.run", &json!({}))["done"], true);
+}
+
+/// The removed volume of a straight slot of length `path` at depth `depth`, by a tool whose body has
+/// radius `reach(h)` at height `h` above its tip: the body's volume, plus the path times its width profile.
+fn straight_slot_volume(reach: impl Fn(f64) -> f64, path: f64, depth: f64) -> f64 {
+    let n = 100_000;
+    let dh = depth / n as f64;
+    (0..n)
+        .map(|k| {
+            let r = reach((k as f64 + 0.5) * dh);
+            dh * (std::f64::consts::PI * r * r + path * 2.0 * r)
+        })
+        .sum()
+}
+
+/// The `SLOT` program (2 mm deep, 40 mm long) cut with a tool of diameter 6 and the given shape.
+fn slot_with(tool: Value) -> Value {
+    let mut params = setup_params(SLOT);
+    params["tools"] = json!([tool]);
+    params
+}
+
+#[test]
+fn a_ball_slot_removes_its_analytic_volume() {
+    // Ball radius 3, 2 mm deep: the hemisphere's cut width is 2 sqrt(R^2 - (R - h)^2), then the shank's 2R.
+    let r = 3.0f64;
+    let reach = |h: f64| if h <= r { (r * r - (r - h) * (r - h)).sqrt() } else { r };
+    let want = straight_slot_volume(reach, 40.0, 2.0);
+    let mut s = Session::default();
+    call(&mut s, "sim.setup", &slot_with(json!({"id": 0, "diameter": 6, "flute_length": 20, "shape": "ball"})));
+    let run = call(&mut s, "sim.run", &json!({}));
+    assert_eq!(run["done"], true);
+    let removed = run["removed_volume"].as_f64().unwrap_or(f64::NAN);
+    assert!((removed - want).abs() <= 0.02 * want, "removed {removed} mm^3, analytic {want} mm^3");
+    assert!(call(&mut s, "sim.status", &json!({}))["diag_count"] == 0, "a ball is cut, not reported");
+}
+
+#[test]
+fn a_bull_slot_removes_its_analytic_volume() {
+    // Radius 3, corner radius 1: the core is a flat disc of radius 2, the corner rises to radius 3 at height 1.
+    let (r, rc) = (3.0f64, 1.0f64);
+    let reach = |h: f64| if h <= rc { (r - rc) + (rc * rc - (rc - h) * (rc - h)).max(0.0).sqrt() } else { r };
+    let want = straight_slot_volume(reach, 40.0, 2.0);
+    let mut s = Session::default();
+    call(&mut s, "sim.setup", &slot_with(json!({"id": 0, "diameter": 6, "flute_length": 20, "shape": "bull", "corner_radius": rc})));
+    let run = call(&mut s, "sim.run", &json!({}));
+    assert_eq!(run["done"], true);
+    let removed = run["removed_volume"].as_f64().unwrap_or(f64::NAN);
+    assert!((removed - want).abs() <= 0.02 * want, "removed {removed} mm^3, analytic {want} mm^3");
 }
 
 #[test]
