@@ -554,8 +554,8 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         const ORDER: [TextVerticalAlign; 4] =
             [TextVerticalAlign::Baseline, TextVerticalAlign::Top, TextVerticalAlign::Middle, TextVerticalAlign::Bottom];
         let mut selected = ORDER.iter().position(|v| *v == k.style.vertical_align).unwrap_or(0);
-        let labels =
-            ["sketch_text.valign_baseline", "sketch_text.valign_top", "sketch_text.valign_middle", "sketch_text.valign_bottom"].map(solidcraft_ui_text::tr);
+        let labels = ["sketch_text.valign_baseline", "sketch_text.valign_top", "sketch_text.valign_middle", "sketch_text.valign_bottom"]
+            .map(solidcraft_ui_text::tr);
         // Four worded segments do not fit the dialog's width: each shows "Ag" with a line where the anchor is.
         let glyph = |p: &egui::Painter, r: egui::Rect, i: usize, ink: egui::Color32| {
             vertical_glyph(p, r, ORDER.get(i).copied().unwrap_or_default(), ink);
