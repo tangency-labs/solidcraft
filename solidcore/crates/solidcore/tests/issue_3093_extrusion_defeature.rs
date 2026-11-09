@@ -23,6 +23,7 @@
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
+use solidcore::mass::enclosure::VolumeSign;
 use solidcore::nurbs::nurbs_srf::decompose_srf;
 use solidcore::surface::extend::Continuity;
 use solidcore::surface::side::BoxSide;
@@ -142,12 +143,12 @@ fn the_extrusion_defeatures_to_the_same_solid_at_any_reach() {
         assert!(s.manifold, "reach {dist:?}");
         assert!(s.check.lines().is_empty(), "reach {dist:?}: {:?}", s.check);
         assert_eq!(bp1::faces(&b, None).unwrap().len(), 13, "reach {dist:?}");
-        Some(s.volume.unwrap())
+        Some(volume_of(&s))
     };
     let Some(v) = base(None) else { return };
     for d in [10.0, 15.0, 19.999_999_999, 20.0, 25.0] {
         let w = base(Some(d)).unwrap();
-        assert!((w - v).abs() <= 1e-9 * v, "reach {d}: {w} against {v}");
+        assert!(w.0 <= v.1 && v.0 <= w.1, "reach {d}: {w:?} against {v:?}");
     }
 }
 
@@ -188,18 +189,21 @@ fn a_feature_whose_cap_cannot_be_built_is_kept_and_named() {
     let s = validation::soundness(&mut k, &mut b).unwrap();
     assert!(s.manifold);
     assert!(s.check.lines().is_empty(), "{:?}", s.check);
-    let v = s.volume.unwrap();
-    assert!((v - 757.499_499_825_162).abs() <= 1e-9 * v, "{v}");
+    let v = volume_of(&s);
+    assert!(
+        v.0 <= 757.499_499_825_162 && 757.499_499_825_162 <= v.1,
+        "{v:?}"
+    );
 }
 
 /// The body's counts and volume, to compare a base with its state before a call.
-fn state(k: &mut Kernel, b: &mut Brep) -> ([usize; 3], f64) {
+fn state(k: &mut Kernel, b: &mut Brep) -> ([usize; 3], (f64, f64)) {
     let counts = [
         bp1::faces(b, None).unwrap().len(),
         bp1::edges(b, None).unwrap().len(),
         bp1::vertices(b, None).unwrap().len(),
     ];
-    let v = validation::soundness(k, b).unwrap().volume.unwrap();
+    let v = volume_of(&validation::soundness(k, b).unwrap());
     (counts, v)
 }
 
@@ -270,4 +274,14 @@ fn a_cancelled_defeature_leaves_the_base() {
         "{r:?}"
     );
     assert_eq!(state(&mut k, &mut b), before);
+}
+
+/// The certified enclosure of the body's volume ([`validation::Soundness::volume`]) as
+/// `(lo, hi)`: main certifies a sign, not a number, so volumes are compared as enclosures.
+fn volume_of(s: &validation::Soundness) -> (f64, f64) {
+    match s.volume.as_ref().unwrap() {
+        VolumeSign::Positive(e) | VolumeSign::Negative(e) | VolumeSign::Undecided(e) => {
+            (e.lo, e.hi)
+        }
+    }
 }
