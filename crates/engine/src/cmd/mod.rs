@@ -112,6 +112,9 @@ pub(crate) use sheet::{
     perforation_pattern, sheet_points, sheet_rule_name, then_list,
 };
 mod silhouette;
+mod sim;
+#[cfg(test)]
+mod sim_tests;
 mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::collapse_reason;
@@ -382,6 +385,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(sim::COMMANDS.iter());
     v
 }
 

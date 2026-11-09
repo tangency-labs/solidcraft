@@ -1,0 +1,18 @@
+[package]
+name = "solidcraft-machining"
+description = "SolidCraft stock-removal simulation: G-code and neutral move lists, swept tool volumes, a tri-dexel stock and its surface mesh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+solidcore-record = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

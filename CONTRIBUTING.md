@@ -105,6 +105,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 - `crates/sketch`: our own constraint solver, plus profile finding.
 - `crates/dynamics`: multibody dynamics: rigid bodies, joint constraints, gravity and springs,
   integrated in time (RFC #9719). It depends only on `geom`.
+- `crates/machining`: stock-removal simulation. It reads G-code (or a neutral move list) and
+  cuts a tri-dexel stock with the swept tool. It depends only on `geom`.
 - `crates/kernel`: the B-rep kernel boundary: solids, extrude/revolve, booleans, fillets,
   meshes, measures and STEP, behind our own API (implemented with `solidcore`). `crates/smlib` is
   the safe wrapper around `solidcore`, and `solidcore` is vendored in this repository at

@@ -1,0 +1,38 @@
+{
+  "en": {
+    "cmd.sim_setup": "Set Up Simulation",
+    "cmd.sim_run": "Run Simulation",
+    "cmd.sim_status": "Simulation Status",
+    "cmd.sim_clear": "Clear Simulation"
+  },
+  "ar": {
+    "cmd.sim_setup": "Set Up Simulation",
+    "cmd.sim_run": "Run Simulation",
+    "cmd.sim_status": "Simulation Status",
+    "cmd.sim_clear": "Clear Simulation"
+  },
+  "he": {
+    "cmd.sim_setup": "Set Up Simulation",
+    "cmd.sim_run": "Run Simulation",
+    "cmd.sim_status": "Simulation Status",
+    "cmd.sim_clear": "Clear Simulation"
+  },
+  "ja": {
+    "cmd.sim_setup": "シミュレーションを設定",
+    "cmd.sim_run": "シミュレーションを実行",
+    "cmd.sim_status": "シミュレーションの状態",
+    "cmd.sim_clear": "シミュレーションをクリア"
+  },
+  "vi": {
+    "cmd.sim_setup": "Set Up Simulation",
+    "cmd.sim_run": "Run Simulation",
+    "cmd.sim_status": "Simulation Status",
+    "cmd.sim_clear": "Clear Simulation"
+  },
+  "zh": {
+    "cmd.sim_setup": "设置模拟",
+    "cmd.sim_run": "运行模拟",
+    "cmd.sim_status": "模拟状态",
+    "cmd.sim_clear": "清除模拟"
+  }
+}
