@@ -1,0 +1,159 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2552-thread-groove-cut-by-a-square-coil-in-a-bore",
+  "expected": {
+    "body_count": 1,
+    "method": "the coil section is 0.9 x 0.9 with centre radius 5 - 0.45 = 4.55, so it spans r 4.1 to 5.0 (its inner face is the bore wall) and turns 10/1.5 = 6.667 times: V_groove = 0.81 * 2 pi 4.55 * 6.667 = 154.4; V = 30 * 30 * 12 - pi 4.1^2 12 - V_groove = 10011.9. The groove opens into the bore (one body).",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2552"
+    ],
+    "volume_mm3": 10011.900066920465,
+    "what": "a square-wire coil (diameter 10, section 0.9 inside, pitch 1.5, height 10) cut as a helical groove into the wall of a bore of radius 4.1 in a 30 x 30 x 12 block (crash report: unclean exit in solid.coil)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 139,
+      "faces": 57,
+      "vertices": 84
+    }
+  },
+  "records": "2552-thread-groove-cut-by-a-square-coil-in-a-bore.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3822.5969419197872,
+      "body_count": 1,
+      "edges": 108,
+      "faces": 38,
+      "vertices": 72,
+      "volume_mm3": 10011.9000669221
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2552"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a square-wire coil (diameter 10, section 0.9 inside, pitch 1.5, height 10) cut as a helical groove into the wall of a bore of radius 4.1 in a 30 x 30 x 12 block (crash report: unclean exit in solid.coil)",
+  "why_not": []
+}

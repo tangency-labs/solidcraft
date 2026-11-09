@@ -36,7 +36,9 @@ pub(super) fn reauthor(s: &mut Session, id: u64, to: u64, cmd: &str) -> Result<(
     if from == to {
         return Ok(());
     }
-    let doc = s.placed_document();
+    // Both placements as the design has them: an exploded view shown would move the sketch by
+    // the difference of its offsets.
+    let doc = s.design_document();
     let path = if to == anchor.component {
         anchor.path.clone()
     } else if to == 0 {

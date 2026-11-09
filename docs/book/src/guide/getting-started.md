@@ -136,10 +136,6 @@ keeps its designs, settings and recovery copies apart from the release's, so try
 changes what the release sees, and nothing is copied between them: to move a design, save it to
 a file in one and open the file in the other. Search engines are told to skip both.
 
-Planned worker and tiered-storage integration is
-described in [web-runtime.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/web-runtime.md)
-(design; not yet wired in the shipped wasm build).
-
 After the first visit the web app works offline: the browser keeps a copy of it. Online, each
 launch gets the latest published build (the browser downloads it once when it changes); offline,
 when the network doesn't answer within a few seconds, or when a new build can't be downloaded

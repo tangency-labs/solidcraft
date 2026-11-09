@@ -1,5 +1,9 @@
 //! Stored navigation slots and their catalogue. Painting lives in `navigation_bar_view`.
-use crate::{SolveApp, navigation::NavCaps};
+use crate::{
+    SolveApp,
+    navigation::NavCaps,
+    ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -34,18 +38,9 @@ pub(crate) fn visual_style_icon(style: u8) -> &'static str {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Kind {
-    Action,
-    Tool,
-    Toggle,
-    Menu,
-    Separator,
-}
-
 pub(crate) struct Slot {
     pub id: &'static str,
-    pub kind: Kind,
+    pub kind: NavigationKind,
     pub icon: &'static str,
     pub label: &'static str,
     pub description: &'static str,
@@ -56,7 +51,7 @@ macro_rules! slot {
     ($id:literal, $kind:ident, $icon:literal, $command:expr) => {
         Slot {
             id: $id,
-            kind: Kind::$kind,
+            kind: NavigationKind::$kind,
             icon: $icon,
             label: concat!("navbar.", $id),
             description: concat!("navbar.description.", $id),
@@ -124,45 +119,12 @@ pub enum Position {
     Right,
 }
 
-/// The edge of the 3D view the bar sits on (#8183): the bottom, or the top, under the ribbon.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Edge {
-    #[default]
-    Bottom,
-    Top,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Size {
-    Compact,
-    #[default]
-    Regular,
-}
-
-impl Size {
-    // Logical points: egui's UI zoom applies the preference's scale to these dimensions.
-    pub(crate) fn points(self) -> f32 {
-        crate::ui_kit::NavigationMetrics::for_size(self).button
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Labels {
     #[default]
     Icons,
     Labels,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Idle {
-    Always,
-    #[default]
-    Fade,
-    Hide,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -183,10 +145,10 @@ pub struct NavigationBar {
     pub slots: Vec<String>,
     pub slot_options: std::collections::BTreeMap<String, SlotOptions>,
     pub position: Position,
-    pub edge: Edge,
-    pub size: Size,
+    pub edge: NavigationEdge,
+    pub size: NavigationSize,
     pub labels: Labels,
-    pub idle: Idle,
+    pub idle: NavigationIdle,
 }
 
 impl Default for NavigationBar {
@@ -198,10 +160,10 @@ impl Default for NavigationBar {
                 .collect(),
             slot_options: Default::default(),
             position: Position::default(),
-            edge: Edge::default(),
-            size: Size::default(),
+            edge: NavigationEdge::default(),
+            size: NavigationSize::default(),
             labels: Labels::default(),
-            idle: Idle::default(),
+            idle: NavigationIdle::default(),
         }
     }
 }
@@ -233,7 +195,7 @@ impl<'de> Deserialize<'de> for NavigationBar {
         }
         if let Some(options) = value.get("slot_options").and_then(Value::as_object) {
             for (id, option) in options.iter().take(MAX_SLOTS) {
-                if id.len() <= 128 && find(id).is_some_and(|slot| slot.kind == Kind::Menu) {
+                if id.len() <= 128 && find(id).is_some_and(|slot| slot.kind == NavigationKind::Menu) {
                     let shows = option.get("shows").cloned().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
                     bar.slot_options.insert(id.clone(), SlotOptions { shows });
                 }
@@ -274,10 +236,10 @@ pub(crate) fn validate(value: &Value) -> Result<(), String> {
                     })
             }),
             "position" => serde_json::from_value::<Position>(value.clone()).is_ok(),
-            "edge" => serde_json::from_value::<Edge>(value.clone()).is_ok(),
-            "size" => serde_json::from_value::<Size>(value.clone()).is_ok(),
+            "edge" => serde_json::from_value::<NavigationEdge>(value.clone()).is_ok(),
+            "size" => serde_json::from_value::<NavigationSize>(value.clone()).is_ok(),
             "labels" => serde_json::from_value::<Labels>(value.clone()).is_ok(),
-            "idle" => serde_json::from_value::<Idle>(value.clone()).is_ok(),
+            "idle" => serde_json::from_value::<NavigationIdle>(value.clone()).is_ok(),
             _ => return Err(format!("unknown navigation_bar field `{key}`")),
         };
         if !valid {

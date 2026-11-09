@@ -2,7 +2,9 @@ use super::*;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 
-fn imported_box() -> Session {
+/// A design whose only feature imports a 10 x 20 x 30 mm box as the mesh body `Mesh`. The
+/// schema tests (`schema/mesh_tests.rs`) convert it too.
+pub(crate) fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
@@ -233,7 +235,7 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
 
 /// The chosen-programs list is process-wide: tests that set it take turns.
 #[cfg(unix)]
-static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
 /// same steps as `file.send_to_slicer`.
@@ -269,7 +271,7 @@ fn save_mesh_with_a_chosen_program_writes_the_file_where_asked_and_sends_it_ther
 
 /// Puts back what the tests of the send commands make up, even when one fails.
 #[cfg(unix)]
-struct MadeUp;
+pub(crate) struct MadeUp;
 
 #[cfg(unix)]
 impl Drop for MadeUp {

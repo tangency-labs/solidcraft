@@ -363,6 +363,38 @@ fn offset_curve_reads_and_round_trips() {
     round_trip_curve(&c, &[]);
 }
 
+/// A CURVE_REPLICA's operator: x' = +Y, z' = +Z (so y' = z' x x' = -X), origin (5, 0, 0), scale 2.
+const TURNED: &str = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',#5,$,#20,2.,#2);";
+
+#[test]
+fn curve_replica_is_its_parent_moved_and_scaled() {
+    let c = curve(&format!("{TURNED}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    // The parent's point at t is origin + 2 (cos t · 10 · x' + sin t · 10 · y').
+    at_curve(&c, 0.0, [5.0, 20.0, 0.0]);
+    at_curve(&c, FRAC_PI_2, [-15.0, 0.0, 0.0]);
+    at_curve(&c, PI, [5.0, -20.0, 0.0]);
+    // A line keeps its parameter: its point at t is the parent's, moved.
+    let l = curve(&format!("{TURNED}#10=LINE('',#1,#12);#12=VECTOR('',#3,3.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    at_curve(&l, 1.0, [5.0, 6.0, 0.0]);
+}
+
+#[test]
+fn curve_replica_scales_its_placement_with_the_file_units() {
+    let inches = Units { len: 25.4, ang: 1.0 };
+    let c = curve(
+        "#20=CARTESIAN_POINT('',(1.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#20,$,$);#10=LINE('',#1,#12);#12=VECTOR('',#3,1.);#11=CURVE_REPLICA('',#10,#21);",
+        11,
+        inches,
+    );
+    at_curve(&c, 1.0, [50.8, 0.0, 0.0]);
+}
+
+#[test]
+fn curve_replica_round_trips() {
+    let c = curve(&format!("{TURNED}#10=CIRCLE('',#4,10.);#11=CURVE_REPLICA('',#10,#21);"), 11, MM);
+    round_trip_curve(&c, &[0.0, 1.0, FRAC_PI_2, PI]);
+}
+
 #[test]
 fn shared_entities_are_written_once() {
     let c = Arc::new(Curve::Circle {

@@ -85,7 +85,7 @@ origin; the design itself does not move. The face is tinted and outlined in the 
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
-marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
+marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 
 The list also has a plain **EasyPrint (Printables, in the browser)** row, and it is the one entry
 that works in the browser build too. EasyPrint is Printables' slicer, so choosing it uploads the

@@ -1,0 +1,792 @@
+//! The chord tolerance over a face's finished triangulation, whatever layout made it. A grid
+//! divides each parameter direction within the tolerance, but on a doubly curved surface the
+//! two sags add up in the middle of a cell, along its diagonal; a patch blended from its sides
+//! has no lines along the surface's own directions at all. Every triangle is checked against
+//! the surface (at its centroid and at the middle of each side inside the face) and the sides
+//! that leave it are split in two, both triangles on them together, so the face stays
+//! conforming. Sides on the face's boundary are never split: they are the edges' own nodes,
+//! which the neighbouring face shares.
+
+use solidcore_convert as kernel;
+use std::collections::HashMap;
+
+use crate::vec::VecExt as _;
+use solidcore::eval::EvalSurface;
+use solidcore_record::Vec3;
+
+use super::{NoValue, Unclassified};
+
+/// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
+/// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
+/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `poles`: the
+/// classifier of the face's nodes, shared by [`refine`], [`flip`] and [`worst`] (how near a pole a
+/// point is taken as one: see [`solidcore::eval::uv::degenerate_within`]).
+///
+/// A point the surface does not evaluate at (a node, or a middle the check needs) is the
+/// evaluator refusing the face: the error names it, and the caller leaves the face out whole.
+/// `Ok(true)` when the refinement stopped at `max_points` with a triangle still to split: the
+/// caller names the face ([`super::Cap::Refine`]).
+/// Why [`refine`], [`flip`] or [`worst`] stopped: a point the surface does not evaluate at, a
+/// point whose poles the kernel's classifier cannot tell, or (for [`worst`]) a triangle, by
+/// index, with a corner past the nodes.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Stop {
+    NoValue(NoValue),
+    Unclassified(Unclassified),
+    Corner(usize),
+}
+
+impl From<NoValue> for Stop {
+    fn from(e: NoValue) -> Self {
+        Stop::NoValue(e)
+    }
+}
+
+impl From<Unclassified> for Stop {
+    fn from(e: Unclassified) -> Self {
+        Stop::Unclassified(e)
+    }
+}
+
+pub(crate) fn refine(
+    s: &EvalSurface,
+    tol: f64,
+    poles: &mut Poles,
+    fixed: &[Vec3],
+    uv: &mut Vec<[f64; 2]>,
+    tris: &mut Vec<[u32; 3]>,
+    max_points: usize,
+) -> Result<bool, Stop> {
+    if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
+        return Ok(false);
+    }
+    let at = |q: [f64; 2]| {
+        s.derivs(q[0], q[1])
+            .map(|d| kernel::record_vec3(d.0))
+            .ok_or(NoValue(q))
+    };
+    // How far the flat point `c` lies from the surface, measured along the normal at the surface
+    // point of the same parameters: those parameters need not be the nearest (a straight line in
+    // the parameters is no geodesic near a pole), and only the departure across the surface
+    // counts. Where the normal is undefined (a pole), the whole distance.
+    let off = |q: [f64; 2], c: Vec3| -> Result<f64, NoValue> {
+        let (p, su, sv) = s
+            .derivs(q[0], q[1])
+            .map(kernel::record_triple)
+            .ok_or(NoValue(q))?;
+        Ok(su
+            .cross(sv)
+            .normalized()
+            .map_or_else(|| p.dist(c), |n| (p - c).dot(n).abs()))
+    };
+    let mut pos = uv
+        .iter()
+        .enumerate()
+        .map(|(i, q)| fixed.get(i).copied().map_or_else(|| at(*q), Ok))
+        .collect::<Result<Vec<Vec3>, NoValue>>()?;
+    // No side is split below this length: a surface whose parameters bend sharply (at a pole) is
+    // not chased to the last bit.
+    let shortest = tol * 1e-3;
+    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
+    for (ti, t) in tris.iter().enumerate() {
+        for [a, b, _] in turns(*t) {
+            // Proven: fewer triangles than twice MAX_FACE_NODES, as above: the index fits a u32.
+            sides.entry(key(a, b)).or_default().push(ti as u32);
+        }
+    }
+    let mut sag_of: HashMap<(u32, u32), f64> = HashMap::new();
+    let limit = uv.len().saturating_add(max_points);
+    // Proven: fewer triangles than twice MAX_FACE_NODES (2^28): the count fits a u32.
+    let mut queue: Vec<u32> = (0..tris.len() as u32).rev().collect();
+    while let Some(ti) = queue.pop() {
+        let Some(&t) = tris.get(ti as usize) else {
+            continue;
+        };
+        let p = |i: u32| pos.get(i as usize).copied();
+        let (Some(pa), Some(pb), Some(pc)) = (p(t[0]), p(t[1]), p(t[2])) else {
+            continue;
+        };
+        // Sides inside the face (two triangles on them), long enough to split, with their sag.
+        // Proven: the capacity is the constant 3.
+        let mut inner: Vec<(f64, f64, (u32, u32))> = Vec::with_capacity(3);
+        for [a, b, _] in turns(t) {
+            let e = key(a, b);
+            if sides.get(&e).is_none_or(|ts| ts.len() != 2) {
+                continue;
+            }
+            let (Some(xa), Some(xb)) = (p(a), p(b)) else {
+                continue;
+            };
+            let len = xa.dist(xb);
+            if len <= shortest {
+                continue;
+            }
+            let sag = if let Some(&sag) = sag_of.get(&e) {
+                sag
+            } else {
+                let sag = off(poles.mean(uv, &[a, b])?, (xa + xb) * 0.5)?;
+                sag_of.insert(e, sag);
+                sag
+            };
+            inner.push((sag, len, e));
+        }
+        // The surface's departure from a flat triangle is about quadratic over it: at the
+        // centroid it is 4/9 of the sum of the sags at the sides' middles, which splitting a side
+        // inside the face divides by four. A triangle whose middle is off splits its side inside
+        // the face that sags most, while that side still contributes; what is left comes from
+        // its boundary sides, which the edges' own sampling keeps within the tolerance.
+        let centroid = poles.mean(uv, &t)?;
+        let worst = inner.iter().max_by(|x, y| x.0.total_cmp(&y.0)).copied();
+        let split = match worst {
+            Some((sag, _, e)) if sag > tol => e,
+            Some((sag, _, e))
+                if sag > 0.25 * tol && off(centroid, (pa + pb + pc) * (1.0 / 3.0))? > tol =>
+            {
+                e
+            }
+            _ => continue,
+        };
+        // Splitting a triangle's shorter side leaves a child with its long side and a wider
+        // angle, and where the long side's middle lies on the surface (a section with an
+        // inflection) the children flatten toward it without end. So a triangle flattened onto its
+        // longest side (its widest angle past 150 degrees) splits that side, and a split never
+        // goes across an obtuse triangle's shorter side: that triangle's longest side is split
+        // first, and so on along the path (Rivara's longest-edge propagation, its lengths growing,
+        // so it ends). Only sides inside the face are split.
+        let mut split = flat_long_side(&t, &pos, &sides, shortest, 150.0).unwrap_or(split);
+        let mut from = ti;
+        while let Some(&across) = sides
+            .get(&split)
+            .and_then(|ts| ts.iter().find(|&&o| o != from))
+        {
+            match tris
+                .get(across as usize)
+                .and_then(|o| flat_long_side(o, &pos, &sides, shortest, 90.0))
+            {
+                Some(long) if long != split => (split, from) = (long, across),
+                _ => break,
+            }
+        }
+        // The triangle is looked at again when the split was another's, on its way.
+        if from != ti {
+            queue.push(ti);
+        }
+        // A split is wanted and there is no room for its point.
+        if uv.len() >= limit {
+            return Ok(true);
+        }
+        let m = poles.mean(uv, &[split.0, split.1])?;
+        let pm = at(m)?;
+        // Proven: `plan_face` checks its nodes and the MAX_REFINE more it lets this add are at most
+        // MAX_FACE_NODES, so the index fits a u32.
+        let mi = uv.len() as u32;
+        uv.push(m);
+        pos.push(pm);
+        sag_of.remove(&split);
+        queue.extend(split_side(tris, &mut sides, split, mi));
+    }
+    Ok(false)
+}
+
+/// Which parameter directions the surface is collapsed along at each node of a face's
+/// triangulation, as the kernel's classifier says (within `reach`): a property of the node's
+/// parameters, so it is asked once per node however many triangles and rounds look at it.
+pub(crate) struct Poles<'a> {
+    s: &'a EvalSurface,
+    reach: f64,
+    /// Per node index; `None` until asked.
+    flags: Vec<Option<[bool; 2]>>,
+    /// Calls of the kernel's classifier made, for the tests.
+    #[cfg(test)]
+    asked: usize,
+}
+
+impl<'a> Poles<'a> {
+    pub(crate) fn new(s: &'a EvalSurface, reach: f64) -> Self {
+        Poles {
+            s,
+            reach,
+            flags: Vec::new(),
+            #[cfg(test)]
+            asked: 0,
+        }
+    }
+
+    /// Whether each direction is collapsed at node `i`, whose parameters are `q`.
+    fn at(&mut self, i: u32, q: [f64; 2]) -> Result<[bool; 2], Unclassified> {
+        let i = i as usize;
+        if let Some(Some(f)) = self.flags.get(i) {
+            return Ok(*f);
+        }
+        #[cfg(test)]
+        {
+            self.asked += 2;
+        }
+        let f = [
+            super::pole_at(self.s, q, 0, self.reach)?,
+            super::pole_at(self.s, q, 1, self.reach)?,
+        ];
+        if self.flags.len() <= i {
+            self.flags.resize(i + 1, None);
+        }
+        if let Some(slot) = self.flags.get_mut(i) {
+            *slot = Some(f);
+        }
+        Ok(f)
+    }
+
+    /// The mean of nodes' parameters, as the surface point between them: at a pole the
+    /// parameter along the degenerate direction is free (the pole copy carries a neighbour's),
+    /// so there the mean takes it from the other nodes alone. A node whose poles the kernel's
+    /// classifier cannot tell is the error.
+    fn mean(&mut self, uv: &[[f64; 2]], nodes: &[u32]) -> Result<[f64; 2], Unclassified> {
+        let mut qs: Vec<([f64; 2], [bool; 2])> = Vec::new();
+        for &i in nodes {
+            if let Some(&q) = uv.get(i as usize) {
+                qs.push((q, self.at(i, q)?));
+            }
+        }
+        let mut out = [0.0; 2];
+        // Proven: `d` < 2 enumerates `out` and indexes the `[f64; 2]` parameters and flags.
+        #[allow(clippy::indexing_slicing)]
+        for (d, slot) in out.iter_mut().enumerate() {
+            let free: Vec<f64> = qs
+                .iter()
+                .filter(|(_, f)| !f[d])
+                .map(|(q, _)| q[d])
+                .collect();
+            let pick: Vec<f64> = if free.is_empty() {
+                qs.iter().map(|(q, _)| q[d]).collect()
+            } else {
+                free
+            };
+            *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
+        }
+        Ok(out)
+    }
+}
+
+/// The farthest the triangles `tris` (as for [`refine`]) lie from the surface, measured as
+/// [`refine`] measures them: at each triangle's middle and at the middles of its three sides
+/// (boundary sides too: they are the mesh's), each along the surface's normal at the mean of
+/// its parameters (the whole distance where the normal is undefined). Only where the surface
+/// evaluates: a middle it has no point at is not measured, and counted (the face's vertices and
+/// the middles [`refine`] needed all evaluated). The sag and that count; the error: a triangle
+/// (by index) with a corner past `uv` ([`Stop::Corner`]), or a point whose poles the kernel's
+/// classifier cannot tell.
+pub(crate) fn worst(
+    s: &EvalSurface,
+    poles: &mut Poles,
+    fixed: &[Vec3],
+    uv: &[[f64; 2]],
+    tris: &[[u32; 3]],
+) -> Result<(f64, usize), Stop> {
+    let pos: Vec<Option<Vec3>> = uv
+        .iter()
+        .enumerate()
+        .map(|(i, q)| {
+            fixed
+                .get(i)
+                .copied()
+                .or_else(|| s.derivs(q[0], q[1]).map(|d| kernel::record_vec3(d.0)))
+        })
+        .collect();
+    // How far the flat point `c` lies from the surface at the mean of `qs`, as `refine`'s `off`.
+    let mut off = |nodes: &[u32], c: Vec3| -> Result<Option<f64>, Unclassified> {
+        let m = poles.mean(uv, nodes)?;
+        let Some((x, su, sv)) = s.derivs(m[0], m[1]).map(kernel::record_triple) else {
+            return Ok(None);
+        };
+        Ok(Some(
+            su.cross(sv)
+                .normalized()
+                .map_or_else(|| x.dist(c), |n| (x - c).dot(n).abs()),
+        ))
+    };
+    let (mut worst, mut unmeasured) = (0.0f64, 0usize);
+    for (k, t) in tris.iter().enumerate() {
+        let corner = |i: u32| Some((*uv.get(i as usize)?, *pos.get(i as usize)?));
+        let (Some((_, pa)), Some((_, pb)), Some((_, pc))) =
+            (corner(t[0]), corner(t[1]), corner(t[2]))
+        else {
+            return Err(Stop::Corner(k));
+        };
+        // The middle, then each side's: `None` where the surface has no point there (or at a
+        // corner they need).
+        let mut measured: Vec<Option<f64>> = Vec::new();
+        measured.push(match (pa, pb, pc) {
+            (Some(a), Some(b), Some(c)) => off(t, (a + b + c) * (1.0 / 3.0))?,
+            _ => None,
+        });
+        for ((nx, px), (ny, py)) in [
+            ((t[0], pa), (t[1], pb)),
+            ((t[1], pb), (t[2], pc)),
+            ((t[2], pc), (t[0], pa)),
+        ] {
+            measured.push(match (px, py) {
+                (Some(x), Some(y)) => off(&[nx, ny], (x + y) * 0.5)?,
+                _ => None,
+            });
+        }
+        for m in measured {
+            match m {
+                Some(x) => worst = worst.max(x),
+                None => unmeasured += 1,
+            }
+        }
+    }
+    Ok((worst, unmeasured))
+}
+
+/// The longest side of triangle `t` when the angle opposite it is past `degrees` and the side lies
+/// inside the face (two triangles on it) and is long enough to split.
+fn flat_long_side(
+    t: &[u32; 3],
+    pos: &[Vec3],
+    sides: &HashMap<(u32, u32), Vec<u32>>,
+    shortest: f64,
+    degrees: f64,
+) -> Option<(u32, u32)> {
+    let p = |i: u32| pos.get(i as usize).copied();
+    let len = |[a, b, _]: [u32; 3]| p(a).zip(p(b)).map(|(a, b)| a.dist(b));
+    let [t0, t1, t2] = turns(*t);
+    let lengths = [len(t0)?, len(t1)?, len(t2)?];
+    // The side from each corner to the next, with the two after it; the last longest one.
+    let ([l, a, b], [ta, tb, _]) = turns(lengths)
+        .into_iter()
+        .zip(turns(*t))
+        .max_by(|x, y| x.0[0].total_cmp(&y.0[0]))?;
+    let side = key(ta, tb);
+    let inside = sides.get(&side).is_some_and(|ts| ts.len() == 2) && l > shortest;
+    let flat =
+        a > 0.0 && b > 0.0 && (a * a + b * b - l * l) / (2.0 * a * b) < degrees.to_radians().cos();
+    (inside && flat).then_some(side)
+}
+
+/// The corners of a triangle turned so each comes first in turn, keeping its winding:
+/// `[a, b, c]`, `[b, c, a]`, `[c, a, b]`.
+fn turns<T: Copy>([a, b, c]: [T; 3]) -> [[T; 3]; 3] {
+    [[a, b, c], [b, c, a], [c, a, b]]
+}
+
+fn key(a: u32, b: u32) -> (u32, u32) {
+    (a.min(b), a.max(b))
+}
+
+/// Move triangle `from` to `to` in the list of side `(a, b)`.
+fn retag(sides: &mut HashMap<(u32, u32), Vec<u32>>, a: u32, b: u32, from: u32, to: u32) {
+    if let Some(ts) = sides.get_mut(&key(a, b)) {
+        for t in ts.iter_mut().filter(|t| **t == from) {
+            *t = to;
+        }
+    }
+}
+
+/// Split side `e` at the new point `m`: each triangle on it becomes two, in its own winding.
+/// The triangles touched, old and new.
+fn split_side(
+    tris: &mut Vec<[u32; 3]>,
+    sides: &mut HashMap<(u32, u32), Vec<u32>>,
+    e: (u32, u32),
+    m: u32,
+) -> Vec<u32> {
+    let on = sides.remove(&e).unwrap_or_default();
+    // Proven: the capacity is the constant 4.
+    let mut touched = Vec::with_capacity(4);
+    for ti in on {
+        let Some(&t) = tris.get(ti as usize) else {
+            continue;
+        };
+        // Turn the triangle so the side comes first, as it winds: [a, b, c].
+        let Some([a, b, c]) = turns(t).into_iter().find(|&[a, b, _]| key(a, b) == e) else {
+            continue;
+        };
+        // Proven: a triangulation of at most MAX_FACE_NODES (2^28) nodes has fewer than twice as
+        // many triangles, so the index fits a u32.
+        let new = tris.len() as u32;
+        if let Some(slot) = tris.get_mut(ti as usize) {
+            *slot = [a, m, c];
+        }
+        tris.push([m, b, c]);
+        retag(sides, b, c, ti, new);
+        sides.entry(key(a, m)).or_default().push(ti);
+        sides.entry(key(m, b)).or_default().push(new);
+        let mc = sides.entry(key(m, c)).or_default();
+        mc.push(ti);
+        mc.push(new);
+        touched.extend([ti, new]);
+    }
+    touched
+}
+
+/// The sharpest corner (radians) a flip may make.
+const MIN_FLIP_ANGLE: f64 = 1e-3;
+
+/// Flip the sides inside a face's triangulation (as [`refine`] takes it) where the two triangles
+/// on a side lie closer along the surface the other way: their facets turn less from the surface
+/// normal. A layout can leave
+/// slivers standing on their long side across the surface (their corners on it, their plane across
+/// it), which count several times the area under them and which no split repairs; the flip lays
+/// them down. A side is flipped only when both new triangles keep the orientation of the old ones
+/// in (u, v) and against the surface normal (nothing folds), and the new side and the new
+/// triangles' middles stay within `tol` of the surface, or no farther than the old side's middle.
+/// Sides with one triangle (the face's boundary) are never flipped. A point the surface does not
+/// evaluate at is the evaluator refusing the face, as in [`refine`].
+pub(crate) fn flip(
+    s: &EvalSurface,
+    tol: f64,
+    poles: &mut Poles,
+    fixed: &[Vec3],
+    uv: &[[f64; 2]],
+    tris: &mut [[u32; 3]],
+) -> Result<(), Stop> {
+    if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
+        return Ok(());
+    }
+    let derivs = |q: [f64; 2]| {
+        s.derivs(q[0], q[1])
+            .map(kernel::record_triple)
+            .ok_or(NoValue(q))
+    };
+    let pos = uv
+        .iter()
+        .enumerate()
+        .map(|(i, q)| {
+            fixed
+                .get(i)
+                .copied()
+                .map_or_else(|| derivs(*q).map(|d| d.0), Ok)
+        })
+        .collect::<Result<Vec<Vec3>, NoValue>>()?;
+    let p = |i: u32| pos.get(i as usize).copied();
+    let q = |i: u32| uv.get(i as usize).copied();
+    let off = |m: [f64; 2], c: Vec3| -> Result<f64, NoValue> {
+        let (x, su, sv) = derivs(m)?;
+        Ok(su
+            .cross(sv)
+            .normalized()
+            .map_or_else(|| x.dist(c), |n| (x - c).dot(n).abs()))
+    };
+    // Twice the signed area in (u, v).
+    let area_uv = |t: [u32; 3]| match (q(t[0]), q(t[1]), q(t[2])) {
+        (Some(a), Some(b), Some(c)) => {
+            (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+        }
+        _ => 0.0,
+    };
+    // The triangle's smallest angle in 3D.
+    let min_angle = |t: [u32; 3]| -> f64 {
+        let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else {
+            return 0.0;
+        };
+        let angle = |o: Vec3, x: Vec3, y: Vec3| match ((x - o).normalized(), (y - o).normalized()) {
+            // Proven: the clamp bounds are the constants -1.0 <= 1.0, neither NaN.
+            (Some(u), Some(v)) => u.dot(v).clamp(-1.0, 1.0).acos(),
+            _ => 0.0,
+        };
+        angle(a, b, c).min(angle(b, c, a)).min(angle(c, a, b))
+    };
+    // How far a facet's normal turns from the surface normal at its middle (radians, 0 to pi/2).
+    let deviation = |poles: &mut Poles, t: [u32; 3]| -> Result<f64, Stop> {
+        let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else {
+            return Ok(0.0);
+        };
+        let m = poles.mean(uv, &t)?;
+        let facet = (b - a).cross(c - a).normalized();
+        let (_, su, sv) = derivs(m)?;
+        Ok(match (facet, su.cross(sv).normalized()) {
+            // Proven: the clamp bounds are the constants 0.0 <= 1.0, neither NaN.
+            (Some(f), Some(n)) => f.dot(n).abs().clamp(0.0, 1.0).acos(),
+            _ => 0.0,
+        })
+    };
+    // Whether the facet's normal lies on the side of the surface normal that its (u, v)
+    // orientation `sign` says.
+    let upright = |poles: &mut Poles, t: [u32; 3], sign: f64| -> Result<bool, Stop> {
+        let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else {
+            return Ok(false);
+        };
+        let (_, su, sv) = derivs(poles.mean(uv, &t)?)?;
+        Ok((b - a).cross(c - a).dot(su.cross(sv)) * sign > 0.0)
+    };
+    let centroid_off = |poles: &mut Poles, t: [u32; 3]| -> Result<f64, Stop> {
+        match (p(t[0]), p(t[1]), p(t[2])) {
+            (Some(a), Some(b), Some(c)) => Ok(off(poles.mean(uv, &t)?, (a + b + c) * (1.0 / 3.0))?),
+            _ => Ok(f64::INFINITY),
+        }
+    };
+    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::new();
+    for (ti, t) in tris.iter().enumerate() {
+        for [a, b, _] in turns(*t) {
+            // Proven: fewer triangles than twice MAX_FACE_NODES, as above: the index fits a u32.
+            sides.entry(key(a, b)).or_default().push(ti as u32);
+        }
+    }
+    let mut queue: Vec<(u32, u32)> = sides
+        .iter()
+        .filter(|(_, ts)| ts.len() == 2)
+        .map(|(e, _)| *e)
+        .collect();
+    queue.sort_unstable();
+    let mut budget = tris.len().saturating_mul(8);
+    // Each triangle's deviation, until it is flipped.
+    let mut dev_of: Vec<Option<f64>> = vec![None; tris.len()];
+    while let Some(e) = queue.pop() {
+        if budget == 0 {
+            break;
+        }
+        let Some(&[t1, t2]) = sides.get(&e).map(Vec::as_slice) else {
+            continue;
+        };
+        let (Some(&ta), Some(&tb)) = (tris.get(t1 as usize), tris.get(t2 as usize)) else {
+            continue;
+        };
+        // [a, b, c] on one side of a -> b, [b, a, d] on the other.
+        let Some([a, b, c]) = turns(ta).into_iter().find(|&[a, b, _]| key(a, b) == e) else {
+            continue;
+        };
+        let Some(d) = tb.iter().copied().find(|&v| v != a && v != b) else {
+            continue;
+        };
+        if c == d || sides.contains_key(&key(c, d)) {
+            continue;
+        }
+        let (n1, n2) = ([a, d, c], [d, b, c]);
+        let sign = area_uv(ta).signum();
+        if sign == 0.0
+            || area_uv(tb).signum() != sign
+            || area_uv(n1) * sign <= 0.0
+            || area_uv(n2) * sign <= 0.0
+        {
+            continue;
+        }
+        // The pair the other way must lie closer along the surface (its facets turn less from
+        // the surface normal), by more than a degree: a pair within a degree of the surface is
+        // left as the layout made it.
+        let mut cached = |poles: &mut Poles, ti: u32, t: [u32; 3]| -> Result<f64, Stop> {
+            if let Some(d) = dev_of.get(ti as usize).copied().flatten() {
+                Ok(d)
+            } else {
+                let d = deviation(poles, t)?;
+                if let Some(slot) = dev_of.get_mut(ti as usize) {
+                    *slot = Some(d);
+                }
+                Ok(d)
+            }
+        };
+        let worse = cached(poles, t1, ta)?.max(cached(poles, t2, tb)?);
+        let degree = 1f64.to_radians();
+        if worse < degree || deviation(poles, n1)?.max(deviation(poles, n2)?) >= worse - degree {
+            continue;
+        }
+        // ... and have area in 3D (three corners on one line of a cone have none, however they
+        // lie in (u, v)).
+        if min_angle(n1).min(min_angle(n2)) < MIN_FLIP_ANGLE {
+            continue;
+        }
+        if !(upright(poles, n1, sign)? && upright(poles, n2, sign)?) {
+            continue;
+        }
+        let (Some(pa), Some(pb), Some(pc), Some(pd)) = (p(a), p(b), p(c), p(d)) else {
+            continue;
+        };
+        let allowed = tol
+            .max(off(poles.mean(uv, &[a, b])?, (pa + pb) * 0.5)?)
+            .max(centroid_off(poles, ta)?)
+            .max(centroid_off(poles, tb)?);
+        if off(poles.mean(uv, &[c, d])?, (pc + pd) * 0.5)? > allowed
+            || centroid_off(poles, n1)? > allowed
+            || centroid_off(poles, n2)? > allowed
+        {
+            continue;
+        }
+        budget -= 1;
+        for ti in [t1, t2] {
+            if let Some(slot) = dev_of.get_mut(ti as usize) {
+                *slot = None;
+            }
+        }
+        if let Some(slot) = tris.get_mut(t1 as usize) {
+            *slot = n1;
+        }
+        if let Some(slot) = tris.get_mut(t2 as usize) {
+            *slot = n2;
+        }
+        sides.remove(&e);
+        sides.insert(key(c, d), vec![t1, t2]);
+        // a-d moves from t2 to t1, b-c from t1 to t2.
+        retag(&mut sides, a, d, t2, t1);
+        retag(&mut sides, b, c, t1, t2);
+        queue.extend(
+            [key(a, d), key(d, b), key(b, c), key(c, a)]
+                .into_iter()
+                .filter(|s| sides.get(s).is_some_and(|ts| ts.len() == 2)),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two triangles of the strip u in [0, 1], v in [0, 1] whose inner side, the diagonal, has its
+    /// middle on the circle the surface has no point on: refinement stops there and names it,
+    /// leaving the triangles as they were.
+    #[test]
+    fn refine_names_the_middle_the_surface_does_not_evaluate_at() {
+        let s = super::super::refusals::cylinder_without(0.5);
+        let mut uv = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let fixed: Vec<Vec3> = uv
+            .iter()
+            .map(|q| s.derivs(q[0], q[1]).map(|d| kernel::record_vec3(d.0)))
+            .collect::<Option<_>>()
+            .unwrap_or_default();
+        assert_eq!(fixed.len(), 4);
+        let mut tris = vec![[0, 1, 2], [0, 2, 3]];
+        assert_eq!(
+            refine(
+                &s,
+                0.01,
+                &mut Poles::new(&s, 1e-9),
+                &fixed,
+                &mut uv,
+                &mut tris,
+                1000
+            ),
+            Err(Stop::NoValue(NoValue([0.5, 0.5])))
+        );
+        assert_eq!(tris, vec![[0, 1, 2], [0, 2, 3]]);
+    }
+
+    /// A node of the triangulation (not one of the boundary's) the surface does not evaluate at is
+    /// named, not left out of the check.
+    #[test]
+    fn refine_names_a_node_the_surface_does_not_evaluate_at() {
+        let s = super::super::refusals::cylinder_without(0.5);
+        let mut uv = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.5, 0.5]];
+        let fixed: Vec<Vec3> = uv
+            .iter()
+            .take(4)
+            .map(|q| s.derivs(q[0], q[1]).map(|d| kernel::record_vec3(d.0)))
+            .collect::<Option<_>>()
+            .unwrap_or_default();
+        assert_eq!(fixed.len(), 4);
+        let mut tris = vec![[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]];
+        assert_eq!(
+            refine(
+                &s,
+                0.01,
+                &mut Poles::new(&s, 1e-9),
+                &fixed,
+                &mut uv,
+                &mut tris,
+                1000
+            ),
+            Err(Stop::NoValue(NoValue([0.5, 0.5])))
+        );
+        assert_eq!(
+            flip(&s, 0.01, &mut Poles::new(&s, 1e-9), &fixed, &uv, &mut tris),
+            Err(Stop::NoValue(NoValue([0.5, 0.5])))
+        );
+    }
+
+    /// A triangle on a cylinder of radius 3 (its axis z, u along it, v the angle): corners at
+    /// the angles -0.1 and 0.1 on one circle and 0 a little up. The side along the circle sags
+    /// S = 3 (1 - cos 0.1) at its middle, the centroid only 2S/3: the measure is the side's.
+    /// It was the centroid's alone.
+    #[test]
+    fn the_worst_sag_is_the_sides_where_it_is_more_than_the_middles() {
+        use solidcore::eval::EvalCurve;
+        let s = EvalSurface::Revolved {
+            profile: EvalCurve::new(
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 4.0, 1.0]],
+            ),
+            origin: solidcore::Vec3::ZERO,
+            axis: solidcore::Vec3::Z,
+            transform: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+            swap: false,
+        };
+        let uv = [[0.5, -0.1], [0.5, 0.1], [0.6, 0.0]];
+        let side = 3.0 * (1.0 - 0.1f64.cos());
+        let got = worst(&s, &mut Poles::new(&s, 0.0), &[], &uv, &[[0, 1, 2]]);
+        assert!(
+            got.as_ref()
+                .is_ok_and(|(w, unmeasured)| (w - side).abs() < 1e-9 * side && *unmeasured == 0),
+            "{got:?} against {side}"
+        );
+        // A corner past the nodes is the triangle's index.
+        assert_eq!(
+            worst(
+                &s,
+                &mut Poles::new(&s, 0.0),
+                &[],
+                &uv,
+                &[[0, 1, 2], [0, 1, 3]]
+            ),
+            Err(Stop::Corner(1))
+        );
+    }
+
+    /// Refining, flipping and measuring a coarse patch of a cylinder (every sag over the
+    /// tolerance, so the nodes are looked at by many triangles, sides and rounds) asks the
+    /// kernel's classifier once per node and direction, not once per look.
+    #[test]
+    fn the_classifier_is_asked_once_per_node() {
+        use solidcore::eval::EvalCurve;
+        let s = EvalSurface::Revolved {
+            profile: EvalCurve::new(
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![[3.0, 0.0, 0.0, 1.0], [3.0, 0.0, 4.0, 1.0]],
+            ),
+            origin: solidcore::Vec3::ZERO,
+            axis: solidcore::Vec3::Z,
+            transform: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ],
+            swap: false,
+        };
+        let n = 6u32;
+        let mut uv: Vec<[f64; 2]> = Vec::new();
+        for i in 0..=n {
+            for j in 0..=n {
+                uv.push([
+                    f64::from(i) / f64::from(n),
+                    3.0 * f64::from(j) / f64::from(n),
+                ]);
+            }
+        }
+        let mut tris: Vec<[u32; 3]> = Vec::new();
+        for i in 0..n {
+            for j in 0..n {
+                let a = i * (n + 1) + j;
+                let (b, c, d) = (a + 1, a + n + 1, a + n + 2);
+                tris.push([a, c, d]);
+                tris.push([a, d, b]);
+            }
+        }
+        let mut poles = Poles::new(&s, 1e-9);
+        let start = uv.len();
+        // Refinement is capped (it may or may not run out of room): the count holds either way.
+        refine(&s, 5e-2, &mut poles, &[], &mut uv, &mut tris, 300).unwrap();
+        flip(&s, 5e-2, &mut poles, &[], &uv, &mut tris).unwrap();
+        worst(&s, &mut poles, &[], &uv, &tris).unwrap();
+        assert!(uv.len() > 2 * start, "{} nodes: not refined", uv.len());
+        assert!(poles.asked > 0);
+        assert!(
+            poles.asked <= 2 * uv.len(),
+            "{} calls for {} nodes",
+            poles.asked,
+            uv.len()
+        );
+    }
+}
