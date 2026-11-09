@@ -151,18 +151,23 @@ Enable the WebAssembly target:
 ./scripts/update-solidcraft.sh -w
 ```
 
-### Web Deployment Permissions
+### Web Deployment and Permissions
 
-Deploying to a web root such as `/var/www/html/solidcraft/` requires write permissions.
+Deploying to a web root requires write permissions to the destination directory.
 
-For scheduled execution as a standard user, the recommended approach is to grant ownership of the installation directory to the build user:
+For scheduled execution as a standard user running via `cron`, the safest approach is to configure the web deployment path inside a directory owned entirely by your build user, bypassing system-wide protected folders completely:
 
-```bash
-sudo mkdir -p /var/www/html/solidcraft
-sudo chown -R "$USER:$USER" /var/www/html/solidcraft
-```
+1. Create a web deployment directory within your user home path or in the webserver path:
 
-Alternatively, configure appropriate permissions for the deployment account. Avoid interactive password prompts when running under `cron`.
+    mkdir -p "$HOME/public_html/solidcraft"
+    - or
+    mkdir -p "/var/www/html/solidcraft"
+    - or
+    mkdir C:\inetpub\wwwroot\solidcraft
+
+2. Configure your web server (such as Nginx or Apache) to serve static assets and WebAssembly files directly from your user directory, eliminating the need for any privileged file copying.
+
+Alternatively, if your workflow requires placing files into a shared web root, ensure the target directory is pre-configured and owned by your user account ahead of time by your system administrator, so your automated script can write to it directly without requiring privilege escalation.
 
 ### Setting Up a Cron Job
 
