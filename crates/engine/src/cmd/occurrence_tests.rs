@@ -1878,3 +1878,74 @@ fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_nam
     let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
 }
+
+// #12150: `occurrence.move` with `to` / `to_matrix` places the occurrence at a target pose, not
+// on top of its current one.
+#[test]
+fn absolute_move_places_at_target_whatever_the_current_placement() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [7,8,9], "axis": [1,0,0], "angle": "30 deg"}));
+    for _ in 0..2 {
+        let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [10,20,30], "axis": [0,0,1], "angle": "90 deg"}}));
+        let t = &r["transform"];
+        near(&t[3][0], 10.0);
+        near(&t[3][1], 20.0);
+        near(&t[3][2], 30.0);
+        // X turns onto Y about Z.
+        near(&t[0][0], 0.0);
+        near(&t[0][1], 1.0);
+        near(&t[2][2], 1.0);
+    }
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [1,2,3]}}));
+    near(&r["transform"][0][0], 1.0);
+    near(&r["transform"][3][2], 3.0);
+}
+
+#[test]
+fn absolute_move_to_matrix_in_world_under_a_turned_parent() {
+    let mut s = Session::default();
+    let (_, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "translate": [100,0,0], "axis": [0,0,1], "angle": "90 deg"}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "translate": [3,4,5]}));
+    let target = json!([1,0,0,10, 0,1,0,20, 0,0,1,30]);
+    for _ in 0..2 {
+        run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "space": "world", "to_matrix": target}));
+        let result = run(&mut s, "occurrence.properties", json!({"occurrence": child, "path": [parent,child]}));
+        near(&result["total"]["center_of_mass"][0], 10.5);
+        near(&result["total"]["center_of_mass"][1], 20.5);
+        near(&result["total"]["center_of_mass"][2], 30.5);
+    }
+    // Local: the same numbers are the placement in the parent.
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": child, "to_matrix": target}));
+    near(&r["transform"][3][0], 10.0);
+    near(&r["transform"][3][1], 20.0);
+}
+
+#[test]
+fn absolute_move_refuses_relative_keys_and_keeps_capture_and_grounding() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    for extra in [json!({"translate": [1,0,0]}), json!({"axis": [0,0,1]}), json!({"angle": 1}), json!({"origin": [0,0,0]}), json!({"matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}), json!({"to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0]})] {
+        let mut p = json!({"occurrence": occ, "to": {"position": [1,2,3]}});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        assert!(s.execute("occurrence.move", &p).is_err(), "{p}");
+    }
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0], "translate": [1,0,0]})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"axis": [0,0,1]}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [0,0,0], "spin": 1}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [2,0,0,0,0,1,0,0,0,0,1,0]})).is_err());
+    let before = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform;
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [5,0,0]}, "capture": false}));
+    assert_eq!(r["pending"], json!(true));
+    near(&r["transform"][3][0], 5.0);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform, before);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [9,0,0]}})).is_err());
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [9,0,0]}, "move_grounded": true}));
+    near(&r["transform"][3][0], 9.0);
+}
