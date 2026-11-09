@@ -160,7 +160,7 @@ The remaining lines of `app-geometry.txt` and `mesh-decisions.txt`, one cluster 
 
 ## 3. Rules for the agents doing it
 
-- **SolidCraft's code is the base.** Where both sides have a job, start from SolidCraft's implementation, add what measures better in solidcore's, and land the result as one crate in `solidcore/`.
+- **SolidCraft's code is the base.** For every job: `git mv` SolidCraft's implementation into `solidcore/` (the move alone in its own commit, so blame keeps its authors), add what measures better in solidcore's existing copies, and unify them into one crate per job. solidcore's duplicate copies (two STEP readers, three meshers and the rest) are deleted and replaced.
 - **Literature first.** Show the problem, read the papers that solve it, and say in the issue how the design follows them (solidcore `AGENTS.md` §1).
 - **No fallbacks or try-chains.** One construction per job. An old path is deleted when its replacement lands, never kept behind it (§4b).
 - **One topic per PR**: one job moved, its callers switched, the old copy deleted, its ledger lines removed.
