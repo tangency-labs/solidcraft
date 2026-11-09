@@ -2432,7 +2432,6 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         }
         Target::SketchContents { sketch, rows, .. } => {
             doc.feature(*sketch).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })) && !contents_selection(app, *sketch, rows).is_empty()
-
         }
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| {

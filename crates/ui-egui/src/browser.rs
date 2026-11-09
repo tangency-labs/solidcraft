@@ -3271,7 +3271,7 @@ fn sketch_contents_rows(
                 depth,
                 fold: Some(open),
                 icon: group_icon(kind),
-                label: crate::i18n::tr(group_title(kind)),
+                label: solidcraft_ui_text::tr(group_title(kind)),
                 dim,
                 count: &count,
                 ..Default::default()
@@ -3353,7 +3353,7 @@ fn sketch_contents_rows(
             }
         }
         if shown < total {
-            let show_all = crate::i18n::format("ui.details_show_all", &[("count", &total.to_string())]);
+            let show_all = solidcraft_ui_text::format("ui.details_show_all", &[("count", &total.to_string())]);
             let rr = draw_row(
                 ui,
                 ui.scope_id().with(("sketch_contents_all", scope, slug)),
