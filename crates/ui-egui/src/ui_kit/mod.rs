@@ -57,6 +57,7 @@ mod text;
 mod text_menu;
 mod theme_picker;
 mod tree;
+pub mod type_face;
 mod value_focus;
 mod viewport_status;
 mod wheel;

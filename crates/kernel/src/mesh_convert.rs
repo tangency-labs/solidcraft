@@ -501,7 +501,7 @@ mod tests {
         let sphere = crate::sphere(Vec3::ZERO, 10.).unwrap();
         assert!(convert_prismatic_mesh(&mesh_of(&sphere), 0.05).is_err());
         for coordinate in [f64::NAN, f64::INFINITY, f64::MAX, 1e30] {
-            let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], triangles: vec![] };
+            let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], triangles: vec![], corner_normals: Vec::new() };
             assert!(weld(&mesh, 0.05).is_err());
         }
     }
@@ -541,7 +541,7 @@ mod tests {
         let err = convert_prismatic_mesh(&body, 0.05).unwrap_err().to_string();
         assert!(err.contains("50001 triangles") && err.contains("50000"), "{err}");
         assert!(err.contains("constant-section") && err.contains("freeform"), "{err}");
-        let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::ZERO; MAX_TRIANGLES * 3 + 1], triangles: vec![] };
+        let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::ZERO; MAX_TRIANGLES * 3 + 1], triangles: vec![], corner_normals: Vec::new() };
         let err = weld(&mesh, 0.05).unwrap_err().to_string();
         assert!(err.contains("150001 vertices") && err.contains("150000"), "{err}");
     }

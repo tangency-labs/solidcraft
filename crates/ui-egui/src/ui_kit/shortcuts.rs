@@ -63,12 +63,13 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
     response
 }
 
-/// Native text editing with the same token frame and leading magnifier as command search.
-pub(crate) fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
-    search_with_icon(ui, id, value, hint)
+/// Native text editing with the same token frame and leading magnifier as command search. Its frame
+/// and clear button are published as `{prefix}:search:frame` and `{prefix}:search:clear`.
+pub(crate) fn preferences_search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, prefix: &str) -> Response {
+    search_with_icon(ui, id, value, hint, prefix)
 }
 
-fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, prefix: &str) -> Response {
     let t = Tokens::get();
     let height = t.form_close_size;
     let (r, frame) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), height), Sense::click());
@@ -85,7 +86,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     let show_clear = !value.is_empty();
     let clear_side = if show_clear { height } else { super::CommandSearch::key(ui, r.right_center() - vec2(t.space_6, 0.0), "Ctrl F") + t.space_12 };
-    solidcraft_ui_registry::publish_rect("prefs:search:frame", r);
+    solidcraft_ui_registry::publish_rect(&format!("{prefix}:search:frame"), r);
     let editor =
         Rect::from_min_max(pos2((icon.right() + t.space_6).min(r.right()), r.top()), pos2((r.right() - clear_side).max(icon.right()), r.bottom()));
     let response = ui
@@ -110,9 +111,7 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     if show_clear {
         let clear_rect = Rect::from_center_size(pos2(r.right() - height * 0.5, r.center().y), vec2(height, height));
         let clear = ui.push_id(id.with("clear"), |ui| super::quiet_icon_button_at(ui, clear_rect, "close", "Clear")).inner;
-        if id == egui::Id::unique("prefs_search") {
-            solidcraft_ui_registry::publish_handle("prefs:search:clear", clear_rect.center());
-        }
+        solidcraft_ui_registry::publish_handle(&format!("{prefix}:search:clear"), clear_rect.center());
         if clear.clicked() {
             value.clear();
             cleared = true;

@@ -52,13 +52,13 @@
 //!   return `NL_MEM_ERR` without changing the slot. [`CurveFunction::compact`] has no
 //!   memory error path; `N_CrvFuncSetPtrs` takes the new arrays by value and checks
 //!   that they hold the indices in use.
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The routine-name argument (`rname`) is dropped.
 //! - On error the evaluators return only the error (upstream leaves `f` / `fd` / `F`
 //!   unwritten).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::basis_basic::basis_derivs;
 use crate::nurbs::knots::{KnotVector, Side};
 
@@ -77,10 +77,6 @@ const OP_SRF_SIZE_ARRAYS: &str = "nurbs::funcs_basic::SurfaceFunction::size_arra
 const OP_SRF_SET_SIZE: &str = "nurbs::funcs_basic::SurfaceFunction::set_size_indices";
 const OP_SRF_VALUE: &str = "nurbs::funcs_basic::SurfaceFunction::value";
 const OP_SRF_EVAL: &str = "nurbs::funcs_basic::SurfaceFunction::eval";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -122,14 +118,14 @@ fn rows_hold(rows: &[Vec<f64>], n: usize, m: usize) -> bool {
 fn array_layout<T>(count: usize, op: &'static str) -> Result<()> {
     std::alloc::Layout::array::<T>(count)
         .map(|_| ())
-        .map_err(|_| nlib(op, NlibCode::Memory))
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))
 }
 
 /// Converts a highest index to an array length without saturation or overflow.
 fn array_len<T>(last: usize, op: &'static str) -> Result<usize> {
     let count = last
         .checked_add(1)
-        .ok_or_else(|| nlib(op, NlibCode::Memory))?;
+        .ok_or_else(|| SolidError::nurbs(op, NurbsFailure::Memory))?;
     array_layout::<T>(count, op)?;
     Ok(count)
 }
@@ -139,7 +135,7 @@ fn zeros(count: usize, op: &'static str) -> Result<Vec<f64>> {
     let mut values = Vec::new();
     values
         .try_reserve_exact(count)
-        .map_err(|_| nlib(op, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))?;
     values.resize(count, 0.0);
     Ok(values)
 }
@@ -254,10 +250,10 @@ impl CurveFunction {
     /// Checks that the indices in use are at least `nf` and `mk`
     /// (`N_CrvIsFuncSized`).
     ///
-    /// Errors with [`NlibCode::Storage`] (`NL_STO_ERR`) otherwise.
+    /// Errors with [`NurbsFailure::Storage`] (`NL_STO_ERR`) otherwise.
     pub fn is_sized(&self, nf: usize, mk: usize) -> Result<()> {
         if self.n < nf || self.m < mk {
-            return Err(nlib(OP_CRV_SIZED, NlibCode::Storage));
+            return Err(SolidError::nurbs(OP_CRV_SIZED, NurbsFailure::Storage));
         }
         Ok(())
     }
@@ -283,8 +279,8 @@ impl CurveFunction {
     /// have indices in use of at least `n` and `m` ([`CurveFunction::is_sized`]); its
     /// storage is kept and the indices and degree are reset to the requested values.
     ///
-    /// Errors with [`NlibCode::Storage`] when the existing function is too small
-    /// or [`NlibCode::Memory`] when new storage cannot be represented or reserved.
+    /// Errors with [`NurbsFailure::Storage`] when the existing function is too small
+    /// or [`NurbsFailure::Memory`] when new storage cannot be represented or reserved.
     /// The slot is left unchanged on error.
     pub fn size_arrays(slot: &mut Option<Self>, n: usize, p: usize, m: usize) -> Result<&mut Self> {
         if let Some(cfn) = slot {
@@ -329,7 +325,7 @@ impl CurveFunction {
     /// The function value at `u` (`N_CFuncEval`): `sum_i N[spn-p+i,p](u) * fu[spn-p+i]`
     /// with the basis of [`KnotVector::basis_eval`].
     ///
-    /// Errors: [`NlibCode::Parameter`] when `u` is outside `[U[0], U[m]]`; the errors
+    /// Errors: [`NurbsFailure::Parameter`] when `u` is outside `[U[0], U[m]]`; the errors
     /// of [`KnotVector::basis_eval`]; `InvalidInput` where upstream would read past
     /// the values (`n < m - p - 1`).
     pub fn eval(&self, u: f64, side: Side) -> Result<f64> {
@@ -341,7 +337,7 @@ impl CurveFunction {
 
         // Check parameter.
         if knt.is_param_out_of_bounds(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         // Compute non-vanishing B-splines.
@@ -361,7 +357,7 @@ impl CurveFunction {
     ///
     /// [`Side::Left`] gives right derivatives at a knot, [`Side::Right`] left ones.
     ///
-    /// Errors: [`NlibCode::Parameter`] when `u` is outside `[U[0], U[m]]`; the errors
+    /// Errors: [`NurbsFailure::Parameter`] when `u` is outside `[U[0], U[m]]`; the errors
     /// of [`basis_derivs`]; `InvalidInput` where upstream would read past the values
     /// (`n < m - p - 1`).
     pub fn derivs(&self, u: f64, side: Side, der: usize) -> Result<Vec<f64>> {
@@ -373,7 +369,7 @@ impl CurveFunction {
 
         // Check parameter.
         if knt.is_param_out_of_bounds(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         // Compute derivatives.
@@ -538,10 +534,10 @@ impl SurfaceFunction {
     /// Checks that the indices in use are at least `(nf, mf, rk, sk)`
     /// (`N_SrfIsFuncSized`).
     ///
-    /// Errors with [`NlibCode::Storage`] (`NL_STO_ERR`) otherwise.
+    /// Errors with [`NurbsFailure::Storage`] (`NL_STO_ERR`) otherwise.
     pub fn is_sized(&self, nf: usize, mf: usize, rk: usize, sk: usize) -> Result<()> {
         if self.n < nf || self.m < mf || self.r < rk || self.s < sk {
-            return Err(nlib(OP_SRF_SIZED, NlibCode::Storage));
+            return Err(SolidError::nurbs(OP_SRF_SIZED, NurbsFailure::Storage));
         }
         Ok(())
     }
@@ -579,8 +575,8 @@ impl SurfaceFunction {
     /// ([`SurfaceFunction::is_sized`]); its storage is kept and the indices and
     /// degrees are reset to the requested values.
     ///
-    /// Errors with [`NlibCode::Storage`] when the existing function is too small
-    /// or [`NlibCode::Memory`] when new storage cannot be represented or reserved.
+    /// Errors with [`NurbsFailure::Storage`] when the existing function is too small
+    /// or [`NurbsFailure::Memory`] when new storage cannot be represented or reserved.
     /// The complete grid size is checked before allocating any rows; the slot is
     /// left unchanged on error.
     pub fn size_arrays(
@@ -604,12 +600,12 @@ impl SurfaceFunction {
             let v_len = array_len::<f64>(s, OP)?;
             let cells = rows
                 .checked_mul(cols)
-                .ok_or_else(|| nlib(OP, NlibCode::Memory))?;
+                .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Memory))?;
             array_layout::<f64>(cells, OP)?;
 
             let mut fuv = Vec::new();
             fuv.try_reserve_exact(rows)
-                .map_err(|_| nlib(OP, NlibCode::Memory))?;
+                .map_err(|_| SolidError::nurbs(OP, NurbsFailure::Memory))?;
             for _ in 0..rows {
                 fuv.push(zeros(cols, OP)?);
             }
@@ -630,7 +626,7 @@ impl SurfaceFunction {
     /// The function value at `(u, v)` (`N_SrfFuncEvalPt`), with the basis of
     /// [`KnotVector::basis_eval`] in each direction.
     ///
-    /// Errors: [`NlibCode::Parameter`] when `u` or `v` is outside its knot range; the
+    /// Errors: [`NurbsFailure::Parameter`] when `u` or `v` is outside its knot range; the
     /// errors of [`KnotVector::basis_eval`] (u first); `InvalidInput` where upstream
     /// would read past the value storage.
     pub fn eval(&self, u: f64, v: f64, ufl: Side, vfl: Side) -> Result<f64> {
@@ -640,7 +636,7 @@ impl SurfaceFunction {
 
         // Check parameters.
         if knu.is_param_out_of_bounds(u) || knv.is_param_out_of_bounds(v) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         // Compute non-vanishing B-splines.
@@ -711,17 +707,11 @@ mod tests {
         let c = quad();
         assert!(matches!(
             c.eval(1.5, Side::Left),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
         assert!(matches!(
             c.derivs(-0.1, Side::Right, 1),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
     }
 
@@ -748,10 +738,7 @@ mod tests {
         // Grow beyond the indices in use: storage error.
         assert!(matches!(
             CurveFunction::size_arrays(&mut slot, 3, 1, 4),
-            Err(SolidError::Nlib {
-                code: NlibCode::Storage,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Storage))
         ));
         let c = slot.as_mut().unwrap();
         c.compact();
@@ -780,10 +767,7 @@ mod tests {
         assert!((f - want).abs() < 1e-14);
         assert!(matches!(
             s.eval(0.5, 2.0, Side::Left, Side::Left),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
     }
 
@@ -811,10 +795,7 @@ mod tests {
                 let mut slot = None;
                 assert!(matches!(
                     CurveFunction::size_arrays(&mut slot, n, 1, m),
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Memory,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
                 ));
                 assert!(slot.is_none());
             }
@@ -833,10 +814,7 @@ mod tests {
                 let mut slot = None;
                 assert!(matches!(
                     SurfaceFunction::size_arrays(&mut slot, n, m, 1, 1, r, s),
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Memory,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
                 ));
                 assert!(slot.is_none());
             }
@@ -849,13 +827,10 @@ mod tests {
         let side = 1_usize << (usize::BITS / 2);
         for (n, m) in [(1, isize::MAX as usize / 16), (side - 1, side - 1)] {
             let mut slot = None;
-            assert!(matches!(
+            assert_eq!(
                 SurfaceFunction::size_arrays(&mut slot, n, m, 1, 1, 0, 0),
-                Err(SolidError::Nlib {
-                    operation: OP_SRF_SIZE_ARRAYS,
-                    code: NlibCode::Memory,
-                })
-            ));
+                Err(SolidError::nurbs(OP_SRF_SIZE_ARRAYS, NurbsFailure::Memory))
+            );
             assert!(slot.is_none());
         }
     }
@@ -866,10 +841,7 @@ mod tests {
         let original_curve = curve.clone();
         assert!(matches!(
             CurveFunction::size_arrays(&mut curve, usize::MAX, 0, 0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Storage,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Storage))
         ));
         assert_eq!(curve, original_curve);
 
@@ -878,10 +850,7 @@ mod tests {
         let original_surface = surface.clone();
         assert!(matches!(
             SurfaceFunction::size_arrays(&mut surface, 0, 0, 0, 0, usize::MAX, 0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Storage,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Storage))
         ));
         assert_eq!(surface, original_surface);
     }

@@ -205,7 +205,7 @@ pub(crate) fn sphere_preview_with_source<R>(
                 ui.spacing_mut().item_spacing.y = t.space_4;
                 ui.add_sized(
                     vec2(text_width, t.space_16),
-                    egui::Label::new(egui::RichText::new(name).font(crate::fonts::semibold(t.font_label)).color(t.form_ink))
+                    egui::Label::new(egui::RichText::new(name).font(crate::ui_kit::type_face::semibold(t.font_label)).color(t.form_ink))
                         .truncate()
                         .halign(egui::Align::Min),
                 )
@@ -254,7 +254,7 @@ impl SphereTile<'_> {
         let t = Tokens::get();
         let accent = solidcraft_theme::TabAccent::current(ui.ctx());
         let side = t.control_height + t.space_6;
-        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&crate::fonts::semibold(t.font_small)));
+        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&crate::ui_kit::type_face::semibold(t.font_small)));
         let height = t.space_16 + side + t.space_6 + line_height * 2.0 + t.space_3;
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let response = ui.interact(rect, ui.make_persistent_id(self.id), Sense::click_and_drag());
@@ -271,20 +271,20 @@ impl SphereTile<'_> {
                 cell.left_top() + vec2(t.space_4, t.space_4),
                 egui::Align2::LEFT_TOP,
                 badge,
-                crate::fonts::semibold(t.font_badge),
+                crate::ui_kit::type_face::semibold(t.font_badge),
                 t.form_dim,
             );
         }
         if self.users > 0 {
             let text = if self.users > 99 { "99+".into() } else { self.users.to_string() };
-            let galley = ui.painter().layout_no_wrap(text, crate::fonts::semibold(t.font_badge), t.on_accent);
+            let galley = ui.painter().layout_no_wrap(text, crate::ui_kit::type_face::semibold(t.font_badge), t.on_accent);
             let width = (galley.size().x + t.space_8).max(t.space_16);
             let badge = Rect::from_min_size(pos2(cell.right() - t.space_4 - width, cell.top() + t.space_2), vec2(width, t.space_16));
             ui.painter().rect_filled(badge, t.radius_lg, accent.ink);
             ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.on_accent);
         }
         let label = Rect::from_min_max(pos2(rect.left() + t.space_3, preview.bottom() + t.space_6), rect.max - vec2(t.space_3, t.space_3));
-        let font = if self.selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let font = if self.selected { crate::ui_kit::type_face::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
         let mut job = egui::text::LayoutJob::simple(self.name.to_owned(), font, t.form_ink, label.width());
         job.halign = egui::Align::Center;
         job.wrap.max_rows = 2;

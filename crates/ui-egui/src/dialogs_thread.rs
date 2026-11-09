@@ -726,6 +726,7 @@ mod contribution_tests {
     };
     use serde_json::json;
     use solidcore_record::Vec3;
+    use solidcraft_engine::geom::MeshGeom;
     use solidcraft_engine::{Sel, Session};
     fn hole() -> (SolveApp, Dialog) {
         let mut app = SolveApp::new(Session::default(), Services::default());

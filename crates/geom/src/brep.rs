@@ -11,12 +11,6 @@ use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
 pub mod eval;
 pub mod form;
 pub mod normal_section;
-/// The pcurve evaluator moved to the kernel (`solidcore::eval::pcurve`, through
-/// `solidcore_ops::pcurve`). Kept here for `crates/kernel/src/tess` only, which is moving into
-/// solidcore-tess: its call sites switch in that move, and this goes with them.
-pub mod pcurve {
-    pub use solidcore_ops::pcurve::eval;
-}
 pub mod placement;
 mod split;
 pub use split::split_edges;
