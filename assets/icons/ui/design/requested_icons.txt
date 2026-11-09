@@ -60,7 +60,6 @@ circle_ttt	false
 close	false
 coil	false
 colored_components	false
-colored_components_off	false
 combine	false
 compare	false
 component	false
@@ -161,6 +160,7 @@ min_radius	false
 mirror	false
 motion_link	false
 move	false
+nav_settings	false
 new	false
 normal	false
 offset	false

@@ -325,28 +325,28 @@ fn damaged_files_are_refused_and_never_patched() {
         let why = refused(&d, edit);
         assert!(why.starts_with("damaged drawing: ") && why.contains("unknown field"), "{i}: {why}");
     }
-    // A newer build's file is refused as one before anything in it is read: a field this build
-    // doesn't know, or a number out of its range.
+    // A newer build's file isn't held to this build's rules: a field it doesn't know, or a sheet with
+    // a number out of range, stays out. With no sheet left to show, it says why.
     let (current, newer) = (DRAWING.current(), DRAWING.current() + 1);
     let why = refused(&d, |v| {
         v["format"] = json!(DRAWING.format_string(newer));
         v["views"] = json!([]);
-        v["sheets"][0]["dpi"] = json!(1e10);
     });
-    assert_eq!(
-        why,
-        format!(
-            "this drawing was saved by a newer SolidCraft (file format {newer}; this version reads formats up to {current}): update SolidCraft to open it"
-        )
+    assert_eq!(why, "read");
+    let why = refused(&d, |v| {
+        v["format"] = json!(DRAWING.format_string(newer));
+        v["sheets"] = json!([{"id": "future", "a_future_field": true}]);
+    });
+    assert!(
+        why.starts_with(&format!(
+            "this drawing was saved by a newer SolidCraft (format {newer}, this version reads up to {current}) and this version can't read it: "
+        )),
+        "{why}"
     );
     // A list of pending changes means nothing beside a format made of none; beside the pending
     // number, a change this build doesn't know is a newer build's.
     let why = refused(&d, |v| v["format_pending"] = json!(["a-later-change"]));
-    if DRAWING.pending_names().is_empty() {
-        assert_eq!(why, "read");
-    } else {
-        assert!(why.contains("newer SolidCraft"), "{why}");
-    }
+    assert_eq!(why, "read");
     // A design is never read as a drawing, nor a drawing as a design.
     let design = crate::Document::new("Plate").to_json();
     let design_format = crate::format::format_string(crate::format::FORMAT);
@@ -550,4 +550,33 @@ fn mutate(v: &mut Value, pick: &mut usize, lie: &Value, how: u64) -> bool {
         Value::Object(o) => o.values_mut().any(|x| mutate(x, pick, lie, how)),
         _ => false,
     }
+}
+
+/// A drawing a newer build saved opens, with what it can read, and saving keeps the rest.
+#[test]
+fn a_newer_builds_drawing_opens_and_keeps_what_it_cant_read() {
+    let d = plate();
+    let mut file: Value = file(&d);
+    assert!(file.as_object().unwrap().keys().all(|key| RECORD_FIELDS.contains(&key.as_str())), "a new field goes in RECORD_FIELDS");
+    let newer = DRAWING.format_string(DRAWING.current() + 1);
+    file["format"] = json!(newer);
+    // With nothing it can't read: the same drawing.
+    let opened = Drawing::from_json(&file.to_string()).unwrap();
+    assert_eq!(opened.sheets, d.sheets);
+    assert!(opened.newer_file.as_ref().unwrap().notice().starts_with("Saved by a newer SolidCraft"));
+    assert_eq!(serde_json::from_str::<Value>(&opened.to_json().unwrap()).unwrap()["format"], json!(newer));
+    // A field and a second sheet it can't read stay out, named, and go back.
+    file["views"] = json!([{"id": "a"}]);
+    let mut future_sheet = file["sheets"][0].clone();
+    future_sheet["name"] = json!("Future");
+    future_sheet["future_layers"] = json!([1]);
+    file["sheets"].as_array_mut().unwrap().push(future_sheet);
+    let opened = Drawing::from_json(&file.to_string()).unwrap();
+    assert_eq!(opened.sheets, d.sheets);
+    let said = &opened.newer_file.as_ref().unwrap().not_understood;
+    assert!(said.iter().any(|what| what.contains("views")) && said.iter().any(|what| what.contains("Future")), "{said:?}");
+    let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
+    assert_eq!(again["views"], file["views"]);
+    assert_eq!(again["sheets"].as_array().unwrap().len(), d.sheets.len() + 1);
+    assert_eq!(again["format"], json!(newer));
 }

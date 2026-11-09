@@ -19,6 +19,7 @@ pub mod pcurves;
 mod sheets;
 mod split;
 pub mod ssi;
+pub mod stop;
 pub mod sweeps;
 pub mod trace;
 pub mod trim;
@@ -54,7 +55,7 @@ pub enum Error {
     /// middle of the edge it was found for, and why there is no room, when the refusal names them.
     TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, why: Option<RoomReason> },
     /// A shell, offset or thicken whose wall is thicker than a face curves: the face's offset
-    /// folds (solidcore's `ShellRefused`, `ShellRefusal::Fold`). The largest wall that works,
+    /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
     WallFolds { largest: Option<f64> },
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
@@ -242,6 +243,13 @@ pub fn set_dump_dir(dir: Option<&Path>) {
 /// The kernel call running right now, if any: for crash reports. Takes no lock.
 pub fn current_call() -> Option<String> {
     core::dump::current()
+}
+
+/// Keeps one of the kernels calls run on out of use until dropped: the next calls run on another.
+/// For tests of what happens when a design's bodies come from a kernel that is busy elsewhere.
+#[doc(hidden)]
+pub fn hold_a_kernel() -> core::HeldKernel {
+    core::hold_a_kernel()
 }
 
 /// Is this thread inside a solidcore call? A panic there is caught and becomes

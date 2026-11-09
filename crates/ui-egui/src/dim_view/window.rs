@@ -101,7 +101,7 @@ thread_local! {
 /// Whether the open window is under `p`: the wheel there steps its value, so the camera under it
 /// does not zoom (navigation asks).
 pub(crate) fn covers(ctx: &egui::Context, p: Pos2) -> bool {
-    super::editing() && ctx.memory(|m| m.area_rect(egui::Id::new(AREA))).is_some_and(|r| r.contains(p))
+    super::editing() && ctx.memory(|m| m.area_rect(egui::Id::unique(AREA))).is_some_and(|r| r.contains(p))
 }
 
 /// Forget the worked-out value (the edit closed).
@@ -183,13 +183,13 @@ fn place(app: &SolveApp, ctx: &egui::Context, param: &str, at: Pos2, size: egui:
 /// the control channel. True when clicked.
 fn button(ui: &mut egui::Ui, rect: Rect, key: &str, tip: &str, icon: &str) -> bool {
     let t = Tokens::get();
-    let response = ui.interact(rect, ui.id().with(key), egui::Sense::click());
+    let response = ui.interact(rect, ui.scope_id().with(key), egui::Sense::click());
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     crate::icons::paint_icon(ui.painter(), rect.shrink(t.space_4), icon, 1.0);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tip));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     crate::scenario::publish_target(key, rect);
     response.on_hover_text(tip).clicked()
 }
@@ -199,8 +199,8 @@ fn button(ui: &mut egui::Ui, rect: Rect, key: &str, tip: &str, icon: &str) -> bo
 /// whether a new dimension's picks go too (the cross, Esc), as Esc in the box does.
 pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Pos2) -> (Option<bool>, bool) {
     let t = Tokens::get();
-    let id = egui::Id::new("sc_dim_edit");
-    let area = egui::Id::new(AREA);
+    let id = egui::Id::unique("sc_dim_edit");
+    let area = egui::Id::unique(AREA);
     let (kind, error) = match &e.draft {
         Some(draft) => (kind(&draft.preview_doc, &e.param), draft.error.clone()),
         None => (kind(&app.session.doc, &e.param), existing(app, &e.param, &e.expr).1),
@@ -229,17 +229,17 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 ui.set_width(width);
                 // The parameter's name, then the check and the cross.
                 let (title, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
-                let name = crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]);
+                let name = solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(title).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline).on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline).on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                 });
                 let side = t.control_height;
                 let cancel = Rect::from_min_size(egui::pos2(title.right() - side, title.top()), egui::vec2(side, side));
                 let ok = cancel.translate(egui::vec2(-(side + t.space_2), 0.0));
-                if button(ui, ok, "dimwin:ok", crate::i18n::tr("ui.heading_ok"), "finish") {
+                if button(ui, ok, "dimwin:ok", solidcraft_ui_text::tr("ui.heading_ok"), "finish") {
                     answer = Some(true);
                 }
-                if button(ui, cancel, "dimwin:cancel", crate::i18n::tr("ui.cancel"), "close") {
+                if button(ui, cancel, "dimwin:cancel", solidcraft_ui_text::tr("ui.cancel"), "close") {
                     answer = Some(false);
                     escaped = true;
                 }
@@ -261,9 +261,9 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                         let can_step = step(&e.expr, 1.0).is_some();
                         let tip = |id: &str| {
                             if can_step {
-                                crate::i18n::format(id, &[("step", &step_text)])
+                                solidcraft_ui_text::format(id, &[("step", &step_text)])
                             } else {
-                                crate::i18n::tr("dialog.dimension_step_expression").to_string()
+                                solidcraft_ui_text::tr("dialog.dimension_step_expression").to_string()
                             }
                         };
                         let up = crate::ui_kit::compact_button(ui, crate::ui_kit::MOVE_UP, &tip("dialog.dimension_step_up"), can_step, false);

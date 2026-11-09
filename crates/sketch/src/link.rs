@@ -1078,7 +1078,10 @@ impl Sketch {
             // thicker moves the inner corner by more than a tenth of the face) is still the same
             // boundary when two witnesses agree: the new boundary was read in the same order
             // with the same curves, and each point read in that order is, among the points on
-            // the same loop with lines the same way, clearly the nearest to where it was.
+            // the same loop with lines leaving them the same ways, clearly the nearest to where
+            // it was. The two end corners of a thin arm have the same lines; the lines leave them
+            // in opposite senses, which tells them apart when the box the points are compared in
+            // shrinks with the face (#12086).
             same_order_agrees = same
                 && loop_roles.as_ref().is_some_and(|roles| {
                     (0..points.len()).all(|k| {
@@ -1090,6 +1093,7 @@ impl Sketch {
                                 old_roles.get(k) == fresh_roles.get(*i)
                                     && roles.old.get(k) == roles.fresh.get(*i)
                                     && roles.old_lines.get(k).zip(roles.fresh_lines.get(*i)).is_some_and(|(x, y)| loops::same_lines(x, y))
+                                    && roles.old_leaving.get(k).zip(roles.fresh_leaving.get(*i)).is_some_and(|(x, y)| loops::same_leaving(x, y))
                             })
                             .map(|(i, q)| (i, p.dist(*q)))
                             .collect();

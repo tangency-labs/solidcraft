@@ -1,0 +1,28 @@
+[package]
+name = "solidcore-ops"
+description = "The modelling operations applications built on solidcore call: each a sequence of kernel calls, converting through solidcore-convert, computing no geometry of its own"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+# solidcore-record needs Rust 1.88 (edition 2024 let chains).
+rust-version = "1.88"
+repository = "https://github.com/tangency-labs/solidcore"
+keywords = ["cad", "brep", "nurbs", "modelling"]
+categories = ["science"]
+
+# Layers §3: ops sits on the kernel, the record and the conversion only.
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-record = { path = "../solidcore-record" }
+solidcore-convert = { path = "../solidcore-convert" }
+
+# The kernel rig corpus's entries are JSON, their records gzip: read by its runner
+# (tests/kernel_cases.rs) and by the unit tests' corpus cases (src/test_corpus.rs).
+[dev-dependencies]
+flate2 = "1.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lints]
+workspace = true

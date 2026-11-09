@@ -2,12 +2,12 @@
 //!
 //! Everything SolidCraft does with solids goes through this crate: building bodies from planar
 //! regions (extrude, revolve) and primitives, booleans, fillets and chamfers, tessellation,
-//! measurement and STEP export and import. The implementation uses the `truck` crates (Apache-2.0; see
-//! `plan/adr/0001-geometry-kernel.md`) plus our own local operations (edge fillets and
-//! chamfers in `blend.rs`), but no truck type appears in the public API, so the kernel can be
-//! replaced without touching the rest of the workspace.
+//! measurement and STEP export and import. The implementation uses the vendored `solidcore`
+//! kernel (Apache-2.0, `solidcore`) plus our own local operations (edge fillets and
+//! chamfers in `blend.rs`), but no solidcore type appears in the public API, so the kernel can
+//! be replaced without touching the rest of the workspace.
 //!
-//! Every call into the third-party kernel runs under [`guard`]: a panic inside it becomes a
+//! Every call into the vendored kernel runs under [`guard`]: a panic inside it becomes a
 //! [`KernelError::Internal`] instead of taking the application down.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -199,7 +199,7 @@ pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
-pub use meshbody::{MAX_TRIANGLES, mesh_body};
+pub use meshbody::{MAX_TRIANGLES, mesh_body, mesh_body_with_normals};
 pub use native::{body_from_smlib, smlib_body};
 pub use native::{brep_record, decode_native_body, encode_native_body, native_preview_mesh};
 pub use offset::with_same_surface;
@@ -215,6 +215,8 @@ pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
+pub use solidcraft_smlib::hold_a_kernel;
+pub use solidcraft_smlib::stop::Stop;
 pub use solidcraft_smlib::trace as smlib_trace;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
@@ -250,7 +252,7 @@ pub enum KernelError {
     /// shown like any feature that isn't supported yet.
     #[error("the operation failed: not supported yet: {0}")]
     TooLarge(String),
-    /// The third-party kernel panicked; the model is unchanged.
+    /// The vendored kernel panicked; the model is unchanged.
     #[error("kernel internal error: {0}")]
     Internal(String),
 }
@@ -320,7 +322,7 @@ pub fn crash_test() -> Result<()> {
     solidcraft_smlib::crash_test().map_err(|e| KernelError::smlib("crash test", e))
 }
 
-/// Run third-party kernel code, converting a panic into an error.
+/// Run vendored kernel code, converting a panic into an error.
 pub fn guard<T>(what: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
     struct Depth;
     impl Drop for Depth {

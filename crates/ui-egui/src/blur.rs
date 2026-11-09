@@ -192,6 +192,8 @@ mod implementation {
     pub struct State {
         radius: f32,
     }
+    /// A frame's blur, as the native [`State::begin`] gives it; here there is nothing to end.
+    pub struct Scope;
     impl State {
         pub fn install(&mut self, _: &egui_wgpu::RenderState, _: bool) {}
         pub fn set_radius(&mut self, radius: f32) -> Result<(), &'static str> {
@@ -210,7 +212,9 @@ mod implementation {
         pub fn counters(&self) -> Counters {
             Counters::default()
         }
-        pub fn begin(&mut self, _: &egui::Context, _: bool) {}
+        pub fn begin(&mut self, _: &egui::Context, _: bool) -> Scope {
+            Scope
+        }
         pub fn set_surface_alpha(&mut self, _: Option<u8>) {}
         pub fn set_available(&mut self, _: bool) {}
         pub fn set_tier_cap(&mut self, _: usize) {}

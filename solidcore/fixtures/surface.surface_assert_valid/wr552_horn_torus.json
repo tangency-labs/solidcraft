@@ -1,0 +1,116 @@
+{
+ "cases": [
+  {
+   "name": "wr552_horn_torus_snapped_m0",
+   "note": "The snapped horn torus (major = minor, the port's analytic_revolution with the opt-in). WR-552 (fork c4e378d): the torus a whole turn of the arc of radius 10 + 1e-10 about (10, 0), ending on the Y axis, sweeps. The arc stops sqrt(2 R 1e-10) short of the apex height, so the V boundary circle there has a radius of about 1e-10: the port's check fails SmSurface test #5 (approximately but not exactly singular) on it; this compares SMLib's.",
+   "inputs": {
+    "block": [
+     5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     89.99999999999999,
+     360.0,
+     179.99974376501865,
+     10.000000000100002,
+     10.000000000100002,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wr552_horn_torus_face_m0",
+   "note": "The torus the swept face ends up with (radii 3 ulp apart, its domain). WR-552 (fork c4e378d): the torus a whole turn of the arc of radius 10 + 1e-10 about (10, 0), ending on the Y axis, sweeps. The arc stops sqrt(2 R 1e-10) short of the apex height, so the V boundary circle there has a radius of about 1e-10: the port's check fails SmSurface test #5 (approximately but not exactly singular) on it; this compares SMLib's.",
+   "inputs": {
+    "block": [
+     5.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     90.00000000000001,
+     360.0,
+     179.99974376501856,
+     10.000000000100004,
+     10.000000000100007,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wr552_horn_torus_snapped_m1",
+   "note": "The snapped horn torus (major = minor, the port's analytic_revolution with the opt-in). WR-552 (fork c4e378d): the torus a whole turn of the arc of radius 10 + 1e-10 about (10, 0), ending on the Y axis, sweeps. The arc stops sqrt(2 R 1e-10) short of the apex height, so the V boundary circle there has a radius of about 1e-10: the port's check fails SmSurface test #5 (approximately but not exactly singular) on it; this compares SMLib's.",
+   "inputs": {
+    "block": [
+     5.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     89.99999999999999,
+     360.0,
+     179.99974376501865,
+     10.000000000100002,
+     10.000000000100002,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "wr552_horn_torus_face_m1",
+   "note": "The torus the swept face ends up with (radii 3 ulp apart, its domain). WR-552 (fork c4e378d): the torus a whole turn of the arc of radius 10 + 1e-10 about (10, 0), ending on the Y axis, sweeps. The arc stops sqrt(2 R 1e-10) short of the apex height, so the V boundary circle there has a radius of about 1e-10: the port's check fails SmSurface test #5 (approximately but not exactly singular) on it; this compares SMLib's.",
+   "inputs": {
+    "block": [
+     5.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     90.00000000000001,
+     360.0,
+     179.99974376501856,
+     10.000000000100004,
+     10.000000000100007,
+     0.0,
+     0.0
+    ]
+   }
+  }
+ ]
+}

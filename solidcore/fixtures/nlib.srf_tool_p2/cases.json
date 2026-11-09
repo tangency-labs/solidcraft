@@ -1,0 +1,2117 @@
+{
+ "cases": [
+  {
+   "name": "Surface_elevate_u_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_elevate_u_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_elevate_u_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 2,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_elevate_u_1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_elevate_u_too_high",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 17,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k0_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.0323000000097693,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k0_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.0323000000097693,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k0_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.0323000000097693,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 4,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k1_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.1580195729049453,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k1_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.1580195729049453,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k1_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.1580195729049453,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 5,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k2_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.2001195729147676,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k2_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.2001195729147676,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k2_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.2001195729147676,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 6,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k3_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5378790260004654,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k3_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5378790260004654,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k3_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5378790260004654,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k3",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 7,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k4_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5799790260102878,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k4_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5799790260102878,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k4_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5799790260102878,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k4",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 8,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k5_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.7841343359098634,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k5_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.7841343359098634,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k5_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.7841343359098634,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k5",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 9,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k6_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8262343359196858,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k6_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8262343359196858,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k6_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8262343359196858,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k6",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 10,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k7_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8293664333098115,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k7_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8293664333098115,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k7_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8293664333098115,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k7",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 11,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k8_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8714664333196339,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k8_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8714664333196339,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k8_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.8714664333196339,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k8",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 12,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k9_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.990199999999947,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k9_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.990199999999947,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_k9_tol1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.990199999999947,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_remove_one_u_k9",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "r": 13,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.0,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_remove_cond_u_nonknot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5000001,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "Surface_elevate_v_0",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_elevate_v_1",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_elevate_v_2",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 2,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "Surface_elevate_v_1_inplace",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "Surface_elevate_v_too_high",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 17,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_remove_cond_v_end",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.0634210842965636,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_remove_cond_v_nonknot",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.3505849413052427,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "Surface_elevate_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 3
+   }
+  },
+  {
+   "name": "Surface_remove_cond_uv",
+   "upstream_ref": "tests/prog_test/src/smSurfaceTest.cpp:4117 (my_test_surface_closest_point, Surface.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "Surface.sms"
+     }
+    },
+    "t": 0.5,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_u_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_u_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_u_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 2,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_u_1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_u_too_high",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 17,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_cond_u_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.0,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_cond_u_nonknot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.5000001,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_v_0",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_v_1",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_v_2",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 2,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_v_1_inplace",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_v_too_high",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 17,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_cond_v_end",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.0,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_cond_v_nonknot",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.5000001,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "DropCurveSurface_elevate_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 1,
+    "dir": 3
+   }
+  },
+  {
+   "name": "DropCurveSurface_remove_cond_uv",
+   "upstream_ref": "TestFiles/pt_TestFiles/DropCurveSurface.sms (my_test_drop_point surface data)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "DropCurveSurface.sms"
+     }
+    },
+    "t": 0.5,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_u_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 0,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_u_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 1,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_u_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 2,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_u_1_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 1,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_u_too_high",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 17,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_k0_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -4.061086369737861,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_k0_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -4.061086369737861,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_k0_tol1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -4.061086369737861,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_remove_one_u_k0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "r": 4,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_k1_tol1e-09",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.030543184868931,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_k1_tol0.001",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.030543184868931,
+    "nt": 1,
+    "tol": 0.001,
+    "dir": 1,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_k1_tol1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.030543184868931,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_remove_one_u_k1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "r": 5,
+    "s": 1,
+    "f": 0,
+    "l": 1,
+    "dir": 1,
+    "mr": 1.7976931348623157e+308
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -5.475299932110956,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_u_nonknot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.737649866055478,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 1
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_v_0",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 0,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_v_1",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 1,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_v_2",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 2,
+    "dir": 2,
+    "inplace": false
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_v_1_inplace",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 1,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_v_too_high",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 17,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_v_end",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 0.0,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_v_nonknot",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 5.0000001,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 2
+   }
+  },
+  {
+   "name": "offset_nurb_elevate_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": 1,
+    "dir": 3
+   }
+  },
+  {
+   "name": "offset_nurb_remove_cond_uv",
+   "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:3769 (offset_nurb.sms)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "sms": {
+      "$upstream_file": "offset_nurb.sms"
+     }
+    },
+    "t": -2.737649966055478,
+    "nt": 1,
+    "tol": 1.0,
+    "dir": 3
+   }
+  },
+  {
+   "name": "rectangle_elevate_u_2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "net": [
+      [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        4.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ]
+    },
+    "t": 2,
+    "dir": 1
+   }
+  },
+  {
+   "name": "rectangle_elevate_v_2",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "net": [
+      [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        4.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ]
+    },
+    "t": 2,
+    "dir": 2
+   }
+  },
+  {
+   "name": "rectangle_refined_remove_u_025",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "net": [
+      [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        4.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0.0,
+      0.0,
+      0.25,
+      0.5,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0
+     ]
+    },
+    "t": 0.25,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 1
+   }
+  },
+  {
+   "name": "rectangle_refined_remove_v_05",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "remove_conditional",
+    "sur": {
+     "net": [
+      [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        4.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0.0,
+      0.0,
+      0.25,
+      0.5,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0
+     ]
+    },
+    "t": 0.5,
+    "nt": 1,
+    "tol": 1e-09,
+    "dir": 2,
+    "inplace": true
+   }
+  },
+  {
+   "name": "rectangle_refined_remove_one_u",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "remove_one_knot",
+    "sur": {
+     "net": [
+      [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        4.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0.0,
+      0.0,
+      0.25,
+      0.5,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0
+     ]
+    },
+    "r": 3,
+    "s": 1,
+    "f": 0,
+    "l": 2,
+    "dir": 1,
+    "mr": -1.0
+   }
+  },
+  {
+   "name": "rectangle_refined_elevate_u_3",
+   "upstream_ref": "tests/SM_API_test/src/SM_API_test.cpp:604 (TestSmCreateRectangle: planar bilinear patch)",
+   "inputs": {
+    "op": "elevate",
+    "sur": {
+     "net": [
+      [
+       [
+        0.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        2.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        4.0,
+        0.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        1.0,
+        0.0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4.0,
+        2.0,
+        0.0,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "p": 1,
+     "q": 1,
+     "u": [
+      0.0,
+      0.0,
+      0.25,
+      0.5,
+      1.0,
+      1.0
+     ],
+     "v": [
+      0.0,
+      0.0,
+      0.5,
+      1.0,
+      1.0
+     ]
+    },
+    "t": 3,
+    "dir": 1
+   }
+  }
+ ]
+}

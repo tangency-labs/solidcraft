@@ -334,8 +334,14 @@ impl<'a> Lexer<'a> {
 
 /// Decode the Part 21 string escapes (`\X\hh`, `\X2\…\X0\`, `\X4\…\X0\`, `\S\c`, `\\`).
 fn decode_string(raw: &[u8]) -> String {
+    decode_string_with_end(raw, |rest| rest.windows(4).position(|w| w == b"\\X0\\"))
+}
+
+/// The decoder with its terminator search supplied, so tests can bound search work directly.
+fn decode_string_with_end(raw: &[u8], mut find_end: impl FnMut(&[u8]) -> Option<usize>) -> String {
     let mut out = String::new();
     let mut i = 0;
+    let mut no_more_run_ends = false;
     let hex = |b: &[u8]| std::str::from_utf8(b).ok().and_then(|t| u32::from_str_radix(t, 16).ok());
     while let Some(&c) = raw.get(i) {
         if c == b'\\' {
@@ -354,9 +360,15 @@ fn decode_string(raw: &[u8]) -> String {
             }
             let mut run = false;
             for (tag, width) in [(&b"\\X2\\"[..], 4usize), (&b"\\X4\\"[..], 8)] {
-                if rest.starts_with(tag)
-                    && let Some(end) = rest.windows(4).position(|w| w == b"\\X0\\")
-                {
+                if rest.starts_with(tag) && !no_more_run_ends {
+                    let Some(end) = find_end(rest) else {
+                        // No terminator exists anywhere in the remaining input. Keep the
+                        // existing literal recovery, but never scan this tail again. A
+                        // successful search consumes its run, so all searches together
+                        // inspect at most the input's length.
+                        no_more_run_ends = true;
+                        break;
+                    };
                     let body = rest.get(4..end).unwrap_or(&[]);
                     let units: Vec<u32> = body.chunks(width).filter_map(hex).collect();
                     if width == 4 {
@@ -538,6 +550,40 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unterminated_unicode_escape_search_is_linear() {
+        // A separator keeps the closing backslash from pairing with the next opening
+        // backslash as an escaped `\\`. Without it, only the first tag is searched.
+        for (tag, literal) in [(b"\\X2\\ ", "\\X2\\ "), (b"\\X4\\ ", "\\X4\\ ")] {
+            let raw = tag.repeat(100_000);
+            let mut comparisons = 0;
+            let decoded = decode_string_with_end(&raw, |rest| {
+                rest.windows(4).position(|w| {
+                    comparisons += 1;
+                    assert!(comparisons <= raw.len(), "the decoder searched the same tail repeatedly");
+                    w == b"\\X0\\"
+                })
+            });
+            assert_eq!(decoded, literal.repeat(100_000));
+        }
+    }
+
+    #[test]
+    fn terminated_runs_and_literal_recovery_keep_their_text() {
+        let raw = b"\\X2\\00E9\\X0\\".repeat(1_000);
+        let mut comparisons = 0;
+        let decoded = decode_string_with_end(&raw, |rest| {
+            rest.windows(4).position(|w| {
+                comparisons += 1;
+                assert!(comparisons <= raw.len());
+                w == b"\\X0\\"
+            })
+        });
+        assert_eq!(decoded, "\u{e9}".repeat(1_000));
+        assert_eq!(decode_string(b"\\X2\\oops \\X\\41 \\S\\a"), "\\X2\\oops A \u{e1}");
+        assert_eq!(decode_string(b"\\X2\\\\X2\\"), "\\X2\\X2\\");
+    }
 
     #[test]
     fn parses_simple_and_complex() {

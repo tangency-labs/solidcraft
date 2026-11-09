@@ -1,0 +1,1506 @@
+{
+  "coverage": "Nested non-empty Boolean results as primary/other operands, then independent forests with null slots and unused boxes. Separated point operands avoid null intermediate results; each case asserts the final vertex count.",
+  "cases": [
+    {
+      "name": "nested_right_union_of_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -1,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_left_union_then_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          2,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_right_difference_of_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 1,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -1,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_left_union_then_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          2,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_right_merge_of_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -1,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_left_union_then_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          2,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_right_xor_of_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -1,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_left_difference_then_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -3,
+          2,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_right_union_of_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -3,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_right_difference_of_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 1,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -3,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_left_difference_then_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -3,
+          2,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_right_merge_of_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -3,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_left_difference_then_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -3,
+          2,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_right_xor_of_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -3,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_left_merge_then_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -4,
+          2,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_right_union_of_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -4,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_left_merge_then_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -4,
+          2,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_right_difference_of_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 1,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -4,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_right_merge_of_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -4,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_left_merge_then_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -4,
+          2,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_right_xor_of_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -4,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_left_xor_then_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -5,
+          2,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_right_union_of_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -5,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "nested_left_xor_then_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 2,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -5,
+          2,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_right_difference_of_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 1,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -5,
+          -3
+        ]
+      }
+    },
+    {
+      "name": "nested_left_xor_then_merge",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -5,
+          2,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_right_merge_of_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -5,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "nested_left_xor_then_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -5,
+          2,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_right_xor_of_xor",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          2,
+          -5,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "nested_balanced_union_xor_difference",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (both binary operands are prior Boolean results)",
+      "coverage": "Reduce two independently computed non-empty subexpressions, unlike a homogeneous left fold.",
+      "expected_vertices": 3,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          },
+          {
+            "point": [
+              6.0,
+              7.0,
+              -8.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          2,
+          3,
+          -3,
+          -5
+        ]
+      }
+    },
+    {
+      "name": "forest_union_before_leaf_unused_box",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "coverage": "A Boolean result precedes a standalone leaf; unused box appends in input order.",
+      "expected_vertices": 11,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          },
+          {
+            "point": [
+              20.0,
+              20.0,
+              20.0
+            ],
+            "size": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "forest_leaf_before_union_unused_box",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "coverage": "A standalone leaf precedes a Boolean result; verifies stack output order separately from unused operand order.",
+      "expected_vertices": 11,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          },
+          {
+            "point": [
+              20.0,
+              20.0,
+              20.0
+            ],
+            "size": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          }
+        ],
+        "tree": [
+          2,
+          0,
+          1,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "forest_union_then_null_unused_box",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "coverage": "A consumed leaf later produces a null output slot without any null dereference; unused box remains live.",
+      "expected_vertices": 10,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              20.0,
+              20.0,
+              20.0
+            ],
+            "size": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          0
+        ]
+      }
+    },
+    {
+      "name": "forest_null_between_live_and_union",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "coverage": "A repeated untouched leaf leaves a null between a live operand and an independent union result.",
+      "expected_vertices": 11,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          },
+          {
+            "point": [
+              20.0,
+              20.0,
+              20.0
+            ],
+            "size": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          0,
+          1,
+          2,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "forest_independent_union_merge_unused_box",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "coverage": "Two independent non-empty Boolean results remain on the stack; unused box appends last.",
+      "expected_vertices": 12,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          },
+          {
+            "point": [
+              6.0,
+              7.0,
+              -8.0
+            ]
+          },
+          {
+            "point": [
+              20.0,
+              20.0,
+              20.0
+            ],
+            "size": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          }
+        ],
+        "tree": [
+          0,
+          1,
+          -1,
+          2,
+          3,
+          -4
+        ]
+      }
+    },
+    {
+      "name": "forest_difference_and_two_unused_boxes",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:BooleanTrees (nested stack results and unused operand append)",
+      "coverage": "A difference and leaf retain their order while unused boxes from before and between consumed operands append in input order.",
+      "expected_vertices": 18,
+      "inputs": {
+        "family": 0,
+        "operation": 0,
+        "a": [
+          {
+            "point": [
+              20.0,
+              20.0,
+              20.0
+            ],
+            "size": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              1.0,
+              2.0,
+              3.0
+            ]
+          },
+          {
+            "point": [
+              4.0,
+              -2.0,
+              0.0
+            ]
+          },
+          {
+            "point": [
+              -20.0,
+              -20.0,
+              -20.0
+            ],
+            "size": [
+              2.0,
+              1.0,
+              2.0
+            ]
+          },
+          {
+            "point": [
+              -3.0,
+              5.0,
+              2.0
+            ]
+          }
+        ],
+        "tree": [
+          4,
+          1,
+          -3,
+          2
+        ]
+      }
+    }
+  ]
+}

@@ -17,7 +17,9 @@ pub(super) struct Exported {
     pub ext: &'static str,
     /// A 3MF was asked for and couldn't be written, so this is an STL.
     pub fell_back: bool,
-    /// The bodies that went in: the ones named, else the selected ones.
+    /// The bodies that went in: the ones named, else the selected ones (read by `file.send`, which
+    /// the browser build doesn't have).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub bodies: Vec<String>,
     /// The bodies laid on their print face, and the ones that couldn't be.
     pub laid: super::print_face::Laid,

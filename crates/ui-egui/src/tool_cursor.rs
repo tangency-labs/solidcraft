@@ -10,7 +10,7 @@
 use egui::{Pos2, Rect, Stroke, Vec2, pos2, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The badge's side and the icon inside it, in points.
 const BADGE: f32 = 26.0;
