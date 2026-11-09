@@ -25,4 +25,3 @@ solid.thread
 surface.extrude
 surface.patch
 surface.revolve
-surface.ruled

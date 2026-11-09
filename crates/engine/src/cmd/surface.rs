@@ -20,6 +20,7 @@ use crate::schema::surface::{
     UnstitchParams, UntrimParams,
 };
 use crate::schema::surface_blend::BlendParams;
+use crate::schema::surface_ruled::SurfaceRuledParams;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -35,6 +36,7 @@ const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::n
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
 const SURFACE_LOFT_CONTRACT: TypedContract<SurfaceLoftParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
+const SURFACE_RULED_CONTRACT: TypedContract<SurfaceRuledParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.patch", "Patch", patch)
@@ -91,9 +93,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&OFFSET_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("faces: [[x,y,z]] (points on the faces); body?; distance: expr (signed, along the faces' normals; 0 copies the faces); chain?: bool (each pick's whole smooth chain of faces); tolerance?: expr (how far a fitted face may stray, default 0.01 mm). Planes and cylinders move exactly; other faces are fitted. A new surface body (a solid where its faces close)"),
-    CommandSpec::new("surface.ruled", "Ruled Surface", ruled)
+    CommandSpec::new("surface.ruled", "Ruled Surface", crate::checked!("surface.ruled", ruled))
         .at("SURFACE", "CREATE")
         .icon("surface_ruled")
+        .contract(&SURFACE_RULED_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body; edges: [[x,y,z]] (points on a chain of its edges, open or closed); distance: expr (how far the strip reaches); mode?: normal|tangent|angle|direction (default normal: along the normal of the face beside each edge; tangent: continuing it); angle?: expr (angle mode: from `direction`, else from the face's normal, turned away from the face; 90 deg from the normal is tangent); direction?: [x,y,z] (direction mode: the rulings; angle mode: the reference, e.g. a pull direction for a draft); face?: [x,y,z] (a point on the face the directions come from; default: the face beside the most picked edges); flip?: bool (the other side); corners?: mitre|round (sharp corners of the chain; inside corners are always cut back); far?: [null|[[x,y,z]]] (per chain edge, the interior control points of a free strip's far curve, as the default curve's handles list them; null: the default). A constant ruling, or one keeping its angle to an arc's axis, gives an exact plane, cylinder or cone; where the rulings turn freely along an edge, the strip is the exact ruled surface to a far curve of its own (from corner to corner, fair, near the rulings' ends). A new surface body"),
     CommandSpec::new("surface.blend", "Blend Surface", crate::checked!("surface.blend", blend))
         .at("SURFACE", "CREATE")
