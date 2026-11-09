@@ -1272,3 +1272,31 @@ fn a_body_pattern_with_no_copies_is_still_added() {
     run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base"],"dir1":[1,0,0],"count1":1,"spacing1":30}));
     assert_eq!(s.model.state().bodies.len(), 1);
 }
+
+/// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored
+/// earlier or is mirrored together with the thread.
+#[test]
+fn mirror_of_a_thread_threads_the_mirrored_hole() {
+    let plane = json!({"origin": [20, 0, 0], "normal": [1, 0, 0]});
+    for (together, modeled) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "diameter": 6.8, "depth": 10, "name": "Hole1"}));
+        if !together {
+            let r = run(&mut s, "solid.mirror", json!({"features": ["Hole1"], "plane": plane}));
+            assert!(r["error"].is_null(), "{r}");
+        }
+        run(&mut s, "solid.thread", json!({"face": [13.4, 15, 5], "designation": "M8", "modeled": modeled, "name": "Thread1"}));
+        let features = if together { json!(["Hole1", "Thread1"]) } else { json!(["Thread1"]) };
+        let r = run(&mut s, "solid.mirror", json!({"features": features, "plane": plane}));
+        assert!(r["error"].is_null(), "together {together}: {r}");
+        let state = s.world_state().unwrap();
+        if modeled {
+            assert_eq!(state.bodies.len(), 1, "{r}");
+            let threaded = volume(&mut s);
+            assert!(threaded < 40.0 * 30.0 * 10.0 - 2.0 * std::f64::consts::PI * 3.4 * 3.4 * 10.0 - 1.0, "both holes are threaded: {threaded}");
+        } else {
+            assert_eq!(state.threads.len(), 2, "together {together}: the source and its mirror");
+        }
+    }
+}

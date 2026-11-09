@@ -35,6 +35,13 @@ pub(super) struct Scene {
     pub bytes: usize,
 }
 
+impl Scene {
+    /// How many triangles the drawing's meshes hold, for the export's reply.
+    pub(super) fn triangle_count(&self) -> usize {
+        self.triangles
+    }
+}
+
 struct Group {
     first: usize,
     inverse: Mat,

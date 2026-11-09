@@ -9,7 +9,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             app.tr("prefs.structure.appearance_note"),
             Some(crate::settings_profiles::tag),
         );
-        let count = crate::i18n::format("prefs.appearance.theme_count", &[("count", &theme_choices(app).len().to_string())]);
+        let count = solidcraft_ui_text::format("prefs.appearance.theme_count", &[("count", &theme_choices(app).len().to_string())]);
         ui_kit::settings_section_count(ui, "theme", app.tr("ui.theme"), Some(&count), |ui| {
             theme_row(app, ui);
             theme_options_row(app, ui);
@@ -19,7 +19,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
                 // The view's background: the theme's gradient, or one colour of the user's (#7688).
                 let label = app.tr("prefs.viewport_background");
-                let labels = [crate::i18n::tr("prefs.viewport_background_theme"), crate::i18n::tr("prefs.viewport_background_colour")];
+                let labels = [solidcraft_ui_text::tr("prefs.viewport_background_theme"), solidcraft_ui_text::tr("prefs.viewport_background_colour")];
                 let segments_width = (labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) + t.space_16) * 2.0;
                 let label_width = (t.space_24 * 6.0 + t.space_6).min(ui.available_width() * 0.6);
                 let available = (ui.available_width() - label_width - t.space_14).max(0.0);
@@ -105,7 +105,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 // The logo in the theme's own logo colours or in its accent.
                 let label = app.tr("prefs.logo");
                 ui_kit::row(ui, label, |ui| {
-                    let labels = [crate::i18n::tr("prefs.logo_theme"), crate::i18n::tr("prefs.logo_accent")];
+                    let labels = [solidcraft_ui_text::tr("prefs.logo_theme"), solidcraft_ui_text::tr("prefs.logo_accent")];
                     let mut selected = usize::from(app.preferences.logo_accent);
                     if ui_kit::settings_segments(ui, label, &mut selected, &labels) {
                         app.preferences.logo_accent = selected == 1;
@@ -134,7 +134,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         });
                     });
                     ui.horizontal_wrapped(|ui| {
-                        let locale = crate::i18n::Locale::for_language(&app.preferences.language);
+                        let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
                         for value in [0.75, 1.0, 1.1, 1.25, 1.5, 2.0] {
                             let percent = format!("{:.0}", value * 100.0);
                             let chip = ui_kit::button(
@@ -154,7 +154,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
-                ui_kit::settings_font_row(ui, crate::i18n::tr("prefs.font"), |ui, part| {
+                ui_kit::settings_font_row(ui, solidcraft_ui_text::tr("prefs.font"), |ui, part| {
                     if part == 0 {
                         ui_font_row(app, ui);
                         return;
@@ -165,7 +165,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                                 if crate::fonts::ui_font(&path).is_some() {
                                     app.preferences.ui_font = path;
                                 } else {
-                                    app.set_status(crate::i18n::tr("prefs.font_unreadable"), true);
+                                    app.set_status(solidcraft_ui_text::tr("prefs.font_unreadable"), true);
                                 }
                             }
                         });
@@ -181,8 +181,8 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let mode = app.preferences.color_vision;
             ui_kit::settings_form(ui, t.form_label_width, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("ui.colour_vision_mode"), app.tr("prefs.appearance.colour_vision_help"), |ui| {
-                    let modes = crate::theme::ColorVision::ALL;
-                    let labels: Vec<_> = modes.iter().map(|m| crate::i18n::tr(m.label_id())).collect();
+                    let modes = solidcraft_theme::ColorVision::ALL;
+                    let labels: Vec<_> = modes.iter().map(|m| solidcraft_ui_text::tr(m.label_id())).collect();
                     let mut selected = modes.iter().position(|m| *m == mode).unwrap_or(0);
                     if ui_kit::settings_segments(ui, app.tr("ui.colour_vision_mode"), &mut selected, &labels)
                         && let Some(mode) = modes.get(selected)
@@ -192,7 +192,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", app.tr("ui.colour_vision_mode"))) {
                         crate::scenario::publish_target("prefs:color_vision", rect);
                     }
-                    for mode in crate::theme::ColorVision::ALL {
+                    for mode in solidcraft_theme::ColorVision::ALL {
                         if let Some(at) =
                             crate::scenario::handle_at(&format!("dialog:{}:{}", app.tr("ui.colour_vision_mode"), app.tr(mode.label_id())))
                         {
@@ -204,7 +204,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             ui_kit::status_palette_sample(ui, app.preferences.color_vision);
             // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
             // their colours in every mode.
-            ui_kit::colour_vision_sample(ui, &crate::theme::Tokens::get_in(app.preferences.color_vision));
+            ui_kit::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
             if app.preferences.color_vision != mode {
                 ui.ctx().request_repaint();
             }
@@ -229,11 +229,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
                         ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
-                            let mut selected = usize::from(app.ui.layout == crate::shell::LayoutMode::Docked);
+                            let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
-                                &[crate::i18n::tr("ui.layout_floating"), crate::i18n::tr("ui.layout_compact")],
+                                &[solidcraft_ui_text::tr("ui.layout_floating"), solidcraft_ui_text::tr("ui.layout_compact")],
                                 ui_kit::Segments { intrinsic: true, ..Default::default() },
                             ) {
                                 let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
@@ -283,7 +283,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
                     });
                     ui_kit::LayoutPreview {
-                        compact: app.ui.layout == crate::shell::LayoutMode::Docked,
+                        compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,
                         labels: app.preferences.ribbon_labels,
                         history: history_choice(app),
                         translucent: app.preferences.browser_float,
@@ -346,7 +346,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.tr("prefs.browser"),
                         &options,
                         usize::from(app.preferences.browser_float),
-                        app.ui.layout == crate::shell::LayoutMode::Floating,
+                        app.ui.layout == crate::ui_kit::LayoutMode::Floating,
                     ) {
                         app.preferences.browser_float = selected == 1;
                     }
@@ -457,6 +457,25 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.browser_eye_left_note"),
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
+                );
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_body_features"),
+                    app.tr("prefs.browser_body_features_note"),
+                    &mut app.preferences.browser_body_features,
+                    "browser_body_features",
+                );
+            });
+            // A folder's icon from its features (#12514), in a row of its own: one more box in the
+            // row above widens it past the page at narrow windows.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_folder_kind_icon"),
+                    app.tr("prefs.history_folder_kind_icon_note"),
+                    &mut app.preferences.history_folder_kind_icon,
+                    "history_folder_kind_icon",
                 );
             });
         });
@@ -640,7 +659,7 @@ fn browser_visibility(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_form(ui, 0.0, |ui| {
         ui_kit::row(ui, app.tr("prefs.browser_shown"), |ui| {
             ui.spacing_mut().item_spacing.x = Tokens::get().space_6;
-            crate::prefs_search::note_current(ui, app.tr("prefs.layout_page.on_hover"));
+            crate::ui_kit::settings_search::note_current(ui, app.tr("prefs.layout_page.on_hover"));
             ui.add_enabled_ui(!crate::timeline_left::stacked(app), |ui| {
                 let mut selected = usize::from(app.preferences.browser_show == BrowserShow::Hover);
                 if ui_kit::settings_segments(

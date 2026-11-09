@@ -1,0 +1,276 @@
+{
+  "cases": [
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initFalse_eu0_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initFalse_eu0_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initFalse_eu1_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initFalse_eu1_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initTrue_eu0_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initTrue_eu0_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initTrue_eu1_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildFalse_initTrue_eu1_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": false
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initFalse_eu0_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initFalse_eu0_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initFalse_eu1_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initFalse_eu1_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": false,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initTrue_eu0_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initTrue_eu0_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 0,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initTrue_eu1_distFalse",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": false,
+        "want_dev": true
+      }
+    },
+    {
+      "name": "cached_gap_mouse_rebuildTrue_initTrue_eu1_distTrue",
+      "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp (GetOrCreateUVTrimCurve cached gap)",
+      "inputs": {
+        "brep": {
+          "kind": "file",
+          "file": "Mouse.smb",
+          "rebuild": true
+        },
+        "init_gaps": true,
+        "op": "get_or_create",
+        "eu": 1,
+        "ok_make": false,
+        "want_dist": true,
+        "want_dev": true
+      }
+    }
+  ]
+}
