@@ -1003,7 +1003,9 @@ mod tests {
         let c = [0.1875, 0.1875 - 0.5, 0.1875];
         let mut roots = Vec::new();
         let mut work = MAX_SUBDIVISIONS;
-        assert!(bernstein_roots(&c, 0.0, 1.0, MAX_DEPTH, &mut work, &mut roots));
+        assert!(bernstein_roots(
+            &c, 0.0, 1.0, MAX_DEPTH, &mut work, &mut roots
+        ));
         roots.sort_by(f64::total_cmp);
         let want = [0.25, 0.75];
         assert_eq!(roots.len(), want.len(), "{roots:?}");
@@ -1012,12 +1014,26 @@ mod tests {
             "{roots:?}"
         );
         let mut none = Vec::new();
-        assert!(bernstein_roots(&[1.0, 0.5, 2.0], 0.0, 1.0, MAX_DEPTH, &mut work, &mut none));
+        assert!(bernstein_roots(
+            &[1.0, 0.5, 2.0],
+            0.0,
+            1.0,
+            MAX_DEPTH,
+            &mut work,
+            &mut none
+        ));
         assert!(none.is_empty());
         // (s - 1/2)^2 = s^2 - s + 1/4: a double root, never isolated by a sign change; its
         // coefficients halve to exact zeros at 1/2, both halves' ends there
         let mut touch = Vec::new();
-        bernstein_roots(&[0.25, -0.25, 0.25], 0.0, 1.0, MAX_DEPTH, &mut work, &mut touch);
+        bernstein_roots(
+            &[0.25, -0.25, 0.25],
+            0.0,
+            1.0,
+            MAX_DEPTH,
+            &mut work,
+            &mut touch,
+        );
         assert!(touch.iter().all(|&x| x == 0.5), "{touch:?}");
     }
 
