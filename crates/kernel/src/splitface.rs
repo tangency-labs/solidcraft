@@ -860,6 +860,11 @@ mod tests {
         let end = (whole - core) / 2.0;
         assert!(v.len() == 3, "{v:?}");
         assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
+        // The same rod across the sphere, its poles outside the rod: the same parts.
+        let across = cylinder(Vec3::new(-30.0, 0.0, 0.0), Vec3::X, 5.0, 60.0).unwrap();
+        let v = volumes(&split_body(&across, &SplitTool::Face { body: &ball, face }).unwrap());
+        assert!(v.len() == 3, "{v:?}");
+        assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
     }
 
     #[test]
