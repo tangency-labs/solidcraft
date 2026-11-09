@@ -446,6 +446,48 @@ fn a_body_pick_goes_on_to_the_point_or_axis() {
     assert!(matches!(d.inputs[1].items.as_slice(), [Sel::Vertex { .. }]), "{:?}", d.inputs[1].items);
 }
 
+/// #14205: once Point to Point, Point to Position or Rotate has gone on from Bodies (#6170), a
+/// Ctrl or Shift click on another body adds it to Bodies, and the window stays where it was, so
+/// the next plain click still picks the From point, Point or Axis. A Ctrl/Shift click on a picked
+/// body takes it out. Free Move never goes on, and plain clicks there add bodies as before.
+#[test]
+fn ctrl_or_shift_click_adds_bodies_after_move_has_gone_on() {
+    for mode in [POINT_TO_POINT, POINT_TO_POSITION, ROTATE] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for (x, name) in [(0, "A"), (30, "B"), (60, "C")] {
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "body_name": name})).unwrap();
+        }
+        h.app.run("select.clear", json!({})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.app.fit_view();
+        h.settle();
+        h.app.start("solid.move");
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(mode, &h.app.session.doc);
+        d.inputs = inputs(mode);
+        d.active = 0;
+        let body = |name: &str| Sel::Body { name: name.into() };
+        let (a, b, c) = (body("A"), body("B"), body("C"));
+        h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{}: a plain click goes on (#6170)", TYPES[mode]);
+        h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+        h.step(&json!({ "click": { "world": [70, 10, 10] }, "shift": true })).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, vec![a.clone(), b.clone(), c.clone()], "{}: Ctrl and Shift clicks add bodies", TYPES[mode]);
+        assert_eq!(d.active, 1, "{}: and stay on {}", TYPES[mode], d.inputs[1].label);
+        assert!(d.inputs[1].items.is_empty(), "{}: {:?}", TYPES[mode], d.inputs[1].items);
+        h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![a.clone(), c.clone()], "{}: a picked body comes out", TYPES[mode]);
+        // The next plain click is the From point, Point or Axis, not another body.
+        let edge = if mode == ROTATE { [10, 0, 10] } else { [0, 0, 10] };
+        h.step(&json!({ "click": { "world": edge } })).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, vec![a, c], "{}: the plain click picked no body", TYPES[mode]);
+        assert_eq!(d.inputs[1].items.len(), 1, "{}: it picked {}", TYPES[mode], d.inputs[1].label);
+    }
+}
+
 /// #8265: input queued while the window is busy arrives together, so one frame can carry the
 /// button let go and the mouse already moving on. The drag must end where the button was
 /// released, not jump the value to where the mouse has since got to.
