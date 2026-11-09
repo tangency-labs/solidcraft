@@ -48,11 +48,11 @@
 //!   leaf from one set of guesses and, where its normal map has a direction
 //!   perpendicular to the line, looks for a second crossing only next to the first; a
 //!   first crossing behind a ray's start was dropped before that, so a line just under
-//!   a cylinder's top missed the crossing ahead. Such a leaf is solved part by part
-//!   ([`LsiGlobalSolver::parts_crossed_once`]): halved until each part's normal map has
-//!   no perpendicular to the line, so each holds at most one crossing, or until its
-//!   normals lie within the angular tolerance. A leaf without one is solved as upstream
-//!   solves it.
+//!   a cylinder's top missed the crossing ahead. Such a leaf of a ray is solved part by
+//!   part ([`LsiGlobalSolver::parts_crossed_once`]): halved until each part's normal map
+//!   has no perpendicular to the line, so each holds at most one crossing, or until its
+//!   normals lie within the angular tolerance. A whole line's leaf, and a leaf without a
+//!   perpendicular, is solved as upstream solves it.
 //! - **Bounds.** Each leaf, or part of one, takes at most six guesses (upstream's fixed
 //!   arrays). A leaf is halved into at most [`MAX_PARTS`] parts, [`MAX_PART_DEPTH`]
 //!   deep, with an explicit stack; a leaf whose surface cannot bound a part on its own
@@ -944,14 +944,17 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         // A leaf whose normal map has no direction perpendicular to the line is crossed
         // at most once: its crossing ends the solve, as upstream's. One whose normal map
         // has such a direction may be crossed twice (a line just under a cylinder's top
-        // crosses its leaf on either side of the top): it is solved part by part, each
-        // part crossed at most once, so a crossing behind a ray's start cannot hide one
+        // crosses its leaf on either side of the top). For a whole line upstream follows
+        // every guess and looks for a near-tangent second crossing next to the first, and
+        // so does this. A ray drops a first crossing behind its start before that search,
+        // so the crossing ahead was never looked for: a ray's leaf is solved part by part,
+        // each part crossed at most once, so a crossing behind the start cannot hide one
         // ahead of it (WR-758, #3120).
         let line_vec = self.line_vector.unitize()?;
-        if cache
+        let crossed_twice = cache
             .polar_box_unstored(k, surface_id)?
-            .has_perpendicular_to_vector(line_vec)
-        {
+            .has_perpendicular_to_vector(line_vec);
+        if self.ray_fire && crossed_twice {
             for part in self.parts_crossed_once(k, &leaf, line_vec, pass)? {
                 let part_leaf = leaf.part(
                     part.domain,
@@ -960,7 +963,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 );
                 self.solve_part(k, &part_leaf, part.once)?;
             }
-        } else if self.solve_part(k, &leaf, true)? {
+        } else if self.solve_part(k, &leaf, !crossed_twice)? {
             return Ok(false);
         }
 
