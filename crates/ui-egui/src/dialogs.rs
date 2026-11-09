@@ -1630,7 +1630,13 @@ impl Dialog {
     pub(crate) fn takes_components(&self) -> bool {
         self.active == 0
             && (matches!(self.kind, Kind::Align { components: true, .. })
-                || (is_pattern(&self.kind) && self.inputs.first().is_some_and(|i| i.accept == selection::OCCURRENCES)))
+                || (is_pattern(&self.kind)
+                    && self.inputs.first().is_some_and(|i| {
+                        // Fresh Components mode uses OCCURRENCES; restored/edited Patterns keep
+                        // label "Components" with BODIES accept so body picks still resolve to
+                        // placements like Align (#12116 review).
+                        i.accept == selection::OCCURRENCES || i.label == "Components"
+                    })))
     }
 
     /// Everything the inputs hold (for highlighting).
