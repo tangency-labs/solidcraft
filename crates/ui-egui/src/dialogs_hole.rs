@@ -79,9 +79,10 @@ pub(crate) fn clearance_rows(ui: &mut egui::Ui, opts: &mut HoleOpts) -> bool {
     crate::dialogs::form_row(ui, "ui.clearance_diameter", |ui| match clearance_table_diameter(opts) {
         Some(d) => {
             let default = format!("{d} mm");
-            let fit = CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| crate::i18n::tr(f.0));
+            let fit = CLEARANCE_FITS.get(opts.clearance_fit).map_or("", |f| solidcraft_ui_text::tr(f.0));
             let mm = format!("{d}");
-            let tip = crate::i18n::format("hole.clearance_tip", &[("size", opts.clearance_size.as_str()), ("fit", fit), ("diameter", mm.as_str())]);
+            let tip =
+                solidcraft_ui_text::format("hole.clearance_tip", &[("size", opts.clearance_size.as_str()), ("fit", fit), ("diameter", mm.as_str())]);
             let mut text = opts.clearance_diameter.clone().unwrap_or_else(|| default.clone());
             let (submitted, changed) = crate::ui_kit::text_field_tip(ui, &mut text, &default, &tip);
             if changed {
@@ -90,7 +91,7 @@ pub(crate) fn clearance_rows(ui: &mut egui::Ui, opts: &mut HoleOpts) -> bool {
             enter = submitted;
         }
         None => {
-            ui.label(crate::i18n::tr("thread.select_size"));
+            ui.label(solidcraft_ui_text::tr("thread.select_size"));
         }
     });
     enter
