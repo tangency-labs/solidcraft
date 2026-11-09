@@ -89,7 +89,7 @@ pub fn direction_input() -> SelInput {
 }
 
 /// The rail inputs' labels, in order: a loft takes up to 16 rails.
-const RAIL_LABELS: [&str; 16] = [
+const RAIL_LABELS: &[&str] = &[
     "Rail",
     "Second Rail",
     "Rail 3",
