@@ -36,6 +36,7 @@ const MODEL_BODY_CRATES: &[&str] = &["crates/doc", "crates/engine"];
 /// only a field the check's syntactic pattern takes for one.
 pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/doc/src/display_quality.rs", "the viewport's display quality levels"),
+    ("crates/doc/src/gpu_plan.rs", "the display plan in the form the viewport evaluates on the GPU"),
     ("crates/doc/src/placed_mesh.rs", "the display meshes and plans of bodies and placed parts"),
     ("crates/doc/src/point_cloud.rs", "no mesh: the triangles of a point cloud's own complex"),
     ("crates/doc/src/point_cloud_complex.rs", "no mesh: the triangles of a point cloud's own complex"),
@@ -68,6 +69,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
     ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),
+    ("crates/doc/src/eval.rs:ModelBody::gpu_plan_at", "the display plan in the form the GPU evaluates"),
     ("crates/doc/src/eval.rs:ModelBody::mesh", "the display mesh"),
     ("crates/doc/src/eval.rs:ModelBody::mesh_in_place", "the display mesh where the body stands"),
     ("crates/doc/src/eval.rs:ModelBody::plan_mesh", "the display plan's mesh"),
