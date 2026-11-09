@@ -1,0 +1,2713 @@
+{
+ "cases": [
+  {
+   "name": "analytic_bpt_cyl_cyl_stacked_touching",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      1.0,
+      2.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cyl_stacked_touching_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      1.0,
+      2.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cyl_stacked_gap",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      1.5,
+      2.5
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cyl_stacked_gap_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      1.5,
+      2.5
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cyl_overlapping",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.5,
+      1.5
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cyl_half_turns_side_by_side",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      180.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      180.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cyl_crossed_axes",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      -1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 0.5,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      2.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      -1.0,
+      0,
+      0
+     ],
+     "x": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 0.5,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      2.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_hemisphere_cap",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      0.0,
+      90.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_hemisphere_cap_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      0.0,
+      90.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_hemisphere_apart",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      3.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      0.0,
+      90.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cone_frustum_shared_circle",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 45.0,
+     "height": [
+      1.0,
+      2.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cyl_cone_frustum_shared_circle_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 45.0,
+     "height": [
+      1.0,
+      2.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cone_cone_stacked",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 30.0,
+     "height": [
+      0.5,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 30.0,
+     "height": [
+      1.0,
+      1.5
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_cone_cone_stacked_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 30.0,
+     "height": [
+      0.5,
+      1.0
+     ]
+    },
+    "b": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 30.0,
+     "height": [
+      1.0,
+      1.5
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_sphere_sphere_hemispheres_apart",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      0.0,
+      90.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      3.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      -90.0,
+      0.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_sphere_sphere_equator_shared",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      0.0,
+      90.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      -90.0,
+      0.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_sphere_sphere_equator_shared_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      0.0,
+      90.0
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      -90.0,
+      0.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_sphere_band_cyl",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      180.0
+     ],
+     "lat": [
+      -30.0,
+      30.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      -0.5
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      180.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_torus_cyl_outer",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      360.0
+     ],
+     "minor": [
+      0.0,
+      360.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 2.5,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      -0.5,
+      0.5
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_torus_quarter_cyl",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      90.0
+     ],
+     "minor": [
+      0.0,
+      180.0
+     ]
+    },
+    "b": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 2.5,
+     "angle": [
+      0.0,
+      90.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_torus_torus_stacked",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      360.0
+     ],
+     "minor": [
+      0.0,
+      180.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      360.0
+     ],
+     "minor": [
+      180.0,
+      360.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_torus_torus_stacked_tight",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990 (DoBoundaryPlaneTest; SM_CAST_PTR(SmBSplineSurface) at 789-799)",
+   "inputs": {
+    "a": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      360.0
+     ],
+     "minor": [
+      0.0,
+      180.0
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      1.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      360.0
+     ],
+     "minor": [
+      180.0,
+      360.0
+     ]
+    },
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 1e-07,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_self_cylinder",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990",
+   "inputs": {
+    "a": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "angle": [
+      0.0,
+      360.0
+     ],
+     "height": [
+      0.0,
+      1.0
+     ]
+    },
+    "b": null,
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_self_sphere",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990",
+   "inputs": {
+    "a": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "radius": 1.0,
+     "lon": [
+      0.0,
+      360.0
+     ],
+     "lat": [
+      -90.0,
+      90.0
+     ]
+    },
+    "b": null,
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_self_torus",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990",
+   "inputs": {
+    "a": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "major_radius": 2.0,
+     "minor_radius": 0.5,
+     "major": [
+      0.0,
+      360.0
+     ],
+     "minor": [
+      0.0,
+      360.0
+     ]
+    },
+    "b": null,
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  },
+  {
+   "name": "analytic_bpt_self_cone",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:763-990",
+   "inputs": {
+    "a": {
+     "kind": "cone",
+     "apex": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "half_angle_deg": 30.0,
+     "height": [
+      0.5,
+      1.5
+     ]
+    },
+    "b": null,
+    "natural": true,
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "fillet": false,
+    "curves": [],
+    "points": [],
+    "ops": [
+     {
+      "op": "bpt",
+      "tol": 0.001,
+      "bbox": [
+       [
+        -4.0,
+        -4.0,
+        -4.0
+       ],
+       [
+        4.0,
+        4.0,
+        5.0
+       ]
+      ],
+      "dom1": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ],
+      "dom2": [
+       0.0,
+       0.0,
+       1.0,
+       1.0
+      ]
+     },
+     {
+      "op": "state"
+     }
+    ]
+   }
+  }
+ ]
+}

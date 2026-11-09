@@ -229,17 +229,17 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 ui.set_width(width);
                 // The parameter's name, then the check and the cross.
                 let (title, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
-                let name = crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]);
+                let name = solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(title).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline).on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline).on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                 });
                 let side = t.control_height;
                 let cancel = Rect::from_min_size(egui::pos2(title.right() - side, title.top()), egui::vec2(side, side));
                 let ok = cancel.translate(egui::vec2(-(side + t.space_2), 0.0));
-                if button(ui, ok, "dimwin:ok", crate::i18n::tr("ui.heading_ok"), "finish") {
+                if button(ui, ok, "dimwin:ok", solidcraft_ui_text::tr("ui.heading_ok"), "finish") {
                     answer = Some(true);
                 }
-                if button(ui, cancel, "dimwin:cancel", crate::i18n::tr("ui.cancel"), "close") {
+                if button(ui, cancel, "dimwin:cancel", solidcraft_ui_text::tr("ui.cancel"), "close") {
                     answer = Some(false);
                     escaped = true;
                 }
@@ -261,9 +261,9 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                         let can_step = step(&e.expr, 1.0).is_some();
                         let tip = |id: &str| {
                             if can_step {
-                                crate::i18n::format(id, &[("step", &step_text)])
+                                solidcraft_ui_text::format(id, &[("step", &step_text)])
                             } else {
-                                crate::i18n::tr("dialog.dimension_step_expression").to_string()
+                                solidcraft_ui_text::tr("dialog.dimension_step_expression").to_string()
                             }
                         };
                         let up = crate::ui_kit::compact_button(ui, crate::ui_kit::MOVE_UP, &tip("dialog.dimension_step_up"), can_step, false);

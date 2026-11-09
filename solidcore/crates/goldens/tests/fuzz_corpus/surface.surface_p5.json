@@ -1,0 +1,6 @@
+{
+  "unit": "surface.surface_p5",
+  "cases": [
+    {"name": "fuzz01414_c_invalid_argument_bad_index_count", "origin": "fuzz-out/n2000/surface.surface_p5/fuzz01414.json (timeout: rust: no result after 20 s)", "cpp": "harness: c++: invalid argument: bad index/count 9223372036854776000 (max 5)", "rust": "harness: 2147483648 samples", "inputs": {"op": {"curve": {"cpts": [[0.0635, 2.3, 1.47, -1.7976931348623157e+308]], "dim": 3, "p": 9223372036854775807, "u": [1.0]}, "dom": [-4.0, -4.0, 4.0, 4.0], "ivl": [0.0, 0.688], "n": 2147483648, "op": "max_dist"}, "surface": {"plane": {"n": [0.992, -0.971, -0.543], "o": [4.37, -4.53, 0.213]}}}}
+  ]
+}

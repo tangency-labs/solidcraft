@@ -1,0 +1,1996 @@
+{
+ "cases": [
+  {
+   "name": "line_chord",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "line_angle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 10
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "line_minseg",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "minseg": 5,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "line_no_tolerance",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {},
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "line_analytic",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "analytic"
+   }
+  },
+  {
+   "name": "line_type",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "type"
+   }
+  },
+  {
+   "name": "cubic_chord",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_chord_aux",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_chord_full",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true,
+     "full": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_full_no_aux",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "full": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_angle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 5
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_angle_aux",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 5,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_both",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.05,
+     "angle": 20,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_offaxis",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.05,
+     "offaxis": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_max3d",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.5,
+     "max3d": 0.5,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_ratio_big",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 1e-06,
+     "ratio": 0.05,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_sub_interval",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0.2,
+    "b": 0.7,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_interval_beyond",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": -0.5,
+    "b": 1.5,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_interval_disjoint",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 2,
+    "b": 3,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_interval_tiny",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0.5,
+    "b": 0.50000000000001,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_reversed_interval",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 1,
+    "b": 0,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "cubic_analytic",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        -1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        6,
+        0,
+        2,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "analytic"
+   }
+  },
+  {
+   "name": "quad_c0_full",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true,
+     "full": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "quad_c0_aux",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        3,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.5,
+       0.5,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 15,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "closed_chord",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.02,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "closed_full",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        2,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        2,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       0.5,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 10,
+     "aux": true,
+     "full": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "degenerate_point",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        1,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "uneven_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0.9,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       1,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "planar_2d",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 2,
+      "cpts": [
+       [
+        0,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        3,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        4,
+        3,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ],
+       [
+        5,
+        0,
+        1.7976931348623157e+308,
+        -1.7976931348623157e+308
+       ]
+      ],
+      "p": 3,
+      "u": [
+       0,
+       0,
+       0,
+       0,
+       2,
+       2,
+       2,
+       2
+      ]
+     }
+    },
+    "a": 0,
+    "b": 2,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "arc_rational",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0.7071067811865476,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.001,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "arc_rational_full",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "bspline": {
+      "dim": 3,
+      "cpts": [
+       [
+        1,
+        0,
+        0,
+        1
+       ],
+       [
+        0.7071067811865476,
+        0.7071067811865476,
+        0.0,
+        0.7071067811865476
+       ],
+       [
+        0,
+        1,
+        0,
+        1
+       ]
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 10,
+     "aux": true,
+     "full": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_chord",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       3,
+       0
+      ],
+      "p2": [
+       4,
+       0,
+       0
+      ],
+      "d2": [
+       3,
+       -3,
+       0
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.001,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_full",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       3,
+       0
+      ],
+      "p2": [
+       4,
+       0,
+       0
+      ],
+      "d2": [
+       3,
+       -3,
+       0
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true,
+     "full": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_angle",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       3,
+       0
+      ],
+      "p2": [
+       4,
+       0,
+       0
+      ],
+      "d2": [
+       3,
+       -3,
+       0
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "angle": 10
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_sub",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       3,
+       0
+      ],
+      "p2": [
+       4,
+       0,
+       0
+      ],
+      "d2": [
+       3,
+       -3,
+       0
+      ]
+     }
+    },
+    "a": 0.25,
+    "b": 0.6,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_line",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       1,
+       0,
+       0
+      ],
+      "p2": [
+       1,
+       0,
+       0
+      ],
+      "d2": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_cusp",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       0,
+       0,
+       0
+      ],
+      "p2": [
+       2,
+       1,
+       0
+      ],
+      "d2": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01,
+     "aux": true
+    },
+    "op": "tessellate"
+   }
+  },
+  {
+   "name": "hermite_analytic",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp (SmBSplineCurve tessellation / SmCurveCache via GetOrCreateObjectCache)",
+   "inputs": {
+    "curve": {
+     "hermite": {
+      "dim": 3,
+      "p1": [
+       0,
+       0,
+       0
+      ],
+      "d1": [
+       3,
+       3,
+       0
+      ],
+      "p2": [
+       4,
+       0,
+       0
+      ],
+      "d2": [
+       3,
+       -3,
+       0
+      ]
+     }
+    },
+    "a": 0,
+    "b": 1,
+    "opts": {
+     "chord": 0.01
+    },
+    "op": "analytic"
+   }
+  }
+ ]
+}

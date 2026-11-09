@@ -302,7 +302,7 @@ impl PanelHost for EguiPanelHost<'_> {
         let body = geometry.body.map(rect);
         let parent_clip = self.ui.clip_rect().intersect(outer);
         let container = crate::ui_kit::Container::new(self.ui.ctx(), crate::ui_kit::Surface::Panel);
-        let frame = container.frame(self.ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
+        let frame = container.frame(self.ui.ctx(), solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
         let mut failure = None;
         self.ui.scope_builder(
             egui::UiBuilder::new().scope_id(egui::Id::unique(("panel_runtime", &geometry.instance.0, &context.owner))).max_rect(outer),
@@ -324,7 +324,7 @@ impl PanelHost for EguiPanelHost<'_> {
                             if slot == ContentSlot::Header {
                                 // Dynamic title/status have semantic metadata; content owns
                                 // additional controls and returns requests through services.
-                                let tokens = crate::theme::Tokens::get();
+                                let tokens = solidcraft_theme::Tokens::get();
                                 let ink = if presentation.attention { tokens.form_primary } else { tokens.form_ink };
                                 let mut response = ui.label(egui::RichText::new(&presentation.title).color(ink));
                                 if let Some(status) = &presentation.status {

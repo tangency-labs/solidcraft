@@ -1,0 +1,143 @@
+{
+ "cases": [
+  {
+   "name": "pin101_coincidence_plane_own_bspline",
+   "upstream_ref": "surface::plane::p1 test coincidence_of_planes: a plane and the flat B-spline over the same patch, tol 1e-6, whole; SmSurface::IsPlanar of the B-spline changes between c9c5979 (padded box) and v1.0.1 (unpadded)",
+   "inputs": {
+    "make": {
+     "kind": "bounded",
+     "o": [
+      1,
+      2,
+      3
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      2,
+      3
+     ],
+     "domain": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "b_spline",
+       "p": 1,
+       "q": 1,
+       "net": [
+        [
+         [
+          1,
+          2,
+          3,
+          null
+         ],
+         [
+          1,
+          5,
+          3,
+          null
+         ]
+        ],
+        [
+         [
+          3,
+          2,
+          3,
+          null
+         ],
+         [
+          3,
+          5,
+          3,
+          null
+         ]
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "tol": 1e-06,
+      "whole": true
+     },
+     {
+      "op": "coincidence",
+      "other": {
+       "kind": "b_spline",
+       "p": 1,
+       "q": 1,
+       "net": [
+        [
+         [
+          1,
+          2,
+          3,
+          null
+         ],
+         [
+          1,
+          5,
+          3,
+          null
+         ]
+        ],
+        [
+         [
+          3,
+          2,
+          3,
+          null
+         ],
+         [
+          3,
+          5,
+          3,
+          null
+         ]
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      },
+      "tol": 1e-06
+     }
+    ]
+   }
+  }
+ ]
+}

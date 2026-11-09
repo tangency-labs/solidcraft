@@ -18,6 +18,7 @@ use super::types::{
     OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint,
     TouchingParam, feature_common, present,
 };
+use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
 
 /// Add a box primitive.
@@ -179,6 +180,78 @@ pub struct ExtrudeParams {
     /// With `thin` and `side: two_sides`: the thickness outside.
     #[serde(default)]
     pub thickness2: Option<LengthExpr>,
+}
+
+/// Revolve sketch profiles (or a planar body face) about an axis into a solid.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RevolveParams {
+    /// The axis to turn about.
+    pub axis: RevolveAxis,
+    /// How far to turn: more than 0 and at most 360 degrees. With `angle2`, the angle on the
+    /// first side, the two adding up to the turn; with `direction: symmetric`, the whole turn,
+    /// split either side. Default: 360 deg. Not used when `to` is given, though it must still
+    /// evaluate.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Two Sides: the angle on the other side, turned back from the profile. Not used when `to`
+    /// is given; used instead of `direction: symmetric` when both are given.
+    #[serde(default)]
+    pub angle2: Option<AngleExpr>,
+    /// `symmetric` splits the angle evenly either side of the profile, whichever way the axis
+    /// points. The handler ignores every other value.
+    #[serde(default)]
+    pub direction: Option<RevolveDirection>,
+    /// When true, the same as `direction: symmetric`.
+    #[serde(default)]
+    pub symmetric: Option<bool>,
+    /// Where the angle starts. Default: sketch_normal.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RevolveConventionParam")]
+    pub convention: Option<RevolveConventionParam>,
+    /// Turn until this face, vertex or point (To Object). Takes the place of `angle`, `angle2`
+    /// and `direction`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "RevolveToPoint")]
+    pub to: Option<RevolveToPoint>,
+    /// The sketch to revolve, by id or name. Default: the active sketch, else the last one.
+    /// Ignored when `face` is given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's profiles to revolve. Default: all of them. Ignored when `face` is
+    /// given.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// A point on a planar body face to revolve instead of a sketch profile.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The body whose face to use, where faces of several bodies meet at `face`.
+    #[serde(default)]
+    pub face_body: Option<String>,
+    /// With `face`, among placed instances: the body whose placement `face` is read in (read by
+    /// the engine's frame mapping, before the command runs). Default: `face_body`, else the
+    /// body nearest the point.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// How the revolve combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on. Default for a join from a body's face, or
+    /// from a sketch on one: that body. Explicit `targets` or `participants` replace it.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// Something a feature's result tells the user without stopping them, with an action to take.
@@ -359,6 +432,110 @@ pub struct PipeParams {
     pub targets: Option<StringList>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// Sweep sketch profiles along a path of sketch curves into a solid.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SweepParams {
+    /// The sketch holding the profiles, by id or name. Default: the active sketch, else the last
+    /// one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's profiles to sweep. Default: all of them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// The sketch holding the path, by id or name.
+    pub path_sketch: SketchRef,
+    /// The path's curve ids, in order along the path.
+    pub path: StringList,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub shape: SweepShape,
+    /// How the sweep combines with existing bodies. Default: new.
+    #[serde(default)]
+    pub operation: Option<OperationParam>,
+    /// The bodies a join, cut or intersect works on; given, they win over `participants`.
+    /// Default: `participants`, else for a join from a sketch on a body's face that body, else
+    /// every body in the active component (an intersect removes those the sweep doesn't meet),
+    /// or for a cut or intersect where it has none, every body.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    /// What a join makes of pieces that share no face. Default: separate.
+    #[serde(default)]
+    pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Sweep sketch curves or profile boundaries along a path of sketch curves into a surface body:
+/// walls only, no caps. A path with corners, or of 3D curves, gives ruled walls mitred at the
+/// corners. `participants` changes nothing here.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SurfaceSweepParams {
+    /// The sketch holding the curves or profiles, by id or name. Default: the active sketch, else
+    /// the last one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Curve ids to sweep, at most 1000: open or closed chains of curves meeting end to end.
+    #[serde(default)]
+    pub curves: Option<StringList>,
+    /// Which of the sketch's profiles to sweep the boundaries of. Default: all of them when no
+    /// `curves` are given, else none.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// Each index or point pick is exactly the region it names. Without it, a pick on a drawn
+    /// profile that reference geometry (a face's projected outline) cuts into regions takes the
+    /// whole drawn profile. The dialogs send `true`: they highlight the regions they pick.
+    #[serde(default)]
+    pub exact_regions: Option<bool>,
+    /// The sketch holding the path, by id or name.
+    pub path_sketch: SketchRef,
+    /// The path's curve ids, in order along the path: 1 to 1000.
+    pub path: StringList,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub shape: SweepShape,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// How a sweep's profile turns and changes size along the path, as `features::sweep_options`
+/// and `features::sweep_rails` read it (solid.sweep and surface.sweep), flattened. Guide rails
+/// set the turn and the size themselves: with `rails`, the handler refuses `orientation`,
+/// `twist` and `scale`.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SweepShape {
+    /// How the profile turns as it follows the path. Default: perpendicular.
+    #[serde(default)]
+    pub orientation: Option<super::types::SweepOrientationParam>,
+    /// How far the profile turns about the path over its length, from none at the start: within
+    /// four turns (1440 deg) either way. Default: none.
+    #[serde(default)]
+    #[schemars(with = "Option<AngleExpr>")]
+    pub twist: Option<super::types::SweepTwist>,
+    /// The profile's scale at the end of the path, changing linearly along it from 1 at the
+    /// start: 0.01 to 100. Default: 1.
+    #[serde(default)]
+    pub scale: Option<NumberExpr>,
+    /// Guide rails, each meeting every plane square to the path once along it, followed from the
+    /// end nearest the path's start. One rail turns the profile so that its point where the rail
+    /// starts stays on the rail, and scales it with the rail's distance from the path; two rails
+    /// carry it between them, its points where they start staying on both. The path must have no
+    /// sharp corners.
+    #[serde(default)]
+    pub rails: Option<super::types::SweepRails>,
+    /// How the rails reshape the profile. Default: scale. Used only with `rails`.
+    #[serde(default)]
+    pub rail_fit: Option<super::types::RailFitParam>,
 }
 
 /// Add a box around bodies, larger by a margin on every side.
@@ -582,6 +759,38 @@ pub struct SetbackParam {
     pub vertex: Point3,
     /// How far along each edge there the corner's patch starts.
     pub distance: LengthExpr,
+}
+
+/// Bevel edges of a body with a flat face: `distance` back from each edge along both faces, or
+/// along the first face with `distance2` along the second, or with the bevel at `angle` from the
+/// first. Giving both `distance2` and `angle` is the handler's to refuse.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ChamferParams {
+    /// The edges to bevel: a point on each, or `{body, index}`.
+    pub edges: EdgeRefs,
+    /// How far the bevel cuts back from the edge: along both faces, or along the first face when
+    /// `distance2` or `angle` is given.
+    pub distance: LengthExpr,
+    /// How far the bevel cuts back along the second face. Not with `angle`.
+    #[serde(default)]
+    pub distance2: Option<LengthExpr>,
+    /// The bevel's angle from the first face. Not with `distance2`.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Which face is first: by default the one facing up most; true takes the other. Default:
+    /// false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The body whose edges the points pick. Default: whichever body has an edge there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Cut each picked edge's tangent chain with it. Default: true; false cuts exactly the picked
+    /// edges.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
 }
 
 /// The radius `fit: reduce` gave one edge.

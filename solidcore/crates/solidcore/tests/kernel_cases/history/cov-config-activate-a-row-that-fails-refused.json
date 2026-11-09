@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-config-activate-a-row-that-fails-refused",
+  "expected": {
+    "method": "a 0 mm block cannot be built: the activation is refused and the design kept",
+    "outcome": "refused",
+    "refusal": "configuration `Zero` would fail to rebuild",
+    "source": "invariants",
+    "sources": [],
+    "what": "config.activate of a row with a block 0 long"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (config.activate): invalid parameters for `config.activate`: configuration `Zero` would fail to rebuild: Block: invalid input: box needs a positive size in x, y and z; Hole: Hole: the reference `F1:+z` no longer exists as it was picked; reselect it",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (config.activate): invalid parameters for `config.activate`: configuration `Zero` would fail to rebuild: Block: invalid input: box needs a positive size in x, y and z; Hole: Hole: the reference `F1:+z` no longer exists as it was picked; reselect it",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.activate of a row with a block 0 long",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 7 (config.activate): invalid parameters for `config.activate`: configuration `Zero` would fail to rebuild: Block: invalid input: box needs a positive size in x, y and z; Hole: Hole: the reference `F1:+z` no longer exists as it was picked; reselect it"
+  ]
+}

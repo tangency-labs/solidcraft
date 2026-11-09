@@ -1,0 +1,265 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/10971",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/2450",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the steps are the issue's own commands (reproduced with solidcraft-cli 0.26.0: the r 11 cut gives 'boolean Cut: the operation failed: no result', the r 9 cut builds); the numbers here are closed form",
+ "summary": "A D-shaped block (a cylinder of radius 31.1225 and height 60 joined to a 62.245 x 31.1225 x 60 box behind it), a 22 mm high opening cut from the front (z 3 to 25), and then a round cut along X centred at z = 14. When the round's radius is 11 its circle touches the opening's top and bottom faces (z = 3 and 25) and the cut fails on SolidCraft's kernel with 'boolean Cut: the operation failed: no result' (the issue's variant); at 10.95 it passes only after the boolean's retry and leaves 0.05 mm slivers, which is what fails the fillet the issue is about; at 9 it builds. The cases are the opening alone and the round cut at 9 and at 11 (the failing one). The volumes are closed form: the round lies inside the opening on the y <= 0 side, so it removes only a half disc over the body's width. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "opening_only",
+   "note": "#10971: the D block with its opening (the start of the failing cut).",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 31.1225,
+     "height": 60.0
+    },
+    {
+     "op": "box",
+     "id": "back",
+     "origin": [
+      -31.1225,
+      0.0,
+      0.0
+     ],
+     "size": [
+      62.245,
+      31.1225,
+      60.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "d",
+     "a": "disc",
+     "b": "back"
+    },
+    {
+     "op": "box",
+     "id": "opening",
+     "origin": [
+      -36.1225,
+      -36.1225,
+      3.0
+     ],
+     "size": [
+      72.245,
+      36.1225,
+      22.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "d",
+     "b": "opening"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 174049.784266743,
+     "tol": 0.01,
+     "formula": "V = V(D) - V(opening within D); V(D) = 60 R^2 (pi/2 + 2) (the disc plus the box behind it, whose part inside the disc is the half disc), R = 31.1225; the opening (y <= 0, 3 <= z <= 25) takes the front half disc over 22 mm: pi R^2 / 2 * 22"
+    }
+   }
+  },
+  {
+   "name": "round_9_clear",
+   "note": "#10971: control, the round at radius 9 (clear of the opening's faces); builds on SolidCraft.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 31.1225,
+     "height": 60.0
+    },
+    {
+     "op": "box",
+     "id": "back",
+     "origin": [
+      -31.1225,
+      0.0,
+      0.0
+     ],
+     "size": [
+      62.245,
+      31.1225,
+      60.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "d",
+     "a": "disc",
+     "b": "back"
+    },
+    {
+     "op": "box",
+     "id": "opening",
+     "origin": [
+      -36.1225,
+      -36.1225,
+      3.0
+     ],
+     "size": [
+      72.245,
+      36.1225,
+      22.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "d",
+     "b": "opening"
+    },
+    {
+     "op": "cylinder",
+     "id": "round",
+     "origin": [
+      -40.0,
+      0.0,
+      14.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 9.0,
+     "height": 80.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "notched",
+     "b": "round"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 166130.072660473,
+     "tol": 0.01,
+     "formula": "V = V(D) - V(opening within D) - pi r^2 / 2 * 2R; R = 31.1225, r = 9. The round (axis X through (0, 0, 14)) lies in z 5..23, inside the opening's 3..25 where y <= 0, so only its half at y >= 0 removes material: a half disc of area pi r^2 / 2 over the body's 2R = 62.245 mm in X. Checked by Monte Carlo (2e8 points, within 0.7 standard errors)"
+    }
+   }
+  },
+  {
+   "name": "round_11_touching",
+   "note": "#10971: the round at radius 11, whose circle touches the opening's top and bottom faces: 'no result' on SolidCraft.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "disc",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 31.1225,
+     "height": 60.0
+    },
+    {
+     "op": "box",
+     "id": "back",
+     "origin": [
+      -31.1225,
+      0.0,
+      0.0
+     ],
+     "size": [
+      62.245,
+      31.1225,
+      60.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "d",
+     "a": "disc",
+     "b": "back"
+    },
+    {
+     "op": "box",
+     "id": "opening",
+     "origin": [
+      -36.1225,
+      -36.1225,
+      3.0
+     ],
+     "size": [
+      72.245,
+      36.1225,
+      22.0
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "notched",
+     "a": "d",
+     "b": "opening"
+    },
+    {
+     "op": "cylinder",
+     "id": "round",
+     "origin": [
+      -40.0,
+      0.0,
+      14.0
+     ],
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "radius": 11.0,
+     "height": 80.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "notched",
+     "b": "round"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "volume": {
+     "value": 162219.10396602,
+     "tol": 0.01,
+     "formula": "V = V(D) - V(opening within D) - pi r^2 / 2 * 2R; R = 31.1225, r = 11. The round (axis X through (0, 0, 14)) lies in z 3..25, inside the opening's 3..25 where y <= 0, so only its half at y >= 0 removes material: a half disc of area pi r^2 / 2 over the body's 2R = 62.245 mm in X. Checked by Monte Carlo (2e8 points, within 0.7 standard errors)"
+    }
+   }
+  }
+ ]
+}

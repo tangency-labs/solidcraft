@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="560" height="330" viewBox="0 0 560 330">
+  <title>The rolling ball between two faces</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L560 0 L560 330 L0 330 Z" fill="#ffffff"/>
+    <path d="M70 90 L330 90 L330 310 L70 310 Z" fill="#f0f0f0"/>
+    <path d="M70 180 L330 180" fill="none" stroke="#777777" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M240 70 L240 310" fill="none" stroke="#777777" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <path d="M150 180 C150 229.706 190.294 270 240 270 C289.706 270 330 229.706 330 180 C330 130.294 289.706 90 240 90 C190.294 90 150 130.294 150 180 Z" fill="none" stroke="#aaaaaa" stroke-width="0.8" stroke-miterlimit="10" stroke-dasharray="2 3"/>
+    <path d="M70 90 L330 90 L330 310" fill="none" stroke="#000000" stroke-width="1.6" stroke-miterlimit="10"/>
+    <path d="M240 180 L303.6 116.4" fill="none" stroke="#000000" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M340 117 L308 118" fill="none" stroke="#000000" stroke-width="0.8" stroke-miterlimit="10"/>
+    <path d="M240 90 C289.706 90 330 130.294 330 180" fill="none" stroke="#1f6fb2" stroke-width="2.6" stroke-miterlimit="10"/>
+    <path d="M244 90 C244 87.791 242.209 86 240 86 C237.791 86 236 87.791 236 90 C236 92.209 237.791 94 240 94 C242.209 94 244 92.209 244 90 Z" fill="#1f6fb2"/>
+    <path d="M334 180 C334 177.791 332.209 176 330 176 C327.791 176 326 177.791 326 180 C326 182.209 327.791 184 330 184 C332.209 184 334 182.209 334 180 Z" fill="#1f6fb2"/>
+    <path d="M244 180 C244 177.791 242.209 176 240 176 C237.791 176 236 177.791 236 180 C236 182.209 237.791 184 240 184 C242.209 184 244 182.209 244 180 Z" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 90 82)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">face F1</tspan></text>
+    <text transform="matrix(1 0 0 1 340 280)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">face F2</tspan></text>
+    <text transform="matrix(1 0 0 1 78 173)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">offset O1 = F1 + r n1</tspan></text>
+    <text transform="matrix(1 0 0 1 247 302)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">offset O2</tspan></text>
+    <text transform="matrix(1 0 0 1 100 213)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">spine m = O1 ∩ O2</tspan></text>
+    <text transform="matrix(1 0 0 1 100 228)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">(runs into the page)</tspan></text>
+    <text transform="matrix(1 0 0 1 182 76)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">rail ρ1 (ball&apos;s foot on F1)</tspan></text>
+    <text transform="matrix(1 0 0 1 342 184)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">rail ρ2 (ball&apos;s foot on F2)</tspan></text>
+    <text transform="matrix(1 0 0 1 345 121)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#1f6fb2"><tspan x="0" y="0">section: circle, Gⁿ or chord</tspan></text>
+    <text transform="matrix(1 0 0 1 279 160)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">r</tspan></text>
+    <text transform="matrix(1 0 0 1 104 266)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#777777"><tspan x="0" y="0">ball, radius r</tspan></text>
+    <text transform="matrix(1 0 0 1 338 84)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">edge (cut away)</tspan></text>
+    <text transform="matrix(1 0 0 1 80 300)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#999999"><tspan x="0" y="0">material</tspan></text>
+  </g>
+</svg>

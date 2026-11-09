@@ -1,0 +1,133 @@
+{
+  "area": "booleans",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": -0.08726646259971647,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                20.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                20.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                10.0,
+                0.0
+              ],
+              "start": [
+                20.0,
+                10.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                10.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "2583-taper-side-drawn-in-collinear-pieces",
+  "expected": {
+    "body_count": 1,
+    "faces": 6,
+    "method": "sections are (20+2d)x(10+2d) with d = z*tan5deg (positive taper grows outward); V = Int (200 + 60d + 4d^2) dz over z in 0..10 = 200*10 + 30*tan5*100 + 4*tan5^2*1000/3 = 2272.672. Four side faces, top and bottom = 6 (not 7)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2583"
+    ],
+    "volume_mm3": 2272.671678905175,
+    "what": "a tapered extrude of a 20x10 rectangle whose bottom side is drawn as two collinear pieces: the sloped side is one face"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1092.9759495427747,
+      "body_count": 1,
+      "edges": 12,
+      "faces": 6,
+      "vertices": 8,
+      "volume_mm3": 2272.671678905175
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2583"
+  ],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a tapered extrude of a 20x10 rectangle whose bottom side is drawn as two collinear pieces: the sloped side is one face",
+  "why_not": []
+}

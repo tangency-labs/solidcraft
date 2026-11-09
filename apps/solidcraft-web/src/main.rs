@@ -810,7 +810,7 @@ mod web {
                             files::pick_from_disk(&self.files, Intent::Open);
                         }
                         if ui_kit::button(ui, "Insert from computer…", ui_kit::Button::Normal)
-                            .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_drawings_hint"))
+                            .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_drawings_hint"))
                             .clicked()
                         {
                             files::pick_from_disk(&self.files, Intent::Insert);
@@ -864,7 +864,7 @@ mod web {
                                         let design = solidcraft_engine::io::is_design_path(&e.name);
                                         if !design
                                             && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                                .backing_on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .backing_on_hover_text(solidcraft_ui_text::tr("web.files.insert_stored_drawings_hint"))
                                                 .clicked()
                                         {
                                             act = Some(("insert", e.name.clone()));
@@ -1016,7 +1016,7 @@ mod web {
 
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
-            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language)) {
+            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language)) {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
@@ -1058,7 +1058,7 @@ mod web {
                         false
                     }
                 };
-                let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+                let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
                 if !installed && solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
                     log::warn!("script font unavailable; showing English for this session");
                 }
@@ -1067,13 +1067,13 @@ mod web {
                 ctx.request_repaint();
             }
             let ready = self.script_font_ready();
-            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.font.tick(&mut self.app.preferences.language, ready) {
                 self.fetch_font(ctx, solidcraft_ui_egui::fonts::web_script_font_kind(effective).unwrap_or("ja"));
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
-            if solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language) != self.font_language {
+            if solidcraft_ui_text::effective_language(&self.app.preferences.language) != self.font_language {
                 self.apply_fonts(ctx);
             }
         }
@@ -1081,7 +1081,7 @@ mod web {
         /// Set up the UI fonts for the live language, keeping fetched script fonts as fallbacks
         /// (Chinese leads a Chinese UI; see [`solidcraft_ui_egui::fonts::install_web_script_fonts`]).
         fn apply_fonts(&mut self, ctx: &egui::Context) {
-            let effective = solidcraft_ui_egui::i18n::effective_language(&self.app.preferences.language);
+            let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.cjk_bytes.is_none() && self.chinese_bytes.is_none() {
                 solidcraft_ui_egui::fonts::setup_fonts(ctx);
             } else {
@@ -1149,7 +1149,7 @@ mod web {
             UNSAVED.with(|u| u.set(self.asks_before_unload()));
             if self.launch.embed {
                 ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Chrome).edge("embed_header", ui_kit::Edge::Top).show(ui, |ui| {
-                    if ui_kit::button(ui, solidcraft_ui_egui::i18n::tr("web.open_full"), ui_kit::Button::Normal).clicked()
+                    if ui_kit::button(ui, solidcraft_ui_text::tr("web.open_full"), ui_kit::Button::Normal).clicked()
                         && let (Some(window), Some(url)) = (web_sys::window(), &self.full_url)
                     {
                         let _ = window.open_with_url_and_target_and_features(url, "_blank", "noopener");
@@ -1225,6 +1225,7 @@ mod web {
 
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
+        solidcraft_ui_egui::i18n::install();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());

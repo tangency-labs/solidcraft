@@ -1839,7 +1839,84 @@ pub fn solve_after_edit(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[V
 /// geometry restoration are identical at every analysis level.
 pub fn solve_after_edit_with_analysis(sk: &mut Sketch, old: &DrivingValues, stored: Option<&[Vec2]>, analysis: Analysis) -> SolveReport {
     let old_values: Vec<Option<f64>> = sk.constraints.iter().map(|c| old.get(&c.id).copied()).collect();
-    solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full())
+    let before = stored.is_none().then(|| sk.clone());
+    let report = solve_from(sk, &Hold::default(), stored, analysis, Some(&old_values), &mut Budget::full());
+    if report.keeps_orientation() {
+        return report;
+    }
+    match before.and_then(|before| solve_in_steps(&before, old, analysis)) {
+        Some((stepped, stepped_report)) => {
+            *sk = stepped;
+            stepped_report
+        }
+        None => report,
+    }
+}
+
+/// A value edit solved in [`EDIT_STEPS`] steps (each a few times more of them than the last
+/// try), the whole sketch at a time, each step a full solve (seed and iteration) from the last
+/// step's solution. Continuation follows one solution branch by the iteration alone, from
+/// sub-step to sub-step; that branch can end before the new values where a solve from the
+/// values a step before still reaches them keeping every turn (the linkage family in
+/// `continuation_tests`). `None` when no try reaches the new values keeping every orientation,
+/// when nothing that can be stepped changed, or when the sketch is not solved for the old values.
+fn solve_in_steps(start: &Sketch, old: &DrivingValues, analysis: Analysis) -> Option<(Sketch, SolveReport)> {
+    let changed: Vec<(usize, f64, f64)> = start
+        .constraints
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            let new = c.kind.value()?;
+            let was = *old.get(&c.id)?;
+            (was != new && was.is_finite() && new.is_finite()).then_some((i, was, new))
+        })
+        .collect();
+    let steppable = |&(i, was, new): &(usize, f64, f64)| start.constraints.get(i).is_some_and(|c| steppable(&c.kind, was, new));
+    if changed.is_empty() || !changed.iter().all(steppable) || !solved_for(start, old) {
+        return None;
+    }
+    'tries: for steps in EDIT_STEPS {
+        let mut at = start.clone();
+        let mut values = old.clone();
+        let mut last = None;
+        for k in 1..=steps {
+            let t = k as f64 / steps as f64;
+            for &(i, was, new) in &changed {
+                if let Some(c) = at.constraints.get_mut(i) {
+                    c.kind.set_value(if k == steps { new } else { was + (new - was) * t });
+                }
+            }
+            let from: Vec<Option<f64>> = at.constraints.iter().map(|c| values.get(&c.id).copied()).collect();
+            let step_analysis = if k == steps { analysis } else { Analysis::StatusOnly };
+            let report = solve_from(&mut at, &Hold::default(), None, step_analysis, Some(&from), &mut Budget::full());
+            if !report.keeps_orientation() {
+                continue 'tries;
+            }
+            values = at.driving_values();
+            last = Some(report);
+        }
+        return last.map(|report| (at, report));
+    }
+    None
+}
+
+/// How many steps [`solve_in_steps`] tries a value edit in, fewest first.
+const EDIT_STEPS: [usize; 4] = [2, 4, 8, 16];
+
+/// The sketch's geometry is a solved state for the driving values `old`: there is a state to
+/// step from and orientations to keep, as `ValueEdit::starts_solved` decides it per component
+/// (a sketch stored unsolved has neither, and its one-jump result stands).
+fn solved_for(sk: &Sketch, old: &DrivingValues) -> bool {
+    let mut was = sk.clone();
+    for c in &mut was.constraints {
+        if let (Some(_), Some(v)) = (c.kind.value(), old.get(&c.id)) {
+            c.kind.set_value(*v);
+        }
+    }
+    let lay = layout(&was, &Hold::default());
+    let mut x = initial_x(&was, &lay);
+    let (blocks, _) = build_blocks(&was, &lay, &points_on_curves(&was));
+    max_abs(&system(&was, &lay, &blocks, &mut x, false).0) < ACCEPT
 }
 
 /// The orientations of `stored` that `solved` (the same sketch, its links moved and solved
