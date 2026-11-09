@@ -54,12 +54,17 @@ function parseDefaults(body) {
     if (pref && pref[1].trim() && !/^<.*>$/.test(pref[2])) {
       return { status: 'yes', detail: pref[1].trim(), preference: pref[2] };
     }
+    // solidcore's rule is the opposite of the app's: a kernel result change becomes the default and the
+    // old path is deleted, no flag (solidcore/AGENTS.md §4b). Accepted only for PRs that stay in solidcore/.
+    const kernel = yes[1].match(/^(.*?)[ ,;]*\bkernel result change\b[ ,;]*no (?:preference|flag)\.?$/i);
+    if (kernel && kernel[1].trim()) return { status: 'kernel', detail: kernel[1].trim() };
   }
   return { status: 'malformed', detail: value };
 }
 
 const DEFAULTS_HELP =
   'Add one line to the description: `Changes a default: no`, or ' +
+  '(solidcore/ only) `Changes a default: yes — <what changes>; kernel result change, no preference`, or ' +
   '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`.';
 
 function isBot(user) {
@@ -151,7 +156,10 @@ async function checkDefaults({ github, context, core }) {
   })).map((f) => f.filename);
   if (isDocsOnly(files)) return { skipped: 'docs only' };
   const result = parseDefaults(pull.body);
-  if (result.status === 'missing') {
+  if (result.status === 'kernel' && !files.every((f) => f.startsWith('solidcore/') || DOC_FILE.test(f))) {
+    core.setFailed('"kernel result change, no preference" is only for pull requests that change solidcore/ alone; ' +
+      `a change to the app keeps its old behaviour behind a preference. ${DEFAULTS_HELP}`);
+  } else if (result.status === 'missing') {
     core.setFailed(`The description has no "Changes a default:" line. ${DEFAULTS_HELP}`);
   } else if (result.status === 'malformed') {
     core.setFailed(`Could not read "Changes a default: ${result.detail}". ${DEFAULTS_HELP}`);

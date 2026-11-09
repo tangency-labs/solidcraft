@@ -47,6 +47,13 @@ test('parseDefaults yes forms', () => {
   assert.equal(pc.parseDefaults('Changes a default: yes — x, old behaviour kept behind preference <name>').status, 'malformed');
 });
 
+test('parseDefaults kernel result change (solidcore/ only)', () => {
+  const r = pc.parseDefaults('Changes a default: yes — the fillet corner patch is G2 now; kernel result change, no preference');
+  assert.equal(r.status, 'kernel');
+  assert.equal(r.detail, 'the fillet corner patch is G2 now');
+  assert.equal(pc.parseDefaults('Changes a default: yes - kernel result change, no preference').status, 'malformed');
+});
+
 test('isBot and isDocsOnly', () => {
   assert.ok(pc.isBot({ login: 'dependabot[bot]', type: 'Bot' }));
   assert.ok(pc.isBot({ login: 'solidcraft-generated[bot]' }));
