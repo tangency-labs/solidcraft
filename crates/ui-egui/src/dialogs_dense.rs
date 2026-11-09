@@ -911,7 +911,6 @@ fn offset_angle_plane_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names
     let section_id = if offset_command { "plane_offset" } else { "plane_angle" };
     let offset_section = format!("{section_id}_offset");
     let turn_section = format!("{section_id}_turn");
-    let options_id = format!("{section_id}_options");
     // Value-driven open wins over a prior collapsed click in this session (edit restore).
     if offset_open {
         let id = ui.make_persistent_id(&offset_section);
@@ -947,7 +946,8 @@ fn offset_angle_plane_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names
             Kind::OffsetPlane { angle, direction_only, .. } | Kind::AnglePlane { angle, direction_only, .. } => {
                 // Empty angle on Offset Plane means a plain offset (no turn).
                 enter |= hint_row(ui, "Angle", angle, if offset_command { "none" } else { "45 deg" });
-                ui_kit::options(ui, &options_id, &mut [("Use axis direction only", direction_only)]);
+                // Inline in Angle — no nested Options section (#12038).
+                ui_kit::checkbox_grid(ui, &mut [("Use axis direction only", direction_only)], 1);
                 const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
                 set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
             }

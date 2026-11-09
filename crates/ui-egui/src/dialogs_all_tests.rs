@@ -632,10 +632,19 @@ fn offset_and_angle_plane_section_defaults() {
         assert!(scenario::rect_of("dialog:row:Plane").is_some(), "{command}: Plane above sections");
         assert!(scenario::handle_at("dialog:section:Offset").is_some(), "{command}: Offset section");
         assert!(scenario::handle_at("dialog:section:Angle").is_some(), "{command}: Angle section");
+        assert!(scenario::handle_at("dialog:section:Options").is_none(), "{command}: direction-only is inline in Angle, not Options");
         assert_eq!(scenario::rect_of("dialog:row:Offset").is_some(), offset_open, "{command}: Offset open={offset_open}");
         assert_eq!(scenario::rect_of("dialog:row:Through point").is_some(), offset_open, "{command}: Through with Offset");
         assert_eq!(scenario::rect_of("dialog:row:Axis").is_some(), angle_open, "{command}: Axis open={angle_open}");
         assert_eq!(scenario::rect_of("dialog:row:Angle").is_some(), angle_open, "{command}: Angle open={angle_open}");
+        if angle_open {
+            assert!(
+                h.output.accesskit_update.as_ref().is_some_and(|tree| {
+                    tree.nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Use axis direction only"))
+                }),
+                "{command}: direction-only checkbox inside Angle"
+            );
+        }
         let collapsed = if offset_open { "dialog:section:Angle" } else { "dialog:section:Offset" };
         h.step(&json!({"click": {"handle": collapsed}})).unwrap();
         h.frames(2);
