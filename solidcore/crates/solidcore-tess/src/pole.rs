@@ -135,7 +135,7 @@ pub(crate) fn limit_normal(
 /// which refuses the face there.
 pub(crate) fn plan_poles(
     fi: usize,
-    s: &EvalSurface,
+    s: &crate::planner::FaceSurface,
     f: &FacePlan,
     reach: f64,
 ) -> (Vec<PoleNode>, Vec<AveragedPole>) {

@@ -982,7 +982,7 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
         plan_face(
             0,
             "spline",
-            &s,
+            &FaceSurface::new(s.clone()),
             loops,
             &rules,
             &size,
@@ -995,7 +995,7 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
     let Ok(fp) = plan_face(
         0,
         "spline",
-        &s,
+        &FaceSurface::new(s.clone()),
         loops,
         &rules,
         &size,
@@ -1038,7 +1038,7 @@ fn a_face_filled_leniently_is_named_in_the_stats() {
     let Ok((fp, stats)) = plan_or_fill(
         7,
         "spline",
-        &s,
+        &FaceSurface::new(s.clone()),
         std::slice::from_ref(&l),
         &rules,
         &size,
@@ -1072,7 +1072,7 @@ fn a_face_untangling_cannot_resolve_is_filled_leniently_and_named() {
     let Ok((fp, stats)) = plan_or_fill(
         7,
         "spline",
-        &s,
+        &FaceSurface::new(s.clone()),
         std::slice::from_ref(&l),
         &rules,
         &size,
@@ -1348,7 +1348,7 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
     sag::refine(
         &s,
         tol,
-        &mut sag::Poles::new(&s, 1e-9),
+        &mut sag::Poles::new(&FaceSurface::new(s.clone()), 1e-9),
         &fixed,
         &mut uv,
         &mut tris,
@@ -1409,7 +1409,15 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
             .sum()
     };
     let before = area(&tris);
-    sag::flip(&s, 0.1, &mut sag::Poles::new(&s, 1e-9), &[], &uv, &mut tris).unwrap();
+    sag::flip(
+        &s,
+        0.1,
+        &mut sag::Poles::new(&FaceSurface::new(s.clone()), 1e-9),
+        &[],
+        &uv,
+        &mut tris,
+    )
+    .unwrap();
     let after = area(&tris);
     let sides: Vec<(u32, u32)> = tris
         .iter()
@@ -1868,7 +1876,7 @@ fn a_face_with_a_loop_of_one_node_is_refused_naming_the_loop() {
     assert_eq!(nodes[e as usize].points.len(), 2);
     let face = &b.faces[4];
     let s = ok(surface::eval_surface(face.parameters()));
-    match boundary(&b, 4, face, &s, &nodes, &rules) {
+    match boundary(&b, 4, face, &FaceSurface::new(s.clone()), &nodes, &rules) {
         Err(e) => assert!(
             e.to_string()
                 .ends_with("face 4 (plane): loop 1 has 1 node (1 edge uses)"),
@@ -1937,10 +1945,14 @@ fn a_thin_loops_edge_that_cannot_be_split_is_returned_with_why() {
 fn an_edge_untangling_cannot_split_refuses_its_faces() {
     let b = fixture("box_10x6x4");
     let rules = size::Rules::new(0.01, 12.0, None);
-    let evals: Vec<Option<EvalSurface>> = b
+    let evals: Vec<Option<FaceSurface>> = b
         .faces
         .iter()
-        .map(|f| surface::eval_surface(f.parameters()).ok())
+        .map(|f| {
+            surface::eval_surface(f.parameters())
+                .ok()
+                .map(FaceSurface::new)
+        })
         .collect();
     let mut edge_faces: Vec<Vec<usize>> = vec![Vec::new(); b.edges.len()];
     for (fi, f) in b.faces.iter().enumerate() {

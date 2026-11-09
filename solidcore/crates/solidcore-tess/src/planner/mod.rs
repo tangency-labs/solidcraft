@@ -49,6 +49,7 @@ use crate::{FacePlan, TessPlan};
 use solidcore::eval::EvalSurface;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self, Curve, Loop, Shell};
+pub(crate) use surface::FaceSurface;
 
 use crate::{Result, TessError};
 
@@ -225,12 +226,12 @@ impl std::fmt::Display for Unclassified {
 /// Whether `s` is collapsed along `d` at `q`, to within `reach` (a pole, or a patch side
 /// collapsed to within a tolerance), as the kernel's classifier says; its refusal the error.
 pub(crate) fn pole_at(
-    s: &EvalSurface,
+    s: &FaceSurface,
     q: [f64; 2],
     d: usize,
     reach: f64,
 ) -> std::result::Result<bool, Unclassified> {
-    solidcore::eval::uv::degenerate_within(s, q, d, reach).map_err(|e| Unclassified {
+    s.collapsed(q, d, reach).map_err(|e| Unclassified {
         at: q,
         why: crate::eval_message(e),
     })
@@ -238,7 +239,7 @@ pub(crate) fn pole_at(
 
 /// The first direction (u, then v) `s` is collapsed along at `q` ([`pole_at`]), if any.
 pub(crate) fn pole_dir(
-    s: &EvalSurface,
+    s: &FaceSurface,
     q: [f64; 2],
     reach: f64,
 ) -> std::result::Result<Option<usize>, Unclassified> {
@@ -445,10 +446,10 @@ fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPl
     // one about a hundred, so the pool is used only where curved faces (or intersection
     // curves) make up the work. A face refused at one step (its surface, an edge of it, its
     // boundary) is passed over by the steps after, and left out of the plan, named.
-    let mut evals: Vec<Option<EvalSurface>> = Vec::new();
+    let mut evals: Vec<Option<FaceSurface>> = Vec::new();
     for (fi, f) in faces.iter().enumerate() {
         let s = match surface::eval_surface(f.parameters()) {
-            Ok(s) => Some(s),
+            Ok(s) => Some(FaceSurface::new(s)),
             Err(e) => {
                 refused.face(
                     fi,
@@ -462,7 +463,7 @@ fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPl
     let curved = evals
         .iter()
         .flatten()
-        .filter(|e| !matches!(e, EvalSurface::Plane { .. }))
+        .filter(|e| !matches!(***e, EvalSurface::Plane { .. }))
         .count();
     let sizes: Vec<Option<size::FaceSize>> =
         crate::par::map("face sizes", &evals, curved >= PARALLEL_SIZES, |s| {
@@ -636,7 +637,7 @@ fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPl
         let surface = match eval {
             Some(eval) => {
                 let i = u32::try_from(plan.surfaces.len()).map_err(|_| too_many())?;
-                plan.surfaces.push(eval);
+                plan.surfaces.push(eval.into_eval());
                 Some(i)
             }
             None => None,
@@ -790,7 +791,7 @@ fn boundary(
     b: &brep::Brep,
     fi: usize,
     face: &brep::Face,
-    s: &EvalSurface,
+    s: &FaceSurface,
     nodes: &[edges::Nodes],
     rules: &size::Rules,
 ) -> Result<Boundary> {
@@ -1133,7 +1134,7 @@ struct Boundary {
 #[allow(clippy::too_many_arguments)]
 fn untangle(
     b: &brep::Brep,
-    evals: &[Option<EvalSurface>],
+    evals: &[Option<FaceSurface>],
     edge_faces: &[Vec<usize>],
     tol: f64,
     nodes: &mut [edges::Nodes],
@@ -1155,7 +1156,7 @@ fn untangle(
     let curved = evals
         .iter()
         .flatten()
-        .filter(|e| !matches!(e, EvalSurface::Plane { .. }))
+        .filter(|e| !matches!(***e, EvalSurface::Plane { .. }))
         .count();
     let found: Vec<Option<Vec<(u32, u32)>>> = crate::par::map(
         "boundary crossings",
@@ -1254,7 +1255,7 @@ fn untangle(
 /// emptied, so it crosses nothing.
 fn rebuild(
     fi: usize,
-    evals: &[Option<EvalSurface>],
+    evals: &[Option<FaceSurface>],
     nodes: &[edges::Nodes],
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
@@ -1309,7 +1310,7 @@ const MAX_SNAP: u32 = 8;
 /// (in `refused`), which are passed over from then on.
 #[allow(clippy::too_many_arguments)]
 fn snap_touches(
-    evals: &[Option<EvalSurface>],
+    evals: &[Option<FaceSurface>],
     edge_faces: &[Vec<usize>],
     tol: f64,
     nodes: &mut [edges::Nodes],
@@ -1660,7 +1661,7 @@ fn area2(uv: &[[f64; 2]]) -> f64 {
 /// second pole back to the first is moved one period along, whichever way keeps the loop
 /// within one period with a positive area: the seam's two uses then lie a period apart.
 fn open_pole_to_pole(
-    s: &EvalSurface,
+    s: &FaceSurface,
     dom: &solidcore::eval::uv::Domain,
     reach: f64,
     l: &mut seam::Loop,
@@ -1751,7 +1752,7 @@ fn open_pole_to_pole(
 /// The poles of a loop where it turns straight back along a seam: the nodes either side have
 /// the same parameters.
 fn turning_poles(
-    s: &EvalSurface,
+    s: &FaceSurface,
     reach: f64,
     per: f64,
     uv: &[[f64; 2]],
@@ -1780,7 +1781,7 @@ fn turning_poles(
 /// their nodes as every other edge does. Kept as it was unless the opened loop spans at most a
 /// period with a positive area.
 fn open_at_pole(
-    s: &EvalSurface,
+    s: &FaceSurface,
     dom: &solidcore::eval::uv::Domain,
     reach: f64,
     l: &mut seam::Loop,
@@ -1913,7 +1914,7 @@ fn holes_beside_outer(dom: &solidcore::eval::uv::Domain, loops: &mut [seam::Loop
 fn plan_or_fill(
     fi: u32,
     kind: &str,
-    s: &EvalSurface,
+    s: &FaceSurface,
     loops: &[seam::Loop],
     rules: &size::Rules,
     size: &size::FaceSize,
@@ -1976,7 +1977,7 @@ fn plan_or_fill(
 fn plan_face(
     fi: u32,
     kind: &str,
-    s: &EvalSurface,
+    s: &FaceSurface,
     loops: &[seam::Loop],
     rules: &size::Rules,
     size: &size::FaceSize,
@@ -2137,7 +2138,7 @@ fn plan_face(
         let fill = cdt::Fill {
             seeds: &seeds,
             refine: Some((sag, MAX_REFINE)),
-            shape: !matches!(s, EvalSurface::Plane { .. }),
+            shape: !matches!(**s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
         };
         cdt::triangulate(&uvs, &ranges, fill)
@@ -2146,7 +2147,7 @@ fn plan_face(
     };
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
-    let planar = matches!(s, EvalSurface::Plane { .. });
+    let planar = matches!(**s, EvalSurface::Plane { .. });
     // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
     let (extra, triangles) = if lenient == Lenient::Yes {
         delaunay()?

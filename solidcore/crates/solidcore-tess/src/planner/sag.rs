@@ -14,7 +14,7 @@ use crate::vec::VecExt as _;
 use solidcore::eval::EvalSurface;
 use solidcore_record::Vec3;
 
-use super::{NoValue, Unclassified};
+use super::{FaceSurface, NoValue, Unclassified};
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
@@ -192,7 +192,7 @@ pub(crate) fn refine(
 /// triangulation, as the kernel's classifier says (within `reach`): a property of the node's
 /// parameters, so it is asked once per node however many triangles and rounds look at it.
 pub(crate) struct Poles<'a> {
-    s: &'a EvalSurface,
+    s: &'a FaceSurface,
     reach: f64,
     /// Per node index; `None` until asked.
     flags: Vec<Option<[bool; 2]>>,
@@ -202,7 +202,7 @@ pub(crate) struct Poles<'a> {
 }
 
 impl<'a> Poles<'a> {
-    pub(crate) fn new(s: &'a EvalSurface, reach: f64) -> Self {
+    pub(crate) fn new(s: &'a FaceSurface, reach: f64) -> Self {
         Poles {
             s,
             reach,
@@ -648,7 +648,7 @@ mod tests {
             refine(
                 &s,
                 0.01,
-                &mut Poles::new(&s, 1e-9),
+                &mut Poles::new(&FaceSurface::new(s.clone()), 1e-9),
                 &fixed,
                 &mut uv,
                 &mut tris,
@@ -677,7 +677,7 @@ mod tests {
             refine(
                 &s,
                 0.01,
-                &mut Poles::new(&s, 1e-9),
+                &mut Poles::new(&FaceSurface::new(s.clone()), 1e-9),
                 &fixed,
                 &mut uv,
                 &mut tris,
@@ -686,7 +686,14 @@ mod tests {
             Err(Stop::NoValue(NoValue([0.5, 0.5])))
         );
         assert_eq!(
-            flip(&s, 0.01, &mut Poles::new(&s, 1e-9), &fixed, &uv, &mut tris),
+            flip(
+                &s,
+                0.01,
+                &mut Poles::new(&FaceSurface::new(s.clone()), 1e-9),
+                &fixed,
+                &uv,
+                &mut tris
+            ),
             Err(Stop::NoValue(NoValue([0.5, 0.5])))
         );
     }
@@ -715,7 +722,13 @@ mod tests {
         };
         let uv = [[0.5, -0.1], [0.5, 0.1], [0.6, 0.0]];
         let side = 3.0 * (1.0 - 0.1f64.cos());
-        let got = worst(&s, &mut Poles::new(&s, 0.0), &[], &uv, &[[0, 1, 2]]);
+        let got = worst(
+            &s,
+            &mut Poles::new(&FaceSurface::new(s.clone()), 0.0),
+            &[],
+            &uv,
+            &[[0, 1, 2]],
+        );
         assert!(
             got.as_ref()
                 .is_ok_and(|(w, unmeasured)| (w - side).abs() < 1e-9 * side && *unmeasured == 0),
@@ -725,7 +738,7 @@ mod tests {
         assert_eq!(
             worst(
                 &s,
-                &mut Poles::new(&s, 0.0),
+                &mut Poles::new(&FaceSurface::new(s.clone()), 0.0),
                 &[],
                 &uv,
                 &[[0, 1, 2], [0, 1, 3]]
@@ -774,6 +787,7 @@ mod tests {
                 tris.push([a, d, b]);
             }
         }
+        let s = FaceSurface::new(s);
         let mut poles = Poles::new(&s, 1e-9);
         let start = uv.len();
         // Refinement is capped (it may or may not run out of room): the count holds either way.

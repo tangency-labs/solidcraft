@@ -4,8 +4,6 @@
 
 use std::cmp::Ordering;
 
-use solidcore::eval::EvalSurface;
-
 use super::seam;
 
 /// Two chords cross only where each one's ends lie strictly either side of the other, by more
@@ -49,7 +47,7 @@ fn shifted(q: [f64; 2], d: usize, by: f64) -> [f64; 2] {
 /// [`solidcore::eval::uv::degenerate_within`]); a node whose poles the kernel's classifier
 /// cannot tell is the error.
 pub(crate) fn crossing(
-    s: &EvalSurface,
+    s: &super::FaceSurface,
     reach: f64,
     loops: &[seam::Loop],
 ) -> Result<Vec<(usize, usize)>, super::Unclassified> {

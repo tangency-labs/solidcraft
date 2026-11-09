@@ -3,6 +3,7 @@
 //! needs, a node of a seam cut, or a point a size rule probes between the nodes it places).
 //! Nothing is substituted for the point, and no point is skipped.
 
+use super::FaceSurface;
 use solidcore::eval::{EvalCurve, EvalSurface};
 use solidcore_convert as kernel;
 use solidcore_record::Vec3;
@@ -100,7 +101,16 @@ fn a_face_whose_surface_refuses_an_inner_point_is_refused_whole() {
     let s = cylinder_without(0.5);
     let loops = [quarter(&s, 8, 1.0)];
     let rules = Rules::new(0.01, 40.0, None);
-    let r = plan_or_fill(0, "revolution", &s, &loops, &rules, &size(1.0), 0.0, None);
+    let r = plan_or_fill(
+        0,
+        "revolution",
+        &FaceSurface::new(s.clone()),
+        &loops,
+        &rules,
+        &size(1.0),
+        0.0,
+        None,
+    );
     match r {
         Err(e) => assert!(
             e.to_string()
@@ -156,7 +166,16 @@ fn a_face_whose_surface_refuses_a_point_between_its_nodes_is_refused_whole() {
     let s = cylinder_without(0.25);
     let loops = [quarter(&s, 16, 1.0)];
     let rules = Rules::new(0.01, 40.0, None);
-    let r = plan_or_fill(0, "revolution", &s, &loops, &rules, &size(50.0), 0.0, None);
+    let r = plan_or_fill(
+        0,
+        "revolution",
+        &FaceSurface::new(s.clone()),
+        &loops,
+        &rules,
+        &size(50.0),
+        0.0,
+        None,
+    );
     match r {
         Err(e) => assert!(
             e.to_string()
@@ -224,7 +243,16 @@ fn a_size_sample_the_surface_refuses_refuses_only_a_face_it_lies_in() {
     );
     // A face beside the circle: the samples on it lie outside, and it meshes.
     let low = [quarter(&s, 16, 0.25)];
-    match plan_or_fill(0, "revolution", &s, &low, &rules, &size, 0.0, None) {
+    match plan_or_fill(
+        0,
+        "revolution",
+        &FaceSurface::new(s.clone()),
+        &low,
+        &rules,
+        &size,
+        0.0,
+        None,
+    ) {
         Ok((fp, stats)) => assert!(
             !fp.triangles.is_empty() && stats.lenient.is_empty(),
             "{stats:?}"
@@ -241,7 +269,16 @@ fn a_size_sample_the_surface_refuses_refuses_only_a_face_it_lies_in() {
     let Some(inside) = inside else {
         panic!("a sample inside the quarter turn: {size:?}")
     };
-    match plan_or_fill(0, "revolution", &s, &whole, &rules, &size, 0.0, None) {
+    match plan_or_fill(
+        0,
+        "revolution",
+        &FaceSurface::new(s.clone()),
+        &whole,
+        &rules,
+        &size,
+        0.0,
+        None,
+    ) {
         Err(e) => assert!(
             e.to_string()
                 .contains(&format!("does not evaluate at {inside:?}")),
@@ -319,7 +356,16 @@ fn a_point_in_a_faces_notch_the_surface_does_not_evaluate_at_does_not_refuse_it(
             [0.0, 1.0],
         ],
     )];
-    match plan_or_fill(0, "spline", &s, &notched, &rules, &size, 0.0, None) {
+    match plan_or_fill(
+        0,
+        "spline",
+        &FaceSurface::new(s.clone()),
+        &notched,
+        &rules,
+        &size,
+        0.0,
+        None,
+    ) {
         Ok((fp, stats)) => assert!(
             !fp.triangles.is_empty() && stats.lenient.is_empty(),
             "{stats:?}"
@@ -330,7 +376,16 @@ fn a_point_in_a_faces_notch_the_surface_does_not_evaluate_at_does_not_refuse_it(
         &s,
         &[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
     )];
-    match plan_or_fill(0, "spline", &s, &square, &rules, &size, 0.0, None) {
+    match plan_or_fill(
+        0,
+        "spline",
+        &FaceSurface::new(s.clone()),
+        &square,
+        &rules,
+        &size,
+        0.0,
+        None,
+    ) {
         Err(e) => assert!(
             e.to_string()
                 .contains("the surface does not evaluate at [0.5, 0.5]"),
@@ -382,7 +437,7 @@ fn the_flips_name_a_middle_the_surface_does_not_evaluate_at() {
     match super::sag::flip(
         &s,
         0.01,
-        &mut super::sag::Poles::new(&s, 1e-9),
+        &mut super::sag::Poles::new(&FaceSurface::new(s.clone()), 1e-9),
         &fixed,
         &uv,
         &mut tris,
@@ -482,7 +537,16 @@ fn a_division_point_too_many_periods_away_to_place_refuses_the_face_for_that() {
     let s = cylinder_without(0.5);
     let loops = [long_strip(&s)];
     let rules = Rules::new(0.01, 40.0, None);
-    match plan_or_fill(0, "revolution", &s, &loops, &rules, &size(1.0), 0.0, None) {
+    match plan_or_fill(
+        0,
+        "revolution",
+        &FaceSurface::new(s.clone()),
+        &loops,
+        &rules,
+        &size(1.0),
+        0.0,
+        None,
+    ) {
         Err(e) => assert!(e.to_string().contains("periods, more than the 4096"), "{e}"),
         Ok((fp, _)) => panic!("meshed with {} triangles", fp.triangles.len()),
     }
@@ -514,7 +578,7 @@ fn a_size_sample_too_many_periods_away_to_place_refuses_the_face_for_that() {
         unevaluated: vec![[0.5, 0.3]],
         ..size(1.0)
     };
-    match plan_or_fill(0, "revolution", &s, &loops, &rules, &size, 0.0, None) {
+    match plan_or_fill(0, "revolution", &FaceSurface::new(s.clone()), &loops, &rules, &size, 0.0, None) {
         Err(e) => assert!(
             e.to_string().ends_with(
                 "periods, more than the 4096 a point the surface does not evaluate at ([0.5, 0.3]) is looked for in"
@@ -553,7 +617,7 @@ fn the_worst_sag_is_measured_where_the_surface_evaluates() {
     let uv = [[0.0, 0.0], [0.75, -0.5], [0.75, 0.5]];
     let got = super::sag::worst(
         &s,
-        &mut super::sag::Poles::new(&s, 1e-9),
+        &mut super::sag::Poles::new(&FaceSurface::new(s.clone()), 1e-9),
         &[],
         &uv,
         &[[0, 1, 2]],
@@ -597,7 +661,16 @@ fn a_face_whose_poles_cannot_be_told_is_refused_with_the_classifiers_reason() {
         speed: [1.0, 1.0],
         unevaluated: Vec::new(),
     };
-    match plan_or_fill(3, "spline", &s, &loops, &rules, &size, 0.0, None) {
+    match plan_or_fill(
+        3,
+        "spline",
+        &FaceSurface::new(s.clone()),
+        &loops,
+        &rules,
+        &size,
+        0.0,
+        None,
+    ) {
         Err(e) => {
             let why = e.to_string();
             assert!(
