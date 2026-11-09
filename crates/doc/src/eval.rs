@@ -7700,11 +7700,11 @@ fn eval_feature(
                 return Err(DocError::Invalid("thread depth must be finite and positive".into()));
             }
             let (spots, dir) = hole_spots(vals, st, f)?;
-            let gone = hole_points_gone(st, f);
-            if !gone.is_empty() {
+            let points_gone = hole_points_gone(st, f);
+            if !points_gone.is_empty() {
                 append_warning(
                     warning,
-                    format!("sketch point(s) {} no longer in the sketch: not drilled there (edit the Hole to drop them)", backticked(&gone)),
+                    format!("sketch point(s) {} no longer in the sketch: not drilled there (edit the Hole to drop them)", backticked(&points_gone)),
                 );
             }
             // How deep each hole goes (through all: as far as the wall goes), read before the cut:
