@@ -1804,10 +1804,11 @@ mod imp {
     fn loft_through(sections: &[(Plane, Vec<Piece>)], first: usize, curves: &[Vec<Curve>], degree: u32) -> Result<Body> {
         let brep = Brep::loft(curves, degree, true).map_err(|e| failed("loft", e))?;
         let body = body_of(brep, "loft")?;
-        // The skin makes flat walls B-splines too: those are their planes (#13331).
-        let body = match crate::flat_faces::flat_splines_as_planes(body.record()) {
-            Some(flat) => body_from_record(&flat, "loft")?,
-            None => body,
+        // The skin makes flat walls B-splines too: those are their planes (#13331). Only a
+        // fallback is lost if SMLib refuses the rewritten record: the skin's own body stays.
+        let body = match crate::flat_faces::flat_splines_as_planes(body.record()).map(|flat| body_from_record(&flat, "loft")) {
+            Some(Ok(flat)) => flat,
+            _ => body,
         };
         let (Some((start, lead)), Some(last)) = (sections.get(first), sections.get(if first == 0 { sections.len().saturating_sub(1) } else { 0 }))
         else {

@@ -192,4 +192,9 @@ fn a_loft_of_lines_and_an_arc_has_planar_walls_on_the_lines() {
     let b = a * 0.36;
     check(&body, 50.0 / 3.0 * (a + b + (a * b).sqrt()), 1e-6);
     assert_eq!(faces_of(&body, "plane"), 5, "{:?}", measure(&body).unwrap().merged.face_types);
+    // Every wall, flat or not, still comes from its segments: the names a saved design picks by.
+    let history = body.history().unwrap();
+    for segment in 0..8 {
+        assert!(history.faces.iter().any(|f| f.origins.contains(&crate::history::FaceOrigin::Profile { segment })), "{segment}");
+    }
 }
