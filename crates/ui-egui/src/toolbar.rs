@@ -2,25 +2,15 @@
 
 use crate::icons::glyphs::pin_icon;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{self, Container, Edge, Surface};
 use egui::{Align2, Color32, FontId, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
-use crate::ribbon::{
-    self, BUTTON_GAP, BUTTON_HEIGHT, BUTTON_LABEL_PADDING, BUTTON_MIN_WIDTH, ButtonSize, Fit, GALLERY_WIDTH, GROUP_HEIGHT, ICON_BUTTON_HEIGHT,
-    ICON_GROUP_HEIGHT, PANEL_GAP, PanelSize, Plan, SECTION_HEIGHT, fit,
-};
+use crate::ribbon::{self, BUTTON_LABEL_PADDING, BUTTON_MIN_WIDTH, ButtonSize, GROUP_HEIGHT, ICON_GROUP_HEIGHT};
 use crate::{SolveApp, icons};
 use solidcraft_theme::Tokens;
 
 pub use crate::workspace::TABS;
-
-/// Legacy paint arguments and non-SVG affordances follow the same semantic palette as the icon.
-/// The requested icon id determines its meaning on ribbons, menus and drag previews alike.
-fn command_accent(icon: &str) -> Color32 {
-    crate::icon_svg::primary(icon, solidcraft_theme::is_dark(), solidcraft_theme::vision())
-}
 
 /// Accent for a tab or a panel with a more specific semantic role.
 fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
@@ -1005,20 +995,6 @@ pub(crate) fn ribbon_label(app: &SolveApp, label: &str) -> String {
     app.tr_label(&label).to_string()
 }
 
-fn ribbon_text(ui: &egui::Ui, at: egui::Pos2, text: &str, size: f32, color: Color32, bold: bool) {
-    let text = egui::RichText::new(text).size(size).color(color);
-    let text = if bold { text.semibold() } else { text };
-    let galley = egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button);
-    ribbon_galley(ui, at, galley, color);
-}
-
-fn ribbon_galley(ui: &egui::Ui, at: egui::Pos2, galley: std::sync::Arc<egui::Galley>, color: Color32) {
-    let origin = at - galley.size() / 2.0;
-    let ppp = ui.ctx().pixels_per_point().max(0.5);
-    let origin = pos2((origin.x * ppp).round() / ppp, (origin.y * ppp).round() / ppp);
-    ui.painter().galley(origin, galley, color);
-}
-
 /// SKETCH while editing a sketch and SHEET METAL while a sheet body is active take the contextual
 /// tab style; SHEET METAL is an ordinary tab otherwise. WELDMENTS selects itself on a frame member
 /// but keeps the ordinary tab look, as MODEL has when selected.
@@ -1150,7 +1126,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
                     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, ribbon_label(app, tab)));
                     let style = ribbon_tab_style(&t, tab, contextual, active, response.hovered());
                     ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
-                    ribbon_text(ui, tr.center(), &ribbon_label(app, tab), t.font_button, style.ink, active || contextual);
+                    ribbon::text(ui, tr.center(), &ribbon_label(app, tab), t.font_button, style.ink, active || contextual);
                     if ui.clip_rect().contains(tr.center()) {
                         crate::scenario::publish_target(&format!("tab:{tab}"), tr);
                         crate::scenario::publish_rect(&format!("toolbar_tab:{tab}"), tr);
@@ -1212,11 +1188,6 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
         );
     }
     clicked
-}
-
-/// The dropdown chevron every ribbon menu shares.
-fn dropdown_arrow(painter: &egui::Painter, at: egui::Pos2, ink: Color32) {
-    crate::ui_kit::dropdown_indicator(painter, Rect::from_center_size(at, vec2(10.0, 10.0)), ink);
 }
 
 pub(crate) fn shell_layout(app: &SolveApp) -> crate::ui_kit::LayoutMode {
@@ -1340,15 +1311,285 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     }
 }
 
+/// One ribbon button as SolidCraft sees it: the command pinned there, the one a click runs (a
+/// family's chosen variant), and the component's data for it.
+struct PanelButton {
+    panel: &'static str,
+    pinned: &'static solidcraft_engine::CommandSpec,
+    selected: &'static solidcraft_engine::CommandSpec,
+    /// The family whose first variant is pinned here: its variants' menu hangs under the button.
+    family: Option<&'static crate::sketch_families::Family>,
+    /// The commands the button stands for in its panel's drop-down.
+    covers: &'static [&'static str],
+    label: String,
+    name: String,
+    icon: &'static str,
+    size: ButtonSize,
+    enabled: bool,
+    pressed: bool,
+    exit: bool,
+    persistent: bool,
+    disabled: Option<String>,
+    split_title: String,
+    split_name: String,
+}
+
+impl PanelButton {
+    fn ribbon(&self) -> ribbon::Button<'_> {
+        ribbon::Button {
+            id: self.pinned.id,
+            run: self.selected.id,
+            label: &self.label,
+            name: &self.name,
+            icon: self.icon,
+            size: self.size,
+            enabled: self.enabled,
+            pressed: self.pressed,
+            exit: self.exit,
+            split: self.family.map(|f| ribbon::Split { key: f.label, title: &self.split_title, name: &self.split_name }),
+            app_paints: self.persistent,
+            covers: self.covers,
+        }
+    }
+}
+
+/// A row of a panel in the » menu.
+struct PanelMoreRow {
+    id: &'static str,
+    label: &'static str,
+    icon: &'static str,
+    shortcut: String,
+    enabled: bool,
+    checked: Option<bool>,
+    hint: Option<String>,
+}
+
+/// One panel of the tab as the ribbon component's group.
+struct Panel {
+    panel: &'static str,
+    key: String,
+    label: String,
+    tip: String,
+    popup_id: egui::Id,
+    commands: Vec<&'static str>,
+    icon: Option<&'static str>,
+    enabled: bool,
+    open: bool,
+    large: Vec<PanelButton>,
+    gallery: Vec<PanelButton>,
+    more: Vec<PanelMoreRow>,
+}
+
+/// The tab's panels for one pass of the ribbon, as the component's data.
+struct RibbonPanels {
+    panels: Vec<Panel>,
+    /// The last panel leaves the sketch or the edit.
+    exit: bool,
+    running: Option<String>,
+}
+
+impl RibbonPanels {
+    fn new(app: &SolveApp, ui: &egui::Ui, tab: &str, lists: &[PanelList], painter: &egui::Painter, running: Option<String>) -> Self {
+        let labels = app.preferences.ribbon_labels;
+        let editing_in_place = app.edit_in_place.active.is_some();
+        let open_menu = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
+        let panels = lists
+            .iter()
+            .map(|(panel, cmds, shown)| {
+                let panel: &'static str = panel;
+                let sketch_create = tab == "SKETCH" && panel == "CREATE";
+                let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
+                let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| app.toolbar_custom.in_gallery(tab, panel, c.id);
+                let button = |c: &'static solidcraft_engine::CommandSpec| {
+                    // Only the family's default pin follows the part's choice. Explicitly pinned
+                    // variants remain exact commands, including in customised toolbars.
+                    let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
+                    let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
+                    let info = crate::render_workspace::interactive_command_info(app, selected);
+                    let persistent = persistent_available(app, selected.id);
+                    let size = if labels {
+                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
+                        ButtonSize { width: ribbon::button_width(painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
+                    } else {
+                        let width = if family.is_some() { 50.0 } else { 40.0 };
+                        ButtonSize { width, min_width: width }
+                    };
+                    let button_label = crate::workspace::ribbon_button_label(selected);
+                    PanelButton {
+                        panel,
+                        pinned: c,
+                        selected,
+                        family,
+                        covers: crate::sketch_families::family(c.id).filter(|_| sketch_create).map_or(&[], |f| f.commands),
+                        label: app.tr_label(if button_label == selected.label { info.label } else { button_label }).to_string(),
+                        name: app.tr_label(info.label).to_string(),
+                        icon: if selected.id == "sketch.finish" { "finish" } else { info.icon },
+                        size,
+                        enabled: info.enabled,
+                        pressed: (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
+                            || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip),
+                        // The buttons that leave the sketch or the edit never show pressed; a
+                        // tool pinned into their group does.
+                        exit: finish
+                            && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
+                        persistent,
+                        disabled: info.disabled_reason,
+                        split_title: family.map(|f| app.tr_label(crate::workspace::ribbon_family_label(f)).to_string()).unwrap_or_default(),
+                        split_name: family.map(|f| app.tr_label(f.label).to_string()).unwrap_or_default(),
+                    }
+                };
+                let cell = |c: &'static solidcraft_engine::CommandSpec| {
+                    let info = crate::render_workspace::interactive_command_info(app, c);
+                    PanelButton {
+                        panel,
+                        pinned: c,
+                        selected: c,
+                        family: None,
+                        covers: &[],
+                        label: String::new(),
+                        name: app.tr_label(info.label).to_string(),
+                        icon: info.icon,
+                        size: ButtonSize { width: 0.0, min_width: 0.0 },
+                        enabled: info.enabled,
+                        pressed: ribbon_shows_pressed(app, c.id),
+                        exit: false,
+                        persistent: false,
+                        disabled: info.disabled_reason,
+                        split_title: String::new(),
+                        split_name: String::new(),
+                    }
+                };
+                let more = menu_commands(cmds, shown)
+                    .into_iter()
+                    .map(|c| {
+                        let info = crate::render_workspace::interactive_command_info(app, c);
+                        let checked =
+                            (persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed).then(|| persistent_pressed(app, c.id));
+                        PanelMoreRow {
+                            id: c.id,
+                            label: info.label,
+                            icon: info.icon,
+                            shortcut: crate::keymap::display_for(app, c.id).unwrap_or_default(),
+                            enabled: info.enabled,
+                            checked,
+                            hint: persistent_hint(app, c, info.enabled),
+                        }
+                    })
+                    .collect();
+                // Per tab: panels of the same name on other tabs (MODIFY, CREATE…) list other
+                // commands, and the drop-down's area remembers its size by this id (#874).
+                let popup_id = ui.scope_id().with(("panel_menu", tab, panel));
+                Panel {
+                    panel,
+                    key: format!("{tab}:{panel}"),
+                    label: if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) },
+                    tip: format!("{} ({})", app.tr_label(panel), shown.len().max(cmds.len())),
+                    popup_id,
+                    commands: cmds.iter().map(|c| c.id).collect(),
+                    icon: shown.first().or(cmds.first()).map(|c| c.info(&app.session).icon),
+                    enabled: !cmds.is_empty() || panel == "SELECT",
+                    open: open_menu == Some(popup_id),
+                    large: shown.iter().copied().filter(|c| !in_gallery(c)).map(button).collect(),
+                    gallery: shown.iter().copied().filter(in_gallery).map(cell).collect(),
+                    more,
+                }
+            })
+            .collect::<Vec<_>>();
+        // The Sketch exit group follows the last sketch panel (Finish Edit the last panel while
+        // editing in place).
+        let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
+            && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
+        RibbonPanels { panels, exit, running: if app.preferences.ribbon_reveal { running } else { None } }
+    }
+
+    fn row<'a>(
+        &'a self,
+        accent: solidcraft_theme::TabAccent,
+        labels: bool,
+        reveal: Option<ribbon::Reveal<'a>>,
+        more_tip: &'a str,
+    ) -> ribbon::Row<'a> {
+        ribbon::Row {
+            groups: self
+                .panels
+                .iter()
+                .map(|p| ribbon::Group {
+                    key: &p.key,
+                    name: p.panel,
+                    label: &p.label,
+                    tip: &p.tip,
+                    buttons: p.large.iter().map(PanelButton::ribbon).collect(),
+                    cells: p.gallery.iter().map(PanelButton::ribbon).collect(),
+                    commands: p.commands.clone(),
+                    icon: p.icon,
+                    enabled: p.enabled,
+                    open: p.open,
+                    running: self.running.as_deref(),
+                    more: p
+                        .more
+                        .iter()
+                        .map(|m| ribbon::MoreRow {
+                            id: m.id,
+                            label: m.label,
+                            icon: m.icon,
+                            shortcut: &m.shortcut,
+                            enabled: m.enabled,
+                            checked: m.checked,
+                            hint: m.hint.as_deref(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            labels,
+            accent,
+            exit: self.exit,
+            reveal,
+            more_tip,
+            handles: RIBBON_HANDLES,
+        }
+    }
+
+    /// The id of panel `group`'s drop-down.
+    fn popup_id(&self, group: usize) -> Option<egui::Id> {
+        self.panels.get(group).map(|p| p.popup_id)
+    }
+
+    /// The panel button the component drew as `drawn`.
+    fn button(&self, drawn: &ribbon::Drawn) -> Option<&PanelButton> {
+        let panel = self.panels.get(drawn.group)?;
+        if drawn.cell { panel.gallery.get(drawn.index) } else { panel.large.get(drawn.index) }
+    }
+}
+
+/// Where SolidCraft's ribbon publishes its parts (scripts and scenarios use these names).
+const RIBBON_HANDLES: ribbon::Handles<'static> = ribbon::Handles {
+    button: &["toolbar:", "button:"],
+    button_rect: "button:",
+    split: "family:",
+    cell: &["toolbar:", "button:", "ribbon:constraint:"],
+    collapsed: "collapsed:",
+    section: "panel:",
+    section_target: "ribbon:section:",
+    group: "panel:",
+    running: "ribbon:running_section:",
+    reveal: "ribbon:reveal",
+    more: "toolbar:overflow",
+    more_row: "toolbar:",
+    collapsed_count: "toolbar_collapsed",
+    more_count: "toolbar_more",
+    trimmed_count: "toolbar_trimmed",
+};
+
+/// One panel of a tab: its name, every command and the buttons it shows.
+type PanelList = (&'static str, Vec<&'static solidcraft_engine::CommandSpec>, Vec<&'static solidcraft_engine::CommandSpec>);
+
 /// One pass of the ribbon in `shape`. Returns `Some(already shown)` when a tab was clicked.
 fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) -> Option<bool> {
     let t = Tokens::get();
     let layout = shell_layout(app);
     let host = Container::for_layout(layout, Surface::Chrome);
     let labels = app.preferences.ribbon_labels;
-    let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
-    let gallery_width = if labels { GALLERY_WIDTH } else { 6.0 * 27.0 };
     let RibbonShape { floating, cards, r, ws, folded } = shape;
     {
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
@@ -1407,8 +1648,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 egui::TextStyle::Button,
             );
             let label_width = galley.size().x;
-            ribbon_galley(ui, pos2(ws.center().x - 6.0, ws.center().y + 1.0), galley, t.text);
-            dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.center().y + 1.5), t.text_dim);
+            ribbon::galley_at(ui, pos2(ws.center().x - 6.0, ws.center().y + 1.0), galley, t.text);
+            ribbon::dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.center().y + 1.5), t.text_dim);
         } else {
             let workspace_icon = if render { "ws_render" } else { "ws_design" };
             icons::paint_icon(
@@ -1417,7 +1658,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 workspace_icon,
                 1.0,
             );
-            ribbon_text(
+            ribbon::text(
                 ui,
                 pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
                 app.tr(if render { "ui.render" } else { "ui.design" }),
@@ -1434,8 +1675,12 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 egui::TextStyle::Button,
             );
             let label_width = galley.size().x;
-            ribbon_galley(ui, pos2(ws.center().x - 6.0, ws.top() + if labels { 89.0 } else { 70.0 }), galley, t.text_dim);
-            dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.top() + if labels { 89.5 } else { 70.5 }), t.text_dim);
+            ribbon::galley_at(ui, pos2(ws.center().x - 6.0, ws.top() + if labels { 89.0 } else { 70.0 }), galley, t.text_dim);
+            ribbon::dropdown_arrow(
+                &painter,
+                pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.top() + if labels { 89.5 } else { 70.5 }),
+                t.text_dim,
+            );
         }
         if wresp.backing_on_hover_text(app.tr("ui.change_workspace")).clicked() {
             crate::context_menu::toggle_for(app, ws, ws.left_bottom(), crate::context_menu::Target::Workspace);
@@ -1465,7 +1710,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             ui.ctx().request_repaint();
         }
         let mut persistent_paints = Vec::new();
-        let mut px = ribbon_left;
         let top = r.top() + TAB_ROW_HEIGHT;
         let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;
         let mut menu: Option<(egui::Pos2, &'static str)> = None;
@@ -1483,7 +1727,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     && !i.events.iter().any(|e| matches!(e, egui::Event::Touch { .. }))
             })
             && !egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ui.ctx());
-        let mut overflow = Vec::new();
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
         let editing_in_place = app.edit_in_place.active.is_some();
@@ -1513,416 +1756,156 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 (panel, cmds, shown)
             })
             .collect();
-        let sizes: Vec<PanelSize> = lists
-            .iter()
-            .map(|(panel, _, shown)| {
-                let mut widths: Vec<_> = shown
-                    .iter()
-                    .filter(|c| !app.toolbar_custom.in_gallery(&tab, panel, c.id))
-                    .map(|c| {
-                        let family = crate::sketch_families::family(c.id)
-                            .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
-                        if labels {
-                            ButtonSize { width: ribbon::button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
-                        } else {
-                            let width = if family.is_some() { 50.0 } else { 40.0 };
-                            ButtonSize { width, min_width: width }
-                        }
-                    })
-                    .collect();
-                if shown.iter().any(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)) {
-                    widths.push(ButtonSize { width: gallery_width, min_width: gallery_width });
-                }
-                PanelSize { buttons: widths }
-            })
-            .collect();
         let right = r.right();
         if crate::workspace::visible_tabs(app).is_empty() {
             // Every tab is hidden: the ribbon says how to bring them back.
             let at = pos2((ribbon_left + right) / 2.0, top + group_height / 2.0);
-            ribbon_text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
+            ribbon::text(ui, at, app.tr("ui.toolbar_tabs_hidden"), t.font_body, t.text_dim, false);
             crate::scenario::publish_handle("ribbon:tabs_hidden", at);
         }
-        // The Sketch exit group follows the last sketch panel, and is always kept room for so it
-        // stays reachable at every width; when panels go into the » menu it moves to the far right.
-        let finish_plan =
-            sizes.last().and_then(|size| if tab == "SKETCH" || (tab == "MODEL" && editing_in_place) { Some(Plan::full(size)) } else { None });
-        let finish_width = finish_plan.as_ref().map_or(0.0, |p| p.width().max(80.0));
-        // The Finish group keeps its own gap before it, so the panels on its left give up room
-        // (collapse) before they would touch it.
-        let finish_gap = if finish_plan.is_some() { 4.0 } else { 0.0 };
-        let normal_count = sizes.len().saturating_sub(usize::from(finish_plan.is_some()));
-        let mut plans = fit(sizes.get(..normal_count).unwrap_or_default(), right - 4.0 - px - finish_width - finish_gap);
-        let finish_right = plans.iter().any(|p| p.fit == Fit::More);
-        plans.extend(finish_plan);
-        crate::scenario::publish_count("toolbar_collapsed", plans.iter().filter(|p| p.fit == Fit::Collapsed).count() as f64);
-        crate::scenario::publish_count("toolbar_more", plans.iter().filter(|p| p.fit == Fit::More).count() as f64);
-        crate::scenario::publish_count(
-            "toolbar_trimmed",
-            plans.iter().zip(&sizes).filter(|(p, s)| p.fit == Fit::Buttons && p.shown < s.buttons.len()).count() as f64,
-        );
-        for ((panel, cmds, shown), plan) in lists.into_iter().zip(plans) {
-            let panel: &&str = &panel;
-            if plan.fit == Fit::More {
-                overflow.push((*panel, menu_commands(&cmds, &shown)));
-                continue;
+        let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
+        let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
+        let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
+        let row = panels.row(accent, labels, reveal.as_ref().map(|r| ribbon::Reveal { id: r.id, preview: r.preview, strength: pulse }), more_tip);
+        let mut out = {
+            let mut more_rows = |ui: &mut egui::Ui, group: usize| {
+                let Some((panel, cmds, shown)) = lists.get(group) else { return false };
+                if tab == "SKETCH" && *panel == "CREATE" {
+                    let cmds = menu_commands(cmds, shown);
+                    sketch_create_menu(app, ui, &cmds, dropdown_width(app, ui, &cmds), &mut menu, &mut toggle);
+                    return true;
+                }
+                if *panel == "SELECT" {
+                    selection_filter(app, ui);
+                }
+                false
+            };
+            ribbon::show(ui, &row, Rect::from_min_max(pos2(ribbon_left, top), r.max), &mut more_rows)
+        };
+        // The app's part of each button: its hover text, drags, the search's preview, deferred
+        // persistent paint and a family's variants menu.
+        for d in &out.buttons {
+            let Some(b) = panels.button(d) else { continue };
+            let resp = &d.response;
+            if resp.drag_started() {
+                resp.dnd_set_drag_payload(ToolbarDrag { id: b.pinned.id, from_menu: false });
             }
-            // A panel left with no buttons (all removed from the toolbar, or saved buttons that no
-            // longer exist) is drawn collapsed too: one button that opens its drop-down, so its
-            // commands never vanish from the toolbar (#7166). Both are ribbon::COLLAPSED_WIDTH wide.
-            let collapsed = plan.fit == Fit::Collapsed || (shown.is_empty() && !cmds.is_empty());
-            let trimmed = plan.shown < plan.widths.len();
-            let finish = (tab == "SKETCH" && *panel == "FINISH SKETCH") || (tab == "MODEL" && *panel == "FINISH EDITING");
-            let pinned = finish;
-            let width = if pinned { finish_width } else { plan.width() };
-            if pinned && finish_right {
-                px = right - finish_width;
-                painter.line_segment([pos2(px, top), pos2(px, r.bottom() - 1.0)], t.tertiary_border(t.border));
+            if !d.cell
+                && let Some(dragged) = resp.dnd_hover_payload::<ToolbarDrag>()
+                && dragged.id != b.pinned.id
+            {
+                ui_kit::insertion_marker(&painter, d.rect.left() - 1.0, d.rect.top() + 2.0, d.rect.bottom() - 2.0);
             }
-            let button_widths = &plan.widths;
+            if let Some(dragged) = resp.dnd_release_payload::<ToolbarDrag>()
+                && dragged.id != b.pinned.id
+            {
+                drop = Some((dragged.id, b.panel, Some(b.pinned.id)));
+            }
+            if let Some(r) = reveal.as_ref().filter(|r| r.preview) {
+                if d.cell {
+                    if r.id == b.pinned.id {
+                        reveal_tooltip(app, ui, d.whole, b.pinned, egui::RectAlign::BOTTOM_START);
+                    }
+                } else if (r.id == b.pinned.id || r.id == b.selected.id || b.family.is_some_and(|f| f.commands.contains(&r.id)))
+                    && let Some(command) = solidcraft_engine::find_command(r.id)
+                {
+                    reveal_tooltip(app, ui, d.whole, command, egui::RectAlign::BOTTOM_START);
+                }
+            }
+            if let Some((background, label_slot, neutral)) = &d.background {
+                persistent_paints.push(PersistentRibbonPaint {
+                    command: b.selected,
+                    response: resp.clone(),
+                    painter: painter.clone(),
+                    rect: d.whole,
+                    background: *background,
+                    label_slot: *label_slot,
+                    neutral: neutral.clone(),
+                    label: labels.then(|| persistent_button_name(app, b.selected)),
+                    enabled: ui.is_enabled() && b.enabled,
+                    disabled: b.disabled.clone(),
+                });
+            } else {
+                let _ = ribbon_tooltip(app, resp.clone(), b.selected, b.disabled.as_deref());
+            }
+            if let (Some(arrow), Some(f)) = (&d.split, b.family) {
+                Container::new(ui.ctx(), Surface::Popup).menu(arrow).show(|ui| {
+                    let variants: Vec<_> = f.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
+                    dropdown_keys(app, ui, &variants);
+                    let width = dropdown_width(app, ui, &variants);
+                    sketch_menu_rows(app, ui, &variants, width, &mut menu, &mut toggle);
+                });
+            }
+        }
+        // What was chosen on the row, in order.
+        let mut opened = Vec::new();
+        for action in std::mem::take(&mut out.actions) {
+            match action {
+                ribbon::Action::Run { id, rect, place } => {
+                    let Some(command) = solidcraft_engine::find_command(&id) else { continue };
+                    match place {
+                        ribbon::Place::Button => {
+                            if persistent_available(app, command.id)
+                                && app.preferences.persistent_ribbon_pressed
+                                && let Some(d) = out.buttons.iter().find(|d| !d.cell && d.whole == rect)
+                            {
+                                d.response.request_focus();
+                            }
+                            if !end_running_tool(app, command.id) {
+                                app.start_pinned(command.id, Some(rect));
+                            }
+                        }
+                        ribbon::Place::Cell => {
+                            if !end_running_tool(app, command.id) {
+                                app.start_at(command.id, Some(rect));
+                            }
+                        }
+                        ribbon::Place::More => app.start_at(command.id, Some(rect)),
+                    }
+                }
+                ribbon::Action::Menu { id, at } => {
+                    if let Some(command) = solidcraft_engine::find_command(&id) {
+                        menu = Some((at, command.id));
+                    }
+                }
+                ribbon::Action::Section { group } => {
+                    let Some(popup_id) = panels.popup_id(group) else { continue };
+                    ui.ctx().data_mut(|d| {
+                        let key = egui::Id::unique("sc_panel_open");
+                        if d.get_temp::<egui::Id>(key) == Some(popup_id) {
+                            d.remove::<egui::Id>(key);
+                        } else {
+                            d.insert_temp(key, popup_id);
+                        }
+                    });
+                }
+                ribbon::Action::Open { group } => {
+                    let Some(popup_id) = panels.popup_id(group) else { continue };
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_panel_open"), popup_id));
+                    opened.push(group);
+                }
+            }
+        }
+        // Each panel's drop-down, and a button dropped on its free space.
+        for g in &out.groups {
+            let (Some((panel, cmds, shown)), Some(data)) = (lists.get(g.group), panels.panels.get(g.group)) else { continue };
+            let panel: &&str = panel;
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
-            let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
-            // Per tab: panels of the same name on other tabs (MODIFY, CREATE…) list other commands,
-            // and the drop-down's area remembers its size by this id (#874).
-            let popup_id = ui.scope_id().with(("panel_menu", &tab, panel));
-            // Dropped on the panel's free space (all of a collapsed panel): the button goes to
-            // its end.
-            let gallery: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)).collect();
-            let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
-            let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
+            let popup_id = data.popup_id;
+            let (collapsed, trimmed, lr, lresp) = (g.collapsed, g.trimmed, g.label, &g.label_response);
+            let opened = opened.contains(&g.group);
+            if follow_panel_hover && g.hot {
+                hovered_panel_menu = Some(popup_id);
+            }
             // The commands the ribbon shows as buttons now (a narrow window shows fewer), which
             // `ribbon_menus_skip_pinned` leaves out of the drop-down.
             let on_ribbon: Vec<&str> =
-                large.iter().take(drawn).map(|c| c.id).chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id)).collect();
-            // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
-            let buttons_width = button_widths.iter().take(drawn).sum::<f32>() + drawn.saturating_sub(1) as f32 * BUTTON_GAP;
-            let inset = if drawn == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
-            let bx = px + 4.0 + inset;
-            let free_x = bx + buttons_width + BUTTON_GAP;
-            let free = Rect::from_min_size(pos2(free_x, top + 2.0), vec2((px + width - 4.0 - free_x).max(0.0), button_height));
-            let fresp = ui.interact(free, ui.scope_id().with(("panel_free", panel)), if collapsed { Sense::click() } else { Sense::hover() });
-            let collapsed_hovered = collapsed && fresp.hovered();
-            let mut opened = false;
-            if collapsed {
-                // One button: the panel's first command's icon over a caret; it opens the
-                // drop-down, which lists every command of the panel.
-                let br = Rect::from_center_size(free.center(), vec2((width - 8.0).max(0.0), button_height));
-                crate::scenario::publish_handle(&format!("collapsed:{tab}:{panel}"), br.center());
-                if fresp.hovered() && enabled_panel {
-                    painter.rect_filled(br, t.radius_sm, t.hover);
-                }
-                if let Some(c) = shown.first().or(cmds.first()) {
-                    let info = c.info(&app.session);
-                    icons::paint_icon(
-                        &painter,
-                        Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0)),
-                        info.icon,
-                        f32::from(t.icon.a()) / 255.0,
-                    );
-                }
-                dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
-                let tip = format!("{} ({})", app.tr_label(panel), shown.len().max(cmds.len()));
-                if fresp.backing_on_hover_text(tip).clicked() && enabled_panel {
-                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_panel_open"), popup_id));
-                    opened = true;
-                }
-            }
-            let mut button_x = bx;
-            for (c, button_width) in large.iter().zip(button_widths.iter().copied()).take(drawn) {
-                // Only the family's default pin follows the part's choice. Explicitly pinned
-                // variants remain exact commands, including in customised toolbars.
-                let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
-                let selected = family.and_then(|f| app.preferences.sketch_variants.selected(f)).unwrap_or(c);
-                let whole = Rect::from_min_size(pos2(button_x, top + 2.0), vec2(button_width, button_height));
-                button_x += button_width + BUTTON_GAP;
-                let mut br = whole;
-                if family.is_some() {
-                    if labels {
-                        br.max.y = whole.top() + 32.0;
-                    } else {
-                        br.max.x -= 14.0;
-                    }
-                }
-                let info = crate::render_workspace::interactive_command_info(app, selected);
-                let resp = ui.interact(br, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
-                crate::scenario::publish_handle(&format!("toolbar:{}", c.id), br.center());
-                // The button itself (`toolbar:<id>` is also a drop-down row's while one is open).
-                crate::scenario::publish_handle(&format!("button:{}", c.id), br.center());
-                crate::scenario::publish_rect(&format!("button:{}", c.id), whole);
-                if selected.id != c.id {
-                    crate::scenario::publish_handle(&format!("button:{}", selected.id), br.center());
-                }
-                if resp.drag_started() {
-                    resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: false });
-                }
-                if let Some(d) = resp.dnd_hover_payload::<ToolbarDrag>()
-                    && d.id != c.id
-                {
-                    ui_kit::insertion_marker(&painter, br.left() - 1.0, br.top() + 2.0, br.bottom() - 2.0);
-                }
-                if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
-                    && d.id != c.id
-                {
-                    drop = Some((d.id, *panel, Some(c.id)));
-                }
-                if resp.secondary_clicked() {
-                    menu = Some((resp.interact_pointer_pos().unwrap_or(br.left_bottom()), c.id));
-                }
-                let persistent = persistent_available(app, selected.id);
-                let background_slot = painter.add(egui::Shape::Noop);
-                let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
-                let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.scope_id().with(("family", f.label)).with("popup")));
-                // The buttons that leave the sketch or the edit (Finish, Finish with AutoConstrain,
-                // Cancel, Finish Edit) never show pressed; a tool pinned into their group does.
-                let exit =
-                    finish && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit");
-                let neutral = if !exit
-                    && (resp.is_pointer_button_down_on()
-                        || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
-                        || family_open
-                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
-                {
-                    egui::Shape::Rect(egui::epaint::RectShape::new(
-                        whole,
-                        t.radius_sm,
-                        accent.soft,
-                        Stroke::new(1.0, accent.color),
-                        egui::StrokeKind::Inside,
-                    ))
-                } else if resp.hovered() && info.enabled {
-                    egui::Shape::rect_filled(whole, t.radius_sm, t.hover)
-                } else {
-                    egui::Shape::Noop
-                };
-                if !persistent {
-                    painter.set(background_slot, neutral.clone());
-                }
-                let revealed = reveal.as_ref().filter(|r| r.id == c.id || r.id == selected.id || family.is_some_and(|f| f.commands.contains(&r.id)));
-                if revealed.is_some() {
-                    paint_reveal(&painter, whole, &accent, pulse, true);
-                    crate::scenario::publish_rect("ribbon:reveal", whole);
-                }
-                if let Some(r) = revealed.filter(|r| r.preview)
-                    && let Some(command) = solidcraft_engine::find_command(r.id)
-                {
-                    reveal_tooltip(app, ui, whole, command, egui::RectAlign::BOTTOM_START);
-                }
-                let icon = if selected.id == "sketch.finish" { "finish" } else { info.icon };
-                let side = if finish { 30.0 } else { 26.0 };
-                let icon_rect =
-                    Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-                icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
-                let tr_label = app.tr_label(info.label).to_string();
-                if !persistent {
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && info.enabled, &tr_label));
-                }
-                let clicked = resp.clicked();
-                if !persistent {
-                    let _ = ribbon_tooltip(app, resp.clone(), selected, info.disabled_reason.as_deref());
-                }
-                if clicked && info.enabled {
-                    if persistent && app.preferences.persistent_ribbon_pressed {
-                        resp.request_focus();
-                    }
-                    let id = selected.id;
-                    if !end_running_tool(app, id) {
-                        app.start_pinned(id, Some(whole));
-                    }
-                }
-                if persistent {
-                    let label = persistent_button_name(app, selected);
-                    persistent_paints.push(PersistentRibbonPaint {
-                        command: selected,
-                        response: resp,
-                        painter: painter.clone(),
-                        rect: whole,
-                        background: background_slot,
-                        label_slot: painter.add(egui::Shape::Noop),
-                        neutral,
-                        label: labels.then_some(label),
-                        enabled: ui.is_enabled() && info.enabled,
-                        disabled: info.disabled_reason.clone(),
-                    });
-                } else if let Some(f) = family {
-                    let ar = if labels {
-                        Rect::from_min_max(pos2(whole.left(), whole.top() + 30.0), pos2(whole.right(), whole.top() + 48.0))
-                    } else {
-                        Rect::from_min_max(pos2(br.right(), whole.top()), whole.right_bottom())
-                    };
-                    let arrow = ui.interact(ar, ui.scope_id().with(("family", f.label)), Sense::click());
-                    crate::scenario::publish_handle(&format!("family:{}", f.label), ar.center());
-                    if arrow.hovered() {
-                        painter.rect_filled(ar, t.radius_sm, t.hover);
-                    }
-                    // The title sits on the same line as the other buttons' labels.
-                    if labels {
-                        let title_y = whole.top() + 39.0;
-                        let galley =
-                            ribbon::button_galley(&painter, app.tr_label(crate::workspace::ribbon_family_label(f)), ar.width() - 16.0, t.text);
-                        painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
-                        dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
-                    } else {
-                        dropdown_arrow(&painter, ar.center(), t.text_dim);
-                    }
-                    arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, app.tr_label(f.label)));
-                    Container::new(ui.ctx(), Surface::Popup).menu(&arrow).show(|ui| {
-                        let variants: Vec<_> = f.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
-                        dropdown_keys(app, ui, &variants);
-                        let width = dropdown_width(app, ui, &variants);
-                        sketch_menu_rows(app, ui, &variants, width, &mut menu, &mut toggle);
-                    });
-                } else if labels {
-                    let button_label = crate::workspace::ribbon_button_label(selected);
-                    let label = app.tr_label(if button_label == selected.label { info.label } else { button_label });
-                    let color = if info.enabled { t.text } else { t.text_dim };
-                    let galley = ribbon::button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
-                    painter.galley(pos2(whole.center().x, ribbon::label_top(whole, galley.size().y)), galley, t.text);
-                }
-            }
-            if !collapsed && drawn > large.len() {
-                if !gallery.is_empty() {
-                    // A quiet rule sets the grid apart from the large button before it.
-                    t.secondary_line(
-                        &painter,
-                        [pos2(button_x - 1.5, top + 8.0), pos2(button_x - 1.5, top + button_height.min(46.0))],
-                        t.toolbar.lerp_to_gamma(t.border, 0.5),
-                    );
-                }
-                for (index, c) in gallery.iter().enumerate() {
-                    let columns = if labels { 3 } else { 6 };
-                    let cell = Rect::from_min_size(
-                        pos2(button_x + (index % columns) as f32 * 27.0, top + 6.0 + (index / columns) as f32 * 23.0),
-                        vec2(24.0, 20.0),
-                    );
-                    let info = crate::render_workspace::interactive_command_info(app, c);
-                    let resp = ui.interact(cell, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
-                    let active = ribbon_shows_pressed(app, c.id);
-                    let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
-                    painter.rect(
-                        cell,
-                        t.radius_sm,
-                        if active {
-                            if accent.color == t.accent { t.panel.lerp_to_gamma(command_accent(c.icon), 0.18) } else { accent.soft }
-                        } else if resp.hovered() && info.enabled {
-                            t.hover
-                        } else {
-                            t.panel
-                        },
-                        Stroke::new(
-                            1.0,
-                            if active { if accent.color == t.accent { command_accent(c.icon) } else { accent.color } } else { t.border },
-                        ),
-                        egui::StrokeKind::Inside,
-                    );
-                    if let Some(r) = reveal.as_ref().filter(|r| r.id == c.id) {
-                        paint_reveal(&painter, cell, &accent, pulse, true);
-                        crate::scenario::publish_rect("ribbon:reveal", cell);
-                        if r.preview {
-                            reveal_tooltip(app, ui, cell, c, egui::RectAlign::BOTTOM_START);
-                        }
-                    }
-                    icons::paint_icon(
-                        &painter,
-                        Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
-                        info.icon,
-                        if info.enabled { 1.0 } else { 0.35 },
-                    );
-                    for prefix in ["toolbar", "button", "ribbon:constraint"] {
-                        crate::scenario::publish_target(&format!("{prefix}:{}", c.id), cell);
-                    }
-                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, info.enabled, app.tr_label(info.label)));
-                    if resp.drag_started() {
-                        resp.dnd_set_drag_payload(ToolbarDrag { id: c.id, from_menu: false });
-                    }
-                    if let Some(d) = resp.dnd_release_payload::<ToolbarDrag>()
-                        && d.id != c.id
-                    {
-                        drop = Some((d.id, *panel, Some(c.id)));
-                    }
-                    if resp.secondary_clicked() {
-                        menu = Some((resp.interact_pointer_pos().unwrap_or(cell.left_bottom()), c.id));
-                    }
-                    if ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()).clicked() && info.enabled && !end_running_tool(app, c.id) {
-                        app.start_at(c.id, Some(cell));
-                    }
-                }
-            }
-            // A 20 px label row is also the section's existing command-list button.
-            // The group area ends 1 px above the card's bottom edge, so the highlight is
-            // RIBBON_TAB_INSET from the card's bottom edge (and from its left edge in the first
-            // section): its corner is concentric with the card's.
-            let lr = Rect::from_min_size(
-                pos2(px + RIBBON_TAB_INSET, top + group_height - SECTION_HEIGHT - (RIBBON_TAB_INSET - 1.0)),
-                vec2((width - 2.0 * RIBBON_TAB_INSET).max(0.0), SECTION_HEIGHT),
-            );
-            let lresp = ui.interact(lr, ui.scope_id().with(("panel", panel)), Sense::click());
-            crate::scenario::publish_handle(&format!("panel:{tab}:{panel}"), lr.center());
-            crate::scenario::publish_target(&format!("ribbon:section:{tab}:{panel}"), lr);
-            // Commands this panel has only in its drop-down (not drawn as a button or cell).
-            let drawn_ids: Vec<&str> = large
-                .iter()
-                .take(drawn)
-                .flat_map(|c| crate::sketch_families::family(c.id).filter(|_| sketch_create).map_or_else(|| vec![c.id], |f| f.commands.to_vec()))
-                .chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id))
-                .collect();
-            let hidden = |id: &str| cmds.iter().any(|c| c.id == id) && !drawn_ids.contains(&id);
-            let hidden_running = app.preferences.ribbon_reveal && running.as_deref().is_some_and(hidden);
-            let hidden_reveal = reveal.as_ref().filter(|r| hidden(r.id));
-            let panel_open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))) == Some(popup_id);
-            let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
-            let hot = lresp.hovered() && enabled_panel;
-            if follow_panel_hover && enabled_panel && !finish && (hot || collapsed_hovered) {
-                hovered_panel_menu = Some(popup_id);
-            }
-            if hidden_running && !panel_open {
-                // Its command is running from the drop-down: the label shows it like a pressed button.
-                painter.rect(lr, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
-                crate::scenario::publish_rect(&format!("ribbon:running_section:{tab}:{panel}"), lr);
-            } else if panel_open || hot {
-                painter.rect_filled(lr, t.radius_sm, if panel_open { accent.soft } else { t.hover });
-            }
-            if hidden_reveal.is_some_and(|r| !r.preview) {
-                paint_reveal(&painter, lr, &accent, pulse, true);
-                crate::scenario::publish_rect("ribbon:reveal", lr);
-            }
-            let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
-            let panel_open = panel_open || hidden_running;
-            let font = if panel_open || hot {
-                crate::ui_kit::type_face::semibold(solidcraft_theme::Tokens::get().font_caption)
-            } else {
-                FontId::proportional(solidcraft_theme::Tokens::get().font_caption)
-            };
-            let label_width = painter.layout_no_wrap(label.clone(), font, t.text_dim).size().x;
-            let ink = if panel_open { accent.ink } else { t.text_dim };
-            ribbon_text(ui, lr.center() - vec2(if finish { 0.0 } else { 6.0 }, 0.0), &label, t.font_caption, ink, panel_open || hot);
-            if !finish {
-                dropdown_arrow(&painter, pos2(lr.center().x + label_width / 2.0 + 1.0, lr.center().y + 0.5), ink);
-            }
-            if lresp.clicked() && enabled_panel {
-                ui.ctx().data_mut(|d| {
-                    let key = egui::Id::unique("sc_panel_open");
-                    if d.get_temp::<egui::Id>(key) == Some(popup_id) {
-                        d.remove::<egui::Id>(key);
-                    } else {
-                        d.insert_temp(key, popup_id);
-                    }
-                });
-            }
+                data.large.iter().take(g.buttons).map(|b| b.pinned.id).chain(data.gallery.iter().filter(|_| g.cells).map(|b| b.pinned.id)).collect();
             // Labels, gaps and margins append; actual buttons keep their insert-before target.
             // Respect the current layer so a dropdown covering the panel is not a drop target.
-            let panel_rect = Rect::from_min_max(pos2(px, top + 2.0), pos2(px + width, r.bottom()));
-            crate::scenario::publish_rect(&format!("panel:{tab}:{panel}"), panel_rect);
-            let over_button = ui.input(|input| input.pointer.hover_pos()).is_some_and(|p| {
-                let mut x = bx;
-                button_widths.iter().take(drawn).any(|width| {
-                    let rect = Rect::from_min_size(pos2(x, top + 2.0), vec2(*width, button_height));
-                    x += width + BUTTON_GAP;
-                    rect.contains(p)
-                })
-            });
-            if !over_button && ui.rect_contains_pointer(panel_rect) && egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).is_some() {
-                ui_kit::insertion_marker(&painter, px + width - 4.0, top + 4.0, top + 38.0);
+            let over_button = ui.input(|input| input.pointer.hover_pos()).is_some_and(|p| g.slots.iter().any(|slot| slot.contains(p)));
+            if !over_button && ui.rect_contains_pointer(g.rect) && egui::DragAndDrop::payload::<ToolbarDrag>(ui.ctx()).is_some() {
+                ui_kit::insertion_marker(&painter, g.rect.right() - 4.0, top + 4.0, top + 38.0);
                 if ui.input(|input| input.pointer.any_released())
                     && let Some(d) = egui::DragAndDrop::take_payload::<ToolbarDrag>(ui.ctx())
                 {
@@ -1931,9 +1914,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             }
             let open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open"))) == Some(popup_id);
             // A hovered search result in this drop-down opens it on its row, under the search sheet.
-            let previewed = hidden_reveal.is_some_and(|r| r.preview && !open);
+            let previewed = g.previewed && !open;
             if open || previewed {
-                let cmds = if collapsed || trimmed { menu_commands(&cmds, &shown) } else { cmds.clone() };
+                let cmds = if collapsed || trimmed { menu_commands(cmds, shown) } else { cmds.clone() };
                 let cmds = if app.preferences.ribbon_menus_skip_pinned { skip_on_ribbon(cmds, &on_ribbon) } else { cmds };
                 let area = Container::new(ui.ctx(), Surface::Popup)
                     .area(popup_id)
@@ -2035,52 +2018,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
                 }
             }
-            px += width;
-            painter.line_segment([pos2(px, top + 4.0), pos2(px, top + group_height - 3.0)], t.tertiary_border(t.border));
-            px += PANEL_GAP;
-        }
-        if !overflow.is_empty() {
-            let at = Rect::from_min_size(pos2(px.min(right - finish_width - 40.0), top + 4.0), vec2(38.0, button_height));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
-                let response = crate::ui_kit::Menu::button(ui, "»", |ui| {
-                    for (panel, cmds) in &overflow {
-                        crate::ui_kit::Menu::button(ui, *panel, |ui| {
-                            if tab == "SKETCH" && *panel == "CREATE" {
-                                sketch_create_menu(app, ui, cmds, dropdown_width(app, ui, cmds), &mut menu, &mut toggle);
-                                return;
-                            }
-                            if *panel == "SELECT" {
-                                selection_filter(app, ui);
-                            }
-                            for c in cmds {
-                                let info = crate::render_workspace::interactive_command_info(app, c);
-                                let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
-                                let response = if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
-                                    let mut item = ui_kit::MenuItem::new(c.id, info.label, info.icon);
-                                    item.shortcut = &shortcut;
-                                    item.enabled = info.enabled;
-                                    item.checked = Some(persistent_pressed(app, c.id));
-                                    item.show(ui)
-                                } else {
-                                    ui_kit::command_menu_button(ui, c.id, info.label, info.icon, &shortcut, info.enabled)
-                                };
-                                let response = if let Some(hint) = persistent_hint(app, c, info.enabled) {
-                                    response.backing_on_hover_text(hint)
-                                } else {
-                                    response
-                                };
-                                crate::scenario::publish_handle(&format!("toolbar:{}", c.id), response.rect.center());
-                                if response.clicked() {
-                                    app.start_at(c.id, Some(response.rect));
-                                    ui.close();
-                                }
-                            }
-                        });
-                    }
-                });
-                crate::scenario::publish_target("toolbar:overflow", response.response.rect);
-                response.response.backing_on_hover_text(solidcraft_ui_text::tr_label("More toolbar panels"));
-            });
         }
 
         // Resolve persistent paint only after large buttons, dropdowns and overflow have
@@ -2283,7 +2220,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         ui.set_width(280.0_f32.max(name_width + key_width + 12.0));
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(name_width, 20.0), Sense::hover());
-            ribbon_text(ui, rect.center(), name, t.font_heading, t.text, true);
+            ribbon::text(ui, rect.center(), name, t.font_heading, t.text, true);
             if let Some(key) = crate::keymap::display_for(app, command.id) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     crate::ui_kit::Container::show_backing(
@@ -2324,22 +2261,6 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             ui.add(egui::Label::new(egui::RichText::new(app.tr_label(reason)).color(t.text_dim)).wrap());
         }
     })
-}
-
-/// The pulse around a command the search points out (#7287); `strength` 0 draws nothing.
-/// `fill` tints the inside too, for a button painted before its icon and label.
-fn paint_reveal(painter: &egui::Painter, rect: Rect, accent: &solidcraft_theme::TabAccent, strength: f32, fill: bool) {
-    if strength <= 0.0 {
-        return;
-    }
-    let t = Tokens::get();
-    painter.rect(
-        rect,
-        t.radius_sm,
-        if fill { accent.soft.gamma_multiply(strength) } else { Color32::TRANSPARENT },
-        Stroke::new(2.0, accent.color.gamma_multiply(strength)),
-        egui::StrokeKind::Inside,
-    );
 }
 
 /// A revealed command's tooltip, open without the pointer on it (#7287).
@@ -2591,7 +2512,7 @@ fn dropdown_row(
     row.shortcut = &shortcut;
     row.paint(ui, rect, &resp, 26.0);
     if let Some(strength) = revealed {
-        paint_reveal(ui.painter(), rect, &solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
+        ribbon::paint_reveal(ui.painter(), rect, &solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
         crate::scenario::publish_rect("ribbon:reveal", rect);
         if !ui.clip_rect().contains_rect(rect) {
             ui.scroll_to_rect(rect, None);
@@ -5253,7 +5174,7 @@ mod ribbon_label_tests {
             ctx.set_pixels_per_point(scale);
             let ink = Tokens::get().text_dim;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                ribbon_text(ui, pos2(100.3, 40.7), "Selected tab", 13.0, ink, true);
+                ribbon::text(ui, pos2(100.3, 40.7), "Selected tab", 13.0, ink, true);
             });
             output.textures_delta.clear();
             let text: Vec<_> = output
@@ -5288,7 +5209,7 @@ mod ribbon_label_tests {
                     for catalog in crate::i18n::LOCALES {
                         let locale = solidcraft_ui_text::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
-                        let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon::button_width(&painter, label), BUTTON_HEIGHT));
+                        let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon::button_width(&painter, label), ribbon::BUTTON_HEIGHT));
                         let galley = ribbon::button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, Color32::WHITE);
                         let top = ribbon::label_top(whole, galley.size().y);
                         let at = format!("{} in {}: {label:?}", command.id, catalog.id);
@@ -5566,7 +5487,7 @@ mod fill_width_tests {
                     let Some(rect) = crate::scenario::rect_of(&format!("panel:{tab}:{panel}")) else { continue };
                     on_bar += 1;
                     if *panel != "FINISH SKETCH" {
-                        end = end.max(rect.right() + PANEL_GAP);
+                        end = end.max(rect.right() + ribbon::PANEL_GAP);
                     }
                     if crate::toolbar_custom::buttons(&h.app, tab, panel, cmds, *promote).is_empty() {
                         continue;
@@ -5582,11 +5503,11 @@ mod fill_width_tests {
                 assert!(gap >= -0.5, "{at}: the panels run {} px past the room", -gap);
                 let hidden = collapsed + trimmed + more > 0.0;
                 let button = if more > 0.0 {
-                    ribbon::COLLAPSED_WIDTH + PANEL_GAP
+                    ribbon::COLLAPSED_WIDTH + ribbon::PANEL_GAP
                 } else if sketch {
-                    GALLERY_WIDTH + BUTTON_GAP
+                    ribbon::GALLERY_WIDTH + ribbon::BUTTON_GAP
                 } else {
-                    BUTTON_MIN_WIDTH + BUTTON_GAP
+                    BUTTON_MIN_WIDTH + ribbon::BUTTON_GAP
                 };
                 if hidden {
                     assert!(gap < button, "{at}: {gap} px left blank while buttons are hidden");

@@ -1,4 +1,4 @@
-//! The ribbon's fit, from plain group sizes.
+//! The ribbon from plain data, no app: how groups fit, and what a click on the row returns.
 use super::*;
 
 fn sizes(buttons: &[usize]) -> Vec<PanelSize> {
@@ -130,4 +130,170 @@ fn constraint_gallery_stays_fixed_and_hands_all_cells_to_the_menu_together() {
     assert_eq!(narrow[0].widths, [BUTTON_MIN_WIDTH, GALLERY_WIDTH]);
     let collapsed = fit(&panels, minimum - 1.0);
     assert_eq!((collapsed[0].fit, collapsed[0].shown), (Fit::Collapsed, 1));
+}
+
+const HANDLES: Handles<'static> = Handles {
+    button: &["t:button:"],
+    button_rect: "t:rect:",
+    split: "t:split:",
+    cell: &["t:cell:"],
+    collapsed: "t:collapsed:",
+    section: "t:section:",
+    section_target: "t:section_target:",
+    group: "t:group:",
+    running: "t:running:",
+    reveal: "t:reveal",
+    more: "t:more",
+    more_row: "t:more_row:",
+    collapsed_count: "t:collapsed",
+    more_count: "t:in_more",
+    trimmed_count: "t:trimmed",
+};
+
+fn button(id: &'static str, enabled: bool) -> Button<'static> {
+    Button {
+        id,
+        run: id,
+        label: id,
+        name: id,
+        icon: "box",
+        size: ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
+        enabled,
+        pressed: false,
+        exit: false,
+        split: None,
+        app_paints: false,
+        covers: &[],
+    }
+}
+
+fn group(key: &'static str, buttons: Vec<Button<'static>>) -> Group<'static> {
+    let more = buttons
+        .iter()
+        .map(|b| MoreRow { id: b.id, label: b.label, icon: b.icon, shortcut: "", enabled: b.enabled, checked: None, hint: None })
+        .collect();
+    let commands = buttons.iter().map(|b| b.id).collect();
+    Group {
+        key,
+        name: key,
+        label: key,
+        tip: key,
+        buttons,
+        cells: Vec::new(),
+        commands,
+        icon: Some("box"),
+        enabled: true,
+        open: false,
+        running: None,
+        more,
+    }
+}
+
+/// Two groups, the second with a disabled button, in a row `width` wide.
+struct RowRig {
+    ctx: egui::Context,
+    width: f32,
+    time: std::cell::Cell<f64>,
+    /// Each text the last frame painted, at its centre.
+    texts: std::cell::RefCell<Vec<(String, egui::Pos2)>>,
+}
+
+impl RowRig {
+    fn new(width: f32) -> RowRig {
+        let rig = RowRig { ctx: crate::fonts::test_context(), width, time: std::cell::Cell::new(0.0), texts: Default::default() };
+        rig.frame(Vec::new());
+        rig
+    }
+
+    fn frame(&self, events: Vec<egui::Event>) -> Vec<Action> {
+        solidcraft_ui_registry::clear_handles();
+        self.time.set(self.time.get() + 1.0 / 60.0);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 400.0))),
+            time: Some(self.time.get()),
+            events,
+            focused: true,
+            ..Default::default()
+        };
+        let t = Tokens::get();
+        let row = Row {
+            groups: vec![
+                group("A", vec![button("a.one", true), button("a.two", true)]),
+                group("B", vec![button("b.on", true), button("b.off", false)]),
+            ],
+            labels: true,
+            accent: TabAccent::for_tab(&t, "MODEL"),
+            exit: false,
+            reveal: None,
+            more_tip: "More",
+            handles: HANDLES,
+        };
+        let mut actions = Vec::new();
+        let output = crate::test_support::frame(&self.ctx, input, |ui| {
+            let rect = Rect::from_min_size(pos2(0.0, 30.0), vec2(self.width, GROUP_HEIGHT + 1.0));
+            actions = show(ui, &row, rect, &mut |_, _| false).actions;
+        });
+        *self.texts.borrow_mut() =
+            crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
+        actions
+    }
+
+    fn click(&self, at: egui::Pos2) -> Vec<Action> {
+        self.time.set(self.time.get() + 1.0);
+        let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = self.frame(vec![egui::Event::PointerMoved(at)]);
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(at), press(true)]));
+        actions.extend(self.frame(vec![egui::Event::PointerMoved(at), press(false)]));
+        actions
+    }
+
+    /// Where the last frame painted `text`.
+    fn text(&self, text: &str) -> egui::Pos2 {
+        self.texts.borrow().iter().find(|(t, _)| t == text).map(|(_, at)| *at).unwrap_or_else(|| panic!("{text} is painted"))
+    }
+
+    fn at(&self, name: &str) -> egui::Pos2 {
+        solidcraft_ui_registry::handle_at(name)
+            .or_else(|| solidcraft_ui_registry::rect_of(name).map(|r| r.center()))
+            .unwrap_or_else(|| panic!("{name} is drawn"))
+    }
+}
+
+/// A click on a button returns its command, with the button's rect; a disabled one returns
+/// nothing; a click on a group's label asks for its menu.
+#[test]
+fn a_click_on_a_button_returns_its_command_and_a_disabled_one_nothing() {
+    let rig = RowRig::new(800.0);
+    let actions = rig.click(rig.at("t:button:a.two"));
+    let [Action::Run { id, rect, place }] = actions.as_slice() else { panic!("{actions:?}") };
+    assert_eq!((id.as_str(), *place), ("a.two", Place::Button));
+    assert_eq!(Some(*rect), solidcraft_ui_registry::rect_of("t:rect:a.two"));
+    assert_eq!(rig.click(rig.at("t:button:b.off")), Vec::new(), "a disabled button runs nothing");
+    assert_eq!(rig.click(rig.at("t:section:B")), vec![Action::Section { group: 1 }]);
+    assert_eq!(solidcraft_ui_registry::count_of("t:in_more"), Some(0.0));
+}
+
+/// Too narrow for both groups: the last goes into the » menu, whose rows run their commands, and
+/// a disabled row runs nothing there either.
+#[test]
+fn a_group_that_does_not_fit_is_in_the_more_menu() {
+    let rig = RowRig::new(COLLAPSED_WIDTH + MORE_ROOM + 8.0);
+    assert_eq!(solidcraft_ui_registry::count_of("t:in_more"), Some(1.0));
+    assert_eq!(solidcraft_ui_registry::count_of("t:collapsed"), Some(1.0));
+    assert!(solidcraft_ui_registry::handle_at("t:button:b.on").is_none(), "B is not on the row");
+    assert_eq!(rig.click(rig.at("t:collapsed:A")), vec![Action::Open { group: 0 }]);
+    let open_b = || {
+        assert_eq!(rig.click(rig.at("t:more")), Vec::new(), "» opens its menu");
+        rig.frame(Vec::new());
+        let b = rig.text("B");
+        for _ in 0..3 {
+            rig.frame(vec![egui::Event::PointerMoved(b)]);
+        }
+    };
+    open_b();
+    let actions = rig.click(rig.at("t:more_row:b.on"));
+    let [Action::Run { id, place, .. }] = actions.as_slice() else { panic!("{actions:?}") };
+    assert_eq!((id.as_str(), *place), ("b.on", Place::More));
+    open_b();
+    assert_eq!(rig.click(rig.at("t:more_row:b.off")), Vec::new(), "a disabled row runs nothing");
 }
