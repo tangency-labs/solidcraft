@@ -214,6 +214,10 @@ try {
     if ($ForceBuild) {
         Write-Host '[STEP 2A] Cleaning Cargo artifacts while preserving deployed-binary backups...'
         Clear-ProfileBuildArtifactsPreservingBackups -TargetDirectory $TargetDir -BackupDirectory $BackupDir
+        if ($BuildWeb) {
+            $WasmTargetDir = Join-Path $RepoRoot (Join-Path 'target' (Join-Path 'wasm32-unknown-unknown' $Profile))
+            if (Test-Path -LiteralPath $WasmTargetDir) { Remove-Item -LiteralPath $WasmTargetDir -Recurse -Force }
+        }
     }
 
     $JobsArg = @()
