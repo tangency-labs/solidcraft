@@ -113,6 +113,7 @@ mod outline_rims;
 mod overflow_first;
 mod piecewise;
 mod surface;
+mod tangent_rollover;
 mod trace_reach;
 mod trim_at_creases;
 mod two_offsets;
@@ -2058,6 +2059,8 @@ impl<'target> FilletSession<'target> {
         // (not upstream, solidcore #2541) a lone round's solver takes the rims it may end
         // on before the corners trace it
         self.end_round_on_outline(k)?;
+        // (not upstream) a lone round rolls over its faces' smooth far edges, the whole length
+        self.roll_over_tangent_edges(k)?;
         let SessionObjects {
             target,
             solvers,
