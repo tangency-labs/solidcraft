@@ -530,16 +530,18 @@ impl Lexer<'_> {
 
 /// Part 21 short entity names (the short-name form ISO 10303-21 allows, which some AP203 writers
 /// use, STEP Tools' among them) of the entities a B-rep, its representation, product and units
-/// are read from, with their long names. The first eleven are `step-import`'s table (#2582); the
-/// rest are the AP203 names of the topology, product structure, representations and units
-/// such files use.
-const SHORT_NAMES: [(&str, &str); 35] = [
+/// are read from, with their long names. Every pair is as ISO's short-names file gives it
+/// (<http://standards.iso.org/iso/10303/tech/short_names/short-names.txt>), checked entry by entry.
+/// `step-import`'s table (#2582) mapped `CMCRSG` to `COMPOSITE_CURVE`; it is
+/// `COMPOSITE_CURVE_SEGMENT`, and `COMPOSITE_CURVE` is `CMPCRV`.
+const SHORT_NAMES: [(&str, &str); 36] = [
     ("A2PL3D", "AXIS2_PLACEMENT_3D"),
     ("ADVFC", "ADVANCED_FACE"),
     ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
     ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
     ("CLSSHL", "CLOSED_SHELL"),
-    ("CMCRSG", "COMPOSITE_CURVE"),
+    ("CMCRSG", "COMPOSITE_CURVE_SEGMENT"),
+    ("CMPCRV", "COMPOSITE_CURVE"),
     ("CNBSUN", "CONVERSION_BASED_UNIT"),
     ("CRTPNT", "CARTESIAN_POINT"),
     ("DMNEXP", "DIMENSIONAL_EXPONENTS"),
