@@ -7,9 +7,9 @@
 //! kind, by what it became; a number within [`ROUNDING`] of its size (relative, no floor) is
 //! counted as rounding, with its count and the largest.
 //!
-//! On the whole corpus (1,332 bodies, at #3187): 1,256 come back bit for bit, 36 within
-//! rounding (the largest 4.9e-16 relative), and 40 differ, each in exactly the classes
-//! [`pinned`] lists for it.
+//! On the whole corpus (1,333 bodies, at #3187 with kernel case 11991 (#3231) in): 1,257 come
+//! back bit for bit, 36 within rounding (the largest 4.9e-16 relative), and 40 differ, each in
+//! exactly the classes [`pinned`] lists for it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -584,7 +584,8 @@ fn parity(stride: usize) {
         );
         assert_eq!(
             (t.bodies, t.identical, t.rounding_only),
-            (1332, 1256, 36),
+            // 1333: kernel case 11991's one body (#3231), which comes back bit for bit
+            (1333, 1257, 36),
             "bodies, identical, within rounding"
         );
         // the largest rounding difference, relative (#3137: 4.885e-16)
