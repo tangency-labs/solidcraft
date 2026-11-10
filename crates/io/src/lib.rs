@@ -135,7 +135,8 @@ pub fn is_iges_path(path: &str) -> bool {
 /// nothing), so the caller chooses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StepNames {
-    /// Keep meaningful solid names; replace placeholders with the nearest named product.
+    /// Keep meaningful solid names; use a shared face label for `NONE`, otherwise replace
+    /// placeholders with the nearest named product.
     #[default]
     Auto,
     /// The solid's own name in the file, else the name of the product that holds it.
@@ -180,6 +181,7 @@ fn generic_name(n: &str) -> bool {
 fn body_name(b: &solidcraft_kernel::ImportedBody, names: StepNames) -> String {
     let usable = |n: &&String| !generic_name(n);
     let chosen = match names {
+        StepNames::Auto if b.name.trim().eq_ignore_ascii_case("none") => b.common_face_name.as_ref().filter(usable),
         StepNames::Auto if !generic_name(&b.name) => Some(&b.name),
         StepNames::Auto => b.path.iter().rev().find(usable).or_else(|| b.instance.as_ref().filter(usable)),
         StepNames::Solid => None,
@@ -1385,6 +1387,30 @@ mod tests {
         assert_eq!(names(&generic, StepNames::Solid), ["Body1", "Body 2 (3)", "Body 2 (3)"]);
         let named = generic.replace("'Body1'", "'Body housing'");
         assert_eq!(names(&named, StepNames::Auto), ["Body housing", "Post", "Post"]);
+        // Some surface exports label only the faces, leaving their owning models `NONE`.
+        let faces = text.replace("ADVANCED_FACE('',", "ADVANCED_FACE('Inspection surface',");
+        assert_ne!(faces, text, "the fixture has named faces");
+        assert_eq!(names(&faces, StepNames::Auto), ["Cut-Extrude3", "Boss-Extrude1", "Boss-Extrude1"]);
+        let surfaces = faces.replace("'Cut-Extrude3'", "' nOnE '").replace("'Boss-Extrude1'", "'NONE'");
+        assert_eq!(names(&surfaces, StepNames::Auto), ["Inspection surface", "Inspection surface", "Inspection surface"]);
+        assert_eq!(names(&surfaces, StepNames::Solid), ["nOnE", "NONE", "NONE"]);
+        assert_eq!(names(&surfaces, StepNames::Product), ["Plate", "Post", "Post"]);
+        assert_eq!(names(&surfaces, StepNames::Instance), ["Plate-1", "Post-1", "Post-2"]);
+        let mixed = surfaces.replacen("ADVANCED_FACE('Inspection surface',", "ADVANCED_FACE('Other surface',", 1);
+        assert_eq!(names(&mixed, StepNames::Auto), ["nOnE", "Inspection surface", "Inspection surface"]);
+        let missing = surfaces.replacen("ADVANCED_FACE('Inspection surface',", "ADVANCED_FACE('',", 1);
+        assert_eq!(names(&missing, StepNames::Auto), ["nOnE", "Inspection surface", "Inspection surface"]);
+        for label in ["Body1", " NoNe ", "  "] {
+            let unnamed = surfaces.replace("ADVANCED_FACE('Inspection surface',", &format!("ADVANCED_FACE('{label}',"));
+            assert_eq!(names(&unnamed, StepNames::Auto), ["nOnE", "NONE", "NONE"]);
+        }
+        let mut body = step_import_feature(mixed.as_bytes(), "frame.step").unwrap().import.bodies[0].clone();
+        assert_eq!(body.common_face_name, None);
+        body.path = vec!["Part".into()];
+        body.instance = Some("Part-1".into());
+        assert_eq!(body_name(&body, StepNames::Auto), "nOnE", "without a shared face name, preserve the source label");
+        body.path.clear();
+        assert_eq!(body_name(&body, StepNames::Auto), "nOnE", "an instance does not replace an unchanged source label");
         // The timeline entry is the root product's name whatever the bodies are called.
         for choice in [StepNames::Auto, StepNames::Solid, StepNames::Product, StepNames::Instance] {
             assert_eq!(step_import_feature_named(text.as_bytes(), "frame.step", choice).unwrap().name, "Frame");

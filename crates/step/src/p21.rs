@@ -136,6 +136,31 @@ impl Exchange {
     pub fn get(&self, id: u64) -> Option<&Entity> {
         self.entities.get(&id)
     }
+
+    /// The original label shared by every listed face, including repeated source faces.
+    /// Missing, empty, `NONE` or different labels give no common name.
+    pub fn common_face_name(&self, faces: &[u64]) -> Option<&str> {
+        let (first, rest) = faces.split_first()?;
+        let name = self.face_name(*first)?;
+        rest.iter().all(|face| self.face_name(*face) == Some(name)).then_some(name)
+    }
+
+    fn face_name(&self, mut id: u64) -> Option<&str> {
+        // Match the topology reader's limit of four nested oriented uses. Labels belong
+        // to the underlying face, not to its oriented wrapper.
+        for _ in 0..=4 {
+            let e = self.get(id)?;
+            match e.name() {
+                "ORIENTED_FACE" => id = e.params().get(2)?.as_ref_id()?,
+                "ADVANCED_FACE" | "FACE_SURFACE" | "FACE" => {
+                    let name = e.params().first()?.as_str()?.trim();
+                    return (!name.is_empty() && !name.eq_ignore_ascii_case("none")).then_some(name);
+                }
+                _ => return None,
+            }
+        }
+        None
+    }
 }
 
 struct Lexer<'a> {
@@ -593,6 +618,47 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn common_face_names_use_decoded_labels_and_ignore_oriented_wrappers() {
+        let ex = parse(
+            "ISO-10303-21;DATA;
+#1=ADVANCED_FACE('  Inspection \\X2\\00E9\\X0\\  ',(),$,.T.);
+#2=FACE_SURFACE('Inspection \\X2\\00E9\\X0\\',(),$,.T.);
+#3=FACE('Inspection \\X2\\00E9\\X0\\',());
+#4=ORIENTED_FACE('Wrapper',*,#1,.F.);
+#5=ORIENTED_FACE('',*,#4,.T.);
+#6=ORIENTED_FACE('',*,#5,.T.);
+#7=ORIENTED_FACE('',*,#6,.T.);
+#8=ORIENTED_FACE('',*,#7,.T.);
+ENDSEC;END-ISO-10303-21;",
+        )
+        .unwrap();
+        assert_eq!(ex.common_face_name(&[1, 2, 3, 4, 7, 1]), Some("Inspection é"));
+        assert_eq!(ex.common_face_name(&[8]), None, "a fifth oriented wrapper exceeds the bound");
+        assert_eq!(ex.get(4).unwrap().params()[0].as_str(), Some("Wrapper"), "source labels are not rewritten");
+    }
+
+    #[test]
+    fn common_face_names_do_not_guess_missing_mixed_or_invalid_labels() {
+        let ex = parse(
+            "ISO-10303-21;DATA;
+#1=ADVANCED_FACE('Inspection surface',(),$,.T.);
+#2=ADVANCED_FACE('Other surface',(),$,.T.);
+#3=ADVANCED_FACE('   ',(),$,.T.);
+#4=ADVANCED_FACE(' nOnE ',(),$,.T.);
+#5=ADVANCED_FACE($,(),$,.T.);
+#6=ORIENTED_FACE('',*,#6,.T.);
+#7=ORIENTED_FACE('',*,$,.T.);
+#8=CARTESIAN_POINT('Inspection surface',(0.,0.,0.));
+ENDSEC;END-ISO-10303-21;",
+        )
+        .unwrap();
+        assert_eq!(ex.common_face_name(&[]), None);
+        for id in [2, 3, 4, 5, 6, 7, 8, 999] {
+            assert_eq!(ex.common_face_name(&[1, id]), None, "face #{id}");
+        }
+    }
 
     #[test]
     fn unterminated_unicode_escape_search_is_linear() {

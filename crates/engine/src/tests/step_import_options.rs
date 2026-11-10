@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
+use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_bodies, step_export_products};
 
 use super::run;
 use crate::*;
@@ -221,6 +221,58 @@ fn the_bodies_are_named_after_the_solid_the_product_or_the_instance() {
     // A feature finds them by those names.
     run(&mut again, "solid.move", json!({"bodies": ["Post-1"], "translate": [0, 0, 5]}));
     assert_eq!(body_names(&again), ["Plate-1", "Post-1"]);
+}
+
+/// A synthetic surface export with two separate bodies labelled `NONE`, whose face labels
+/// carry the useful name. The duplicate label exercises normal body-name disambiguation.
+fn face_labelled_surface_file() -> String {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-face-labels-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let bodies: Vec<_> = (0..2).map(|i| box_solid(Vec3::new(i as f64 * 4.0, 0.0, 0.0), Vec3::new(i as f64 * 4.0 + 2.0, 3.0, 4.0)).unwrap()).collect();
+    let exported: Vec<_> = bodies.iter().map(|body| ExportBody { name: "NONE".into(), body, color: None }).collect();
+    let text = step_export_bodies(&exported, &StepHeader::default()).unwrap();
+    let mut surfaces = String::new();
+    for line in text.lines() {
+        if let Some((before, after)) = line.split_once("MANIFOLD_SOLID_BREP(") {
+            let (name, shell) = after.strip_suffix(");").unwrap().split_once(',').unwrap();
+            surfaces += &format!("{before}SHELL_BASED_SURFACE_MODEL({name},({shell}));\n");
+        } else {
+            surfaces += line;
+            surfaces.push('\n');
+        }
+    }
+    assert_eq!(surfaces.matches("SHELL_BASED_SURFACE_MODEL").count(), 2);
+    let named = surfaces.replace("ADVANCED_FACE('',", "ADVANCED_FACE('Inspection surface',");
+    assert_ne!(named, surfaces, "the fixture has face labels");
+    let path = dir.join("labelled-surfaces.step");
+    std::fs::write(&path, named).unwrap();
+    path.to_string_lossy().to_string()
+}
+
+#[test]
+fn original_step_face_labels_name_none_bodies_when_opened_and_inserted() {
+    let path = face_labelled_surface_file();
+    let original = std::fs::read(&path).unwrap();
+    let expected = ["Inspection surface", "Inspection surface (2)"];
+    for command in ["doc.open", "file.insert_step"] {
+        let mut s = Session::default();
+        run(&mut s, command, json!({"path": path, "up": "z"}));
+        assert_eq!(body_names(&s), expected, "ordinary {command} uses automatic names");
+        assert_eq!(s.model.state().bodies.len(), 2);
+        assert!(near(extent(&s).0, [0.0, 0.0, 0.0]));
+        assert!(near(extent(&s).1, [6.0, 3.0, 4.0]));
+
+        let design = std::path::Path::new(&path).with_file_name(format!("{command}.solidcraft"));
+        run(&mut s, "file.save_as", json!({"path": design.to_string_lossy()}));
+        let mut again = Session::default();
+        run(&mut again, "doc.open", json!({"path": design.to_string_lossy()}));
+        assert_eq!(body_names(&again), expected, "chosen names survive reopening");
+        assert_eq!(std::fs::read(&path).unwrap(), original, "the original STEP is read only");
+    }
+
+    let mut exact = Session::default();
+    run(&mut exact, "doc.open", json!({"path": path, "names": "solid", "up": "z"}));
+    assert_eq!(body_names(&exact), ["NONE", "NONE (2)"], "explicit source names remain available");
 }
 
 /// `matrix` places the inserted file's component, after `up`, in the same command (one undo
