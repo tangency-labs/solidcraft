@@ -12,7 +12,7 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::SolveApp;
 use crate::ui_kit;
 
-pub(crate) const DRAG_ZOOM: &str = "view.tool.zoom";
+pub(crate) const DRAG_ZOOM: &str = crate::navigation_bar::ZOOM_TOOL;
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[

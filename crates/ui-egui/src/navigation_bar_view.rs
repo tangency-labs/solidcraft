@@ -33,8 +33,13 @@ fn measure_row(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width:
     if !content.is_finite() || available < button + 2.0 * inset || content.height() < height + NAV_BOTTOM {
         return result;
     }
-    let slots: Vec<_> =
-        prefs.slots.iter().take(navigation_bar::MAX_SLOTS).filter_map(|id| navigation_bar::find(id)).filter(|slot| slot.available(caps)).collect();
+    let slots: Vec<_> = prefs
+        .slots
+        .iter()
+        .take(navigation_bar::MAX_SLOTS)
+        .filter_map(|id| navigation_bar::find(id))
+        .filter(|slot| slot.available(caps.orbit, caps.pick))
+        .collect();
     if slots.is_empty() {
         return result;
     }
@@ -136,6 +141,18 @@ pub(crate) fn editor_layout(stage: Rect, prefs: &NavigationBar, label_width: imp
     bar
 }
 
+/// What the current canvas lets the camera do: a flat sheet page or a finished render cannot
+/// orbit or pick, the Render workspace has its own caps, and the model has the full set.
+pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
+    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) {
+        NavCaps { orbit: false, pick: false }
+    } else if crate::render_workspace::active(app) {
+        NavCaps::RENDER
+    } else {
+        NavCaps::MODEL
+    }
+}
+
 pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> BarLayout {
     let t = Tokens::get();
     let label_width = |slot: &Slot| {
@@ -143,7 +160,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
             fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::ui_kit::type_face::medium(ui_kit::NAV_TEXT), t.form_ink).size().x
         })
     };
-    let mut bar = measure(content, &app.preferences.navigation_bar, navigation_bar::canvas_caps(app), label_width);
+    let mut bar = measure(content, &app.preferences.navigation_bar, canvas_caps(app), label_width);
     let Some(_) = app.universal_panel_frame() else {
         return bar;
     };
@@ -176,12 +193,8 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
             .map(|bounds| (bounds.size.width - 2.0 * t.space_4).max(0.0))
             .max_by(f32::total_cmp)
             .unwrap_or(0.0);
-        bar = measure(
-            Rect::from_min_size(content.min, vec2(width, content.height())),
-            &app.preferences.navigation_bar,
-            navigation_bar::canvas_caps(app),
-            label_width,
-        );
+        bar =
+            measure(Rect::from_min_size(content.min, vec2(width, content.height())), &app.preferences.navigation_bar, canvas_caps(app), label_width);
         if bar.rect.is_positive() {
             location = place(&bar);
         }
@@ -191,12 +204,8 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
         // free piece is tall enough. Validate that measured footprint directly.
         let metrics = ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size);
         let width = metrics.button + 2.0 * (ui_kit::NAV_BORDER + ui_kit::NAV_PADDING + ui_kit::NAV_EDGE);
-        bar = measure(
-            Rect::from_min_size(content.min, vec2(width, content.height())),
-            &app.preferences.navigation_bar,
-            navigation_bar::canvas_caps(app),
-            label_width,
-        );
+        bar =
+            measure(Rect::from_min_size(content.min, vec2(width, content.height())), &app.preferences.navigation_bar, canvas_caps(app), label_width);
         if bar.rect.is_positive() {
             location = place(&bar);
         }
@@ -279,7 +288,7 @@ fn tip(app: &SolveApp, slot: &Slot, hidden: Option<&str>, key: bool) -> String {
 /// Slot `slot`, at `index` of the stored list, as the bar component draws it.
 fn slot_view(app: &SolveApp, bar: &BarLayout, slot: &'static Slot, index: usize, rect: Rect, editing: Option<(NavCaps, bool)>) -> SlotView<'static> {
     let hidden = editing
-        .filter(|(caps, _)| !slot.available(*caps))
+        .filter(|(caps, _)| !slot.available(caps.orbit, caps.pick))
         .map(|(_, render)| if render { "navbar.custom.hidden_render" } else { "navbar.custom.hidden_design" });
     let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     let value = slot.kind == NavigationKind::Menu
@@ -559,7 +568,7 @@ mod tests {
         assert_eq!(bar.slots, ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"]);
         let flat = NavCaps { orbit: false, pick: false };
         for caps in [NavCaps::MODEL, NavCaps::RENDER, flat] {
-            let shown: Vec<_> = CATALOGUE.iter().filter(|slot| slot.available(caps)).map(|slot| slot.id).collect();
+            let shown: Vec<_> = CATALOGUE.iter().filter(|slot| slot.available(caps.orbit, caps.pick)).map(|slot| slot.id).collect();
             for id in ["orbit", "spin", "look_at", "projection", "visual_style"] {
                 assert_eq!(shown.contains(&id), caps.orbit && (caps.pick || !matches!(id, "look_at" | "visual_style")), "{caps:?}: {id}");
             }
@@ -569,7 +578,8 @@ mod tests {
         }
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
         app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        assert!(find("visual_style").unwrap().available(canvas_caps(&app)), "the previous bar kept style available in a sketch");
+        let caps = canvas_caps(&app);
+        assert!(find("visual_style").unwrap().available(caps.orbit, caps.pick), "the previous bar kept style available in a sketch");
     }
 
     #[test]

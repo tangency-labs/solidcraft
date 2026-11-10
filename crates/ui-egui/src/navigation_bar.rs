@@ -1,9 +1,5 @@
 //! Stored navigation slots and their catalogue. Painting lives in `navigation_bar_view`.
-use crate::{
-    SolveApp,
-    navigation::NavCaps,
-    ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize},
-};
+use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -60,10 +56,13 @@ macro_rules! slot {
     };
 }
 
+/// The zoom slot's command: the drag-zoom tool, which a key held down also starts.
+pub(crate) const ZOOM_TOOL: &str = "view.tool.zoom";
+
 pub(crate) const CATALOGUE: &[Slot] = &[
     slot!("orbit", Tool, "orbit", Some("view.tool")),
     slot!("pan", Tool, "pan", Some("view.tool")),
-    slot!("zoom", Tool, "zoom", Some(crate::keymap::DRAG_ZOOM)),
+    slot!("zoom", Tool, "zoom", Some(ZOOM_TOOL)),
     slot!("spin", Toggle, "spin", Some("view.spin")),
     slot!("fit", Action, "fit", Some("view.fit")),
     slot!("look_at", Action, "lookat", Some("view.normal_to")),
@@ -86,24 +85,16 @@ impl Slot {
         if self.id == "visual_style" { visual_style_icon(visual_style) } else { self.icon }
     }
 
-    pub(crate) fn available(&self, caps: NavCaps) -> bool {
-        if !caps.orbit {
+    /// Whether the slot works on the current canvas: `orbit` when its camera may orbit, `pick`
+    /// when what is under the pointer can be picked.
+    pub(crate) fn available(&self, orbit: bool, pick: bool) -> bool {
+        if !orbit {
             return !matches!(self.id, "orbit" | "spin" | "look_at" | "projection" | "visual_style");
         }
-        if !caps.pick && matches!(self.id, "look_at" | "visual_style") {
+        if !pick && matches!(self.id, "look_at" | "visual_style") {
             return false;
         }
         true
-    }
-}
-
-pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
-    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) {
-        NavCaps { orbit: false, pick: false }
-    } else if crate::render_workspace::active(app) {
-        NavCaps::RENDER
-    } else {
-        NavCaps::MODEL
     }
 }
 

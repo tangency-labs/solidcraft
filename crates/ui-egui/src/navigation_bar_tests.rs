@@ -1,4 +1,5 @@
 use super::*;
+use crate::navigation::NavCaps;
 use crate::navigation_bar_view::measure;
 use egui::{Rect, pos2, vec2};
 use serde_json::json;
