@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 use solidcraft_io::MAX_DRAWING_BYTES;
 
-use super::{DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams};
+use super::{
+    DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, InsertSvgResult, SvgDiagnosticsParams, SvgDiagnosticsResult,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -21,7 +23,10 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 fn schemas_and_the_key_check_agree() {
     let insert = ["align", "angle", "at", "height", "name", "path", "plane", "scale", "sketch", "text", "tolerance", "width"];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
-    assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
+    let mut svg: Vec<&str> = insert.to_vec();
+    svg.push("repair_tolerance");
+    svg.sort_unstable();
+    assert_keys(input_schema_for::<InsertSvgParams>(), &svg);
     assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
 }
 
@@ -310,4 +315,112 @@ fn replies_match_the_output_schema() {
     s.param_check = ParamCheck::Strict;
     let error = s.execute("sketch.insert_dxf", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`wdth`") && error.contains("did you mean `width`"), "{error}");
+}
+
+const SVG_RECT: &str =
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+
+#[test]
+fn svg_import_schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<SvgDiagnosticsParams>(),
+        &["align", "angle", "at", "height", "path", "repair_tolerance", "scale", "text", "width"],
+    );
+    assert_keys(
+        input_schema_for::<InsertSvgParams>(),
+        &["align", "angle", "at", "height", "name", "path", "plane", "repair_tolerance", "scale", "sketch", "text", "tolerance", "width"],
+    );
+}
+
+#[test]
+fn svg_repair_tolerance_is_present_finite_and_bounded() {
+    for p in [
+        json!({"repair_tolerance": null}),
+        json!({"repair_tolerance": "0.1"}),
+        json!({"repair_tolerance": 0}),
+        json!({"repair_tolerance": -1}),
+        json!({"repair_tolerance": 11}),
+    ] {
+        assert!(serde_json::from_value::<SvgDiagnosticsParams>(p.clone()).is_err(), "{p}");
+        assert!(serde_json::from_value::<InsertSvgParams>(p.clone()).is_err(), "{p}");
+    }
+    for tolerance in [1e-9, 0.01, 10.0] {
+        assert!(serde_json::from_value::<SvgDiagnosticsParams>(json!({"repair_tolerance": tolerance})).is_ok());
+    }
+}
+
+#[test]
+fn svg_repair_tolerance_errors_are_identical_in_strict_mode() {
+    for id in ["sketch.svg_diagnostics", "sketch.insert_svg"] {
+        for tolerance in [Value::Null, json!("0.1"), json!(0), json!(-1), json!(11)] {
+            let p = json!({"text": SVG_RECT, "repair_tolerance": tolerance});
+            let mut off = Session::default();
+            let expected = off.execute(id, &p).unwrap_err().to_string();
+            let mut strict = Session { param_check: ParamCheck::Strict, ..Session::default() };
+            assert_eq!(strict.execute(id, &p).unwrap_err().to_string(), expected, "{id}: {p}");
+        }
+    }
+}
+
+#[test]
+fn svg_insert_plane_contract_matches_sketch_creation_in_strict_mode() {
+    for plane in [json!("XY"), json!({"face": [15, 15, 10]}), json!({"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]})] {
+        assert!(serde_json::from_value::<InsertSvgParams>(json!({"text": SVG_RECT, "plane": plane})).is_ok());
+    }
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10})).unwrap();
+    let result = s.execute("sketch.insert_svg", &json!({"text": SVG_RECT, "plane": {"face": [15, 15, 10]}})).unwrap();
+    assert_eq!(result["curves"], 4);
+    assert!(result["created_sketch"].as_u64().is_some());
+    assert!(result.get("param_warnings").is_none());
+}
+
+#[test]
+fn svg_diagnostic_output_describes_original_and_replacement_display_geometry() {
+    let svg = r#"<svg width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M0 0C-.1 0 1 1 2 0L2 2L0 2Z M4 0L6 0L6 2L4 2L4 0C3.999 0 3.999 -.001 4 -.001Z"/></svg>"#;
+    let output = output_schema_for::<SvgDiagnosticsResult>();
+    let schema = output.as_value();
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    let original = s.execute("sketch.svg_diagnostics", &json!({"text": svg})).unwrap();
+    assert!(conforms(schema, schema, &original));
+    for diagnostic in original["diagnostics"].as_array().unwrap() {
+        assert!(!diagnostic["highlight"].as_array().unwrap().is_empty());
+        assert_eq!(diagnostic["replacement_highlight"], json!([]));
+    }
+    let repaired = s.execute("sketch.svg_diagnostics", &json!({"text": svg, "repair_tolerance": 0.01})).unwrap();
+    assert!(conforms(schema, schema, &repaired));
+    let issues = repaired["diagnostics"].as_array().unwrap();
+    let replaced = issues.iter().find(|issue| issue["kind"] == "backtracking_curve").unwrap();
+    assert_eq!(replaced["repaired"], true);
+    assert!(!replaced["replacement_highlight"].as_array().unwrap().is_empty());
+    let removed = issues.iter().find(|issue| issue["kind"] == "attached_loop").unwrap();
+    assert_eq!(removed["repaired"], true);
+    assert_eq!(removed["replacement_highlight"], json!([]));
+    let chains: Vec<Vec<[f64; 2]>> = serde_json::from_value(replaced["replacement_highlight"].clone()).unwrap();
+    assert!(chains.iter().all(|chain| chain.len() >= 2));
+    let mut malformed = repaired;
+    malformed["diagnostics"][0]["replacement_highlight"] = json!([[0, 0]]);
+    assert!(!conforms(schema, schema, &malformed), "a replacement is a list of point chains");
+}
+
+#[test]
+fn svg_commands_replies_match_the_output_schemas() {
+    for (id, output) in
+        [("sketch.svg_diagnostics", output_schema_for::<SvgDiagnosticsResult>()), ("sketch.insert_svg", output_schema_for::<InsertSvgResult>())]
+    {
+        for extra in [
+            json!({}),
+            json!({"repair_tolerance": 0.01}),
+            json!({"align": "center", "scale": 2, "angle": 90, "at": [4, 5]}),
+            json!({"repair_tolernce": 0.01}),
+        ] {
+            let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+            let mut p = json!({"text": SVG_RECT});
+            p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let reply = s.execute(id, &p).unwrap();
+            let schema = output.as_value();
+            assert!(conforms(schema, schema, &reply), "{id}: {reply} doesn't match {schema}");
+            assert_eq!(reply.get("param_warnings").is_some(), extra.get("repair_tolernce").is_some(), "{reply}");
+        }
+    }
 }

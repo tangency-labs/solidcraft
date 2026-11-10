@@ -569,8 +569,13 @@ fn settings_section_count_spaced<R>(
 /// Full-width settings detail group. Container owns its surface; content cannot shrink the card.
 pub(crate) fn settings_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     let t = Tokens::get();
+    settings_card_with_inset(ui, vec2(t.space_12, t.space_10), add)
+}
+
+/// A settings card with an explicit theme-derived content inset.
+pub(crate) fn settings_card_with_inset<R>(ui: &mut Ui, inset: egui::Vec2, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
-    let frame = settings_card_frame(ui).inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8));
+    let frame = settings_card_frame(ui).inner_margin(egui::Margin::symmetric(dimension(inset.x) as i8, dimension(inset.y) as i8));
     container.show_frame(ui, frame, ui.max_rect(), |ui| {
         ui.set_min_width(dimension(ui.available_width()));
         add(ui)

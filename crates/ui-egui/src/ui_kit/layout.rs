@@ -482,14 +482,56 @@ pub(crate) fn figure_rows(
 /// Persisted disclosure with a rule and uppercase title. Tokens: `control_height, space_2, radius_sm, hover, dialog_rule, form_section_icon_size, form_gap_y, font_caption, font_section_tracking, text_dim`.
 /// Static section caption for a group that stays expanded.
 pub(crate) fn section_heading(ui: &mut Ui, title: &str) {
+    section_heading_with_size(ui, title, Tokens::get().font_caption);
+}
+
+/// Opt-in section typography; existing callers retain the theme's caption size.
+pub(crate) fn section_heading_with_size(ui: &mut Ui, title: &str, font_size: f32) {
     let t = Tokens::get();
+    let size = if font_size.is_finite() && font_size > 0.0 { font_size } else { t.font_caption };
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), egui::Sense::hover());
-    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::ui_kit::type_face::semibold(size), t.form_dim, true);
     solidcraft_ui_registry::publish_rect(&format!("dialog:heading:{title}"), rect);
 }
 
 pub(crate) fn section<R>(ui: &mut Ui, id: impl egui::AsIdSalt, title: &str, default_open: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     section_count(ui, id, title, default_open, None::<usize>, add)
+}
+
+/// A quiet disclosure row: a chevron and a normal-case title, for a summary that opens into its
+/// controls (a collapsed setup, a placement line). Same saved state and handle names as `section`.
+/// Tokens: `control_height, radius_sm, hover, form_section_icon_size, form_dim, form_ink, font_label, space_6`.
+pub(crate) fn quiet_disclosure<R>(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    title: &str,
+    strong: bool,
+    default_open: bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    let t = Tokens::get();
+    let id = ui.make_persistent_id(id);
+    let mut open = ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height), egui::Sense::click());
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+    }
+    let icon = egui::pos2(rect.left() + t.form_section_icon_size / 2.0, rect.center().y);
+    super::disclosure(ui.painter(), icon, open, t.form_dim);
+    let text_rect =
+        egui::Rect::from_min_max(egui::pos2((icon.x + t.form_section_icon_size / 2.0 + t.space_6).min(rect.right()), rect.top()), rect.max);
+    let (font, ink) =
+        if strong { (crate::ui_kit::type_face::semibold(t.font_label), t.form_ink) } else { (egui::FontId::proportional(t.font_label), t.form_dim) };
+    paint_text(ui, text_rect, title, font, ink, false);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, title));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(open));
+    solidcraft_ui_registry::publish_handle(&format!("dialog:section:{title}"), response.rect.center());
+    solidcraft_ui_registry::publish_rect(&format!("dialog:section:{title}"), rect);
+    if response.clicked() {
+        open = !open;
+    }
+    ui.ctx().data_mut(|data| data.insert_persisted(id, open));
+    open.then(|| ui.push_id(id, add).inner)
 }
 
 /// Section with a renderer/method tag. Shares disclosure, typography and badge tokens with section_count.

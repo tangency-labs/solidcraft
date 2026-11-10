@@ -322,6 +322,59 @@ pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], column
     }
 }
 
+/// A checkbox row whose legend swatch matches the mark it shows on the model, with an optional
+/// mono count at the right: how a feature panel's display options read. Tokens: `control_height,
+/// form_ink/dim, accent, space_2/6/8/14/16, font_label, font_small`, and `checkbox` tokens.
+pub(crate) fn swatch_checkbox(
+    ui: &mut Ui,
+    label: &str,
+    count: &str,
+    on: &mut bool,
+    swatch: egui::Color32,
+    shape: ChoiceChipSwatchShape,
+    enabled: bool,
+) -> egui::Response {
+    let t = Tokens::get();
+    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, mut response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height), sense);
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    let shown = *on && enabled;
+    let square = super::checks::box_at(ui, egui::pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
+    super::checks::paint_box(ui, square, &response, shown, false);
+    let cell = egui::Rect::from_center_size(egui::pos2(square.right() + t.space_8 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
+    let swatch = if enabled { swatch } else { t.form_dim };
+    match shape {
+        ChoiceChipSwatchShape::Line => {
+            ui.painter().line_segment([cell.left_center(), cell.right_center()], egui::Stroke::new(t.space_2, swatch));
+        }
+        ChoiceChipSwatchShape::Dot => {
+            ui.painter().circle_filled(cell.center(), t.space_3 + t.space_2 * 0.5, swatch);
+        }
+        ChoiceChipSwatchShape::Square => {
+            let side = t.space_10 + t.space_2;
+            let square = egui::Rect::from_center_size(cell.center(), vec2(side, side));
+            ui.painter().rect_filled(square, t.radius_sm, swatch.gamma_multiply(0.45));
+            ui.painter().rect_stroke(square, t.radius_sm, egui::Stroke::new(1.0, swatch), egui::StrokeKind::Inside);
+        }
+    }
+    let ink = if shown { t.form_ink } else { t.form_dim };
+    let mut right = rect.right();
+    if !count.is_empty() {
+        let galley = ui.painter().layout_no_wrap(count.to_owned(), egui::FontId::monospace(t.font_small), t.form_dim);
+        right -= galley.size().x;
+        ui.painter().galley(egui::pos2(right, rect.center().y - galley.size().y * 0.5), galley, t.form_dim);
+        right -= t.space_6;
+    }
+    let text_rect =
+        egui::Rect::from_min_max(egui::pos2((cell.right() + t.space_6).min(right), rect.top()), egui::pos2(right.max(cell.right()), rect.bottom()));
+    paint_text(ui, text_rect, label, egui::FontId::proportional(t.font_label), ink, false);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, shown, label));
+    response
+}
+
 /// Shared expanded options band for feature dialogs.
 /// Expanded two-column Options disclosure. Tokens: `section and checkbox_grid tokens`.
 pub(crate) fn options(ui: &mut Ui, id: &str, items: &mut [(&str, &mut bool)]) {
@@ -483,6 +536,15 @@ pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
     let response = ui.add_sized(vec2(width, super::row_height()), egui::Button::selectable(selected, text).truncate());
     solidcraft_ui_registry::publish_target(&format!("dialog:list:{key}"), response.rect);
     response
+}
+
+/// Semantic swatch shapes for the marks a display option shows on the model.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum ChoiceChipSwatchShape {
+    Line,
+    #[default]
+    Square,
+    Dot,
 }
 
 /// An independently indexed toolbar visibility chip using the standard icon segments.

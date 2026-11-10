@@ -410,3 +410,32 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
         }
     }
 }
+
+#[test]
+fn swatch_checkbox_rows_keep_the_control_height_and_toggle_on_click() {
+    let ctx = crate::fonts::test_context();
+    let mut at = egui::Pos2::ZERO;
+    let mut on = true;
+    frame(&ctx, vec![], |ui| {
+        let t = solidcraft_theme::Tokens::get();
+        let row = swatch_checkbox(ui, "Curves", "4", &mut on, t.svg_curve, ChoiceChipSwatchShape::Line, true);
+        assert_eq!(row.rect.height(), t.control_height);
+        at = row.rect.center();
+    });
+    for down in [true, false] {
+        frame(&ctx, pointer(at, down), |ui| {
+            let t = solidcraft_theme::Tokens::get();
+            swatch_checkbox(ui, "Curves", "4", &mut on, t.svg_curve, ChoiceChipSwatchShape::Line, true);
+        });
+    }
+    assert!(!on, "a click toggles the option");
+    // A disabled row never toggles.
+    let mut off = true;
+    for down in [true, false] {
+        frame(&ctx, pointer(at, down), |ui| {
+            let t = solidcraft_theme::Tokens::get();
+            swatch_checkbox(ui, "Curves", "4", &mut off, t.svg_curve, ChoiceChipSwatchShape::Line, false);
+        });
+    }
+    assert!(off);
+}

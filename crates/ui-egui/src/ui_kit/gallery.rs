@@ -54,6 +54,22 @@ fn navigation_sample(ui: &mut Ui, size: NavigationSize) {
 
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 const ELEMENTS: &[Element] = &[
+    element!("section_heading_with_size", |ui, _| {
+        section_heading_with_size(ui, "Readiness", Tokens::get().font_small);
+    }),
+    element!("quiet_disclosure", |ui, _| {
+        quiet_disclosure(ui, "gallery_quiet", "Placement", false, true, |ui| {
+            text(ui, "Centred on the sketch", Text::Hint("gallery_quiet_body"));
+        });
+    }),
+    element!("check_indicator", |ui, _| {
+        let t = Tokens::get();
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(t.form_icon_size), egui::Sense::hover());
+        check_indicator(ui.painter(), rect, t.form_success);
+    }),
+    element!("swatch_checkbox", |ui, s| {
+        swatch_checkbox(ui, "Regions", "12", &mut s.checked, Tokens::get().form_primary, ChoiceChipSwatchShape::Square, true);
+    }),
     element!("theme_mode_segments", |ui, _| {
         theme_segments(
             ui,

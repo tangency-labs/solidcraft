@@ -76,7 +76,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         app.viewport.insert_drag = None;
         return;
     };
-    let Some(plane) = app.session.active_sketch.and_then(|id| crate::canvas::profile_plane(app, id)) else { return };
+    let plane = placement_plane(app);
+    let painter = ui.painter().clone();
+    show_svg_diagnostics(&place, &plane, proj, &painter);
+    if place.command.ends_with("svg") && !crate::dialogs_insert_drawing::placement_visible(&place) {
+        app.viewport.insert_drag = None;
+        return;
+    }
+
     let Some(corners) = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
         .iter()
         .map(|(u, v)| spot(&place, *u, *v).and_then(|q| on_screen(&plane, proj, q)))
@@ -93,7 +100,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let knob = top + if away.length() > 0.0 { away * KNOB_GAP } else { vec2(0.0, -KNOB_GAP) };
     let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
-    let stroke = Stroke::new(1.5, t.accent);
+    let stroke = Stroke::new(t.space_2, if place.command.ends_with("svg") { t.svg_repair_segment } else { t.accent });
     painter.add(egui::Shape::closed_line(corners.clone(), stroke));
     painter.line_segment([top, knob], stroke);
     painter.circle(knob, HANDLE, t.overlay, stroke);
@@ -109,7 +116,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     parts.push((egui::Rect::from_center_size(knob, Screen::splat(HANDLE * 3.0)), Part::Turn, egui::CursorIcon::Crosshair));
     for (i, (rect, part, cursor)) in parts.into_iter().enumerate() {
         let response = ui.interact(rect, egui::Id::unique(("sc_insert_handle", i)), Sense::drag()).on_hover_cursor(cursor);
-        crate::scenario::publish_handle(&format!("insert:handle:{i}"), rect.center());
+        solidcraft_ui_registry::publish_handle(&format!("insert:handle:{i}"), rect.center());
         if response.drag_started()
             && let Some(from) = response.interact_pointer_pos().and_then(|p| pointer_on_sketch(&plane, proj, p))
         {
@@ -131,6 +138,157 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
             app.viewport.insert_drag = None;
         }
     }
+}
+
+/// Insert creates an XY sketch on OK without an active sketch; its preview carries that plane.
+pub(crate) fn placement_plane(app: &SolveApp) -> Plane {
+    app.session
+        .active_sketch
+        .and_then(|id| crate::canvas::profile_plane(app, id))
+        .or_else(|| app.preview.sketches.first().map(|preview| preview.sketch.plane))
+        .unwrap_or(Plane::XY)
+}
+
+pub(crate) fn diagnostic_world(place: &Place, plane: &Plane, q: [f64; 2]) -> Option<solidcore_record::Vec3> {
+    let q = Vec2::new(q[0], q[1]);
+    let point = turn(q, place.angle) + Vec2::new(place.x, place.y);
+    point.is_finite().then(|| plane.to_world(point))
+}
+
+/// Read-only viewport captions use the same semantic backing as the other HUDs.
+fn svg_caption(painter: &egui::Painter, at: Pos2, text: String, pill: bool) -> egui::Rect {
+    let t = solidcraft_theme::Tokens::get();
+    let galley = painter.layout(text, egui::FontId::proportional(t.font_small), t.text, t.form_card_width);
+    let container =
+        crate::ui_kit::Container::new(painter.ctx(), if pill { crate::ui_kit::Surface::ViewportStatus } else { crate::ui_kit::Surface::Panel });
+    let frame = container.frame(painter.ctx(), t.overlay, crate::frame::Side::Left).inner_margin(t.space_8);
+    let clip = painter.clip_rect().shrink(t.space_12);
+    let size = galley.size();
+    let pos = egui::pos2(
+        at.x.clamp(clip.left(), (clip.right() - size.x).max(clip.left())),
+        at.y.clamp(clip.top(), (clip.bottom() - size.y).max(clip.top())),
+    );
+    let content = egui::Rect::from_min_size(pos, size);
+    container.paint_background(painter, frame, content);
+    painter.galley(content.min, galley, t.text);
+    frame.widget_rect(content)
+}
+
+/// Repair overlays describe actual changes. Detailed originals and endpoint dots appear only
+/// during explicit review; source warnings never appear automatically on initial placement.
+fn show_svg_diagnostics(place: &Place, plane: &Plane, proj: &Proj, painter: &egui::Painter) {
+    if !place.command.ends_with("svg") {
+        return;
+    }
+    let t = solidcraft_theme::Tokens::get();
+    let screen = |q: [f64; 2]| diagnostic_world(place, plane, q).and_then(|q| proj.to_screen(q));
+    let selected = place.svg.review.then_some(place.svg.selected).flatten();
+    let stale = crate::dialogs_insert_drawing::is_stale(place);
+    let mut highlighted = 0;
+    let mut changed = 0;
+    let mut before_lines = 0;
+    let mut after_lines = 0;
+    let mut overlay_vertices = 65_536usize;
+    let mut draw = |chain: &[[f64; 2]], stroke: Stroke, dashed: bool| -> bool {
+        let limit = overlay_vertices.min(4096).min(chain.len());
+        overlay_vertices = overlay_vertices.saturating_sub(limit);
+        let points: Vec<Pos2> = chain.iter().take(limit).filter_map(|q| screen(*q)).collect();
+        if points.len() < 2 {
+            return false;
+        }
+        if dashed {
+            painter.extend(crate::ui_kit::dashed_line(&points, painter.clip_rect(), stroke, t.space_6, t.space_4));
+        } else {
+            painter.add(egui::Shape::line(points, stroke));
+        }
+        true
+    };
+    // The selected issue gets its budget first, even in an outline with thousands of changes.
+    if let Some((index, issue)) = selected.and_then(|i| place.svg.diagnostics.get(i).map(|d| (i, d))) {
+        for chain in &issue.replacement_highlight {
+            after_lines += usize::from(draw(chain, Stroke::new(t.space_3, t.svg_repair_segment), false));
+        }
+        before_lines += usize::from(draw(&issue.highlight, Stroke::new(t.space_2, t.svg_original_segment), true));
+        highlighted = 1;
+        if let Some(at) = screen(issue.at) {
+            painter.circle(at, t.space_6, t.overlay, Stroke::new(t.space_2, if issue.repaired { t.svg_repair_segment } else { t.warning }));
+            solidcraft_ui_registry::publish_handle(&format!("insert:svg:highlight:{index}"), at);
+            if issue.repaired {
+                changed += 1;
+                solidcraft_ui_registry::publish_handle(&format!("insert:svg:changed:{index}"), at);
+                if issue.replacement_highlight.is_empty() {
+                    let d = vec2(t.space_4, t.space_4);
+                    let e = vec2(t.space_4, -t.space_4);
+                    painter.line_segment([at - d, at + d], Stroke::new(t.space_2, t.preview_cut));
+                    painter.line_segment([at - e, at + e], Stroke::new(t.space_2, t.preview_cut));
+                }
+            }
+            for point in issue
+                .replacement_highlight
+                .first()
+                .and_then(|p| p.first())
+                .into_iter()
+                .chain(issue.replacement_highlight.last().and_then(|p| p.last()))
+            {
+                if let Some(point) = screen(*point) {
+                    painter.circle(point, t.space_3, t.overlay, Stroke::new(t.space_2, t.svg_repair_segment));
+                }
+            }
+        }
+        // Other changes in the selected source outline remain legible above the dimmed drawing.
+        for (other, part) in place.svg.diagnostics.iter().enumerate() {
+            if other == index || part.path != issue.path || part.subpath != issue.subpath {
+                continue;
+            }
+            if part.repaired && !place.svg.original_view {
+                for chain in &part.replacement_highlight {
+                    draw(chain, Stroke::new(t.space_2, t.svg_curve), false);
+                }
+            } else {
+                draw(&part.highlight, Stroke::new(t.space_2, t.svg_curve), false);
+            }
+        }
+        let reason = solidcraft_ui_text::tr(crate::dialogs_insert_drawing::diagnostic_kind(&issue.kind));
+        let text = if let Some(bound) = issue.max_deviation_mm {
+            let value = if bound > 0.0 && bound < 1e-4 { format!("{bound:.3e}") } else { format!("{bound:.6}") };
+            format!("{}\n{}", reason, solidcraft_ui_text::format("ui.svg_viewport_largest_move", &[("deviation", &format!("≤ {value}"))]))
+        } else {
+            reason.to_string()
+        };
+        if let Some(at) = screen(issue.at) {
+            svg_caption(painter, at + vec2(t.space_16, -t.space_24 * 2.0), text, false);
+        }
+    } else if !place.svg.review && place.svg.repair && !place.svg.original_view && place.svg.show_curves {
+        let color = if stale { t.svg_original_segment.gamma_multiply(0.35) } else { t.svg_repair_segment };
+        for issue in place.svg.diagnostics.iter().filter(|d| d.repaired) {
+            for chain in &issue.replacement_highlight {
+                after_lines += usize::from(draw(chain, Stroke::new(t.space_3, color), false));
+            }
+        }
+    }
+    if !place.svg.review && place.svg.show_changes {
+        for (index, issue) in place.svg.diagnostics.iter().enumerate().filter(|(_, d)| !d.repaired).take(512) {
+            if let Some(at) = screen(issue.at) {
+                painter.circle_filled(at, t.space_3, t.warning);
+                solidcraft_ui_registry::publish_handle(&format!("insert:svg:highlight:{index}"), at);
+                highlighted += 1;
+            }
+        }
+    }
+    if place.svg.review {
+        let legend = format!(
+            "{}\n{}\n{}",
+            solidcraft_ui_text::tr("ui.svg_viewport_original_legend"),
+            solidcraft_ui_text::tr("ui.svg_viewport_replacement_legend"),
+            solidcraft_ui_text::tr("ui.svg_viewport_removed_legend")
+        );
+        svg_caption(painter, egui::pos2(proj.rect.left() + t.space_16, proj.rect.bottom() - t.control_height * 4.0), legend, false);
+    }
+    // The closed-region and change summaries live in the single SVG integrity status item.
+    solidcraft_ui_registry::publish_count("svg_highlighted_segments", highlighted as f64);
+    solidcraft_ui_registry::publish_count("svg_changed_locations", changed as f64);
+    solidcraft_ui_registry::publish_count("svg_original_overlays", before_lines as f64);
+    solidcraft_ui_registry::publish_count("svg_repaired_overlays", after_lines as f64);
 }
 
 /// The placement after the pointer has moved to `p`, from where `drag` began.
@@ -171,7 +329,16 @@ mod tests {
     use super::*;
 
     fn place() -> Place {
-        Place { command: "sketch.insert_svg".into(), path: "a.svg".into(), x: 10.0, y: 5.0, scale: 1.0, angle: 0.0, natural: Some((20.0, 10.0)) }
+        Place {
+            command: "sketch.insert_svg".into(),
+            path: "a.svg".into(),
+            x: 10.0,
+            y: 5.0,
+            scale: 1.0,
+            angle: 0.0,
+            natural: Some((20.0, 10.0)),
+            svg: Default::default(),
+        }
     }
 
     fn drag(part: Part, from: Vec2, p: &Place) -> Drag {
@@ -214,5 +381,48 @@ mod tests {
         assert!((p.angle - 90.0).abs() < 1e-9, "{}", p.angle);
         apply(&mut p, &d, Vec2::new(4.0, 3.0), true);
         assert!(p.angle == 90.0 || (p.angle % 15.0).abs() < 1e-9, "snapped: {}", p.angle);
+    }
+    #[test]
+    fn reviewing_a_late_svg_issue_only_marks_the_selected_change() {
+        let ctx = crate::fonts::test_context();
+        let mut p = place();
+        let issue = crate::dialogs_insert_drawing::Diagnostic {
+            path: 1,
+            subpath: 1,
+            segment: 1,
+            kind: "backtracking_curve".into(),
+            at: [0.0, 0.0],
+            highlight: vec![[0.0, 0.0], [1.0, 1.0]],
+            replacement_highlight: vec![vec![[0.0, 0.0], [1.0, 0.9]]],
+            repaired: true,
+            max_deviation_mm: Some(0.1),
+        };
+        p.svg.diagnostics = std::sync::Arc::new(vec![issue; 601]);
+        crate::scenario::clear_handles();
+        let mut first = ctx.run_ui(Default::default(), |ui| {
+            let cam = solidcraft_viewport::Camera::default();
+            let rect = egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+            let proj = Proj { cam, vp: cam.view_proj(800.0 / 600.0, 100.0), rect };
+            show_svg_diagnostics(&p, &Plane::XY, &proj, ui.painter());
+        });
+        first.textures_delta.clear();
+        assert!(crate::scenario::handle_at("insert:svg:highlight:0").is_none());
+        p.svg.review = true;
+        p.svg.selected = Some(600);
+        p.natural = None;
+        let mut h = crate::scenario::Harness::new();
+        h.app.dialog = Some(crate::dialogs::Dialog::new(Kind::InsertDrawing(p.clone()), Vec::new()));
+        crate::scenario::clear_handles();
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            let cam = solidcraft_viewport::Camera::default();
+            let rect = egui::Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+            let proj = Proj { cam, vp: cam.view_proj(800.0 / 600.0, 100.0), rect };
+            show(&mut h.app, ui, &proj);
+        });
+        output.textures_delta.clear();
+        assert!(crate::scenario::handle_at("insert:svg:highlight:600").is_some());
+        assert_eq!(crate::scenario::count_of("svg_original_overlays"), Some(1.0));
+        assert_eq!(crate::scenario::count_of("svg_repaired_overlays"), Some(1.0));
+        assert_eq!(crate::scenario::count_of("svg_changed_locations"), Some(1.0));
     }
 }

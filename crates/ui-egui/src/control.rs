@@ -18,7 +18,7 @@
 //!   `ui.selection` (selection, dialog inputs, hover, drawn sketch dimensions);
 //!   `ui.sketchToScreen {points: [[x,y]…]}` (screen points of active-sketch coordinates); `ui.editFeature {feature}` (edit dialog)
 //! - `ui.set {...UiState fields}`; `ui.view {view: front|back|top|bottom|left|right|iso|home|fit, animate?: bool}` (snaps unless animate)
-//! - `ui.start {command}`: like clicking the toolbar button (starts tools/dialogs)
+//! - `ui.start {command, params?}`: starts tools/dialogs; Insert SVG takes `{path}` for a picker-free preview
 //! - `ui.click {x, y, button?, shift?}`, `ui.move {x, y}`: real
 //!   pointer input in screen points; `ui.scroll {x, y, delta}`: mouse-wheel input in
 //!   points (zooms); `ui.key {key, cmd?, shift?}`, `ui.text {text}`
@@ -935,6 +935,27 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.start" => {
             let Some(id) = s("command") else { return err("missing `command`") };
+            // An explicit SVG path opens the same placement preview without a native picker.
+            // Validate before changing the current dialog, tool, preview or camera.
+            if id == "sketch.insert_svg"
+                && let Some(params) = p.get("params")
+            {
+                let Some(fields) = params.as_object() else { return err("Insert SVG ui.start params must be an object containing only `path`") };
+                if fields.keys().any(|key| key != "path") {
+                    return err("Insert SVG ui.start params take only `path`");
+                }
+                let Some(path) = fields.get("path").and_then(Value::as_str).filter(|path| !path.trim().is_empty() && path.len() < 4096) else {
+                    return err("Insert SVG ui.start `path` must be nonempty text shorter than 4096 bytes");
+                };
+                if let Err(error) = app.session.execute("sketch.drawing_bounds", &json!({"path": path, "format": "svg"})) {
+                    return err(error);
+                }
+                crate::dim_view::cancel();
+                app.tool = None;
+                app.home.open = false;
+                crate::dialogs_insert_drawing::open(app, id, path.to_string());
+                return ok(started(app));
+            }
             // `params`: what the dialog opens on. Refused: nothing starts, or the dialog closes.
             let params = p.get("params").filter(|v| !v.is_null());
             if params.is_some() && id != "joint.drive" && id != "motion.study" {
@@ -3529,6 +3550,61 @@ mod tests {
             assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("takes no ui.start params"), "{r}");
             assert!(h.app.dialog.is_none() && h.app.tool.is_none() && h.app.session.analysis.is_none(), "{command} started nothing");
         }
+    }
+
+    #[test]
+    fn ui_start_svg_path_opens_only_a_preview_and_refuses_hostile_params_before_ui_changes() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let dir = std::env::temp_dir().join(format!("solidcraft-control-svg-preview-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("drawing.svg");
+        std::fs::write(&path, r#"<svg width="20mm" height="10mm" viewBox="0 0 20 10"><rect width="20" height="10"/></svg>"#).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        let picks = Rc::new(Cell::new(0));
+        let picked = picks.clone();
+        h.app.services.pick_open = Some(Box::new(move |_| {
+            picked.set(picked.get() + 1);
+            Box::pin(std::future::ready(None))
+        }));
+        let before = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        let reply = h.call("ui.start", json!({"command": "sketch.insert_svg", "params": {"path": path.to_string_lossy()}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["dialog"]["command"], "sketch.insert_svg");
+        let Some(crate::dialogs::Kind::InsertDrawing(place)) = h.app.dialog.as_ref().map(|dialog| &dialog.kind) else { panic!("no SVG preview") };
+        assert_eq!(place.path, path.to_string_lossy());
+        assert_eq!(place.natural, Some((20.0, 10.0)));
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.session.doc.features.is_empty() && h.app.session.undo.is_empty());
+        assert!(h.app.session.active_sketch.is_none());
+        assert_eq!(picks.get(), 0);
+        assert!(!h.app.file_picker_busy());
+        assert!(!h.app.home.open && h.app.tool.is_none());
+        let opened = super::dialog_state(&h.app);
+        let camera = h.app.cam;
+        for params in [
+            Value::Null,
+            json!([]),
+            json!("drawing.svg"),
+            json!({}),
+            json!({"path": null}),
+            json!({"path": "  "}),
+            json!({"path": "x".repeat(4096)}),
+            json!({"path": path.to_string_lossy(), "scale": 2}),
+            json!({"path": dir.join("missing.svg").to_string_lossy()}),
+        ] {
+            let reply = h.call("ui.start", json!({"command": "sketch.insert_svg", "params": params}));
+            assert_eq!(reply["ok"], false, "{params}: {reply}");
+            assert_eq!(super::dialog_state(&h.app), opened, "{params}");
+            assert_eq!(h.app.cam, camera, "a refused path does not reframe the drawing");
+            assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+            assert_eq!(picks.get(), 0);
+            assert!(!h.app.file_picker_busy());
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// #9087: the dialog is reported as data (its command, inputs and what OK runs), not as the

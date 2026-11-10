@@ -187,6 +187,101 @@ retain world coordinates. A lost cross-component association refreshed by an old
 need an explicit relink or refresh when its source returns. Loading never guesses a numerical
 correction. Association records, coordinate arrays and placements are bounded and checked.
 
+## SVG sketches and repair
+
+**Insert SVG drawing** starts with the source curves and subtle shading for the closed regions
+actually detected. It frames the drawing once on opening. Control points, problem markers and
+individual diagnostics stay out of the initial view. The source SVG file is never changed.
+
+1. **Place the drawing.** The file card names the source and the sketch it will enter. With no
+   active sketch, import creates one on XY. Set the linked width and height fields to size the
+   drawing without changing its aspect ratio. Expand **Placement** to change the centre,
+   rotation or scale.
+2. **Read the import readiness ladder.** **Curves** reports the diagnostic check and any bounded
+   adjustments. **Closed regions** separately reports the regions found by the sketch solver.
+   **Ready to extrude** remains **Not checked**: detecting regions does not run an extrusion.
+   Adjusting curves never marks either of the other steps complete by itself.
+3. **Preview a repair when needed.** Open **Repair…**, set **Max change** in millimetres, then
+   press **Preview repair**. The bound applies at the final placed size, after scaling. Editing
+   the field makes the proposal stale until a new preview finishes. **Use original** discards
+   the proposal and returns to the source geometry.
+4. **Compare or review.** **Before** and **After** keep the camera in place. The footer always
+   names the geometry that will be imported; check that choice before importing. **Review
+   changes** opens a focused view grouped into unresolved and adjusted outlines. Select a group
+   and step through its segments with Previous and Next. The original segment is dashed, its
+   replacement is solid, and a removed segment has a cross. **Locate** zooms explicitly; selecting
+   a row alone does not move the camera. **Technical details** reveals source path, subpath and
+   segment numbers and the bound. Returning to import setup keeps the proposal.
+5. **Import the chosen geometry.** The primary action reads **Import original · N regions** or
+   **Import repaired · N regions**, using the current detected count. The repaired choice is
+   disabled while its check is running, stale or failed. Original curves remain an import option
+   when a repair is stale or fails. Open outlines are allowed as curves. **Cancel** leaves the
+   design unchanged, and one undo removes an insertion.
+
+**Show in viewport** controls the display of curves, detected closed regions, problem markers
+and placement handles. Curves and regions start visible; problems appear only on request.
+Placement handles are hidden while repairing or reviewing. These display controls do not change
+the sketch geometry. The caption under comparison reminds you that the camera stays put.
+
+The readiness steps are three different facts. Shaded regions and their count come from the
+solved sketch, including holes. An unshaded outline has not been confirmed as a face, and a
+positive count does not identify every area the designer intended to fill. A repair tolerance
+bounds curve changes; it does not guarantee that the same faces remain, that an open outline
+closes, or that extrusion succeeds. Changing the tolerance can change which regions are found.
+Inspect the areas you intend to extrude and run the intended solid operation. Normal SMLib
+validation remains enabled.
+
+While analysis runs, the drawing stays visible and obsolete results are discarded. A stale or
+failed repair is labelled as such rather than presented as a current proposal. **Not checked**
+means no extrusion was tested.
+
+The checks recognise attached loops after an outline has already closed, curves that double
+back, very short tangent handles, closed cubic segments, shared path boundaries and known
+unpainted boundaries. These warnings identify geometry to inspect. A short handle or a closed
+cubic can be intentional; a warning alone does not prove that the curve is invalid. Likewise,
+a drawing with no warnings is not a certificate of valid solid geometry.
+
+Repair is an explicit CAD preparation option. It approximates the cubic segments of all exactly
+closed source paths with straight segments, including ordinary segments with no initial warning.
+Each approximation is bounded by **Max change** at the placed size and appears in the
+proposal. An adjusted segment is not necessarily a defect in the original artwork. Open paths
+retain their curves unless an individual segment is separately flagged for repair; circles and
+circular arcs are retained.
+
+An attached loop can be removed when its entire control hull fits within the limit around its
+attachment point. Closed paths that share source edges, and closed paths known to have no fill
+and no inherited stroke, receive the same bounded approximation as other closed paths. Unpainted
+outlines remain sketch geometry; they are not dropped because they are invisible in the SVG.
+Unknown CSS prevents the separate unpainted-boundary warning classification.
+
+In repair mode, only exactly matching endpoints are shared; the ordinary endpoint joining
+tolerance cannot move nearby curves. Repeated Bézier controls retain their multiplicity and
+degree when importing the original geometry. A segment that cannot be adjusted within the bound
+stays unchanged and appears under **Unresolved**. A limit below the numerical precision of
+the placed coordinates is refused. This option does not promise to close gaps or make every
+outline extrudable; inspect the detected faces and validate the intended solid operation.
+
+Scripts and agents use `sketch.svg_diagnostics` to check an SVG without changing the design:
+
+```json
+{"path":"drawing.svg","scale":2,"align":"center","repair_tolerance":0.01}
+```
+
+The reply contains `diagnostics`, `repaired` and `remaining`. Each diagnostic gives one-based
+`path`, `subpath` and `segment` numbers, its `kind`, placed sketch coordinates in `at`, original
+source display points in `highlight`, replacement display chains in `replacement_highlight`, a
+`repaired` flag and `max_deviation_mm` (null when unchanged). Replacement chains are empty when
+no adjustment was made or an attached loop was removed. The diagnostic codes are `attached_loop`,
+`backtracking_curve`, `closed_cubic`, `outline_approximation`, `shared_boundary`, `short_tangent`
+and `unpainted_boundary`. `outline_approximation` appears only in repair proposals for otherwise
+unflagged closed-path cubic segments; it does not identify a source defect. Display points are
+only for comparing and highlighting the geometry; adjustment decisions use the source geometry.
+
+Pass the same source, placement and `repair_tolerance` to `sketch.insert_svg` to insert that
+repair. Omit `repair_tolerance` to keep repair off. The accepted repair range is 0.000000001 to
+10 mm. Both commands also accept SVG document `text` instead of `path`; `width` or `height` in
+millimetres can set the placed size instead of `scale`.
+
 ## Large files
 
 SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files

@@ -288,7 +288,7 @@ fn pixel_frame_budget_does_not_cache_unbounded_empty_curve_results() {
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
 
-/// #6524: an imported drawing of 5000 lines, shown and sampled first (sketches are drawn in
+/// #6524: an imported drawing of 5000 coincident circles exhausts its vertex budget when shown first (sketches are drawn in
 /// timeline order), uses up its own sketch's budget only. A line drawn in a later sketch is still
 /// sampled, so drawn and pickable, instead of coming back empty while its end points show.
 #[test]
@@ -296,9 +296,8 @@ fn a_large_sketch_drawn_first_leaves_a_later_sketch_its_curves() {
     let mut h = Harness::new();
     h.app.set_origin_shown(false);
     let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
-    for i in 0..5000 {
-        let (x, y) = (f64::from(i % 100) * 2.0, f64::from(i / 100) * 2.0);
-        dxf.push_str(&format!("0\nLINE\n8\n0\n10\n{x}\n20\n{y}\n11\n{}\n21\n{y}\n", x + 1.5));
+    for _ in 0..5000 {
+        dxf.push_str("0\nCIRCLE\n8\n0\n10\n0\n20\n0\n40\n10\n");
     }
     dxf.push_str("0\nENDSEC\n0\nEOF\n");
     h.app.run("sketch.insert_dxf", json!({"text": dxf, "plane": "XY", "name": "Drawing"})).unwrap();
@@ -355,5 +354,106 @@ fn zoomed_in_ring_fill_fits_the_hover_highlight_budget() {
         let r = ((t[0] + t[1] + t[2]) / 3.0).len();
         assert!((39.9..=45.1).contains(&r), "fill triangle outside the ring: r = {r}");
     }
+    assert_eq!(h.app.session.doc.to_json(), baseline);
+}
+
+fn complex_fill_projection() -> Proj {
+    use solidcraft_viewport::{Camera, Mat4};
+    Proj {
+        cam: Camera::default(),
+        vp: Mat4([[0.0005, 0.0, 0.0, 0.0], [0.0, 0.005, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]),
+        rect: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 720.0)),
+    }
+}
+
+fn fill_rectangle(x: f64, y: f64, width: f64, height: f64) -> solidcore_record::Loop2 {
+    solidcore_record::Loop2::polygon(&[Vec2::new(x, y), Vec2::new(x + width, y), Vec2::new(x + width, y + height), Vec2::new(x, y + height)])
+}
+
+fn fill_area(triangles: &[[Vec2; 3]]) -> f64 {
+    triangles.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).abs() * 0.5).sum()
+}
+
+/// A legitimate region can exceed the per-curve cap just by having many small holes.
+#[test]
+fn a_profile_with_many_holes_keeps_every_complete_boundary() {
+    let region = solidcore_record::Region2 {
+        outer: fill_rectangle(0.0, 0.0, 320.0, 160.0),
+        holes: (0..512).map(|i| fill_rectangle(1.0 + f64::from(i % 32) * 10.0, 1.0 + f64::from(i / 32) * 10.0, 8.0, 8.0)).collect(),
+    };
+    let visits: usize = std::iter::once(&region.outer).chain(&region.holes).map(|boundary| boundary.segs.len() * 2).sum();
+    assert!(visits > 4096, "the old sampling cap must be exceeded");
+    let display = crate::sketch_display::display_region(&region, &Plane::XY, &complex_fill_projection(), 1.0).expect("a complete complex profile");
+    assert_eq!(display.holes.len(), 512, "never omit a hole to keep the outer fill");
+    let mut budget = 65_536;
+    let triangles = crate::sketch_display::fill_triangles(&display, &mut budget);
+    assert!(!triangles.is_empty());
+    assert!((fill_area(&triangles) - (320.0 * 160.0 - 512.0 * 64.0)).abs() < 1e-6);
+    for [a, b, c] in &triangles {
+        let centre = (*a + *b + *c) / 3.0;
+        let local = Vec2::new(centre.x.rem_euclid(10.0), centre.y.rem_euclid(10.0));
+        assert!(
+            !(local.x > 1.0 + 1e-9 && local.x < 9.0 - 1e-9 && local.y > 1.0 + 1e-9 && local.y < 9.0 - 1e-9),
+            "a display triangle covers a hole: {centre:?}"
+        );
+    }
+}
+
+/// Staggered hole heights multiply slabs while the geometric boundary remains small.
+#[test]
+fn staggered_holes_coalesce_without_exhausting_the_triangle_budget() {
+    let region = solidcore_record::Region2 {
+        outer: fill_rectangle(0.0, 0.0, 2560.0, 20.0),
+        holes: (0..256).map(|i| fill_rectangle(2.0 + f64::from(i) * 10.0, 1.0 + f64::from(i) / 1024.0, 6.0, 9.0)).collect(),
+    };
+    let visits: usize = std::iter::once(&region.outer).chain(&region.holes).map(|boundary| boundary.segs.len() * 2).sum();
+    assert!(visits < 4096, "this isolates the slab cap from the sampling cap");
+    let display = crate::sketch_display::display_region(&region, &Plane::XY, &complex_fill_projection(), 1.0).unwrap();
+    let mut budget = 65_536;
+    let triangles = crate::sketch_display::fill_triangles(&display, &mut budget);
+    assert!(!triangles.is_empty(), "132098 slab crossings must not hide a simple region");
+    assert!(triangles.len() < 4096, "stable edge pairs should span unrelated vertex heights: {}", triangles.len());
+    assert_eq!(budget, 65_536 - triangles.len());
+    assert!((fill_area(&triangles) - (2560.0 * 20.0 - 256.0 * 54.0)).abs() < 1e-6);
+    for [a, b, c] in &triangles {
+        let centre = (*a + *b + *c) / 3.0;
+        let column = (centre.x / 10.0).floor();
+        let local_x = centre.x - column * 10.0;
+        let low = 1.0 + column / 1024.0;
+        assert!(
+            !(local_x > 2.0 + 1e-9 && local_x < 8.0 - 1e-9 && centre.y > low + 1e-9 && centre.y < low + 9.0 - 1e-9),
+            "a coalesced triangle covers a hole: {centre:?}"
+        );
+    }
+    let mut too_small = 8;
+    assert!(crate::sketch_display::fill_triangles(&display, &mut too_small).is_empty(), "a small budget omits the whole fill, never its holes");
+    assert_eq!(too_small, 8, "an incomplete fill consumes no output budget");
+}
+
+/// Thousands of cheap line segments must not be omitted just because their index exceeds 4096.
+#[test]
+fn a_valid_dense_line_drawing_samples_its_last_curve() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+    for i in 0..5000 {
+        let (x, y) = (f64::from(i % 100) * 2.0, f64::from(i / 100) * 2.0);
+        dxf.push_str(&format!("0\nLINE\n8\n0\n10\n{x}\n20\n{y}\n11\n{}\n21\n{y}\n", x + 1.5));
+    }
+    dxf.push_str("0\nENDSEC\n0\nEOF\n");
+    h.app.run("sketch.insert_dxf", json!({"text": dxf, "plane": "XY", "name": "Lines"})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = state.sketch(sid).unwrap();
+    let proj = complex_fill_projection();
+    let baseline = h.app.session.doc.to_json();
+    *h.app.viewport.display.lock().unwrap() = Default::default();
+    for index in 0..5000 {
+        let path = curve_sample(&h.app, sid, index, &sketch.plane, &proj);
+        assert_eq!((path.quality, path.vertex_count), (SamplingQuality::Complete, 2), "curve {index}");
+    }
+    let last = curve_sample(&h.app, sid, 4999, &sketch.plane, &proj);
+    assert_eq!(last.parts, vec![vec![Vec3::new(198.0, 98.0, 0.0), Vec3::new(199.5, 98.0, 0.0)]]);
+    assert_eq!(h.app.viewport.display.lock().unwrap().len(), 5000);
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }

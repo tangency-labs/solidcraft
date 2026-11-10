@@ -11,6 +11,10 @@ use solidcraft_geom::prelude::*;
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES};
 use crate::{IoError, Result};
 
+mod diagnostics;
+
+pub use diagnostics::{SvgDiagnostic, SvgDrawing};
+
 const MAX_DEPTH: usize = 256;
 const PX_MM: f64 = 25.4 / 96.0;
 
@@ -44,6 +48,51 @@ impl Tf {
     }
     fn is_finite(self) -> bool {
         self.0.iter().all(|x| x.is_finite())
+    }
+}
+
+/// Only the paint information needed to identify unpainted source outlines. Unknown paint
+/// values count as painted, so unsupported CSS never makes a visible path eligible by mistake.
+#[derive(Clone, Copy)]
+struct Paint {
+    fill: bool,
+    stroke: bool,
+}
+
+impl Paint {
+    const DEFAULT: Self = Self { fill: true, stroke: false };
+
+    fn inherited(self, attrs: &[(String, String)]) -> Self {
+        let value = |v: &str, inherited: bool, initial: bool| match v.trim().to_ascii_lowercase().as_str() {
+            "none" => false,
+            "inherit" | "unset" => inherited,
+            "initial" => initial,
+            _ => true,
+        };
+        let mut paint = Self {
+            fill: attr(attrs, "fill").map(|v| value(v, self.fill, true)).unwrap_or(self.fill),
+            stroke: attr(attrs, "stroke").map(|v| value(v, self.stroke, false)).unwrap_or(self.stroke),
+        };
+        let (mut fill_important, mut stroke_important) = (false, false);
+        if let Some(style) = attr(attrs, "style") {
+            for (key, text) in style.split(';').filter_map(|d| d.split_once(':')) {
+                let text = text.trim();
+                let important = text.to_ascii_lowercase().ends_with("!important");
+                let text = if important { text.get(..text.len().saturating_sub(10)).unwrap_or("").trim() } else { text };
+                match key.trim().to_ascii_lowercase().as_str() {
+                    "fill" if important || !fill_important => {
+                        paint.fill = value(text, self.fill, true);
+                        fill_important = important;
+                    }
+                    "stroke" if important || !stroke_important => {
+                        paint.stroke = value(text, self.stroke, false);
+                        stroke_important = important;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        paint
     }
 }
 
@@ -169,6 +218,11 @@ fn length_mm(s: &str) -> Option<f64> {
 
 struct Out {
     g: Vec<Geom2>,
+    source_segments: Vec<usize>,
+    source_segment: usize,
+    unpainted: Vec<std::ops::Range<usize>>,
+    closed: Vec<std::ops::Range<usize>>,
+    spans: Vec<(usize, usize, std::ops::Range<usize>)>,
 }
 
 impl Out {
@@ -180,6 +234,7 @@ impl Out {
             return Err(IoError::Invalid(OUT_OF_RANGE.into()));
         }
         self.g.push(g);
+        self.source_segments.push(self.source_segment);
         Ok(())
     }
     fn line(&mut self, t: Tf, a: Vec2, b: Vec2) -> Result<()> {
@@ -282,7 +337,10 @@ fn arc_to(out: &mut Out, t: Tf, p0: Vec2, mut rx: f64, mut ry: f64, phi_deg: f64
     out.elliptic(t, cc, rx, ry, phi, t0, dt)
 }
 
-fn path(out: &mut Out, t: Tf, d: &str) -> Result<()> {
+fn path(out: &mut Out, t: Tf, d: &str, path_index: usize, unpainted: bool) -> Result<()> {
+    let mut span_start = out.g.len();
+    let mut subpath = 0usize;
+    out.source_segment = 0;
     // Tokenise into commands and their numbers.
     let mut cmds: Vec<(char, Vec<f64>)> = Vec::new();
     let mut cur: Option<(char, String)> = None;
@@ -314,6 +372,7 @@ fn path(out: &mut Out, t: Tf, d: &str) -> Result<()> {
             _ => 0,
         };
         if c.eq_ignore_ascii_case(&'Z') {
+            out.source_segment += 1;
             out.line(t, p, start)?;
             p = start;
             last_c = None;
@@ -327,12 +386,28 @@ fn path(out: &mut Out, t: Tf, d: &str) -> Result<()> {
             if a.len() < arity {
                 break;
             }
+            if c.eq_ignore_ascii_case(&'M') && k == 0 {
+                out.source_segment = 0;
+            } else {
+                out.source_segment += 1;
+            }
             let o = base(p);
             let v = |i: usize| Vec2::new(a[i], a[i + 1]) + o;
             match c.to_ascii_uppercase() {
                 'M' => {
                     let q = v(0);
                     if k == 0 {
+                        if subpath > 0 {
+                            out.spans.push((path_index, subpath, span_start..out.g.len()));
+                            if unpainted {
+                                out.unpainted.push(span_start..out.g.len());
+                            }
+                            if p == start {
+                                out.closed.push(span_start..out.g.len());
+                            }
+                        }
+                        subpath += 1;
+                        span_start = out.g.len();
                         p = q;
                         start = q;
                     } else {
@@ -404,6 +479,15 @@ fn path(out: &mut Out, t: Tf, d: &str) -> Result<()> {
             }
         }
     }
+    if subpath > 0 {
+        out.spans.push((path_index, subpath, span_start..out.g.len()));
+        if unpainted {
+            out.unpainted.push(span_start..out.g.len());
+        }
+        if p == start {
+            out.closed.push(span_start..out.g.len());
+        }
+    }
     Ok(())
 }
 
@@ -426,6 +510,20 @@ fn not_drawn(name: &str, a: &[(String, String)]) -> bool {
 
 /// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
 pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
+    Ok(read_svg_internal(text, None, false)?.geometry)
+}
+
+/// Read source-addressed diagnostics, optionally approximating closed path cubics and repairing
+/// suspect open curves within a millimetre bound.
+/// A missing tolerance preserves all source geometry. Repairs never exceed the requested bound.
+pub fn read_svg_diagnosed(text: &str, repair_tolerance: Option<f64>) -> Result<SvgDrawing> {
+    if repair_tolerance.is_some_and(|t| !t.is_finite() || t <= 0.0) {
+        return Err(IoError::Invalid("SVG repair tolerance must be finite and positive".into()));
+    }
+    read_svg_internal(text, repair_tolerance, true)
+}
+
+fn read_svg_internal(text: &str, repair_tolerance: Option<f64>, diagnose: bool) -> Result<SvgDrawing> {
     if text.len() > MAX_DRAWING_BYTES {
         return Err(IoError::Invalid("the SVG file is too large".into()));
     }
@@ -433,7 +531,10 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     rd.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut stack: Vec<Tf> = Vec::new();
-    let mut out = Out { g: Vec::new() };
+    let mut paints: Vec<Paint> = Vec::new();
+    let mut paint_unknown = false;
+    let mut out = Out { g: Vec::new(), source_segments: Vec::new(), source_segment: 0, unpainted: Vec::new(), closed: Vec::new(), spans: Vec::new() };
+    let mut path_index = 0usize;
     let mut root: Option<Tf> = None;
     let mut pending_text: Option<(Tf, Vec2, f64)> = None;
     // The depth of the element whose contents are not drawn (#11039), while inside one.
@@ -445,6 +546,7 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
             Event::Empty(e) => (Some(e.clone()), true),
             Event::End(_) => {
                 stack.pop();
+                paints.pop();
                 if skip_from.is_some_and(|d| stack.len() <= d) {
                     skip_from = None;
                 }
@@ -463,6 +565,12 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
                 buf.clear();
                 continue;
             }
+            Event::PI(pi) => {
+                if String::from_utf8_lossy(pi.as_ref()).trim_start().to_ascii_lowercase().starts_with("xml-stylesheet") {
+                    paint_unknown = true;
+                }
+                (None, false)
+            }
             Event::Eof => break,
             _ => (None, false),
         };
@@ -472,12 +580,30 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
         };
         let a = attrs(&e);
         let parent = stack.last().copied().or(root).unwrap_or(Tf::ID);
+        let paint = paints.last().copied().unwrap_or(Paint::DEFAULT).inherited(&a);
         let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+        if name == "style"
+            || attr(&a, "class").is_some()
+            || attr(&a, "style").is_some_and(|s| {
+                s.contains("/*")
+                    || s.contains('\\')
+                    || s.split(';').filter_map(|d| d.split_once(':')).any(|(key, value)| {
+                        key.trim().eq_ignore_ascii_case("all")
+                            || (value.contains('!') && !value.trim_end().to_ascii_lowercase().ends_with("!important"))
+                    })
+            })
+        {
+            paint_unknown = true;
+        }
+        if name == "path" {
+            path_index += 1;
+        }
         if skip_from.is_some() || not_drawn(&name, &a) {
             // Keep the stack in step with the end tags; draw nothing until this element closes.
             if !empty {
                 skip_from = skip_from.or(Some(stack.len()));
                 stack.push(parent);
+                paints.push(paint);
                 if stack.len() > MAX_DEPTH {
                     return Err(IoError::Invalid("SVG nested too deeply".into()));
                 }
@@ -505,7 +631,9 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
             return Err(IoError::Invalid(OUT_OF_RANGE.into()));
         }
         match name.as_str() {
-            "path" => path(&mut out, tf, attr(&a, "d").unwrap_or(""))?,
+            "path" => {
+                path(&mut out, tf, attr(&a, "d").unwrap_or(""), path_index, !paint.fill && !paint.stroke)?;
+            }
             "line" => out.line(tf, Vec2::new(num_attr(&a, "x1"), num_attr(&a, "y1")), Vec2::new(num_attr(&a, "x2"), num_attr(&a, "y2")))?,
             "rect" => {
                 let (x, y, w, h) = (num_attr(&a, "x"), num_attr(&a, "y"), num_attr(&a, "width"), num_attr(&a, "height"));
@@ -547,13 +675,25 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
         }
         if !empty {
             stack.push(tf);
+            paints.push(paint);
             if stack.len() > MAX_DEPTH {
                 return Err(IoError::Invalid("SVG nested too deeply".into()));
             }
         }
         buf.clear();
     }
-    Ok(out.g)
+    if diagnose {
+        diagnostics::process(
+            out.g,
+            out.spans,
+            out.source_segments,
+            if paint_unknown { Vec::new() } else { out.unpainted },
+            out.closed,
+            repair_tolerance,
+        )
+    } else {
+        Ok(SvgDrawing { geometry: out.g, diagnostics: Vec::new() })
+    }
 }
 
 /// The text of an SVG file's bytes: a UTF-8 byte-order mark is dropped and UTF-16 files (with
@@ -638,9 +778,243 @@ pub fn svg_nothing_to_import(text: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn svg_diagnostics_preserve_geometry_and_address_compound_paths() {
+        let text = r#"<svg width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M0 0L10 0L10 10L0 0C-.01 -.01 -.02 -.01 -.02 0Z M12 0C11.9 0 14 2 15 3L12 0Z"/></svg>"#;
+        let original = read_svg(text).unwrap();
+        let drawing = read_svg_diagnosed(text, None).unwrap();
+        assert_eq!(original, drawing.geometry);
+        assert!(drawing.diagnostics.iter().any(|d| d.path == 1 && d.subpath == 1 && d.segment == 4 && d.kind == "attached_loop" && !d.repaired));
+        assert!(drawing.diagnostics.iter().any(|d| d.subpath == 2 && d.segment == 1 && d.kind == "backtracking_curve"));
+        let repaired = read_svg_diagnosed(text, Some(0.05)).unwrap();
+        assert!(repaired.diagnostics.iter().any(|d| d.kind == "attached_loop" && d.repaired));
+        assert!(repaired.diagnostics.iter().all(|d| d.max_deviation_mm.is_none_or(|e| e <= 0.05)));
+        assert!(repaired.geometry.iter().all(|g| !matches!(g, Geom2::Spline { .. })));
+        assert!(matches!(repaired.geometry.first(), Some(Geom2::Line(a,b)) if *a == Vec2::ZERO && *b == Vec2::new(10.0,0.0)));
+    }
+
+    #[test]
+    fn svg_repair_respects_transform_units_and_refuses_large_attached_loop() {
+        let text =
+            r#"<svg width="20mm" height="20mm" viewBox="0 0 20 20"><g transform="scale(2)"><path d="M0 0L5 0L5 5L0 0C1 0 1 1 0 1Z"/></g></svg>"#;
+        let drawing = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        assert!(drawing.diagnostics.iter().any(|d| d.kind == "attached_loop" && !d.repaired));
+        assert!(drawing.geometry.iter().any(|g| matches!(g, Geom2::Line(a,b) if *a == Vec2::ZERO && *b == Vec2::new(10.0,0.0))));
+        for t in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
+            assert!(read_svg_diagnosed(text, Some(t)).is_err());
+        }
+        assert!(read_svg_diagnosed(text, Some(1e-300)).is_ok());
+    }
+
+    #[test]
+    fn svg_repair_keeps_unrelated_open_cubics_exact() {
+        let text = r#"<svg width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M0 0C1 0 2 1 3 1 M5 0C4.9 -.1 6 1 7 2L5 0Z"/></svg>"#;
+        let original = read_svg(text).unwrap();
+        let repaired = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        assert_eq!(original.first(), repaired.geometry.first());
+        assert_eq!(repaired.diagnostics.len(), 1);
+        assert!(repaired.diagnostics[0].repaired);
+        assert_eq!(repaired.diagnostics[0].subpath, 2);
+        let monotone = r#"<svg><path d="M0 0C10 0 9 0 19 0"/></svg>"#;
+        assert!(read_svg_diagnosed(monotone, None).unwrap().diagnostics.is_empty());
+    }
+
+    #[test]
+    fn svg_repair_bounds_actual_curve_distance_without_changing_endpoints() {
+        let text = r#"<svg width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M5 5C-10 -5 30 15 15 15"/></svg>"#;
+        let drawing = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        let diagnostic = drawing.diagnostics.first().unwrap();
+        assert!(diagnostic.repaired);
+        assert_eq!(diagnostic.highlight.len(), 17);
+        assert_eq!(diagnostic.highlight.first(), Some(&Vec2::new(5.0, -5.0)));
+        assert_eq!(diagnostic.highlight.last(), Some(&Vec2::new(15.0, -15.0)));
+        let points = [Vec2::new(5.0, -5.0), Vec2::new(-10.0, 5.0), Vec2::new(30.0, -15.0), Vec2::new(15.0, -15.0)];
+        for i in 0..=10_000 {
+            let t = f64::from(i) / 10_000.0;
+            let u = 1.0 - t;
+            let p = points[0] * (u * u * u) + points[1] * (3.0 * u * u * t) + points[2] * (3.0 * u * t * t) + points[3] * (t * t * t);
+            let distance = drawing
+                .geometry
+                .iter()
+                .filter_map(|g| {
+                    if let Geom2::Line(a, b) = g {
+                        let d = *b - *a;
+                        let t = ((p - *a).dot(d) / d.len2()).clamp(0.0, 1.0);
+                        Some(p.dist(*a + d * t))
+                    } else {
+                        None
+                    }
+                })
+                .fold(f64::INFINITY, f64::min);
+            assert!(distance <= 0.01 + 1e-12, "distance {distance}");
+        }
+    }
+
+    #[test]
+    fn svg_diagnostics_count_source_segments_despite_omitted_lines_and_split_arcs() {
+        let text = r#"<svg width="30mm" height="30mm" viewBox="0 0 30 30"><path d="M0 0L0 0L0 0A10 10 0 0 1 20 0C19 -.1 22 .1 23 0"/></svg>"#;
+        let drawing = read_svg_diagnosed(text, None).unwrap();
+        let issue = drawing.diagnostics.iter().find(|d| d.kind == "backtracking_curve").unwrap();
+        assert_eq!(issue.path, 1);
+        assert_eq!(issue.subpath, 1);
+        assert_eq!(issue.segment, 4);
+        let text = r#"<svg><path d="M0 0L0 0Z C-1 -1 1 1 2 2"/></svg>"#;
+        let drawing = read_svg_diagnosed(text, None).unwrap();
+        assert_eq!(drawing.diagnostics[0].segment, 3);
+    }
+
+    #[test]
+    fn svg_repair_never_claims_an_overflowed_or_underflowed_distance_bound() {
+        let huge = r#"<svg><path d="M1e308 1e308C1e308 1e308 -1e308 -1e308 -1e308 -1e308"/></svg>"#;
+        let drawing = read_svg_diagnosed(huge, Some(0.01)).unwrap();
+        assert!(!drawing.diagnostics.is_empty());
+        assert!(drawing.diagnostics.iter().all(|d| !d.repaired && d.max_deviation_mm.is_none()));
+        let tiny = r#"<svg><path d="M0 0C0 0 1e-200 1e-200 0 1e-200"/></svg>"#;
+        let drawing = read_svg_diagnosed(tiny, Some(1e-300)).unwrap();
+        assert!(!drawing.diagnostics.is_empty());
+        assert!(drawing.diagnostics.iter().all(|d| !d.repaired));
+    }
+
+    #[test]
+    fn svg_repair_reserves_rounding_error_and_preserves_isolated_closed_cubics() {
+        // The tiny bow is larger than the requested tolerance, although subdivision at this
+        // large absolute coordinate can round its controls onto a straight line.
+        let text = r#"<svg width="1mm" height="1mm" viewBox="0 0 1 1"><path d="M100000000 100000000C100000000 100000000 100000000.00000001 100000000.00000001 100000000.00000001 100000000"/></svg>"#;
+        let original = read_svg(text).unwrap();
+        let drawing = read_svg_diagnosed(text, Some(1e-9)).unwrap();
+        assert_eq!(drawing.geometry, original);
+        assert!(!drawing.diagnostics.is_empty());
+        assert!(drawing.diagnostics.iter().all(|d| !d.repaired && d.max_deviation_mm.is_none()));
+
+        // Removing this entire loop would leave an empty drawing, which has no finite
+        // Hausdorff distance to the original curve. Keep it unresolved instead.
+        let text = r#"<svg width="1mm" height="1mm" viewBox="0 0 1 1"><path d="M0 0C.01 0 .01 .01 0 0Z"/></svg>"#;
+        let original = read_svg(text).unwrap();
+        let drawing = read_svg_diagnosed(text, Some(0.1)).unwrap();
+        assert_eq!(drawing.geometry, original);
+        assert!(!drawing.geometry.is_empty());
+        assert!(drawing.diagnostics.iter().any(|d| d.kind == "closed_cubic" && !d.repaired && d.max_deviation_mm.is_none()));
+    }
+
+    #[test]
+    fn svg_repair_normalizes_only_closed_boundaries_sharing_exact_cubics() {
+        // A source boundary is shared exactly at the first cubic, then follows the same
+        // carrier with differently split and rounded cubic controls. The arrangement must
+        // see consistent analytic pieces, while unrelated artwork stays exact.
+        let text = r#"<svg width="30mm" height="20mm" viewBox="-5 -5 30 20">
+            <path d="M0 0L20 0L20 10L0 10C-.5 9.25 -.875 8.4375 -1.125 7.59375C-1.875 5.0625 -1.5 2.25 0 0Z"/>
+            <path d="M0 0L10 0L10 10L0 10C-.5 9.25 -.875 8.4375 -1.125 7.59375C-1.2450 7.1888 -1.3362 6.7766 -1.3986 6.3606C-1.7262 4.1769 -1.2600 1.8900 0 0Z"/>
+            <path d="M25 0C26 0 27 1 28 1"/>
+        </svg>"#;
+        let original = read_svg(text).unwrap();
+        let diagnosed = read_svg_diagnosed(text, None).unwrap();
+        assert_eq!(diagnosed.geometry, original);
+        assert!(diagnosed.diagnostics.iter().any(|d| d.kind == "shared_boundary" && !d.repaired));
+        let repaired = read_svg_diagnosed(text, Some(0.05)).unwrap();
+        assert_eq!(repaired.geometry.last(), original.last());
+        assert_eq!(repaired.geometry.iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), 1);
+        assert_eq!(repaired.diagnostics.len(), 5);
+        assert!(repaired.diagnostics.iter().all(|d| d.kind == "shared_boundary"
+            && d.repaired
+            && d.max_deviation_mm.is_some_and(|b| b <= 0.05)
+            && !d.replacement_highlight.is_empty()));
+    }
+
+    #[test]
+    fn svg_shared_boundary_normalization_also_recognizes_exact_lines() {
+        let text = r#"<svg width="30mm" height="20mm" viewBox="-5 -5 30 20"><path d="M0 0L10 0L20 0L20 10L10 10L0 10C-2 7 -2 3 0 0Z"/><path d="M0 0L10 0L10 10L0 10C-.7400 8.8900 -1.2062 7.6431 -1.3986 6.3606C-1.7262 4.1769 -1.2600 1.8900 0 0Z"/></svg>"#;
+        let drawing = read_svg_diagnosed(text, Some(0.05)).unwrap();
+        assert_eq!(drawing.diagnostics.len(), 3);
+        assert!(drawing.diagnostics.iter().all(|d| d.kind == "shared_boundary" && d.repaired));
+        assert!(drawing.geometry.iter().all(|g| matches!(g, Geom2::Line(..))));
+    }
+
+    #[test]
+    fn svg_repair_normalizes_known_unpainted_closed_outlines_within_the_bound() {
+        let text = r#"<svg width="10mm" height="10mm" viewBox="0 0 10 10"><g fill="none"><g stroke="none"><path d="M0 0C2 0 4 2 6 2L6 6L0 6Z"/></g></g></svg>"#;
+        let original = read_svg(text).unwrap();
+        let diagnosed = read_svg_diagnosed(text, None).unwrap();
+        assert_eq!(diagnosed.geometry, original);
+        assert!(diagnosed.diagnostics.iter().any(|d| d.kind == "unpainted_boundary" && !d.repaired));
+        let repaired = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        assert!(repaired.geometry.iter().all(|g| matches!(g, Geom2::Line(..))));
+        assert!(repaired.diagnostics.iter().all(|d| d.kind == "unpainted_boundary" && d.repaired && d.max_deviation_mm.is_some_and(|b| b <= 0.01)));
+        // Inline style wins over the presentation attribute.
+        let text = text.replace("stroke=\"none\"", "stroke=\"red\" style=\"stroke:none\"");
+        assert!(read_svg_diagnosed(&text, Some(0.01)).unwrap().diagnostics.iter().any(|d| d.kind == "unpainted_boundary" && d.repaired));
+    }
+
+    #[test]
+    fn svg_unpainted_outline_normalization_is_conservative_about_paint_and_css() {
+        let path = r#"<path fill="none" d="M0 0C2 0 4 2 6 2L6 6L0 6Z"/>"#;
+        let cases = [
+            format!("<svg stroke=\"red\">{path}</svg>"),
+            format!("<svg><g stroke=\"red\">{path}</g></svg>"),
+            format!("<svg class=\"art\">{path}</svg>"),
+            format!("<svg>{path}<style>path{{stroke:red}}</style></svg>"),
+            format!("<?xml-stylesheet href=\"paint.css\" type=\"text/css\"?><svg>{path}</svg>"),
+            format!("<svg>{}</svg>", path.replace("fill=\"none\"", "fill=\"none\" class=\"art\"")),
+            format!("<svg>{}</svg>", path.replace("fill=\"none\"", "fill=\"none\" style=\"stroke:red!important;stroke:none\"")),
+            format!("<svg>{}</svg>", path.replace("fill=\"none\"", "fill=\"none\" style=\"all:initial\"")),
+            format!("<svg>{}</svg>", path.replace("fill=\"none\"", "fill=\"none\" style=\"stroke/**/:red\"")),
+            format!("<svg>{}</svg>", path.replace("fill=\"none\"", "fill=\"none\" style=\"str\\6fke:red\"")),
+            format!("<svg>{}</svg>", path.replace("fill=\"none\"", "fill=\"none\" style=\"stroke:red ! important;stroke:none\"")),
+            format!("<svg>{}</svg>", path.replace("L6 6L0 6Z", "")),
+        ];
+        for text in cases {
+            let original = read_svg(&text).unwrap();
+            let diagnosed = read_svg_diagnosed(&text, None).unwrap();
+            assert_eq!(diagnosed.geometry, original, "{text}");
+            let drawing = read_svg_diagnosed(&text, Some(0.01)).unwrap();
+            // Generic closed-outline approximation is paint-agnostic; unsupported CSS must
+            // still never be classified as a known unpainted outline.
+            assert!(drawing.diagnostics.iter().all(|d| d.kind != "unpainted_boundary"), "{text}");
+            assert!(drawing.diagnostics.iter().all(|d| !d.repaired || d.max_deviation_mm.is_some_and(|b| b <= 0.01)), "{text}");
+        }
+    }
+
+    #[test]
+    fn svg_repair_approximates_closed_cubics_and_preserves_open_and_analytic_curves() {
+        let text = r#"<svg width="40mm" height="20mm" viewBox="0 0 40 20">
+            <path d="M0 0C2 0 4 2 6 2L6 6L0 6Z"/>
+            <path d="M20 0C21 0 22 1 23 1"/>
+            <circle cx="30" cy="5" r="1"/>
+            <path d="M2 0A2 2 0 0 0 0 2C-1 2 -2 1 -2 0L2 0Z"/>
+        </svg>"#;
+        let original = read_svg(text).unwrap();
+        let diagnosed = read_svg_diagnosed(text, None).unwrap();
+        assert_eq!(diagnosed.geometry, original);
+        assert!(diagnosed.diagnostics.is_empty(), "ordinary curves are not source defects");
+        let repaired = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        assert_eq!(repaired.diagnostics.len(), 2);
+        assert!(
+            repaired.diagnostics.iter().all(|d| d.kind == "outline_approximation" && d.repaired && d.max_deviation_mm.is_some_and(|b| b <= 0.01))
+        );
+        assert_eq!(repaired.geometry.iter().filter(|g| matches!(g, Geom2::Spline { .. })).count(), 1, "the unrelated open cubic stays exact");
+        for g in original.iter().filter(|g| matches!(g, Geom2::Circle(..) | Geom2::Arc { .. })) {
+            assert!(repaired.geometry.contains(g), "analytic curves stay exact");
+        }
+        let open = original.iter().find(|g| matches!(g, Geom2::Spline { pts, .. } if pts.first() == Some(&Vec2::new(20.0, 0.0)))).unwrap();
+        assert!(repaired.geometry.contains(open));
+    }
+
     /// The parser recurses over groups and reads numbers out of a document the user did not write,
     /// so none of these may panic: `catch_unwind` turns one into a failed test, the way
     /// `hostile_files_never_panic` does for STEP (solidcraft#469).
+    #[test]
+    fn svg_repair_uses_the_fewest_equal_chords_within_the_bound() {
+        // Midpoint bisection would need 64 chords for each of the two halves at 0.01.
+        let text = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M0 10 C0 -3.333 20 -3.333 20 10 C20 23.333 0 23.333 0 10 Z"/></svg>"#;
+        let repaired = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        assert!(repaired.diagnostics.iter().all(|d| d.repaired && d.max_deviation_mm.is_some_and(|b| b <= 0.01)));
+        assert!(repaired.geometry.iter().all(|g| matches!(g, Geom2::Line(..))));
+        assert!(repaired.geometry.len() <= 80, "{} chords", repaired.geometry.len());
+        let ends = |g: &Geom2| if let Geom2::Line(a, b) = g { (*a, *b) } else { (Vec2::ZERO, Vec2::ZERO) };
+        for pair in repaired.geometry.windows(2) {
+            assert_eq!(ends(&pair[0]).1, ends(&pair[1]).0, "chords stay connected end to end");
+        }
+    }
+
     #[test]
     fn hostile_svg_never_panics() {
         let good = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50">
@@ -654,6 +1028,7 @@ mod tests {
             "<svg><path d='M 1 1 L'/></svg>".into(),
             "<svg><path d='M nan nan L inf inf'/></svg>".into(),
             "<svg><path d='M 1e400 1e400 L 1 1'/></svg>".into(),
+            "<svg><path d='M1e308 1e308 C-1e308 1e308 1e308 -1e308 -1e308 -1e308 Z'/></svg>".into(),
             "<svg><rect width='-1' height='-1'/></svg>".into(),
             "<svg><use href='#a'/><g id='a'><use href='#a'/></g></svg>".into(),
             format!("<svg>{}{}</svg>", "<g>".repeat(300), "</g>".repeat(300)),
@@ -671,6 +1046,8 @@ mod tests {
         for c in &cases {
             let r = std::panic::catch_unwind(|| read_svg(c));
             assert!(r.is_ok(), "panicked on {:?}", c.get(..c.len().min(200)));
+            let r = std::panic::catch_unwind(|| read_svg_diagnosed(c, Some(0.01)));
+            assert!(r.is_ok(), "diagnosis or repair panicked on {:?}", c.get(..c.len().min(200)));
         }
     }
 

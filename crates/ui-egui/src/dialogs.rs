@@ -3112,7 +3112,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         vec2(t.space_24, t.space_24),
                     );
                     let button = crate::ui_kit::icon_button_at(ui, rect, "close", "Clear the selection");
-                    crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
+                    solidcraft_ui_registry::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
                     if button.clicked() {
                         clear = Some(i);
                         surrender_keyboard_focus(ui);
@@ -3125,7 +3125,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         let at = rect.translate(vec2(-t.space_24, 0.0));
                         let label = solidcraft_ui_text::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
                         let arrow = crate::ui_kit::disclosure_button_at(ui, at, open, label);
-                        crate::scenario::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
+                        solidcraft_ui_registry::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
                         if arrow.clicked() {
                             toggle_list = Some(i);
                         }
@@ -3256,7 +3256,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     let note_shown_id = egui::Id::unique("sc_dialog_pick_refused_shown");
     if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
         let note = crate::ui_kit::text(ui, solidcraft_ui_text::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
-        crate::scenario::publish_rect("dialog:pick_refused", note.rect);
+        solidcraft_ui_registry::publish_rect("dialog:pick_refused", note.rect);
         if ui.data(|m| m.get_temp::<&'static str>(note_shown_id)) != Some(id) {
             ui.scroll_to_rect(note.rect, None);
             ui.data_mut(|m| m.insert_temp(note_shown_id, id));
@@ -3288,13 +3288,13 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                     let ready = solidcraft_engine::find_command(crate::refused_part::REPAIR).map(|c| c.info(&app.session));
                     let enabled = ready.as_ref().is_some_and(|i| i.enabled);
                     let repair = crate::ui_kit::button(ui, solidcraft_ui_text::tr("refused.repair"), crate::ui_kit::Button::Enabled(enabled));
-                    crate::scenario::publish_handle("dialog:repair_part", repair.rect.center());
+                    solidcraft_ui_registry::publish_handle("dialog:repair_part", repair.rect.center());
                     if repair.clicked() {
                         crate::refused_part::repair(app, &part.body);
                     }
                     if part.face.is_some() {
                         let show = crate::ui_kit::button(ui, solidcraft_ui_text::tr("refused.show_face"), crate::ui_kit::Button::Normal);
-                        crate::scenario::publish_handle("dialog:show_face", show.rect.center());
+                        solidcraft_ui_registry::publish_handle("dialog:show_face", show.rect.center());
                         if show.clicked() {
                             crate::refused_part::show_face(app, &part);
                         }
@@ -3329,7 +3329,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                 ui.horizontal(|ui| {
                     if plain.is_some() {
                         let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
-                        crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
+                        solidcraft_ui_registry::publish_handle("dialog:copy_details", copy.rect.center());
                         if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
                             ui.ctx().copy_text(error.clone());
                         }
@@ -3339,7 +3339,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                         return;
                     }
                     let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
-                    crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
+                    solidcraft_ui_registry::publish_handle("dialog:create_issue", response.rect.center());
                     if response.clicked() {
                         crate::issue_report::begin(app, ctx, Some(d), Some(&error));
                     }
@@ -3735,7 +3735,9 @@ pub(crate) fn docks(d: &Dialog) -> bool {
 /// The width a dialog's card asks for: the managers' wider form, a study's table, or a card.
 pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
-    if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
+    if matches!(&d.kind, Kind::InsertDrawing(p) if p.command.ends_with("svg")) {
+        t.svg_panel_width
+    } else if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. } | Kind::InsertDrawing(_)) {
         t.form_card_width + t.form_label_width + t.space_6
     } else if matches!(&d.kind, Kind::Motion(k) if k.wide()) {
         t.form_card_width * 3.0
@@ -3752,6 +3754,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
+        Kind::InsertDrawing(p) if p.command.ends_with("svg") => (solidcraft_ui_text::tr(crate::dialogs_insert_drawing::import_label(p)), "Cancel"),
         _ => ("OK", "Cancel"),
     }
 }
@@ -3817,6 +3820,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Physical materials: the library's, then the design's own (material.create).
+    let svg_import = matches!(&d.kind, Kind::InsertDrawing(p) if p.command.ends_with("svg"));
+    let _svg_metrics = svg_import.then(|| solidcraft_theme::scoped_panel_tokens(Tokens::get().svg_import_layout()));
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     // The Sketch Palette owns the right edge for as long as a sketch is being edited. A dialog
@@ -3827,7 +3832,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::frame::Side::Right
     };
-    let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
+    let top = if svg_import { vp.top() + t.space_16 } else { crate::shell::panel_top(app, vp, vp.bottom(), side) };
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
         app.dialog = Some(d);
@@ -3836,13 +3841,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Command dialogs share the last dragged offset on this side until the application
     // exits, kept inside the viewport. In the left column a dialog stays in its place.
     let (drag_key, moved, docked, drag_bounds, anchor) = if let Some(column) = column {
-        crate::scenario::publish_rect("dialog:column", column);
+        solidcraft_ui_registry::publish_rect("dialog:column", column);
         ("", egui::Vec2::ZERO, column.min, crate::dialog_column::bounds(app, column, vp), column.min)
     } else {
-        let drag_key = side.dialog_offset_key();
+        let drag_key = if svg_import { "sc_svg_import_offset" } else { side.dialog_offset_key() };
         let moved = crate::frame::dock_offset(ctx, drag_key);
-        let docked = egui::pos2(side.anchor_x(vp), top);
-        let drag_bounds = crate::shell::tool_drag_rect(app, vp);
+        let edge = t.space_16 + t.space_4;
+        let x = if svg_import && side == crate::frame::Side::Right { vp.right() - edge } else { side.anchor_x(vp) };
+        let docked = egui::pos2(x, top);
+        let mut drag_bounds = crate::shell::tool_drag_rect(app, vp);
+        if svg_import {
+            let gap = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Feature).gap();
+            drag_bounds.max.y = (drag_bounds.bottom() - (edge - gap).max(0.0)).max(drag_bounds.top());
+        }
         (drag_key, moved, docked, drag_bounds, crate::frame::offset_anchor(docked, moved, drag_bounds, side))
     };
     let mut keep = true;
@@ -3867,6 +3878,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
+        Kind::InsertDrawing(p) if p.command.ends_with("svg") => {
+            crate::dialogs_insert_drawing::preview_ready(p) && crate::preview::matches_dialog(app, &d)
+        }
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
@@ -3874,7 +3888,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
         _ => !has_ok || !d.previews() || (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none()),
     };
-    let (ok_label, close_label) = action_labels(&d.kind);
+    let (base_ok_label, close_label) = action_labels(&d.kind);
+    let svg_action = if let Kind::InsertDrawing(p) = &d.kind {
+        (svg_import && crate::preview::matches_dialog(app, &d)).then(|| {
+            let count = app.preview.sketches.iter().map(|s| s.sketch.profiles.len()).sum::<usize>();
+            solidcraft_ui_text::format(
+                if crate::dialogs_insert_drawing::repair_enabled(p) { "ui.svg_import_repaired_regions" } else { "ui.svg_import_original_regions" },
+                &[("count", &count.to_string())],
+            )
+        })
+    } else {
+        None
+    };
+    let ok_label = svg_action.as_deref().unwrap_or(base_ok_label);
     // What the footer's OK takes, for the check in the view's corner too (#6709).
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
     // #10620: the card widens to fit its widest label in the current language. The body
@@ -3893,19 +3919,25 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
+    let panel = if svg_import { panel.fill_height(true).cancel_left(true) } else { panel };
     let panel = if let Some(column) = column {
-        panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
+        panel.width(if svg_import { column.width().min(card_width(&d)) } else { column.width() }).joined(crate::ui_kit::DockEdges {
+            left: true,
+            top: true,
+            ..Default::default()
+        })
     } else if wide && side == crate::frame::Side::Left {
         let available = crate::sketch_palette::room_left_of(app, ctx, vp);
         panel.width(card_width(&d).min(available))
-    } else if manager {
+    } else if manager || svg_import {
         panel.width(card_width(&d))
     } else {
         panel.width(card_width(&d) + label_grow).grow_label(grow_key)
     };
     let reset_scroll = d.reset_scroll;
-    let panel =
-        panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
+    let panel = panel.reset_scroll(
+        reset_scroll && (svg_import || matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. }))),
+    );
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
@@ -3940,7 +3972,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             };
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
-            let label = if d.editing.is_some() { heading.as_str() } else { label };
+            let label = if let Kind::InsertDrawing(p) = &d.kind {
+                if svg_import {
+                    tr(if p.svg.review {
+                        "ui.svg_panel_review_title"
+                    } else if crate::dialogs_insert_drawing::repair_open(p) {
+                        "ui.svg_panel_repair_title"
+                    } else {
+                        "ui.svg_panel_title"
+                    })
+                } else {
+                    label
+                }
+            } else if d.editing.is_some() {
+                heading.as_str()
+            } else {
+                label
+            };
             let heading = crate::ui_kit::FeatureOptions { icon, title: label, drag_key, moved, docked, apply_label: repeatable.then_some("Apply") };
             let applying = app.applying.is_some();
             let mut collapsed = d.collapsed;
@@ -3949,6 +3997,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if cell_enter && collapsed {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             }
+            let svg_mode = |dialog: &Dialog| match &dialog.kind {
+                Kind::InsertDrawing(p) if p.command.ends_with("svg") => Some((p.svg.review, crate::dialogs_insert_drawing::repair_open(p))),
+                _ => None,
+            };
+            let previous_svg_mode = svg_mode(&d);
             let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
                 crate::hole_presets::rows(ui, &mut d, &mut app.preferences.hole_presets, &app.session.doc, reset_scroll);
@@ -3971,7 +4024,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             } else {
                 panel.feature(ui, heading, applying, valid, body)
             };
-            d.reset_scroll = false;
+            d.reset_scroll = previous_svg_mode != svg_mode(&d);
             d.collapsed = collapsed;
             cancel |= closed;
             if app.issue_report.draft.is_none() {
@@ -4008,8 +4061,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.viewport.corner_ok = ok_enabled;
     }
     if let Some(r) = app.viewport.dialog_rect {
-        crate::scenario::publish_rect("dialog:outer", r);
-        crate::scenario::publish_target("dialog:card", r);
+        solidcraft_ui_registry::publish_rect("dialog:outer", r);
+        solidcraft_ui_registry::publish_target("dialog:card", r);
     }
     if let Some(field) = crate::ui_kit::canvas_value_focus(ctx) {
         value_fields.push(field);
@@ -4108,7 +4161,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     cancel |= !keep;
     // A window still choosing its operation applies once its check is in (#6901).
-    let ok = crate::op_auto::hold_ok(&mut d, ok, &mut apply_again, cancel);
+    let svg_ready = match &d.kind {
+        Kind::InsertDrawing(p) if p.command.ends_with("svg") => {
+            crate::dialogs_insert_drawing::preview_ready(p) && crate::preview::matches_dialog(app, &d)
+        }
+        _ => true,
+    };
+    let ok = crate::op_auto::hold_ok(&mut d, ok && svg_ready, &mut apply_again, cancel);
     if ok && !cancel && app.applying.is_none() {
         d.repeat_after_apply = apply_again;
         // Edit Text applies its own way: its live changes and OK are one undo step.

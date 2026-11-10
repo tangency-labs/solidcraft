@@ -209,6 +209,10 @@ pub(crate) struct Footer<'a> {
     /// Parent surface corners; the footer inherits only its two bottom corners.
     pub corners: Option<egui::CornerRadius>,
     pub secondary_left: bool,
+    /// Keep Cancel at the leading edge, opposite the primary action.
+    pub cancel_left: bool,
+    /// Use the compact reference action padding, retaining the normal hit height.
+    pub compact_actions: bool,
     /// Nothing to apply yet (nothing changed since the dialog opened or since the last Apply):
     /// Apply is drawn and reported disabled, and clicking it does nothing (#8561).
     pub nothing_to_apply: bool,
@@ -226,7 +230,8 @@ pub(super) fn footer_with_left(
     options: Footer<'_>,
     left: impl FnOnce(&mut Ui),
 ) -> Action {
-    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, nothing_to_apply } = options;
+    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, cancel_left, compact_actions, nothing_to_apply } =
+        options;
     let t = Tokens::get();
     let ok_enabled = ok_enabled && !ok_label.is_empty();
     // The footer is a full-width band (the card has no margin of its own): its own fill, a rule
@@ -257,7 +262,11 @@ pub(super) fn footer_with_left(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_6;
             for (label, kind) in [(ok_label, Action::Ok), (apply_label.unwrap_or(""), Action::Apply), (cancel_label, Action::Cancel)] {
-                if (kind == Action::Apply && (apply_label.is_none() || confirm)) || (kind == Action::Ok && ok_label.is_empty()) || label.is_empty() {
+                if (kind == Action::Apply && (apply_label.is_none() || confirm))
+                    || (kind == Action::Ok && ok_label.is_empty())
+                    || (kind == Action::Cancel && cancel_left)
+                    || label.is_empty()
+                {
                     continue;
                 }
                 let primary = look.primary(kind);
@@ -266,7 +275,13 @@ pub(super) fn footer_with_left(
                     label,
                     kind,
                     &look,
-                    if primary { t.space_16 } else { t.space_12 },
+                    if compact_actions {
+                        t.space_10
+                    } else if primary {
+                        t.space_16
+                    } else {
+                        t.space_12
+                    },
                     if primary { t.space_24 * 3.0 } else { 0.0 },
                 );
                 actions_left = actions_left.min(response.rect.left());
@@ -278,6 +293,12 @@ pub(super) fn footer_with_left(
     });
     let left_rect = egui::Rect::from_min_max(inner.min, egui::pos2((actions_left - t.space_8).max(inner.left()), inner.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+        if cancel_left && !cancel_label.is_empty() {
+            let response = action_button(ui, cancel_label, Action::Cancel, &look, if compact_actions { t.space_10 } else { t.space_12 }, 0.0);
+            if response.clicked() {
+                action = Action::Cancel;
+            }
+        }
         if let Some(label) = apply_label.filter(|_| confirm) {
             let marked = selected == Some(Action::Apply);
             let tone = if !secondary_left {
@@ -521,6 +542,8 @@ pub enum Button {
     Small,
     Enabled(bool),
     Ghost,
+    /// Underlined accent text action with the standard accessible button hit target.
+    Link,
     SmallSelected,
 }
 
@@ -564,6 +587,18 @@ fn button_widget(label: egui::WidgetText, options: Button) -> impl egui::Widget 
                 .corner_radius(Tokens::get().control_radius)
                 .min_size(vec2(0.0, Tokens::get().control_height)),
             Button::Ghost => styled_button(ui, label, ButtonTone::Ghost).frame(false),
+            Button::Link => {
+                let t = Tokens::get();
+                egui::Button::new(
+                    RichText::new(label.text()).font(crate::ui_kit::type_face::semibold(t.font_body)).underline().color(if ui.is_enabled() {
+                        t.form_primary
+                    } else {
+                        t.form_dim
+                    }),
+                )
+                .frame(false)
+                .min_size(vec2(0.0, t.control_height))
+            }
             Button::SmallSelected => styled_button(ui, label, ButtonTone::Selected).small(),
             _ => styled_button(ui, label, ButtonTone::Normal),
         };
@@ -584,7 +619,7 @@ pub fn button(ui: &mut Ui, label: impl Into<egui::WidgetText>, options: Button) 
         Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| ui.add(button_widget(solidcraft_ui_text::tr_label(&key).into(), options))).inner,
         _ => ui.add(button_widget(label, options)),
     };
-    if !matches!(options, Button::Ghost) {
+    if !matches!(options, Button::Ghost | Button::Link) {
         Tokens::get().button_bevel(ui, &response, matches!(options, Button::SmallSelected));
     }
     pointer_on_hover(ui, &response);
@@ -612,7 +647,7 @@ pub(crate) fn button_at(ui: &mut Ui, id: &str, rect: egui::Rect, label: impl Int
             },
         )
         .inner;
-    if !matches!(options, Button::Ghost) {
+    if !matches!(options, Button::Ghost | Button::Link) {
         Tokens::get().button_bevel(ui, &response, matches!(options, Button::SmallSelected));
     }
     pointer_on_hover(ui, &response);
