@@ -950,6 +950,9 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Calibrate");
     let p = app.tree.canvas_panel.clone().unwrap();
     assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
+    act(&mut app, &t, "Straighten");
+    let p = app.tree.canvas_panel.clone().unwrap();
+    assert!(p.straighten && !p.calibrate && p.picks_points() && p.target_angle() == 0.0, "{p:?}");
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.canvases.is_empty());
     app.run("edit.undo", json!({})).unwrap();
@@ -958,7 +961,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Lock");
     assert!(app.session.doc.canvases[0].locked);
     let items = context_menu::items(&app, &t);
-    for label in ["Edit Canvas", "Calibrate", "Delete"] {
+    for label in ["Edit Canvas", "Calibrate", "Straighten", "Delete"] {
         let item = find(&items, label);
         assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
     }
