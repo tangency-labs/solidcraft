@@ -219,6 +219,31 @@ fn an_empty_placement_field_counts_as_zero_for_the_marker() {
     assert!(base.dist(Vec3::new(300.0 + size.x / 2.0, size.y / 2.0, 400.0)) < 1e-6, "corner with y empty: {base:?}");
 }
 
+/// A typed corner is read as the size fields read it, by the marker and by OK alike: in an inch
+/// design a decimal comma, a unitless expression, a value with its unit and a bare number are all
+/// inches, and the marker stands over the corner of the box OK makes.
+#[test]
+fn a_typed_corner_is_in_the_design_unit_for_the_marker_and_for_ok() {
+    for (text, inches) in [("1,5", 1.5), ("2 * 1", 2.0), ("1,5 in", 1.5), ("3", 3.0)] {
+        let mut h = Harness::new();
+        h.app.preferences.placement_handles = true;
+        h.app.run("document.units", json!({"units": "in"})).unwrap();
+        h.settle();
+        start(&mut h, "solid.box");
+        let size = h.app.dialog.as_ref().map(|d| super::box_size(&h.app, d)).unwrap();
+        h.app.dialog.as_mut().unwrap().extra.insert("corner".into(), json!([text, text, text]));
+        let (base, _) = place(&h);
+        let marked = base - Vec3::new(size.x / 2.0, size.y / 2.0, 0.0);
+        ok(&mut h);
+        let r = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+        let min = &r["bodies"][0]["bbox"]["min"];
+        let made = Vec3::new(min[0].as_f64().unwrap(), min[1].as_f64().unwrap(), min[2].as_f64().unwrap());
+        let want = Vec3::new(inches, inches, inches) * 25.4;
+        assert!(marked.dist(want) < 1e-6, "{text}: the marker's corner {marked:?}, want {want:?}");
+        assert!(made.dist(want) < 1e-6, "{text}: OK's corner {made:?}, want {want:?}");
+    }
+}
+
 /// A size typed as a bare expression ("2 * 1") is in the design's unit, as OK reads it: in an
 /// inch design the corner a drop writes is 1 in back from the point, not 1 mm.
 #[test]
