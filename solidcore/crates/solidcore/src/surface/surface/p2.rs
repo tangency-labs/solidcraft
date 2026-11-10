@@ -2138,6 +2138,9 @@ impl Surface {
                     .net()
                     .evaluate(uv, highest_u_deriv, highest_v_deriv, flags);
             }
+            // (each exact evaluation proves its certificate: a long solve over a screw
+            // surface stops at the next one once cancelled)
+            k.check_cancelled("surface::surface::Surface::evaluate")?;
             return sweep.definition().screw_derivatives_with_flags(
                 uv,
                 highest_u_deriv,

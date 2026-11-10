@@ -135,7 +135,7 @@ use crate::curve::curve::p2::{
     at, evaluate_continuity, is_kind_of as curve_is_kind_of, knots_ignoring_status, Curve,
     CurveEvaluate, CurveKind, KnotsWithStatus, CRV_ON_SURF_TYPE,
 };
-use crate::curve::curve::p5::CurveMemoKey;
+use crate::curve::curve::p5::{CurveMemo, CurveMemoKey};
 use crate::curve::curve::p6::{calculate_bounding_box_base, CurveHandle, DroppedPoint};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
@@ -1626,6 +1626,7 @@ impl CrvOnSurf {
             guess,
             op,
             None,
+            None,
             &mut None,
         )
     }
@@ -1643,6 +1644,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        memo: Option<&CurveMemo>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // check inputs (upstream warns and selects SM_SO_MINIMIZE)
@@ -1665,6 +1667,7 @@ impl CrvOnSurf {
                 guess,
                 op,
                 derived,
+                memo,
                 cache,
             );
         }
@@ -1701,6 +1704,7 @@ impl CrvOnSurf {
                     guess,
                     op,
                     derived,
+                    memo,
                     cache,
                 );
             }
@@ -1729,6 +1733,7 @@ impl CrvOnSurf {
             Some(min_param),
             op,
             derived,
+            memo,
             cache,
         )
     }
@@ -1749,6 +1754,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        memo: Option<&CurveMemo>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // this curve's own cache, for a caller without one (not for a derived object,
@@ -1764,7 +1770,14 @@ impl CrvOnSurf {
                 }
             }
         }
-        let curve = self.as_curve(derived);
+        let mut curve = self.as_curve(derived);
+        // not upstream: the stand-in is this curve's value, so its global solve reads and
+        // fills the memo of the curve object the caller dropped on (a pure value only:
+        // the memo key refuses every other curve on a surface, and a derived object is
+        // another curve)
+        if let (Some(memo), None) = (memo, derived) {
+            curve.share_memo(memo);
+        }
         let result = curve.drop_point_base_cached(
             k,
             interval,
@@ -1822,6 +1835,7 @@ impl CrvOnSurf {
             guess,
             op,
             None,
+            None,
             &mut None,
         )
     }
@@ -1839,6 +1853,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        memo: Option<&CurveMemo>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // (an exact stand-in for `this`, whose caches are kept below)
@@ -1858,6 +1873,7 @@ impl CrvOnSurf {
             guess,
             op,
             derived,
+            memo,
             cache,
         );
         self.keep_caches_of(copy);
@@ -2948,6 +2964,7 @@ mod tests {
             None,
             SolverOperation::Normalize,
             None,
+            None,
             &mut None,
         )
         .unwrap();
@@ -2975,6 +2992,7 @@ mod tests {
                     1e-6,
                     None,
                     SolverOperation::Normalize,
+                    None,
                     None,
                     &mut None,
                 )
@@ -3015,6 +3033,7 @@ mod tests {
                     1e-6,
                     None,
                     SolverOperation::Normalize,
+                    None,
                     None,
                     cache,
                 )

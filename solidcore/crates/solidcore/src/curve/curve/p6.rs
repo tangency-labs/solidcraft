@@ -720,6 +720,7 @@ impl Curve {
                 guess,
                 op,
                 None,
+                Some(self.memo()),
                 cache,
             ),
             // the SmCrvOnSurf override on the derived object (its Evaluate)
@@ -732,6 +733,7 @@ impl Curve {
                 guess,
                 op,
                 Some(c.members()),
+                None,
                 cache,
             ),
             _ => self.drop_point_base_cached(

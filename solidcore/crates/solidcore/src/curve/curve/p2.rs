@@ -878,6 +878,12 @@ impl Curve {
         &self.memo
     }
 
+    /// Makes this curve share `memo`, the memo of a curve whose value this one is (an
+    /// exact stand-in made for one query), so that its cache builds read and fill it.
+    pub(crate) fn share_memo(&mut self, memo: &CurveMemo) {
+        self.memo = memo.share();
+    }
+
     /// The key this curve object is notified under, once a context has issued it one
     /// (the kernel issues it; there is no setter).
     #[must_use]

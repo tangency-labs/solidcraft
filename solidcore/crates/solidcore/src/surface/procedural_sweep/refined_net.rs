@@ -1083,6 +1083,7 @@ mod tests {
         assert!(profile.canonical().unwrap().control_points.len() > 2);
         let stations = [0.0, 0.23, 0.53, 0.78];
         let mut definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+        definition.invalidate_runtime_allowance();
         definition.offset = Some(offset);
         let net = candidate_refined_net(&definition, &profile, 4).unwrap();
         assert_eq!(definition.stations(), &stations);
@@ -1120,6 +1121,7 @@ mod tests {
             .map(|i| (f64::from(i) * 10.0 * TAU) / 100.0)
             .collect();
         let mut definition = ProceduralSweep::create(&profile, motion, &stations, 0.32).unwrap();
+        definition.invalidate_runtime_allowance();
         definition.offset = Some(offset);
         let pieces = pieces_for_lift(&definition, 3e-6).unwrap();
         let net = candidate_refined_net(&definition, &profile, pieces).unwrap();
@@ -1159,6 +1161,7 @@ mod tests {
         net.reverse(SurfParamType::U).unwrap();
         net.reverse(SurfParamType::V).unwrap();
         net.swap_uv().unwrap();
+        definition.invalidate_runtime_allowance();
         definition.map = SweepMap {
             a: [1.0, 0.5],
             b: [-1.0, -1.0],
