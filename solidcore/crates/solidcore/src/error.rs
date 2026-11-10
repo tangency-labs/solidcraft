@@ -30,6 +30,7 @@
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
 //! | [`curve::CurveFailure`]     | none: why a curve query refuses (#3184)           |
+//! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns a
@@ -86,6 +87,7 @@ pub mod mass;
 pub mod nurbs;
 pub mod offset;
 pub mod primitive;
+pub mod query;
 pub mod sweep;
 
 use crate::topology::{
@@ -677,6 +679,8 @@ pub enum Reason {
     Geom(geom::GeomFailure),
     /// A curve query refused (#3184).
     Curve(curve::CurveFailure),
+    /// A query failed.
+    Query(query::QueryFailure),
 }
 
 impl Reason {
@@ -693,7 +697,8 @@ impl Reason {
             | Self::Mass(_)
             | Self::Heal(_)
             | Self::Geom(_)
-            | Self::Curve(_) => None,
+            | Self::Curve(_)
+            | Self::Query(_) => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -715,6 +720,7 @@ impl Reason {
             Self::Heal(h) => h.comparison_status(),
             Self::Geom(g) => g.comparison_status(),
             Self::Curve(c) => c.comparison_status(),
+            Self::Query(q) => q.comparison_status(),
         }
     }
 
@@ -734,6 +740,7 @@ impl Reason {
             Self::Heal(h) => h.kind(),
             Self::Geom(g) => g.kind(),
             Self::Curve(c) => c.kind(),
+            Self::Query(q) => q.kind(),
         }
     }
 }
@@ -753,6 +760,7 @@ impl core::fmt::Display for Reason {
             Self::Heal(h) => h.fmt(f),
             Self::Geom(g) => g.fmt(f),
             Self::Curve(c) => c.fmt(f),
+            Self::Query(q) => q.fmt(f),
         }
     }
 }
@@ -820,6 +828,12 @@ impl From<sweep::SweepFailure> for Reason {
 impl From<curve::CurveFailure> for Reason {
     fn from(c: curve::CurveFailure) -> Self {
         Self::Curve(c)
+    }
+}
+
+impl From<query::QueryFailure> for Reason {
+    fn from(q: query::QueryFailure) -> Self {
+        Self::Query(q)
     }
 }
 
@@ -1051,7 +1065,7 @@ impl SolidError {
     /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-    /// [`geom::GeomFailure`], a [`sweep::SweepFailure`] that
+    /// [`geom::GeomFailure`], [`query::QueryFailure`], a [`sweep::SweepFailure`] that
     /// [replaced one](sweep::SweepFailure::replaces_upstream_status)). The callers that branch
     /// on an upstream status use it so that they treat both alike; it goes with `Upstream` in
     /// the last PR of the typed-errors work.
@@ -1065,7 +1079,8 @@ impl SolidError {
                 | Reason::Primitive(_)
                 | Reason::Mass(_)
                 | Reason::Heal(_)
-                | Reason::Geom(_) => Some(f.status),
+                | Reason::Geom(_)
+                | Reason::Query(_) => Some(f.status),
                 Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
@@ -1287,7 +1302,7 @@ impl SolidError {
 /// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-/// [`geom::GeomFailure`], a [`sweep::SweepFailure`] that
+/// [`geom::GeomFailure`], [`query::QueryFailure`], a [`sweep::SweepFailure`] that
 /// [replaced one](sweep::SweepFailure::replaces_upstream_status)).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
