@@ -514,3 +514,25 @@ fn end_caps_close_open_sections_with_the_outside_of_the_profile() {
     close(cap.signed_area(), 1600.0 - 3.0 * r * r * (1.0 - PI / 4.0) - 2.0, "slotted extrusion");
     assert_eq!(cap.segs.iter().filter(|s| matches!(s, Seg2::Arc { .. })).count(), 3, "its three rounds are kept");
 }
+
+#[test]
+fn mounting_plate_regions_have_exact_areas_and_hole_centres() {
+    let shape = PlateShape::Rectangle { width: "100".into(), height: "80".into() };
+    let holes = PlateHoles::Rectangle { diameter: "10".into(), pitch_x: "70".into(), pitch_y: "50".into() };
+    let number = |e: &Expr| Ok(e.parse::<f64>().unwrap());
+    let r = plate_region(&shape, &holes, number, 0.).unwrap();
+    close(r.area(), 8000. - 4. * PI * 25., "four-hole plate area");
+    assert_eq!(r.holes.len(), 4);
+    for (hole, (x, y)) in r.holes.iter().zip([(-35., -25.), (35., -25.), (35., 25.), (-35., 25.)]) {
+        assert!(matches!(hole.segs[0],Seg2::Arc{center,..} if center.dist(Vec2::new(x,y))<1e-10));
+    }
+    let r = plate_region(
+        &PlateShape::Round { diameter: "120".into() },
+        &PlateHoles::Circle { diameter: "10".into(), pitch_diameter: "90".into(), count: 6, angle: "0".into() },
+        number,
+        0.,
+    )
+    .unwrap();
+    close(r.area(), PI * (3600. - 6. * 25.), "six-hole round plate area");
+    assert_eq!(r.holes.len(), 6);
+}

@@ -43,6 +43,7 @@ pub mod dialogs_assembly;
 pub mod dialogs_coupling;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
+pub mod dialogs_frame_plate;
 mod dialogs_hole;
 pub mod dialogs_insert_drawing;
 pub mod dialogs_library;
