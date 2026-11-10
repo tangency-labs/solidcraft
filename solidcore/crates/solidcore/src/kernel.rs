@@ -596,14 +596,6 @@ pub struct UpstreamFixes {
     /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
     /// both endpoints inside the natural parameter box instead of either (WR-3).
     pub extent3d_contains_both_segment_endpoints: bool,
-    /// `SmCurveClassification::Intersect3DDiscontinuities(const SmVolume&, ...)` checks
-    /// `m_bUnalignedU || m_bUnalignedV || m_bUnalignedW` instead of testing
-    /// `m_bUnalignedU` three times, so unaligned `V` or `W` discontinuities return
-    /// `SM_ERR` rather than proceeding to build constant-parameter planes across them
-    /// (WR-156, #2171;
-    /// `plan/upstream-issues/WR-156--addendum-2026-11-01-check-vw-unaligned.md`).
-    /// Off by default for pinned C++ parity.
-    pub volume_discontinuity_checks_vw_unaligned: bool,
     /// `SmPeriodicExtent1d::AddInterval` on an empty extent sets `[from, to]` rather
     /// than assuming the full period `[0, period]` (WR-6, 2026-10-31 addendum).
     /// Off by default for pinned C++ parity.
@@ -1067,8 +1059,6 @@ pub struct UpstreamFixes {
     pub boolean_cleanup_removes_slits: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057).
     pub classify_edge_interval: bool,
-    /// `SmPointClassification::ComputePointParameters` takes the nearest of a face's (or surface's) point-solve solutions when they all evaluate to the same point within the source zone tolerance: a point on the seam of a face that closes on itself has its parameters at both ends of the period, and upstream, finding no single solution, drops the classification to `SM_PC_UNKNOWN` (a boolean of a hole and a pin a hair off its axis then fails in `Homogenize`) (WR-537; the fork's tangency-labs/smlib@577f7be).
-    pub seam_point_solutions_are_one: bool,
     /// `sm_GetEllipseTrimIntervals` evaluates the two seam lines on the cone's whole height (only their sweep from the given domain), as the end circles and the classification are, so a face trimmed along its axis keeps an ellipse whose only seam crossing lies in its trimmed-off part (WR-490, #871; a solidcore-only fix, not in the SolidCraft fork at tangency-labs/smlib@26cc451, whose `sm_GetEllipseTrimIntervals` still takes the seam lines on the domain's v range; `plan/upstream-issues/WR-490--ellipse-trim-seam-lines-on-trimmed-domain.md`).
     pub ellipse_trim_seam_lines_span_cone_height: bool,
     /// `SmProtoEdge::Resolve` treats a proto edge from a proto vertex back to itself whose ends find one vertex definition as degenerate below twice the proto vertex's containment radius, and `ImprintIntersections` fits that vertex to its edges (WR-306, #1058).
@@ -1093,18 +1083,6 @@ pub struct UpstreamFixes {
     pub internal_pole_row_through_knot: bool,
     /// `SmSurfOfExtrusion::AssertValid` test 8 point-solves the origin on the generating curve with an unscaled `SM_EFF_ZERO`, so an origin evaluated on the curve at coordinates of about 10 (a text outline's quadratic Bezier) resolves to a few 1e-12 and is reported missing; with this fix that solve uses the issue's coordinate-aware zero `SM_EFF_ZERO * (1.0 + origin.max_dimension())`, its own factor rather than the factor 100 of the neighbouring point tests (WR-511, #1508; tangency-labs/smlib#31).
     pub extrusion_origin_scaled_zero: bool,
-    /// `SmSurfaceIntersector::IsPointOnCurve` (`SmSurfaceIntersector.cpp:7376`, `:7391`,
-    /// [`crate::intersect::surface_intersector::p1::SurfaceIntersector::is_point_on_curve`])
-    /// and `sm_IsPointOnCurve` (`SmSurfaceIntersector.cpp:4195`,
-    /// [`crate::intersect::surface_intersector::p1::is_point_on_tsect_curve`]) propagate
-    /// a failing `EvaluatePoint`, `DropPoint`, or Hermite `LocalPointSolve` error as
-    /// `Err(...)` instead of reproducing upstream's `SER(...)` inside an `SmBoolean`
-    /// return — where a non-zero `SmStatus` converts to `TRUE` (`Ok(true)`) and makes
-    /// the test point count as lying on the curve (`WR-52`; see
-    /// `plan/upstream-issues/WR-52--addendum-2026-11-01-is-point-on-curve-eval-failure.md`).
-    /// [`SolidError::Unported`](crate::error::SolidError::Unported) always propagates in
-    /// both modes. Off by default for pinned C++ parity.
-    pub is_point_on_curve_propagates_eval_failure: bool,
     /// `SmSurfOfExtrusion::EvaluateSTEP` and `EvaluateSTEPPoint` evaluate the clamped
     /// copy of the STEP parameters ("clamp input point to surface domain"), not the
     /// caller's unclamped `crUV`: with out-of-bounds evaluation off, a parameter
@@ -1379,16 +1357,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-39--addendum-2026-10-31-parallel-to-vector.md`). Off by
     /// default for pinned C++ parity.
     pub surface_parallel_to_vector_checks: bool,
-    /// `DoIntersection`'s start-point loop fails with [`crate::SolidError::InvalidInput`]
-    /// once its traces have taken [`MAX_START_LOOP_TRACE_STEPS`] `ComputeNextPoint` calls
-    /// together. Upstream's loop ignores a failed trace and goes on to the next start point,
-    /// so a trace creeping toward a surface boundary repeats until every start point has run
-    /// out of its 5000 points: defeaturing a fillet face of an ordinary box takes about 16
-    /// minutes in release here and 11 in C++ (HANG-52). It does finish, so this is a time
-    /// limit and not a hang fix. Off by default (pinned behaviour).
-    ///
-    /// [`MAX_START_LOOP_TRACE_STEPS`]: crate::intersect::surface_intersector::p4::MAX_START_LOOP_TRACE_STEPS
-    pub ssi_start_loop_trace_budget: bool,
     /// `SmEdgeDefinition::Imprint` makes no edge for a definition whose two ends are one proto vertex and land on one vertex in each B-rep (`GetFinalVertex`), when its curve is a speck on that vertex (9 samples, ends included, all within each B-rep's vertex tolerance and within the definition's own tolerance, which its edge would have) and another definition of the same proto edge is imprinted between two distinct vertices in each B-rep; `ImprintIntersections` then grows each vertex's tolerance (only if larger) to `2 * gap_gain * gap` so `AssertValid` tests 0-3 accept edges meeting the speck's far end. Upstream makes a closed edge from that vertex back to itself along the speck; a coplanar face at it is then classified against a flat radial sector, and a union of two cubes within 5e-6 of each other across a 1e-4 strip deletes its bottom sliver piece and comes back with no solid region (WR-619, #1794; own design, not in the fork).
     pub imprint_skips_collapsed_definition: bool,
     /// `SmTopologyIntersector::IntersectInsertRelate`, before `ResolveIntersections`, removes the edge definition of two planar faces' crossing line (and its proto edge when that is left without one) when both sides of the crossing are bounded by edges of the two faces running straight and parallel to the crossing, covering it, facing it (`binorm.dot(off) < 0`) and lying within the edge/face intersection tolerance of the opposite plane (with at least one side represented by an edge-on-face definition): the planes then stay within tolerance of each other across the whole strip where both faces exist, and the crossing, fixed only to `tol / sin(angle)`, is not an edge. Upstream imprints it with end vertices picked per B-rep (`SmProtoVertex::GetFinalVertex`) that `SetRelationships` never relates, so `SmMerge::MakeFaceuse` fails on the edge's inconsistent vertex mates (`SM_ERR`): two 4 mm cubes, one turned 5.7 deg about z, within 1e-5 of each other across a 2e-4 strip, or overlapping across a 1e-4 strip at imported vertex/edge tolerances (WR-614, #1794; own design, not in the fork; pair with [`Self::imprint_skips_collapsed_definition`] so the strip union keeps its solid region).

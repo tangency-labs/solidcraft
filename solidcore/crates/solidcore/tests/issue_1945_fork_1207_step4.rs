@@ -129,7 +129,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;

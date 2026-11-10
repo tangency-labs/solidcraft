@@ -293,7 +293,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
