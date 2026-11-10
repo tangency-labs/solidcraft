@@ -7,7 +7,8 @@ use serde::Serialize;
 use solidcore_record::Vec3;
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
-use crate::{FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use crate::{FaceAppearance, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use solidcraft_viewport::Mat4;
 
 #[cfg(test)]
 #[path = "image_tests.rs"]
@@ -31,6 +32,16 @@ pub struct Admission {
     /// Supersampled raster work only; absent for ray tracing and registered executors.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub projected_pixel_tests: Option<u64>,
+    /// Present when the job explicitly refreshes its photon map every pass.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub caustic_work: Option<super::caustics::CausticWork>,
+    /// CPU worker count selected during admission and retained through execution.
+    /// Auto records the available parallelism at admission; other producers omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_workers: Option<u16>,
+    /// Native host RAM snapshot and shared reservations; absent without a native host.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_memory: Option<super::HostMemoryAdmission>,
     pub geometry_bytes: u64,
     pub pixel_scratch_bytes: u64,
     pub preparation_bytes: u64,
@@ -132,15 +143,31 @@ fn admit_source(scene: &ProductScene, request: &ImageRequest, max_triangles: u64
 /// Ray tracing has no raster projected-triangle lists. Keep a conservative
 /// pixel/codec allowance, then let the ray tracer charge its actual BVH and film.
 #[cfg(feature = "raytrace-cpu")]
-pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest, budget: super::CpuBudget) -> Result<Admission> {
+pub(crate) fn admit_raytrace_source(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    budget: super::CpuBudget,
+    dimensions: (u32, u32),
+) -> Result<Admission> {
     budget.validate_execution()?;
     budget.validate_image(
-        request.width,
-        request.height,
+        dimensions.0,
+        dimensions.1,
         request.raytrace.as_ref().map(super::RaytraceOptions::camera_sampling).transpose()?.flatten(),
     )?;
-    let source = admit_source_with_budget(scene, request, budget.limits().max_triangles, budget)?;
+    let limits = budget.limits();
+    let source = admit_source_with_dimensions(
+        scene,
+        request,
+        limits.max_triangles,
+        limits.max_bodies,
+        limits.max_geometry_bytes,
+        budget.image_limits(false),
+        dimensions,
+    )?;
     let mut a = source.admission;
+    // The codec and retained previews have the requested final dimensions.
+    a.encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
     a.pixel_scratch_bytes = source.raster_scratch_bytes;
     a.preparation_bytes = PREPARATION_METADATA_BYTES;
     a.estimated_total_bytes = a
@@ -176,7 +203,7 @@ pub fn admit_geometry_with_limits(
         || max_geometry_bytes == 0
         || max_geometry_bytes > 4 * 1024 * 1024 * 1024
         || image_limits.max_dimension > 16_384
-        || image_limits.max_pixels > 67_108_864
+        || image_limits.max_pixels > 134_217_728
         || image_limits.max_scratch_bytes > super::NATIVE_CPU_POOL_BYTES
     {
         return Err(limit("registered source envelope exceeds implementation bounds"));
@@ -191,6 +218,19 @@ fn admit_source_with_limits(
     max_bodies: usize,
     max_geometry_bytes: u64,
     image_limits: crate::RenderLimits,
+) -> Result<Source> {
+    admit_source_with_dimensions(scene, request, max_triangles, max_bodies, max_geometry_bytes, image_limits, (request.width, request.height))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn admit_source_with_dimensions(
+    scene: &ProductScene,
+    request: &ImageRequest,
+    max_triangles: u64,
+    max_bodies: usize,
+    max_geometry_bytes: u64,
+    image_limits: crate::RenderLimits,
+    dimensions: (u32, u32),
 ) -> Result<Source> {
     if !request.camera.is_valid() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
@@ -214,8 +254,8 @@ fn admit_source_with_limits(
             backend: None,
             mode: RenderMode::Preview,
             operation: RenderOperation::Image,
-            width: u64::from(request.width),
-            height: u64::from(request.height),
+            width: u64::from(dimensions.0),
+            height: u64::from(dimensions.1),
             format: Some(RenderFormat::Png),
             features: Vec::new(),
             policy: Default::default(),
@@ -256,12 +296,15 @@ fn admit_source_with_limits(
             return Err(invalid("invalid body opacity"));
         }
     }
-    let encoded_limit = u64::from(request.width) * u64::from(request.height) * 8 + 65_536;
+    let encoded_limit = u64::from(dimensions.0) * u64::from(dimensions.1) * 8 + 65_536;
     Ok(Source {
         admission: Admission {
             triangles,
             face_appearances: faces,
             projected_pixel_tests: None,
+            caustic_work: None,
+            cpu_workers: None,
+            host_memory: None,
             geometry_bytes: geometry,
             pixel_scratch_bytes: 0,
             preparation_bytes: 0,
@@ -338,8 +381,12 @@ impl Projection {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
         let normals = if surface.is_some() {
-            [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
-                .map(|n| n.map_err(|e| invalid(&e.to_string())))
+            [
+                solidcraft_viewport::surface::unit_direction(na),
+                solidcraft_viewport::surface::unit_direction(nb),
+                solidcraft_viewport::surface::unit_direction(nc),
+            ]
+            .map(|n| n.map_err(|e| invalid(&e.to_string())))
         } else {
             [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
         };
@@ -454,7 +501,7 @@ struct Triangle {
     inv_w: [f64; 3],
     colour: [f64; 3],
     opacity: f64,
-    surface: Option<crate::surface::OpaqueSurface>,
+    surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     centre_depth: f64,
     area: f64,
     bounds: [usize; 4],
@@ -850,12 +897,12 @@ fn raster_pixel(
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
         let [r, g, b] = t.colour;
-        let surface = crate::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
+        let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
         let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        crate::raster::shade(n, back, t.colour)
+        solidcraft_viewport::shade(n, back, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

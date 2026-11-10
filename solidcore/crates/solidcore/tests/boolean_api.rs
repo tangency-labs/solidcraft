@@ -384,3 +384,58 @@ fn public_booleans_give_closed_solids_with_analytic_volume() {
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// A slice by a solid fails with a typed reason in solidcore's terms: the stage's path, a phrase,
+/// the stable kind, and the comparison status (`SM_ERR`) the C++ reports for it.
+#[test]
+fn a_slice_by_a_solid_fails_with_a_typed_reason() {
+    use solidcore::boolean::api_brep::boolean;
+    use solidcore::error::{ErrorKind, SolidError};
+    use solidcore::geom::a_object::BooleanOperation;
+
+    let mut k = Kernel::default();
+    let (a, b, _) = operands(&mut k, "box-box-union").unwrap();
+    let error = boolean(&mut k, a, b, BooleanOperation::Slice).unwrap_err();
+    assert!(matches!(error, SolidError::Failed(_)), "{error:?}");
+    assert_eq!(error.kind(), ErrorKind::Failed);
+    assert_eq!(error.sm_status(), Some(solidcore::error::SM_ERR));
+    assert_eq!(error.operation(), "boolean::merge::p4::manifold_boolean");
+    assert_eq!(
+        error.to_string(),
+        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the B-rep is not one"
+    );
+    assert!(!error.is_port_failure());
+}
+
+/// The Boolean subsystem names no SMLib symbol in an error, a message or an operation path.
+#[test]
+fn boolean_sources_name_no_smlib_symbol_in_a_string() {
+    fn visit(dir: &std::path::Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                    let code = line.trim_start();
+                    if code.starts_with("//") {
+                        continue;
+                    }
+                    let mut rest = code;
+                    while let Some(i) = rest.find("\"Sm") {
+                        if rest[i + 3..].starts_with(|c: char| c.is_ascii_uppercase()) {
+                            found.push(format!("{}:{}: {line}", path.display(), n + 1));
+                        }
+                        rest = &rest[i + 3..];
+                    }
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/boolean"),
+        &mut found,
+    );
+    assert!(found.is_empty(), "{found:#?}");
+}

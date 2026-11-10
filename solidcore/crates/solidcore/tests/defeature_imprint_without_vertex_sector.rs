@@ -13,7 +13,9 @@
 //! none. Neither loop's patch fills its void alone, so both are joined into the first
 //! loop's patch, and the defeatured body is the C++ reference's (the difftest compares its
 //! whole graph and geometry: 8 faces, 17 edges, 11 vertices). Only the unused loop patch's
-//! face count moved (recorded in the difftest's known mismatches).
+//! face count moved (recorded in the difftest's known mismatches). That body is not a
+//! closed solid: the joined patch leaves the hole open, so the defeature is refused and the
+//! base put back (WR-656), where upstream returns it open.
 //!
 //! The model is the upstream test file, read by the Rust reader when the pinned upstream
 //! checkout is present (as the difftest does).
@@ -25,6 +27,7 @@
 )] // test helpers
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
+use solidcore::error::SM_ERR;
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
@@ -33,7 +36,7 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::{Brep, EntityRef, Kernel, SolidError};
 
 /// `Defeature/defillet.smb`, read and arena-named as the difftest reader does.
 fn defillet(k: &mut Kernel) -> Option<Brep> {
@@ -67,20 +70,6 @@ fn defillet(k: &mut Kernel) -> Option<Brep> {
     Some(b)
 }
 
-/// Per loop of the one feature: base and feature patch face counts (-1 for none).
-fn patch_faces(ex: &FeatureExecutive<'_>) -> Vec<(i64, i64)> {
-    let count = |p: Option<solidcore::blend::feature_executive::PatchId>| {
-        p.and_then(|p| ex.patch(p))
-            .map_or(-1, |b| bp1::faces(b, None).unwrap().len() as i64)
-    };
-    let feature = &ex.features()[0];
-    feature
-        .loops
-        .iter()
-        .map(|l| (count(l.base_patch), count(l.feat_patch)))
-        .collect()
-}
-
 #[test]
 fn defeature_goes_on_past_imprints_without_a_vertex_sector() {
     let mut k = Kernel::default();
@@ -97,40 +86,29 @@ fn defeature_goes_on_past_imprints_without_a_vertex_sector() {
     )
     .unwrap()
     .unwrap();
-    ex.do_defeature(&mut k).unwrap();
-    let got = patch_faces(&ex);
-    eprintln!("patch faces per loop: {got:?}");
-    assert_eq!(got, EXPECTED);
-
-    // the second loop's one patch face is bounded by the loop circle
-    let pid = ex.features()[0].loops[1].base_patch.unwrap();
-    let patch = ex.patch(pid).unwrap();
-    let on_circle = bp1::edges(patch, None).unwrap().into_iter().any(|e| {
-        let r = patch.edge(e).unwrap();
-        let c = r.curve.as_ref().unwrap();
-        (0..=8).all(|i| {
-            let p = c
-                .evaluate_point(&k, r.interval.evaluate(f64::from(i) / 8.0))
-                .unwrap();
-            let rho = (p.x - 1.0).hypot(p.y - 1.0);
-            (rho - 0.7).abs() < 1e-12 && (p.z - 2.0).abs() < 1e-12
-        })
-    });
+    // the joined patch leaves the hole open (the C++ reference's body, 8 faces, 17 edges and
+    // 11 vertices, is not a closed solid): the feature is refused and the base put back
+    // (WR-656), so the patches are not read back
+    let before = (
+        bp1::faces(ex.base_brep(), None).unwrap().len(),
+        bp1::edges(ex.base_brep(), None).unwrap().len(),
+    );
+    let r = ex.do_defeature(&mut k);
     assert!(
-        on_circle,
-        "the loop patch is not bounded by the loop circle"
+        matches!(
+            r,
+            Err(SolidError::Upstream {
+                code: SM_ERR,
+                entity: Some(EntityRef::Edge(_)),
+                ..
+            })
+        ),
+        "{r:?}"
     );
-
-    // the defeatured body is the C++ reference's
-    let base = ex.base_brep();
-    let counts = (
-        bp1::faces(base, None).unwrap().len(),
-        bp1::edges(base, None).unwrap().len(),
-        bp1::vertices(base, None).unwrap().len(),
+    assert!(ex.features().is_empty());
+    let after = (
+        bp1::faces(ex.base_brep(), None).unwrap().len(),
+        bp1::edges(ex.base_brep(), None).unwrap().len(),
     );
-    assert_eq!(counts, (8, 17, 11), "faces, edges, vertices");
+    assert_eq!(after, before);
 }
-
-/// Per loop, the base and feature patch face counts on the exact extension: the C++
-/// reference's [(4, 4), (0, 0)] but for the second loop's own (joined, unused) patch.
-const EXPECTED: &[(i64, i64)] = &[(4, 4), (1, 1)];

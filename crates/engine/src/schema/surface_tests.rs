@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use super::{FairParams, OffsetParams, ReverseNormalParams, StitchParams, ThickenParams, UnstitchParams, UntrimParams};
+use super::{
+    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceTrimParams, ThickenParams, UnstitchParams, UntrimParams,
+};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -321,4 +323,94 @@ fn surface_edits_reply_with_their_schemas() {
     assert!(r["param_warnings"].to_string().contains("chian"), "{r}");
     let error = cube(ParamCheck::Strict).execute("surface.offset", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`chian`"), "{error}");
+}
+
+/// The error `id` gives on `sheet` at the check level.
+fn sheet_error(level: ParamCheck, id: &str, p: &Value) -> Option<String> {
+    sheet(level).execute(id, p).err().map(|e| e.to_string())
+}
+
+/// Each call fails with the same message whether or not the contract reads it first. On the
+/// sheet, so the handler gets past its check that the body exists.
+fn assert_sheet_keeps_todays_errors(id: &str, calls: &[Value]) {
+    for p in calls {
+        let off = sheet_error(ParamCheck::Off, id, p);
+        assert!(off.is_some(), "{p} should fail today");
+        assert_eq!(sheet_error(ParamCheck::Strict, id, p), off, "{p}");
+    }
+}
+
+/// Surface Extend and Surface Trim describe their keys, keep today's errors, and each form's reply
+/// fits the feature result.
+#[test]
+fn surface_extend_and_trim_contracts_and_replies() {
+    assert_keys(
+        input_schema_for::<SurfaceExtendParams>(),
+        &["body", "body_name", "body_names", "distance", "edges", "mode", "name", "neighbours", "participants", "up_to"],
+    );
+    assert_keys(
+        input_schema_for::<SurfaceTrimParams>(),
+        &["body", "body_name", "body_names", "curves", "extend", "keep", "keep_with", "name", "participants", "plane", "stitch", "tool", "with"],
+    );
+    assert_strict_keeps_todays_errors(&[
+        ("surface.extend", json!({})),
+        ("surface.extend", json!({"body": 3})),
+        ("surface.trim", json!({})),
+        ("surface.trim", json!({"body": 3})),
+    ]);
+    assert_sheet_keeps_todays_errors(
+        "surface.extend",
+        &[
+            json!({"body": "Sheet"}),
+            json!({"body": "Sheet", "edges": 3, "distance": 5}),
+            json!({"body": "Sheet", "edges": [], "distance": 5}),
+            json!({"body": "Sheet", "edges": [true], "distance": 5}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]]}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "wavy"}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "up_to": {"body": 3}}),
+            json!({"body": "Sheet", "edges": [[10, 5, 0]], "up_to": "bounds", "mode": "tangent"}),
+        ],
+    );
+    assert_sheet_keeps_todays_errors(
+        "surface.trim",
+        &[
+            json!({"body": "Sheet", "plane": "XY"}),
+            json!({"body": "Sheet", "plane": "XY", "keep": 3}),
+            json!({"body": "Sheet", "plane": "XY", "keep": []}),
+            json!({"body": "Sheet", "plane": "XY", "keep": [true]}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "with": 3}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "with": "Sheet"}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "tool": {"point": [0, 0, 0]}}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "tool": {"body": "Sheet", "point": [0, 0, 0]}, "curves": {"sketch": "S"}}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "curves": {"sketch": "Nope"}}),
+            json!({"body": "Sheet", "keep": [8, 5, 0], "plane": "XY", "stitch": true}),
+        ],
+    );
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let cut = json!({"origin": [3, 0, 0], "normal": [1, 0, 0]});
+    let calls = [
+        ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": "5 mm", "name": "Out"})),
+        ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "mode": "tangent", "neighbours": false})),
+        ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "up_to": {"origin": [15, 0, 0], "normal": [1, 0, 0]}})),
+        ("surface.trim", json!({"body": "Sheet", "plane": cut, "keep": [8, 5, 0], "name": "Half"})),
+        ("surface.trim", json!({"body": "Sheet", "plane": cut, "keep": [[8, 5, 0]]})),
+    ];
+    for (id, p) in calls {
+        let r = sheet(ParamCheck::Strict).execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+}
+
+/// With their contracts, Surface Extend and Surface Trim refuse an unknown key in strict.
+#[test]
+fn surface_extend_and_trim_check_their_keys() {
+    let calls = [
+        ("surface.extend", json!({"body": "Sheet", "edges": [[10, 5, 0]], "distance": 5, "flp": true})),
+        ("surface.trim", json!({"body": "Sheet", "plane": {"origin": [3, 0, 0], "normal": [1, 0, 0]}, "keep": [8, 5, 0], "flp": true})),
+    ];
+    for (id, p) in calls {
+        let error = sheet_error(ParamCheck::Strict, id, &p).unwrap_or_default();
+        assert!(error.contains("`flp`"), "{id}: {error}");
+    }
 }

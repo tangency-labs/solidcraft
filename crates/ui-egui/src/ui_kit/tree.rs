@@ -1,7 +1,7 @@
 //! Shared Browser tree rows; feature modules supply content and dispatch commands.
-use crate::icons;
-use crate::icons::glyphs::badge;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons;
+use crate::ui_kit::icons::glyphs::badge;
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;

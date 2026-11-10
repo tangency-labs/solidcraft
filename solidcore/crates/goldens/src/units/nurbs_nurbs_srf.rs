@@ -26,6 +26,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::tol::zone_tol3d;
 use solidcore::kernel::Kernel;
@@ -248,7 +249,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
-        Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         Err(SolidError::Upstream { code, .. }) => f64::from(*code),
         // Upstream's NLib flag without an error number (see the module docs of
         // `solidcore::nurbs::nurbs_srf`).

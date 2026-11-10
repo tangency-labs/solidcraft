@@ -409,7 +409,7 @@ fn read_folder(root: &Path, current: &Path) -> Result<Listing, String> {
     Ok(result)
 }
 
-fn available(app: &SolveApp) -> bool {
+pub(super) fn available(app: &SolveApp) -> bool {
     !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some()
 }
 

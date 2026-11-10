@@ -107,7 +107,7 @@ impl Presentation {
             tone_map: self.tone_map,
             finishing: self.finishing,
             backdrop: self.backdrop,
-            background: self.background.map(crate::surface::srgb8_to_linear),
+            background: self.background.map(solidcraft_viewport::surface::srgb8_to_linear),
             transparent: self.transparent_background,
         })
     }

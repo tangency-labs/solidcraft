@@ -21,13 +21,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::knots::{KnotVector, Side};
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::nurbs_crv as nc;
-use solidcore::{NlibCode, SolidError, Vec3};
+use solidcore::{SolidError, Vec3};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -406,12 +407,9 @@ fn dump(o: &mut Vec<f64>, c: &Curve) {
 /// domain-end flag, `Unsupported`), `-1` for a port-only one.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Nlib {
-            code: NlibCode::Input,
-            ..
-        } => 14.0,
-        SolidError::Nlib { .. }
-        | SolidError::Degenerate { .. }
+        e if nlib_number(e) == Some(14) => 14.0,
+        e if nlib_number(e).is_some() => 1.0,
+        SolidError::Degenerate { .. }
         | SolidError::NotConverged { .. }
         | SolidError::Unsupported { .. } => 1.0,
         _ => -1.0,
