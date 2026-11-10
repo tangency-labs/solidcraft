@@ -355,7 +355,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
 /// One row in `r`: name, bar with its step, and the X. True when the X was clicked.
 fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alpha: f32, r: Rect) -> bool {
     let fade = |c: Color32| c.gamma_multiply(alpha);
-    let accent = if row.agent { crate::icons::pointer::agent() } else { t.form_primary };
+    let accent = if row.agent { solidcraft_look::pointer::agent() } else { t.form_primary };
     crate::scenario::publish_rect(&format!("operations:row:{}", row.key), r);
     // The X on the right.
     let x = Rect::from_center_size(pos2(r.right() - ROW * 0.5, r.center().y), vec2(ROW - 6.0, ROW - 6.0));

@@ -7,7 +7,7 @@ entries, browser selectors or runtime request manifests are changed by this draf
 `render_execute`, `render_environment` and `render_fit_product` now have their own
 masters in `design/svg/model/`. Accepted source masters stay unchanged.
 
-Review with `python3 -B assets/icons/ui/design/tools/icon_status.py --serve`,
+Review with `python3 -B crates/look/icons/design/tools/icon_status.py --serve`,
 search `render_`, and select Open. See [STYLE_GUIDE.md](STYLE_GUIDE.md) for
 acceptance; drafts do not imply implemented commands.
 

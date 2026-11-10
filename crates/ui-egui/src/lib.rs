@@ -873,14 +873,12 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
-        // The app's icons, likewise, before the first frame.
-        icon_svg::install();
+        // The app's look (icons, glyphs and built-in theme files), likewise, before the first frame.
+        solidcraft_look::install_tables();
         // The tab table theme files are read against, likewise.
         workspace::install_tabs();
         // The navigation slots stored bars are read against, likewise.
         navigation_slots::install();
-        // The built-in theme files, likewise.
-        theme::install_builtin_themes();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]

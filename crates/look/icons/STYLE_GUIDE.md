@@ -184,7 +184,7 @@ whole set, especially final artwork, when adding one icon.
 1. Read the command/interaction and two closest finished references. Choose a
    distinct concept and the category above. Check final/master/alias protection.
 2. Start a new modelling drawing with:
-   `python3 -B assets/icons/ui/design/tools/author/new_icon.py my_icon --base cube`.
+   `python3 -B crates/look/icons/design/tools/author/new_icon.py my_icon --base cube`.
    Choose `--base slab` or `--base empty` when appropriate. The starter is not a
    completed icon. The tool refuses an existing master/alias and adds attribution.
 3. Add the smallest clear operation cue. Wire `.icon("my_icon")` in the command

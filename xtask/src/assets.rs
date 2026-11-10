@@ -61,12 +61,25 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Collected files kept beside the code that ships them, held to the same rows as `assets/`:
+/// SolidCraft's look (its icon masters and tools, fonts, theme files and glyph drawing code) and
+/// the app's own marker and navigation cube drawing code.
+const COLLECTED_OUTSIDE_ASSETS: &[&str] = &[
+    "crates/look/icons/",
+    "crates/look/fonts/",
+    "crates/look/themes/",
+    "crates/look/src/glyphs.rs",
+    "crates/look/src/pointer.rs",
+    "crates/look/src/compass.rs",
+    "crates/ui-egui/src/icons/",
+];
+
 fn needs_attribution(path: &str) -> bool {
     // Include code masters, native work, catalogs, metadata and licence texts in the collection.
     if path.starts_with("assets/locales/pending/") {
         return false;
     }
-    if path.starts_with("assets/") {
+    if path.starts_with("assets/") || COLLECTED_OUTSIDE_ASSETS.iter().any(|dir| path.starts_with(dir)) {
         return !path.ends_with(".md");
     }
     Path::new(path).extension().is_some_and(|ext| ASSET_EXT.contains(&ext.to_string_lossy().to_ascii_lowercase().as_str()))
@@ -112,6 +125,17 @@ mod tests {
         assert!(needs_attribution("design/project.vectorcraft"));
         assert!(!needs_attribution("assets/README.md"));
         assert!(!needs_attribution("crates/ui/src/widget.rs"));
+        for path in [
+            "crates/look/icons/design/palette.toml",
+            "crates/look/fonts/ibm-plex-sans/OFL.txt",
+            "crates/look/themes/nord.json",
+            "crates/look/src/glyphs.rs",
+            "crates/ui-egui/src/icons/markers.rs",
+        ] {
+            assert!(needs_attribution(path), "{path}");
+        }
+        assert!(!needs_attribution("crates/look/icons/README.md"));
+        assert!(!needs_attribution("crates/look/src/lib.rs"));
     }
 
     #[test]

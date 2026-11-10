@@ -7,7 +7,7 @@ references define the style. The SVGs are the application's editable masters.
 ## Review all existing and new icons
 
 ```sh
-python3 -B assets/icons/ui/design/tools/icon_status.py --serve
+python3 -B crates/look/icons/design/tools/icon_status.py --serve
 ```
 
 Open **http://127.0.0.1:8770/**. Python 3.11+ and its standard library are the only
@@ -88,20 +88,22 @@ Palette changes preserve accepted artwork and never update review hashes.
 | `design/tools/icon_status.py`, `review_state.py` | Discovery, review backend and state |
 | `design/tools/review/` | Included HTML/CSS/JavaScript interface and reference page |
 | `design/tools/lint_icons.py`, `preview.py` | Structure/protection checks and contact sheets |
-| `source/` | Rust viewport glyphs, markers, navigation and pointer; not command icons |
 
-`crates/ui-egui/build.rs` embeds SVGs, palette and aliases. `icon_svg.rs` parses and
-rasterises them for `icons::paint_icon`; adding an icon still requires its registry or
-UI assignment and an application rebuild. Review status never controls rendering.
+The look crate's `build.rs` (`crates/look/build.rs`) embeds the SVGs, palette and aliases as
+`solidcraft_look::icons::SET`; the kit's renderer parses and rasterises them for
+`icons::paint_icon`. The code-drawn glyphs are `crates/look/src/glyphs.rs`, `compass.rs` and
+`pointer.rs`; the app's marker and navigation cube artwork is `crates/ui-egui/src/icons/`. Neither
+is a command icon. Adding an icon still requires its registry or UI assignment and an application
+rebuild. Review status never controls rendering.
 
 ## Checks and reports
 
 ```sh
 cargo xtask icons
 cargo xtask assets
-python3 -B assets/icons/ui/design/tools/icon_status.py --summary
-python3 -B assets/icons/ui/design/tools/icon_status.py --notes
-python3 -B assets/icons/ui/design/tools/icon_status.py --csv
+python3 -B crates/look/icons/design/tools/icon_status.py --summary
+python3 -B crates/look/icons/design/tools/icon_status.py --notes
+python3 -B crates/look/icons/design/tools/icon_status.py --csv
 ```
 
 Reports, screenshots, requests, generated contact sheets and previews stay under

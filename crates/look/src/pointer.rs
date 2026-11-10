@@ -1,10 +1,11 @@
 //! Original agent pointer and label. Animation stays with the UI controller.
 use egui::{Color32, FontId, Pos2, Shape, Stroke, vec2};
 /// The agent pointer's colour (a theme token, so a colour vision mode can reach it).
-pub(crate) fn agent() -> Color32 {
+pub fn agent() -> Color32 {
     solidcraft_theme::Tokens::get().icons.agent
 }
-pub(crate) fn paint(painter: &egui::Painter, p: Pos2) {
+/// [`Glyphs::pointer`](solidcraft_ui_kit::icons::glyphs::Glyphs::pointer): the agent pointer and its label, tip at `p`.
+pub fn paint(painter: &egui::Painter, p: Pos2) {
     let ic = solidcraft_theme::Tokens::get().icons;
     // An arrow pointer, tip at `p`.
     let pts: Vec<Pos2> =

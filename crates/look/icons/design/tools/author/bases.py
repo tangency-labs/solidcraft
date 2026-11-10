@@ -1,4 +1,4 @@
-"""Canonical original bases. Read assets/icons/ui/STYLE_GUIDE.md before drawing an icon.
+"""Canonical original bases. Read crates/look/icons/STYLE_GUIDE.md before drawing an icon.
 
 SVGs remain the masters; these helpers make new drawings conform to the set.
 """
