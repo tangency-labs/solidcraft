@@ -116,6 +116,22 @@ fn a_dimension_is_added_by_points_or_edges_and_saved_by_name() {
     assert_eq!(listed, json!(added.into_iter().map(ids::encode).collect::<Vec<_>>()));
 }
 
+/// Placing reads the new dimension on the caller's drawing and takes it out again: `add` and
+/// `from_model` both place on a drawing they keep using.
+#[test]
+fn placing_leaves_the_callers_dimensions_as_they_were() {
+    let (mut s, view) = front_view();
+    add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    let mut record = Drawing::clone(s.drawing(ADD).unwrap());
+    let ids = |d: &Drawing| d.dimensions.iter().map(|d| d.id).collect::<Vec<_>>();
+    let before = ids(&record);
+    let kind = record.dimensions[0].kind.clone();
+    let new = NewDimension { view, kind, offset_mm: None, text: None, decimals: None, override_text: None, choose_diameter: false };
+    let (dimension, read) = placed(&mut s, &mut record, ADD, new).unwrap().unwrap_or_else(|e| panic!("{}", e.error()));
+    assert!(!before.contains(&dimension.id) && read.is_some_and(|r| r.status == Status::Ok));
+    assert_eq!(ids(&record), before);
+}
+
 /// An undone add takes the dimension out, and a redo puts it back.
 #[test]
 fn an_added_dimension_is_one_undo_step() {

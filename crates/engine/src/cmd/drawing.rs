@@ -429,15 +429,24 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
 /// Each parts list with how many balloons point at each of its rows, its editor's ballooned column
 /// (`drawing.inspect`): null for a list that can't be made, its component deleted or too large.
 fn parts_lists(d: &Drawing, tree: &mut Tree<'_>) -> Vec<Value> {
+    let lists = ballooned(d, tree).into_iter().map(|(id, rows)| {
+        let rows = rows.map(|rows| rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>());
+        json!({"table": ids::encode(id), "ballooned": rows})
+    });
+    lists.collect()
+}
+
+/// Each parts list of `d` by id, with how many balloons point at each of its rows by item, in its
+/// order: none for a list that can't be made. One count for `drawing.inspect` and `drawing.check`.
+pub(super) fn ballooned(d: &Drawing, tree: &mut Tree<'_>) -> Vec<(u64, Option<Vec<(String, usize)>>)> {
     let reading = d.balloons_by_list();
     let lists = d.tables.iter().filter_map(|t| if let Kind::PartsList(list) = &t.kind { Some((t.id, list)) } else { None });
     lists
         .map(|(id, list)| {
-            let ballooned = bom::list_with(tree, &list.request(), true).ok().map(|listed| {
-                let rows = balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree);
-                rows.into_iter().map(|(item, balloons)| json!({"item": item, "balloons": balloons})).collect::<Vec<_>>()
-            });
-            json!({"table": ids::encode(id), "ballooned": ballooned})
+            let rows = bom::list_with(tree, &list.request(), true)
+                .ok()
+                .map(|listed| balloons_by_row(reading.get(&id).map_or(&[], Vec::as_slice), &listed, tree));
+            (id, rows)
         })
         .collect()
 }

@@ -414,7 +414,7 @@ pub fn sheet<'a>(drawing: &'a Drawing, id: u64, cmd: &str) -> Result<&'a Sheet> 
 }
 
 /// Where a sheet's views belong: inside `space` and off `block`. One rule for the views [`outside`]
-/// lists and the scale a view is fitted at.
+/// lists, the views `drawing.check` lists and the scale a view is fitted at.
 #[derive(Clone, Copy, Debug)]
 pub struct Room {
     pub space: Aabb2,
@@ -436,7 +436,7 @@ impl Room {
 
     /// Whether `boundary` is where a view belongs. Drawn up to the border, its sides on it, it is
     /// inside: the margin takes rounding.
-    fn holds(&self, boundary: &Aabb2) -> bool {
+    pub fn holds(&self, boundary: &Aabb2) -> bool {
         let space = self.space.inflated(EPS);
         space.contains(boundary.min) && space.contains(boundary.max) && self.clear_of_block(boundary)
     }

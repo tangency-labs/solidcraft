@@ -17,7 +17,7 @@ fn view_at(scale: &str) -> ViewFrame {
 }
 
 fn dimension(kind: DimensionKind, offset_mm: f64, text: TextPlace) -> Dimension {
-    Dimension { id: 7, view: 8, kind, offset_mm, text, decimals: 2, override_text: None, last_good: None }
+    Dimension { id: 7, view: 8, kind, offset_mm, text, decimals: 2, override_text: None, last_good: None, from_model: None }
 }
 
 fn edge() -> ModelEdge {

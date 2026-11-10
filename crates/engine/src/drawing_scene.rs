@@ -194,6 +194,21 @@ pub struct SheetScene {
     /// the dimensions and notes on its model a view drawing an exploded view holds back
     /// ([`held_by_exploded`]).
     pub out_of_date: Vec<u64>,
+    /// What each view whose lines are in the scene drew them from: its world state and its bodies.
+    drawn: Vec<(Arc<ModelState>, Arc<Owners>)>,
+}
+
+impl SheetScene {
+    /// Each body the views in the scene draw, with the world state it was drawn from: what the sheet
+    /// shows of the model, a deferred drawing's as it last was.
+    pub fn bodies_drawn(&self) -> impl Iterator<Item = (&Arc<ModelState>, &Shown)> {
+        self.drawn.iter().flat_map(|(state, owners)| owners.bodies.iter().map(move |shown| (state, shown)))
+    }
+}
+
+/// Whether view `id` is one of `views` whose lines are in the scene.
+fn in_scene(views: &[ViewState], id: u64) -> bool {
+    views.iter().any(|view| view.view == id && view.status == Status::Drawn)
 }
 
 /// One sheet as the provider last drew it ([`extract`]).
@@ -333,12 +348,16 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // at most one view's are held beside the scene.
     let mut sessions = ViewSessions::new(s);
     let mut shown: BTreeMap<Exploded, std::result::Result<ShownSet, Unmeasured>> = BTreeMap::new();
+    // What each view drew its lines from, kept as it is drawn (the lines themselves aren't): the
+    // state of the assembly it draws, and its bodies.
+    let mut owners = Vec::new();
     let drawn = on.iter().map(|(id, view, centre)| {
         let choice = view.exploded.value;
         let drawn = match sessions.drawing(choice) {
             Ok(from) => draw(from, shown.entry(choice).or_insert_with(|| crate::drawing_view::shown(from)), *id, view),
             Err(why) => draw(s, &Err(why), *id, view),
         };
+        owners.extend(drawn.owners.clone().map(|of| (*id, choice, of)));
         (*id, *centre, drawn)
     });
     let lettering = Lettering::of(s, drawing);
@@ -355,7 +374,11 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     assembly.add_sheet_notes(&notes);
     let (scene, views, objects, dimensions, notes) = assembly.finish()?;
     let out_of_date = held_by_exploded(drawing, on.iter().map(|(id, ..)| *id));
-    Ok(SheetScene { scene, views, objects, dimensions, notes, out_of_date })
+    // Each drawn view's bodies with the world state of the session it drew from: an exploded view's
+    // are its copy's, as the sheet shows them.
+    let state_of = |choice: Exploded| Some(shown.get(&choice)?.as_ref().ok()?.state.clone());
+    let drawn = owners.into_iter().filter(|(id, ..)| in_scene(&views, *id)).filter_map(|(_, choice, of)| Some((state_of(choice)?, of))).collect();
+    Ok(SheetScene { scene, views, objects, dimensions, notes, out_of_date, drawn })
 }
 
 /// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
@@ -374,7 +397,11 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     let annotations = out_of_date_annotations(d, views_on(d, sheet)?.iter().map(|(id, ..)| *id), &shown.stale, up_to_date);
     let out_of_date = shown.stale.iter().copied().chain(annotations).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
-    Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, notes: shown.notes, out_of_date })
+    // Each view in the scene as it was last drawn, from the world state it was drawn from.
+    let entries = &s.drawing_scenes.views;
+    let drawn_from = |view: &ViewState| entries.get(&view.view).and_then(|entry| Some((entry.state.clone(), entry.drawn.owners.clone()?)));
+    let drawn = shown.views.iter().filter(|view| view.status == Status::Drawn).filter_map(drawn_from).collect();
+    Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, notes: shown.notes, out_of_date, drawn })
 }
 
 /// Draws what is waiting on the sheet last extracted, as the sheet page would: each view once, then
@@ -701,7 +728,7 @@ fn held_back(d: &Drawing, record: &Annotation) -> bool {
 }
 
 /// The dimensions and notes of `views` of `d` that are held back ([`held_back`]), by view and id.
-fn held_by_exploded(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<u64> {
+pub(crate) fn held_by_exploded(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<u64> {
     annotations_on(d, views).iter().filter(|record| held_back(d, record)).map(Annotation::id).collect()
 }
 

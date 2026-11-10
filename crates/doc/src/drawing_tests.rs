@@ -90,7 +90,17 @@ pub(crate) fn plate() -> Drawing {
     let texts = [(TextPlace::Centred, None), (TextPlace::At([0.0, -20.0]), None), (TextPlace::At([12.5, 30.0]), Some("≈45°".to_string()))];
     for (kind, (text, override_text)) in measures.into_iter().zip(texts) {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_dimensions([Arc::new(Dimension { id, view: front, kind, offset_mm: -10.0, text, decimals: 1, override_text, last_good: None })]);
+        d.add_dimensions([Arc::new(Dimension {
+            id,
+            view: front,
+            kind,
+            offset_mm: -10.0,
+            text,
+            decimals: 1,
+            override_text,
+            last_good: None,
+            from_model: None,
+        })]);
     }
     let id = d.allocate_id(&mut id_source).unwrap();
     d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0], parts_list: None })]);

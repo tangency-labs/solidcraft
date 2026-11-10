@@ -830,7 +830,8 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             .zip(&dimension_copies)
             .filter_map(|(old, new)| {
                 let original = d.dimension(*old)?;
-                Some(Arc::new(Dimension { id: *new, view: copy_of(original.view)?, ..original.clone() }))
+                // A copy shows no model dimension: its original still does, and each shows once.
+                Some(Arc::new(Dimension { id: *new, view: copy_of(original.view)?, from_model: None, ..original.clone() }))
             })
             .collect();
         d.add_dimensions(copied);

@@ -673,6 +673,33 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
     assert_eq!(v.get("$schema").and_then(Value::as_str), Some("https://json-schema.org/draft/2020-12/schema"));
 }
 
+/// Every string the schema's `$defs` entry `def` allows by `enum` or `const`, however it nests
+/// them, sorted: a reply's closed list, which each module's test holds to the list's `ALL`.
+pub(super) fn closed_list(schema: &Schema, def: &str) -> Vec<String> {
+    fn walk(node: &Value, out: &mut Vec<String>) {
+        match node {
+            Value::Object(o) => o.iter().for_each(|(key, v)| match (key.as_str(), v) {
+                ("enum", Value::Array(list)) => out.extend(list.iter().filter_map(Value::as_str).map(str::to_string)),
+                ("const", Value::String(name)) => out.push(name.clone()),
+                _ => walk(v, out),
+            }),
+            Value::Array(list) => list.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(&schema.as_value()["$defs"][def], &mut out);
+    out.sort();
+    out
+}
+
+/// The names `values` serialize to, sorted: a closed list's `ALL`, for [`closed_list`].
+pub(super) fn names_of<T: serde::Serialize>(values: &[T]) -> Vec<String> {
+    let mut out: Vec<String> = values.iter().filter_map(|v| serde_json::to_value(v).ok()?.as_str().map(str::to_string)).collect();
+    out.sort();
+    out
+}
+
 /// A call with one problem that already fails gets the same error in strict as with the check
 /// off, apart from messages that differ on purpose. Chiefly: a missing key; a value the handler
 /// reads as missing where its message for a missing key says something else (a wrong type, a
