@@ -29,10 +29,7 @@ use super::{live_solver_ops, SessionObjects};
 use crate::blend::blend_setback::{ease_surface_of, interval_in, uv_at, EaseRamp};
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletVertexType, SurfaceHandle};
 use crate::blend::fillet_section::section::{GnFaces, GnSectionFsg};
-use crate::blend::fillet_solver::p1::{
-    FilletSolverOps, FilletSolverType, FilletSurfaceGeneratorType,
-};
-use crate::blend::fillet_standard_solver::p1::{BlendCurveCrossSectionFsg, RailSurface};
+use crate::blend::fillet_solver::p1::{FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -105,9 +102,10 @@ impl SessionObjects<'_> {
     /// `SM_FV_SETBACK` vertex of a corner with an ease (in `corners`' order), the round's
     /// surface is replaced, over the rail parameter from where the plane square to the edge
     /// at the setback plus the ease cuts the rail to where the setback's section meets it,
-    /// by the C2 blend of its own surface into the one `SmBlendCurveCrossSectionFSG` (`G2`,
-    /// at thirds) builds on the same rails. A round whose sections are already that
-    /// (`SM_FSG_BLEND_CURVE`) keeps them; ramps on both ends of one round go into one
+    /// by the C2 blend of its own surface into the order-2 G^n section at thumbweight 0 on
+    /// the same rails (the fork's 11ea2d9 and 22d258a; its first version, `e74bbd3`, took
+    /// `SmBlendCurveCrossSectionFSG`'s `G2` at thirds). A round whose sections are already
+    /// curvature-continuous (`SM_FSG_BLEND_CURVE`) keeps them; ramps on both ends of one round go into one
     /// blend. Without an eased corner nothing changes.
     ///
     /// # Errors
@@ -425,57 +423,29 @@ impl SessionObjects<'_> {
 
             // the curvature-continuous surface on the same rails (CreateSurfaceFromCurves
             // changes the curves' knots: it is given copies)
-            let mut c0 = center;
+            let c0 = center;
             let mut c1 = bspline_curve(rail0).ok_or_else(null)?.clone();
             let mut c2 = bspline_curve(rail1).ok_or_else(null)?.clone();
-            let g2_generator = BlendCurveCrossSectionFsg {
-                continuity: 2,
-                blend_scale: 1.0,
-                at_thirds: true,
-            };
-            let solver = self.solver_mut(solver_id)?;
-            let need_g1 = live_solver_ops(solver).solver_type()? == FilletSolverType::ConstRadius;
             let (Some(surf0), Some(surf1)) = (face_surfs.first(), face_surfs.get(1)) else {
                 return Err(sm_err());
             };
-            let g2 = if k.fixes.fillet_gn_section_generator {
-                // the fork's order-2 G^n section (WR-685, tangency-labs/smlib@11ea2d9):
-                // the faces' curvature across the rails. Its thumbweight stays 0, not the
-                // equal area default: it is the corner's transition, not the blend's own
-                // section (the fork's 22d258a = d01d7b0's adb9854)
-                let (Some(uv0), Some(uv1)) = (uvs.first(), uvs.get(1)) else {
-                    return Err(null());
-                };
-                GnSectionFsg::new(2, 0.0).create_surface_from_curves(
-                    k,
-                    &c0,
-                    [&mut c1, &mut c2],
-                    tol,
-                    GnFaces {
-                        surfaces: [surf0, surf1],
-                        uv: [uv0, uv1],
-                    },
-                )?
-            } else {
-                g2_generator
-                    .create_surface_from_curves(
-                        k,
-                        &mut c0,
-                        &mut c1,
-                        &mut c2,
-                        tol,
-                        need_g1,
-                        RailSurface {
-                            surface: Some(surf0),
-                            uv_curve: uvs.first(),
-                        },
-                        RailSurface {
-                            surface: Some(surf1),
-                            uv_curve: uvs.get(1),
-                        },
-                    )
-                    .map(Surface::from)?
+            // the fork's order-2 G^n section (WR-685, tangency-labs/smlib@11ea2d9): the
+            // faces' curvature across the rails. Its thumbweight stays 0, not the equal area
+            // default: it is the corner's transition, not the blend's own section (the fork's
+            // 22d258a = d01d7b0's adb9854)
+            let (Some(uv0), Some(uv1)) = (uvs.first(), uvs.get(1)) else {
+                return Err(null());
             };
+            let g2 = GnSectionFsg::new(2, 0.0).create_surface_from_curves(
+                k,
+                &c0,
+                [&mut c1, &mut c2],
+                tol,
+                GnFaces {
+                    surfaces: [surf0, surf1],
+                    uv: [uv0, uv1],
+                },
+            )?;
 
             // (the fork's EaseSurface takes the G^n target, a blend by its definition with
             // `fillet_round_as_definition`, and the round's own surface as they are)

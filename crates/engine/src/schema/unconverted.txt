@@ -12,7 +12,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-solid.coil
 solid.draft
 solid.emboss
 solid.hole

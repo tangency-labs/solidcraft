@@ -38,7 +38,6 @@ use solidcore::surface::surface::{Surface, SurfaceKind};
 
 fn kernel(definition: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = definition;
     k
 }
