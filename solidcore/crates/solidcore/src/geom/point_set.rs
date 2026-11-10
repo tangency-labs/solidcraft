@@ -58,10 +58,10 @@
 //!   alignment keeps a rotated box only when its base area is smaller, so it never
 //!   loosens the box.
 //! - `SetUpTightPseudoBox` calls the `const` `ProjectPointToPlane` on its boundary and
-//!   candidate points and discards the results (`WR-14`). The port measures the chord
-//!   angles on the unprojected points as upstream: `CCWAngleBetween` projects both
-//!   vectors onto the plane itself, so assigning the projections would change nothing
-//!   beyond roundoff.
+//!   candidate points and discards the results (`WR-14`). The port uses the projections,
+//!   so the hull chords lie in the box plane. `CCWAngleBetween` projects as well, but
+//!   for points far off the plane the unprojected chords' roundoff can decide an exact
+//!   tie between two rotations the wrong way.
 //! - The tolerance member `m_dDistTol3d` is an `SmTol3d`: the constructors store
 //!   `|tol3d|` ([`crate::geom::tol::tol3d`]) as upstream's conversion does.
 //! - `SM_DEBUG_CODE` blocks and `SM_DBG_WARN` messages are omitted.
@@ -479,6 +479,7 @@ impl PointSet3d {
         // ensure the pseudo box is built
         self.set_up_bboxes(DataRequest::BBoxes, pbox_z)?;
 
+        let plane_point = self.pbox.evaluate(0.5, 0.5, 0.5);
         let [mut plane_x, mut plane_y, mut plane_z] = *self.pbox.basis();
         let plane_normal = plane_x.cross(plane_y).unitize_or_z();
         let mut area = self.pbox.xy_area();
@@ -544,9 +545,10 @@ impl PointSet3d {
 
         // Upstream (`SmPointSet.cpp:777-780, 790`) calls the `const`
         // `ProjectPointToPlane(sPlanePoint, sPlaneZ)` on the four boundary points and
-        // each candidate point and discards its return value (`WR-14`). The raw points
-        // give the same angles: `ccw_angle_between` projects onto the plane itself.
-        let point_at = |i: usize| self.points.get(i).copied().unwrap_or(Vec3::ZERO);
+        // each candidate point and discards its return value (`WR-14`); the port uses
+        // the projections, so the chords lie in the box plane.
+        let project = |p: Point3| p.project_point_to_plane(plane_point, plane_z);
+        let point_at = |i: usize| project(self.points.get(i).copied().unwrap_or(Vec3::ZERO));
         let beg_pt0 = point_at(beg_index0);
         let end_pt0 = point_at(end_index0);
         let beg_pt1 = point_at(beg_index1);
@@ -557,12 +559,13 @@ impl PointSet3d {
         let (mut end_ang1, mut end_min1, mut end_max1) = (0.0, BIG_DOUBLE, -BIG_DOUBLE);
 
         // find the neighbour points with the smallest angles from the boundary planes
-        for (ii, &this_pt) in self.points.iter().enumerate() {
+        for (ii, &raw_pt) in self.points.iter().enumerate() {
             // skip the bound points
             if beg_index0 == ii || end_index0 == ii || beg_index1 == ii || end_index1 == ii {
                 continue;
             }
 
+            let this_pt = project(raw_pt);
             let beg_vec0 = this_pt - beg_pt0;
             let end_vec0 = this_pt - end_pt0;
             let beg_vec1 = this_pt - beg_pt1;
@@ -1099,13 +1102,14 @@ mod tests {
             .collect()
     }
 
-    /// WR-14: the tight box measures hull-chord angles on the unprojected points, as
-    /// upstream (the projection upstream discards is a no-op up to roundoff, since
-    /// `ccw_angle_between` projects onto the plane itself). Planar sets at any
-    /// elevation select the `+0.08` rad hull edge, and every box holds its points,
-    /// also for points far off the box plane.
+    /// WR-14: the tight box measures hull-chord angles between points projected onto
+    /// the box plane (upstream discards the projections). Planar sets at any elevation
+    /// select the `+0.08` rad hull edge. For points up to 4e5 off the plane, the
+    /// unprojected chords tie the `+0.08` rad edge with the `-0.08` rad chamfer and
+    /// roundoff picks the chamfer, whose rotated box is rejected (area > 75); the
+    /// projected chords select the long edge, a box about 30% smaller.
     #[test]
-    fn wr14_tight_box_on_unprojected_points() {
+    fn wr14_tight_box_on_projected_points() {
         // Planar set in `z = 0` with `normal = None` (best-fit plane).
         let pts_xy0 = wr14_tilted_hull_points(Vec3::X, Vec3::Y, Vec3::Z, 0.06, [0.0; 6]);
         let mut set_xy0 = PointSet3d::new(pts_xy0.clone(), 1e-9, None);
@@ -1140,14 +1144,19 @@ mod tests {
             assert!(pb_obl.contains_point(p, 1e-9));
         }
 
-        // Points far off the box plane: the box still holds every point.
+        // Points far off the box plane: the long hull edge is selected.
         let ws = [2.0e5, -2.0e5, -3.0e5, 4.0e5, 3.0e5, -4.0e5];
         let pts_far = wr14_tilted_hull_points(nx, ny, nz, 0.08, ws);
         let mut n_far = n0;
         let mut set_far = PointSet3d::new(pts_far.clone(), 1e-9, Some(&mut n_far));
         let pb_far = set_far.tight_pbox(None).unwrap();
+        let rot_far = nx.angle_between(pb_far.basis()[0]).unwrap();
+        assert!((rot_far - 0.08).abs() < 1e-10, "rotation {rot_far}");
+        assert!(pb_far.xy_area() < 53.0, "area {}", pb_far.xy_area());
+        assert!(pb_far.volume() < 4.2e7, "volume {}", pb_far.volume());
         let mut z_far = n0;
         let pb_far_z = set_far.tight_pbox(Some(&mut z_far)).unwrap();
+        assert!(pb_far_z.xy_area() < 53.0, "area {}", pb_far_z.xy_area());
         for &p in &pts_far {
             assert!(pb_far.contains_point(p, 1e-7));
             assert!(pb_far_z.contains_point(p, 1e-7));
