@@ -132,8 +132,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         id: 100,
         name: "Pivot".into(),
         kind: JointKind::Revolute,
-        a: JointOrigin { occurrence: 0, snap: Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) } },
-        b: JointOrigin { occurrence, snap: Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) } },
+        a: JointOrigin::new(0, Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) }),
+        b: JointOrigin::new(occurrence, Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) }),
         values: vec![0.0],
         limits: Vec::new(),
         flip: true,
@@ -181,7 +181,7 @@ fn joint_face_measurements_never_follow_a_replaced_body_or_stale_offset() {
     let mut doc = Document::new("replaced joint geometry");
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 10.0).unwrap(), 0));
-    let origin = JointOrigin { occurrence: 0, snap: Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None } };
+    let origin = JointOrigin::new(0, Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None });
     let work = counted(|| {
         joints::resolve_origin(&doc, &state, &origin).unwrap();
     });
@@ -210,7 +210,7 @@ fn an_edge_origin_measures_its_faces_once() {
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap(), 0));
     let pick = Vec3::new(5.0, 0.0, 10.0);
-    let origin = JointOrigin { occurrence: 0, snap: Snap::Edge { pick, edge: None, face: None, corner: None, axis: None } };
+    let origin = JointOrigin::new(0, Snap::Edge { pick, edge: None, face: None, corner: None, axis: None });
     let work = counted(|| {
         for _ in 0..8 {
             let frame = joints::resolve_origin(&doc, &state.clone(), &origin).unwrap();

@@ -54,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ORIGIN_CONTRACT)
         .output(output_schema_for::<MakeJointOriginResult>)
         .params(
-        "name?, occurrence?: id|name (default: from the pick, or the named face's component), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z]; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
+        "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z]; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
     CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint))
         .at("SOLID", "ASSEMBLE")
@@ -474,24 +474,87 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
 
 /// The occurrence whose bodies are nearest a world point (0 = root bodies).
 pub(crate) fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
+    placement_at(s, p).map(|path| path.last().copied().unwrap_or(0))
+}
+
+/// The placement (occurrence ids from the root; empty for the root) whose bodies are nearest a
+/// world point. Each copy of a sub-assembly placed more than once is a placement of its own; on a
+/// tie, the smaller path (the earlier occurrences) wins.
+pub(crate) fn placement_at(s: &Session, p: Vec3) -> Option<Vec<u64>> {
     let st = s.model.state();
-    let mut best: Option<(f64, u64)> = None;
+    let placements = s.doc.placements();
+    let mut of: BTreeMap<u64, Vec<&(u64, Vec<u64>, solidcraft_doc::Mat)>> = BTreeMap::new();
+    for placement in &placements {
+        of.entry(placement.0).or_default().push(placement);
+    }
+    let mut best: Option<(f64, &Vec<u64>)> = None;
     for b in &st.bodies {
-        let comp = s.doc.model_body_component(b);
-        let occs: Vec<u64> = if comp == 0 { vec![0] } else { s.doc.occurrences.iter().filter(|o| o.component == comp).map(|o| o.id).collect() };
-        for occ in occs {
-            let t = if occ == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occ) };
-            let inv = solidcraft_doc::mat_inverse(&t)?;
+        // Which body a pick is on is a model decision: its exact box, not its display mesh's.
+        let Ok(bb) = b.body.exact_bounds() else { continue };
+        for (_, path, t) in of.get(&s.doc.model_body_component(b)).into_iter().flatten() {
+            // A placement that can't be undone (a hand-edited file) is skipped, not every pick.
+            let Some(inv) = solidcraft_doc::mat_inverse(t) else { continue };
             let q = solidcraft_doc::apply_point(&inv, p);
-            let bb = b.mesh().bounds();
             let c = Vec3::new(q.x.clamp(bb.min.x, bb.max.x), q.y.clamp(bb.min.y, bb.max.y), q.z.clamp(bb.min.z, bb.max.z));
             let d = c.dist(q);
-            if best.is_none_or(|(bd, _)| d < bd) {
-                best = Some((d, occ));
+            if best.is_none_or(|(bd, bp)| d < bd || (d == bd && path < bp)) {
+                best = Some((d, path));
             }
         }
     }
-    best.map(|(_, o)| o)
+    best.map(|(_, path)| path.clone())
+}
+
+/// The placement a world pick was made on, for an origin: its `path` (checked, ending at its
+/// `occurrence`), or with no occurrence given, the placement nearest the pick. `None` when the
+/// origin names its occurrence alone.
+fn picked_placement(s: &Session, v: &Value, world: Option<Vec3>, cmd: &str) -> Result<Option<Vec<u64>>> {
+    // `null` is left out, as for the other optional keys.
+    match (v.get("path").filter(|p| !p.is_null()), v.get("occurrence"), world) {
+        (Some(path), occurrence, _) => {
+            let last = path.as_array().and_then(|ids| ids.last()).cloned();
+            let id = occurrence_id(s, occurrence.or(last.as_ref()), cmd)?;
+            super::component::occurrence_path(s, v, id, cmd).map(Some)
+        }
+        (None, None, Some(world)) => placement_at(s, world).map(Some).ok_or_else(|| bad(cmd, "no body there")),
+        (None, ..) => Ok(None),
+    }
+}
+
+/// An origin's parameters with their world points and directions moved from the placement
+/// `path` to its last occurrence's first placement, where [`origin_param`] reads them (a part in
+/// a sub-assembly placed more than once is found there).
+pub(crate) fn in_first_placement(s: &Session, v: &Value, path: &[u64], cmd: &str) -> Result<Value> {
+    let placed = s.doc.path_placement(path).map(|(_, m)| m).ok_or_else(|| bad(cmd, "that occurrence path is not in the design"))?;
+    let first = joints::occurrence_world(&s.doc, path.last().copied().unwrap_or(0));
+    let to_first = solidcraft_doc::mat_inverse(&placed)
+        .map(|inv| solidcraft_doc::mat_mul(&first, &inv))
+        .ok_or_else(|| bad(cmd, "invalid occurrence placement"))?;
+    let point = |v: &mut Value| {
+        if let Some(p) = vec3(v) {
+            let p = solidcraft_doc::apply_point(&to_first, p);
+            *v = json!([p.x, p.y, p.z]);
+        }
+    };
+    let dir = |v: &mut Value| {
+        if let Some(d) = vec3(v) {
+            let d = solidcraft_doc::apply_vector(&to_first, d);
+            *v = json!([d.x, d.y, d.z]);
+        }
+    };
+    let mut out = v.clone();
+    for key in ["face", "circle", "edge", "point", "corner", "on"] {
+        out.get_mut(key).map(point);
+    }
+    out.get_mut("z").map(dir);
+    out.get_mut("x").map(dir);
+    out.get_mut("x").and_then(|x| x.get_mut("face")).map(point);
+    if let Some(frame) = out.get_mut("frame") {
+        frame.get_mut("origin").map(point);
+        frame.get_mut("z").map(dir);
+        frame.get_mut("x").map(dir);
+    }
+    Ok(out)
 }
 
 /// A joint origin from parameters: a named origin, or a snap given in world coordinates.
@@ -507,6 +570,23 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
             .map(|o| o.origin.clone())
             .ok_or_else(|| bad(cmd, format!("no joint origin `{name}`")));
     }
+    let world = ["face", "circle", "edge", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let world = world.or_else(|| v.get("frame").and_then(|f| f.get("origin")).and_then(vec3));
+    let Some(path) = picked_placement(s, v, world, cmd)? else { return origin_on_part(s, v, cmd) };
+    let (occurrence, inside) = joints::origin_anchor(&s.doc, &path);
+    let mut on_part = if inside.is_empty() { v.clone() } else { in_first_placement(s, v, &path, cmd)? };
+    if let Some(m) = on_part.as_object_mut() {
+        m.remove("path");
+        m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
+    }
+    // A part in a sub-assembly placed more than once is found on its first placement, then the
+    // origin goes on the copy it was picked on (#11426).
+    let o = origin_on_part(s, &on_part, cmd)?;
+    Ok(if inside.is_empty() { o } else { JointOrigin { occurrence, inside, snap: o.snap } })
+}
+
+/// [`origin_param`] for a snap on one occurrence's own component, read at its first placement.
+fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
     // A face given by its name, as `model.faces` lists it.
     if let Some((what, name)) = ["face", "circle"].iter().find_map(|k| v.get(*k).and_then(Value::as_str).map(|n| (*k, n))) {
         return origin_by_name(s, v, what, name, cmd);
@@ -548,8 +628,8 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
                     let at = corner.unwrap_or(local(world));
                     let point = Snap::Point { point: at, z: Some(z), x: None };
                     let followed = snap.ok().map(|snap| joints::edge_axis(&s.doc, &st, component, snap, z));
-                    let o = followed.map(|snap| JointOrigin { occurrence, snap }).filter(|o| same_frame(s, o, at, z));
-                    return Ok(o.unwrap_or(JointOrigin { occurrence, snap: point }));
+                    let o = followed.map(|snap| JointOrigin::new(occurrence, snap)).filter(|o| same_frame(s, o, at, z));
+                    return Ok(o.unwrap_or(JointOrigin::new(occurrence, point)));
                 }
             }
         }
@@ -573,7 +653,7 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
             Snap::Frame { origin: local(world), z: local_dir(z), x: f.get("x").and_then(vec3).map(local_dir) }
         }
     };
-    let o = JointOrigin { occurrence, snap };
+    let o = JointOrigin::new(occurrence, snap);
     // A round edge's centre with the z it was picked with: its end, by name, where that is the
     // frame it shows; else a point there as before.
     if what == "circle"
@@ -582,19 +662,18 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
         let at = local(world);
         // The turn the point gave, kept.
         let point = Snap::Point { point: at, z: Some(z), x: None };
-        let px =
-            joints::resolve_origin(&s.doc, &st, &JointOrigin { occurrence, snap: point.clone() }).ok().map(|m| Vec3::new(m[0][0], m[0][1], m[0][2]));
+        let px = joints::resolve_origin(&s.doc, &st, &JointOrigin::new(occurrence, point.clone())).ok().map(|m| Vec3::new(m[0][0], m[0][1], m[0][2]));
         let turn = |snap: Snap| match (snap, px) {
             (Snap::CircleCenter { pick, face, end, x: None }, Some(x)) => Snap::CircleCenter { pick, face, end, x: Some(XRef::Dir(x)) },
             (snap, _) => snap,
         };
-        let by_wall = settle(s, JointOrigin { occurrence, snap: turn(o.snap.clone()) }, v, cmd).ok();
+        let by_wall = settle(s, JointOrigin::new(occurrence, turn(o.snap.clone())), v, cmd).ok();
         let by_centre = || {
             let snap = joints::round_end_at(&s.doc, &st, component, at)?;
-            settle(s, JointOrigin { occurrence, snap: turn(snap) }, v, cmd).ok()
+            settle(s, JointOrigin::new(occurrence, turn(snap)), v, cmd).ok()
         };
         let found = by_wall.filter(|o| same_frame(s, o, at, z)).or_else(|| by_centre().filter(|o| same_frame(s, o, at, z)));
-        return Ok(found.unwrap_or(JointOrigin { occurrence, snap: point }));
+        return Ok(found.unwrap_or(JointOrigin::new(occurrence, point)));
     }
     match settle(s, o, v, cmd) {
         Ok(o) => Ok(o),
@@ -605,7 +684,7 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
                 Some(Snap::CircleCenter { pick, face, end, .. }) => Snap::CircleCenter { pick, face, end, x: x_param(s, v, component, &inv, cmd)? },
                 _ => circle_centre(s, occurrence, local(world)).ok_or(e)?,
             };
-            settle(s, JointOrigin { occurrence, snap }, v, cmd)
+            settle(s, JointOrigin::new(occurrence, snap), v, cmd)
         }
         Err(e) => Err(e),
     }
@@ -669,7 +748,7 @@ fn origin_by_name(s: &Session, v: &Value, what: &str, name: &str, cmd: &str) -> 
     let x = x_param(s, v, component, &inv, cmd)?;
     let face = Some(name.to_string());
     let snap = if what == "face" { Snap::FaceCenter { pick, face, x } } else { Snap::CircleCenter { pick, face, end: None, x } };
-    settle(s, JointOrigin { occurrence, snap }, v, cmd)
+    settle(s, JointOrigin::new(occurrence, snap), v, cmd)
 }
 
 /// A new joint origin checked: `end?` (a circle's end, by the name of the face across its rim
@@ -1120,8 +1199,8 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         id,
         name,
         kind,
-        a: JointOrigin { occurrence: oa, snap: fa },
-        b: JointOrigin { occurrence: ob, snap: fb },
+        a: JointOrigin::new(oa, fa),
+        b: JointOrigin::new(ob, fb),
         values: vec![0.0; n],
         limits: limits_param(s, p, kind, cmd)?,
         flip: true, // as built: the origins coincide as they are, not mated

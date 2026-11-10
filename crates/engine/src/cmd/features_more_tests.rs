@@ -2760,3 +2760,24 @@ fn a_sheet_metal_cut_that_removes_nothing_says_so() {
     assert!(!reply["warning"].as_str().unwrap_or_default().contains("removes no material"), "{reply}");
     assert!(volume(&mut s) < before - 50.0);
 }
+
+/// Align by a frame picked on a part in the second copy of a sub-assembly placed twice (#11426):
+/// the frame is the part's own, so the move is the one a pick on the first copy gives, and every
+/// copy shows it. Header (Pin, a 10 mm cube, and Peg, a 2 mm cube at x = 20) sits in Board, placed
+/// at the origin and at +100 mm X.
+#[test]
+fn align_by_a_frame_picked_on_another_copy_moves_the_part_in_its_own_coordinates() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Board", "parent": "root"}));
+    run(&mut s, "component.create", json!({"name": "Header", "parent": "Board"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [20, 0, 0], "body_name": "Peg"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let header = s.doc.find_component("Header").and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).unwrap();
+    // Peg's bottom onto Pin's top, picked on the second copy: Peg sits on Pin in both copies.
+    let top = json!({"occurrence": header, "path": [second, header], "face": [105, 5, 10]});
+    run(&mut s, "solid.align", json!({"bodies": ["Peg"], "from_frame": {"face": [21, 1, 0]}, "to_frame": top}));
+    assert_bounds(&mut s, "Peg", [4., 4., 10.], [6., 6., 12.]);
+    assert_bounds(&mut s, "Peg (Board:2/Header:1)", [104., 4., 10.], [106., 6., 12.]);
+}

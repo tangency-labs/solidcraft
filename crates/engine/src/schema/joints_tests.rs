@@ -28,7 +28,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SolveJointsParams>(), &["quiet"]);
     assert_keys(
         input_schema_for::<MakeJointOriginParams>(),
-        &["body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "point", "x", "z"],
+        &["body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "point", "x", "z"],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "joints", "occurrence", "point", "quiet", "z"]);
@@ -1272,6 +1272,7 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
         input_schema_for::<MakeJointOriginParams>(),
         &[
             (json!({"face": [1, 2, 3]}), true),
+            (json!({"face": [1, 2, 3], "occurrence": 4, "path": [6, 4]}), true),
             (json!({"face": "F1", "x": "F2", "name": "Top", "body": "B", "occurrence": "A"}), true),
             (json!({"circle": "F1", "end": "F2", "x": {"face": [1, 2, 3]}}), true),
             (json!({"circle": [1, 2, 3], "z": [0, 0, 1], "x": null}), true),
@@ -1285,6 +1286,11 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"frame": {"origin": [0, 0, 0]}}), false),
             (json!({"point": [1, 2, 3], "x": 5}), false),
             (json!({"point": [1, 2, 3], "nme": "N"}), false),
+            (json!({"face": [1, 2, 3], "path": "6/4"}), false),
+            (json!({"face": [1, 2, 3], "path": [6, -4]}), false),
+            (json!({"face": [1, 2, 3], "path": null}), true),
+            (json!({"face": [1, 2, 3], "path": []}), false),
+            (json!({"face": [1, 2, 3], "path": (0..65).collect::<Vec<u64>>()}), false),
         ],
     );
     takes(
