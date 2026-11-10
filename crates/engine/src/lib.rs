@@ -88,6 +88,10 @@ pub enum EngineError {
     /// A command panicked; the document was kept as it was (a bug: please report it).
     #[error("internal error in `{0}` (the design was kept as it was): {1}")]
     Internal(String, String),
+    /// The work running the command was cancelled ([`solidcraft_doc::progress::Progress::cancel`])
+    /// while it ran: nothing was applied, whatever was computed before the cancel came in.
+    #[error("`{0}` was cancelled; nothing was applied")]
+    Cancelled(String),
 }
 
 impl From<solidcraft_doc::DocError> for EngineError {
@@ -1729,6 +1733,15 @@ impl Session {
                 let msg = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
+        };
+        // Cancelled while it ran: no result, even one finished before the cancel came in, and
+        // the design goes back as it was (solidcore#3247). Opening, starting or recovering a
+        // design (which replaces the session) keeps its own Cancel: the features not yet built
+        // are skipped and what is built so far is shown (#10577).
+        let r = if solidcraft_doc::progress::cancelled() && self.replacements == replacements {
+            Err(EngineError::Cancelled(spec.id.to_string()))
+        } else {
+            r
         };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
