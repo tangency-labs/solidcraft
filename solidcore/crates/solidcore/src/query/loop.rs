@@ -1167,8 +1167,10 @@ impl WalkExclusion {
 ///   line whose NURB domain is within `SM_EFF_ZERO` maps NURB parameters to themselves
 ///   but STEP parameters back with its scale, so a point far past the segment dropped at
 ///   distance 0). So the point must lie farther than the tolerance from the whole
-///   infinite line, computed as the drop computes it; a clamped foot's point is on that
-///   line, no nearer;
+///   infinite line, the perpendicular distance with the direction normalised: the drop's
+///   distance is that one, or the distance to the line's point when its vector is
+///   shorter than `SM_EFF_ZERO` (found in review: a vector of length `1e-13`, scale
+///   `1.3e14`), or to a clamped foot's point on the line, never less;
 /// - an ellipse: it evaluates and solves through one NURB, which clamps a parameter into
 ///   its knot range; with positive weights and every parameter the drop can evaluate in
 ///   `[U[p], U[n]]` ([`in_hull_domain`]), its points lie in the box of all its control
@@ -1189,11 +1191,20 @@ fn drop_cannot_reach(edge: &crate::topology::Edge, point: Point3) -> bool {
     };
     match curve.kind() {
         CurveKind::Line(line) => {
-            // the line's drop measures the distance to its infinite line (from the same
-            // point and unit vector), or, past the interval, to a point it evaluates on
-            // that line: never less than the distance to the infinite line
+            // the line's drop measures the distance to its infinite line, or to its point
+            // when the vector is shorter than SM_EFF_ZERO (`line_point_distance`'s
+            // degenerate branch), or, past the interval, to a point it evaluates on that
+            // line: never less than the perpendicular distance to the line, computed
+            // here with the direction normalised
             let c = line.canonical_unit();
-            let (to_line, _) = line_point_distance(c.point, c.vector, point);
+            let length = c.vector.length();
+            let along = c.vector / length;
+            if !(length > 0.0 && along.x.is_finite() && along.y.is_finite() && along.z.is_finite())
+            {
+                return false;
+            }
+            let offset = point - c.point;
+            let to_line = (offset - along * offset.dot(along)).length();
             let size = [c.point, point].iter().fold(0.0_f64, |m, p| {
                 m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
             });
@@ -2060,6 +2071,61 @@ mod tests {
             dropped.success,
             "the drop accepts the point past the segment"
         );
+        assert!(!drop_cannot_reach(e, point));
+        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
+        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
+        assert_eq!(walk.containment, PointContainment::OnBoundary);
+        hold_in_outer_square(&mut b);
+        let (on, off) = classified_on_and_off(&b, uv);
+        assert_eq!(on, off);
+    }
+
+    /// A line edge whose direction is shorter than `SM_EFF_ZERO` (`(1e-13, 0, 0)`, scale
+    /// `1.3e14`, analytic domain `[1, 2]`, from `(-5, -5)`): `line_point_distance` takes
+    /// such a vector for a point and reports 13 from `(8, -5)`, but the drop clamps its
+    /// foot and evaluates a point of the line at `(8, -5)`, distance 0. The point is on
+    /// the line, so it is walked (on the edge), and the face classifies it the same with
+    /// the shortcut on and off.
+    #[test]
+    fn a_line_edge_with_a_tiny_direction_bounds_by_its_line() {
+        let k = Kernel::default();
+        let mut b = square(plane(), true, &[]);
+        let nurb = NurbCurve::new(
+            vec![
+                CPoint::new(-5.0, -5.0, 0.0, NOW),
+                CPoint::new(5.0, -5.0, 0.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let line = Line::from_parts(
+            BSplineCurve::from_nurb(nurb, 3, false),
+            Vec3::new(-5.0, -5.0, 0.0),
+            Vec3::new(1e-13, 0.0, 0.0),
+            Extent1d::from_min_max(1.0, 2.0),
+            1.3e14,
+            false,
+        );
+        let (uv, l) = ([8.0, -5.0], LoopId::from_index(0));
+        let point = Vec3::new(uv[0], uv[1], 0.0);
+        let e = b.edge_mut(EdgeId::from_index(0)).unwrap();
+        e.curve = Some(Curve::from(line));
+        let dropped = e
+            .curve
+            .as_ref()
+            .unwrap()
+            .drop_point(
+                &k,
+                &e.interval,
+                point,
+                None,
+                e.tolerance,
+                None,
+                SolverOperation::Intersect,
+            )
+            .unwrap();
+        assert!(dropped.success, "the drop finds the point on the line");
         assert!(!drop_cannot_reach(e, point));
         assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
         let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
