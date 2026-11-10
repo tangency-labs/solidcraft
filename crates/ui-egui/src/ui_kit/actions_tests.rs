@@ -1,19 +1,19 @@
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
 
-use crate::scenario;
 use egui::Ui;
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn footer_clicks_and_keyboard_respect_validation_and_editor_focus() {
     for enabled in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut action = Action::None;
         let mut draw = |ui: &mut Ui| {
             action = footer(ui, "OK", "Cancel", enabled, Footer::default());
         };
         frame(&ctx, vec![], &mut draw);
-        let pos = scenario::handle_at("dialog:ok").unwrap();
+        let pos = registry::handle_at("dialog:ok").unwrap();
         frame(&ctx, pointer(pos, true), &mut draw);
         frame(&ctx, pointer(pos, false), &mut draw);
         assert_eq!(action, if enabled { Action::Ok } else { Action::None });
@@ -30,12 +30,12 @@ fn footer_clicks_and_keyboard_respect_validation_and_editor_focus() {
         frame(&ctx, vec![], |ui| {
             footer(ui, "OK", "Cancel", enabled, Footer::default());
         });
-        let cancel = scenario::handle_at("dialog:cancel").unwrap();
+        let cancel = registry::handle_at("dialog:cancel").unwrap();
         frame(&ctx, pointer(cancel, true), |ui| action = footer(ui, "OK", "Cancel", enabled, Footer::default()));
         frame(&ctx, pointer(cancel, false), |ui| action = footer(ui, "OK", "Cancel", enabled, Footer::default()));
         assert_eq!(action, Action::Cancel);
     }
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut action = Action::None;
     let mut text = "radius".to_string();
     frame(&ctx, vec![], |ui| {
@@ -54,20 +54,20 @@ fn footer_clicks_and_keyboard_respect_validation_and_editor_focus() {
 #[test]
 fn enabled_buttons_show_the_pointing_hand_and_disabled_ones_do_not() {
     for (enabled, expected) in [(true, egui::CursorIcon::PointingHand), (false, egui::CursorIcon::Default)] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut draw = |ui: &mut Ui| {
             footer(ui, "OK", "Cancel", enabled, Footer { apply: Some("Apply"), ..Default::default() });
         };
         frame(&ctx, vec![], &mut draw);
-        let ok = scenario::handle_at("dialog:ok").unwrap();
+        let ok = registry::handle_at("dialog:ok").unwrap();
         // Settled over two frames: the hover is known from the first frame's layout.
         frame_cursor(&ctx, ok, &mut draw);
         assert_eq!(frame_cursor(&ctx, ok, &mut draw), expected, "OK, enabled {enabled}");
         // Apply is a button too, and Cancel is always enabled.
-        let apply = scenario::handle_at("dialog:apply").unwrap();
+        let apply = registry::handle_at("dialog:apply").unwrap();
         frame_cursor(&ctx, apply, &mut draw);
         assert_eq!(frame_cursor(&ctx, apply, &mut draw), expected, "Apply, enabled {enabled}");
-        let cancel = scenario::handle_at("dialog:cancel").unwrap();
+        let cancel = registry::handle_at("dialog:cancel").unwrap();
         frame_cursor(&ctx, cancel, &mut draw);
         assert_eq!(frame_cursor(&ctx, cancel, &mut draw), egui::CursorIcon::PointingHand, "Cancel is always enabled");
     }
@@ -82,18 +82,18 @@ fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibilit
     for confirm in [false, true] {
         for nothing_to_apply in [true, false] {
             let live = !nothing_to_apply;
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             ctx.enable_accesskit();
             let action = std::cell::Cell::new(Action::None);
             let run = |events: Vec<egui::Event>| {
-                scenario::clear_handles();
+                registry::clear_handles();
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
                     events,
                     focused: true,
                     ..Default::default()
                 };
-                crate::test_support::frame(&ctx, input, |ui| {
+                crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| {
                     ui.set_width(280.0);
                     scope(ui, |ui| {
                         let options = Footer { apply: Some("Apply"), confirm, nothing_to_apply, ..Default::default() };
@@ -103,8 +103,8 @@ fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibilit
             };
             let case = format!("confirm {confirm}, nothing to apply {nothing_to_apply}");
             let output = run(vec![]);
-            assert_eq!(scenario::count_of("dialog:apply:enabled"), Some(f64::from(live)), "{case}");
-            assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{case}: OK keeps its own state");
+            assert_eq!(registry::count_of("dialog:apply:enabled"), Some(f64::from(live)), "{case}");
+            assert_eq!(registry::count_of("dialog:ok:enabled"), Some(1.0), "{case}: OK keeps its own state");
             let node = output
                 .platform_output
                 .accesskit_update
@@ -115,7 +115,7 @@ fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibilit
             assert_eq!(node.role(), egui::accesskit::Role::Button, "{case}");
             assert_eq!(node.is_disabled(), nothing_to_apply, "{case}: accessibility reports the state");
             if !confirm {
-                let ink = crate::test_support::text_shapes(&output)
+                let ink = crate::ui_kit::test_support::text_shapes(&output)
                     .find(|text| text.galley.job.text == "Apply")
                     .and_then(|text| text.galley.job.sections.first().map(|section| section.format.color))
                     .unwrap_or_else(|| panic!("{case}: Apply's label is painted"));
@@ -124,7 +124,7 @@ fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibilit
             }
 
             // The pointer: no hand and no click without something to apply.
-            let apply = scenario::handle_at("dialog:apply").unwrap_or_else(|| panic!("{case}: Apply has a handle"));
+            let apply = registry::handle_at("dialog:apply").unwrap_or_else(|| panic!("{case}: Apply has a handle"));
             run(vec![egui::Event::PointerMoved(apply)]);
             let cursor = run(vec![egui::Event::PointerMoved(apply)]).platform_output.cursor_icon;
             assert_eq!(cursor, if live { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default }, "{case}");
@@ -160,7 +160,7 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for enabled in [false, true] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             solidcraft_theme::apply(&ctx);
             let rects =
                 [Rect::from_min_size(egui::pos2(20.0, 30.0), vec2(108.0, 32.0)), Rect::from_min_size(egui::pos2(140.0, 30.0), vec2(108.0, 32.0))];
@@ -220,6 +220,7 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
 
 #[test]
 fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
+    crate::test_support::host_data();
     use egui::{Color32, Shape};
     use solidcraft_theme::{Tokens, scoped_tokens};
 
@@ -241,7 +242,7 @@ fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
         let t = crate::theme_files::resolve(crate::theme_files::find(id, &[]).unwrap());
         let _restore = scoped_tokens(t);
         assert_eq!(Tokens::get().form_primary_fill, fill, "{id}");
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut rects = Vec::new();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_width(400.0);
@@ -249,7 +250,7 @@ fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
                 rects.push(primary_button(ui, "Primary").rect);
                 rects.push(wide_primary_button(ui, "Wide").rect);
                 footer(ui, "OK", "Cancel", true, Footer::default());
-                rects.push(scenario::rect_of("dialog:ok").unwrap());
+                rects.push(registry::rect_of("dialog:ok").unwrap());
             });
         });
         output.textures_delta.clear();
@@ -268,6 +269,7 @@ fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
 
 #[test]
 fn persistent_native_selected_recipe_is_opt_in_and_preserves_small_selected_controls() {
+    crate::test_support::host_data();
     fn flatten(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
         match shape {
             egui::Shape::Vec(shapes) => {
@@ -286,7 +288,7 @@ fn persistent_native_selected_recipe_is_opt_in_and_preserves_small_selected_cont
     assert!(themes.iter().any(|t| t.borders.bevel.is_some()), "include a real bevel theme");
     for t in themes {
         let _theme = solidcraft_theme::scoped_tokens(t);
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut selected = egui::Shape::Noop;
         let mut native = egui::Rect::NOTHING;
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {

@@ -158,7 +158,7 @@ fn icon_button_presentation(
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.hover);
     }
-    let paint = if mirrored { crate::icons::paint_ink_mirrored } else { crate::icons::paint_ink };
+    let paint = if mirrored { crate::ui_kit::icons::paint_ink_mirrored } else { crate::ui_kit::icons::paint_ink };
     paint(
         ui.painter(),
         if quiet { egui::Rect::from_center_size(rect.center(), vec2(t.space_12, t.space_12)) } else { rect.shrink(t.form_icon_inset) },
@@ -488,7 +488,7 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
                 let left = rect.center().x - (galley.size().x + icon_width) / 2.0;
                 let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
                 if let Some(icon) = button.icon {
-                    crate::icons::paint_icon(
+                    crate::ui_kit::icons::paint_icon(
                         &painter,
                         egui::Rect::from_center_size(
                             egui::pos2(left + t.sketch_footer_icon_size / 2.0, rect.center().y),
@@ -684,9 +684,9 @@ pub(crate) fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: b
             if arrow {
                 let icon = rect.shrink(t.form_icon_inset);
                 if glyph == MOVE_UP {
-                    crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
+                    crate::ui_kit::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
                 } else {
-                    crate::icons::paint_ink(ui.painter(), icon, "chevron", ink);
+                    crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", ink);
                 }
             } else {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(t.font_label), ink);
@@ -806,7 +806,7 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
                 t.space_12
             };
         if let Some(icon) = icon {
-            crate::icons::paint_ink(
+            crate::ui_kit::icons::paint_ink(
                 ui.painter(),
                 egui::Rect::from_center_size(egui::pos2(left + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14)),
                 icon,

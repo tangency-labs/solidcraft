@@ -187,7 +187,7 @@ pub(crate) fn paint_contact_shading(p: &Painter, rect: Rect, on: bool) {
 /// It is explanatory vector content: no second viewport, live scene, or nested host.
 /// A restrained workspace schematic: panel placement remains primary, with a few
 /// tool marks, tree rows and one simple solid providing recognisable CAD context.
-pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview) {
+pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview, note: &str) {
     let t = Tokens::get();
     let width = super::metrics::dimension(ui.available_width());
     let size = vec2(width, width * 148.0 / 226.0);
@@ -251,7 +251,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let viewport_left = bx + bw + gap;
     let viewport_bottom = if state.history == 0 { bottom - 10.0 - gap } else { bottom };
     let object_centre = c.at((viewport_left + 120.0 - inset) * 0.5, (top + viewport_bottom) * 0.5);
-    crate::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
+    crate::ui_kit::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
     p.circle_filled(c.at(110.0 - inset, top + 7.0), c.width(3.5), quiet);
     let history = match state.history {
         1 => Some(panel(inset, top, 10.0, bottom - top, "", t.selected_bg)),
@@ -281,8 +281,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview:dialog", dialog);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview", outer);
-    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
-        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.layout_note"));
+    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).backing_on_hover_text(note);
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
@@ -313,10 +312,10 @@ mod tests {
         for dark in [false, true] {
             solidcraft_theme::set_dark(dark);
             let draw = |state| {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     ui.set_width(262.0);
-                    super::paint_layout(ui, state);
+                    super::paint_layout(ui, state, "Where the panels go");
                 });
                 output.textures_delta.clear();
                 format!("{:?}", output.shapes)
@@ -334,9 +333,9 @@ mod tests {
                 assert_ne!(original, draw(state), "each actual choice changes the schematic");
             }
             let _ = draw(LayoutPreview { compact: false, labels: false, history: 2, translucent: true, dialog_left: true });
-            let browser = crate::scenario::rect_of("prefs:layout_preview:browser").unwrap();
-            let history = crate::scenario::rect_of("prefs:layout_preview:history").unwrap();
-            let dialog = crate::scenario::rect_of("prefs:layout_preview:dialog").unwrap();
+            let browser = solidcraft_ui_registry::rect_of("prefs:layout_preview:browser").unwrap();
+            let history = solidcraft_ui_registry::rect_of("prefs:layout_preview:history").unwrap();
+            let dialog = solidcraft_ui_registry::rect_of("prefs:layout_preview:dialog").unwrap();
             assert!(browser.contains_rect(dialog), "the left-column dialog remains inside the Browser region");
             assert!(!dialog.intersects(history), "the dialog cannot cover the Under browser History caption");
         }
@@ -368,7 +367,7 @@ mod tests {
 
     /// Shapes a figure paints into `rect` on a fresh frame, in the given theme.
     fn shapes(rect: Rect, paint: impl Fn(&egui::Painter, Rect)) -> Vec<egui::epaint::ClippedShape> {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut output =
             ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), ..Default::default() }, |ui| {
                 paint(ui.painter(), rect);
@@ -404,7 +403,7 @@ mod tests {
                 let centre_rect = rect.shrink(radius);
                 let mut vertices = 0;
                 for clipped in shapes(rect, |p, r| paint_theme_thumbnail_rounded(p, r, &sample, radius)) {
-                    crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
                         if let egui::Shape::Mesh(mesh) = shape {
                             for vertex in &mesh.vertices {
                                 let nearest = Pos2::new(

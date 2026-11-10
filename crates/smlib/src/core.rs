@@ -113,7 +113,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
-    f.fillet_trace_rejects_short_step = true;
     f.torus_iso_circle_axis_from_midpoint = true;
     f.torus_keeps_inside_out = true;
     f.internal_pole_row_through_knot = true;
@@ -175,7 +174,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.corner_blend_coons_patch_tangent_to_sides = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_corner_ball_center_from_axes = true;
-    f.seam_point_solutions_are_one = true;
     f.boolean2d_plane_covers_far_faces = true;
     f.brep_area_between_solid_and_void = true;
     f.boolean_splits_definition_across_split = true;
@@ -202,7 +200,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.offset_closes_loop_gaps = true;
     f.cylinder_plane_tangent_within_tolerance = true;
     f.boolean_wire_edge_keeps_faceuse_shell = true;
     f.fillet_nx1_tangent_corner_edge = true;
@@ -260,9 +257,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_splits_corner_vertices = true;
     f.offset_keep_cavity_regions = true;
-    f.offset_four_face_vertex_split = true;
     f.gap_samples_non_bspline_v_stride = true;
     f.imprint_skips_collapsed_definition = true;
     f.fillet_blend_curve_revolved_on_arc = true;
@@ -289,8 +284,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
     f.analytic_corner_failure_is_false = true;
-    f.defeature_refuses_open_base = true;
-    f.ssi_start_loop_trace_budget = true;
     f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
@@ -311,7 +304,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.surface_continuity_checks_last_v_knot = true;
     f.surface_point_solver_propagates_bbox_failure = true;
     f.volume_lift_third_derivative_terms = true;
-    f.volume_discontinuity_checks_vw_unaligned = true;
     f.periodic_extent_add_empty_interval = true;
     f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
@@ -335,17 +327,14 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.bend_volume_trim_param_box_across_period = true;
     f.point_set_tight_pbox_projects_points = true;
     f.degen_param_tiebreak_uses_actual_param = true;
-    f.conic_evaluate_uses_computed_second_deriv = true;
     f.cylinder_plane_section_trims_exact = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.curve_max_distance_single_sample_midpoint = true;
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
     f.mark_lock_pair_advances_and_locks_second_context = true;
     f.is_iso_curve_at_propagates_canonical_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
-    f.is_point_on_curve_propagates_eval_failure = true;
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
@@ -583,11 +572,14 @@ fn call_on<T: dump::Answer>(
 /// that stands for an SMLib status exactly ([`SolidError::sm_status`](solidcore::SolidError::sm_status),
 /// solidcore#1452) is `None`. Every other solidcore error
 /// (unported code, invalid input to an adapter, a missing record...) is not a status the C++
-/// path returns, so it fails the call instead of hiding as a skipped entity.
+/// path returns, so it fails the call instead of hiding as a skipped entity. So does a status
+/// error whose cause chain holds a solidcore-side failure or a cancellation
+/// ([`SolidError::is_status_answer`](solidcore::SolidError::is_status_answer)), the rule of
+/// solidcore-ops' `session::answer`.
 pub(crate) fn answer<T>(r: std::result::Result<T, solidcore::SolidError>) -> std::result::Result<Option<T>, solidcore::SolidError> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.sm_status().is_some() => Ok(None),
+        Err(e) if e.is_status_answer() => Ok(None),
         Err(e) => Err(e),
     }
 }

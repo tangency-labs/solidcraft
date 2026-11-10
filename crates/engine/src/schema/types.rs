@@ -278,7 +278,7 @@ impl JsonSchema for AxisDir {
 /// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
 /// handlers' message, "invalid camera", for anything else (#10898).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraParam(pub solidcraft_render::Camera);
+pub struct CameraParam(pub solidcraft_viewport::Camera);
 
 impl<'de> Deserialize<'de> for CameraParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -300,10 +300,10 @@ impl JsonSchema for CameraParam {
                 "pitch": {"description": "Elevation above the ground plane, from -π/2 (looking up) to π/2 (looking down).", "type": "number"},
                 "roll": {"description": "Turn about the viewing direction; 0 keeps the up axis upright. Default: 0.", "type": "number", "default": 0.0},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI},
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI, "default": 0.0},
                 "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
             },
-            "required": ["target", "yaw", "pitch", "distance", "fov"]
+            "required": ["target", "yaw", "pitch", "distance"]
         })
     }
 }
@@ -1439,6 +1439,11 @@ fn revolve_axis_object_problem(o: &Value) -> Option<String> {
         let ok = o.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"));
         return (!ok).then(|| whole("world axis requires `axis` to be X, Y or Z"));
     }
+    if o.get("curve").and_then(Value::as_str).is_some() {
+        // A line of a named sketch (#6548): {sketch?, curve}, also saved as {type: "sketch_line", …}.
+        // Whether that sketch and line exist is the handler's, which has the design.
+        return None;
+    }
     if let Some(origin) = o.get("origin")
         && serde_json::from_value::<PointExpr3>(origin.clone()).is_err()
     {
@@ -1452,7 +1457,8 @@ fn revolve_axis_object_problem(o: &Value) -> Option<String> {
 
 /// Revolve's `axis`, as `features::axis_param` reads it before it looks anything up: a sketch
 /// line's id or name, `x` or `y`, X, Y or Z, a construction axis's name (any text), `{type: "world",
-/// axis}`, `{origin?, dir}`, or an edge or face of the model (as `construct::model_axis_param`
+/// axis}`, `{sketch?, curve}` (a line of another sketch, #6548), `{origin?, dir}`, or an edge or
+/// face of the model (as `construct::model_axis_param`
 /// reads it). Kept as given, for the handler. Whether a line or axis exists, and whether a picked
 /// edge or face gives an axis, is checked by the handler, which has the design.
 #[derive(Clone, Debug, PartialEq)]
@@ -1484,12 +1490,14 @@ impl JsonSchema for RevolveAxis {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let point = generator.subschema_for::<Point3>();
         let origin = generator.subschema_for::<PointExpr3>();
+        let id_or_name = generator.subschema_for::<IdOrName>();
         let model = json!({"anyOf": [{"required": ["edge"]}, {"required": ["face"]}, {"required": ["type"], "properties": {"type": {"enum": ["edge", "face"]}}}]});
         json_schema!({
-            "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
+            "description": "The axis to turn about: a sketch line's id or name (a line of the profile's sketch wins over a construction axis of the same name); {\"sketch\"?: an id or name, \"curve\": an id} — a line of that sketch, which the revolve follows when that sketch is edited; x or y, the sketch's own axes; X, Y or Z, the world axes (any other case is a name); a construction axis's name, which the revolve follows when it is edited; {\"type\": \"world\", \"axis\": X, Y or Z}, as timeline.inspect gives one back; {\"origin\"?: [x, y, z] (numbers or length expressions; default: the world origin), \"dir\": [x, y, z]}, which the revolve follows when parameters change; or an edge or face of a body ({\"edge\": [x, y, z]} or {\"face\": [x, y, z]}, a point on a straight or circular edge, or on a cylinder, cone or torus face, or as saved: {\"type\": \"edge\" or \"face\", \"at\", \"name\"?}), about whose axis it turns, followed as the model changes.",
             "anyOf": [
                 {"type": "string"},
                 {"type": "object", "properties": {"type": {"enum": ["world"]}, "axis": {"enum": ["X", "Y", "Z"]}}, "required": ["type", "axis"]},
+                {"type": "object", "properties": {"sketch": id_or_name, "curve": {"type": "string"}}, "required": ["curve"]},
                 {
                     "type": "object",
                     "properties": {"origin": origin, "dir": point},

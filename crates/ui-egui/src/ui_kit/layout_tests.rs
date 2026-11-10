@@ -1,16 +1,16 @@
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
 
-use crate::scenario;
 use egui::Ui;
 use solidcraft_theme::Tokens;
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let clicked = std::cell::Cell::new(false);
     let draw = |ui: &mut Ui| {
-        theme_browser(ui, "padding_browser", 10, false, None, |ui, i, width| {
+        theme_browser(ui, "padding_browser", 10, false, None, &PageLabels { previous: "Previous themes", next: "Next themes" }, |ui, i, width| {
             let card = theme_card(
                 ui,
                 &ThemeCard {
@@ -27,41 +27,41 @@ fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() 
                 width,
             );
             clicked.set(clicked.get() || card.clicked());
-            scenario::publish_rect(&format!("test:theme_card:{i}"), card.rect);
+            registry::publish_rect(&format!("test:theme_card:{i}"), card.rect);
         });
     };
     for _ in 0..3 {
         frame(&ctx, vec![], draw);
     }
-    let viewport = scenario::rect_of("prefs:theme_viewport").unwrap();
-    let first = scenario::rect_of("test:theme_card:0").unwrap();
+    let viewport = registry::rect_of("prefs:theme_viewport").unwrap();
+    let first = registry::rect_of("test:theme_card:0").unwrap();
     for gap in [first.left() - viewport.left(), first.top() - viewport.top(), viewport.bottom() - first.bottom()] {
         assert!((gap - Tokens::get().space_10).abs() < 0.1, "same padding on every resting side: {gap}");
     }
-    assert!(scenario::handle_at("prefs:theme_previous").is_none());
+    assert!(registry::handle_at("prefs:theme_previous").is_none());
     let advance = || {
-        let at = scenario::handle_at("prefs:theme_next").unwrap();
+        let at = registry::handle_at("prefs:theme_next").unwrap();
         frame(&ctx, pointer(at, true), draw);
         frame(&ctx, pointer(at, false), draw);
         frame(&ctx, vec![], draw);
     };
-    let stride = scenario::rect_of("test:theme_card:1").unwrap().left() - first.left();
+    let stride = registry::rect_of("test:theme_card:1").unwrap().left() - first.left();
     let page = ((viewport.width() / stride).floor() as usize).max(1);
     advance();
-    let moved = scenario::rect_of(&format!("test:theme_card:{page}")).unwrap();
+    let moved = registry::rect_of(&format!("test:theme_card:{page}")).unwrap();
     assert!((moved.left() - first.left()).abs() < 0.1, "arrow moves a screenful of {page} cards");
-    assert!(scenario::handle_at("prefs:theme_previous").is_some());
-    assert!(scenario::handle_at("prefs:theme_next").is_some());
+    assert!(registry::handle_at("prefs:theme_previous").is_some());
+    assert!(registry::handle_at("prefs:theme_next").is_some());
     for _ in 0..10 {
-        if scenario::handle_at("prefs:theme_next").is_none() {
+        if registry::handle_at("prefs:theme_next").is_none() {
             break;
         }
         advance();
     }
-    let viewport = scenario::rect_of("prefs:theme_viewport").unwrap();
-    let last = scenario::rect_of("test:theme_card:9").unwrap();
+    let viewport = registry::rect_of("prefs:theme_viewport").unwrap();
+    let last = registry::rect_of("test:theme_card:9").unwrap();
     assert!((viewport.right() - last.right() - Tokens::get().space_10).abs() < 0.1);
-    assert!(scenario::handle_at("prefs:theme_next").is_none());
+    assert!(registry::handle_at("prefs:theme_next").is_none());
     assert!(!clicked.get(), "floating arrows never select the card under them");
 }
 
@@ -91,14 +91,14 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
                             key: "axes",
                             label: "Axes (signed)",
                             figure: |p, rect| {
-                                paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_engine::render::Camera::default()))
+                                paint_navigation_axes(p, rect, &crate::viewport::navigator_axes(&solidcraft_viewport::Camera::default()))
                             },
                         },
                         PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
                     ],
                 ),
             ] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let draw = |ui: &mut Ui| {
                     ui.set_width(available);
                     settings_picture_choices_sized(ui, "nav_geometry", label, &options, 0, true, PictureChoiceSize { width, aspect, caption: true })
@@ -106,16 +106,16 @@ fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths()
                 frame(&ctx, vec![], |ui| {
                     draw(ui);
                 });
-                let row = scenario::rect_of(&format!("dialog:row:{label}")).unwrap();
+                let row = registry::rect_of(&format!("dialog:row:{label}")).unwrap();
                 for option in &options {
-                    let card = scenario::rect_of(&format!("prefs:nav_geometry:{}", option.key)).unwrap();
+                    let card = registry::rect_of(&format!("prefs:nav_geometry:{}", option.key)).unwrap();
                     assert!(row.expand(0.5).contains_rect(card), "{available}: {card:?} outside {row:?}");
                     assert!(card.width() <= available + 0.5);
                     if available == 646.0 {
                         assert!((card.width() - width).abs() < 0.5);
                     }
                 }
-                let at = scenario::handle_at(&format!("prefs:nav_geometry:{}", options[1].key)).unwrap();
+                let at = registry::handle_at(&format!("prefs:nav_geometry:{}", options[1].key)).unwrap();
                 for down in [true, false] {
                     frame(&ctx, pointer(at, down), |ui| {
                         let picked = draw(ui);
@@ -136,13 +136,13 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for width in [180.0, 280.0, 646.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let mut reverse = false;
             let mut gain = 1.0;
             let mut source = 0;
             let (mut inverted, mut speed, mut motion) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
             let (mut invert_clip, mut speed_clip, mut source_clip) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
-            let output = crate::test_support::frame(
+            let output = crate::ui_kit::test_support::raw_frame(
                 &ctx,
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1200.0))), ..Default::default() },
                 |ui| {
@@ -150,6 +150,7 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
                         ui.set_width(width);
                         settings_axis_row(
                             ui,
+                            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
                             "Pan X",
                             0.5,
                             [0.2, 0.3],
@@ -169,16 +170,16 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
                     });
                 },
             );
-            let row = scenario::rect_of("prefs:axis:Pan X").unwrap();
+            let row = registry::rect_of("prefs:axis:Pan X").unwrap();
             let controls = [inverted, speed, motion];
             assert!(controls.into_iter().all(|control| row.expand(0.5).contains_rect(control)), "{width}: {controls:?} in {row:?}");
             for (control, clip) in controls.into_iter().zip([invert_clip, speed_clip, source_clip]) {
                 assert!(clip.expand(0.5).contains_rect(control), "{width}: control {control:?} is clipped by {clip:?}");
             }
-            assert_eq!(row, scenario::rect_of("dialog:control:Pan X").unwrap(), "paint bounds use the allocated row, not its centered cursor");
+            assert_eq!(row, registry::rect_of("dialog:control:Pan X").unwrap(), "paint bounds use the allocated row, not its centered cursor");
             let mut bars = 0;
             for clipped in &output.shapes {
-                crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+                crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
                     egui::Shape::Text(text) => {
                         let painted = text.galley.rect.translate(text.pos.to_vec2());
                         assert!(
@@ -198,7 +199,7 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
                 });
             }
             assert_eq!(bars, 1, "inspect the actual live-meter background");
-            assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == "Pan X" && !text.galley.elided));
+            assert!(crate::ui_kit::test_support::text_shapes(&output).any(|text| text.galley.text() == "Pan X" && !text.galley.elided));
             assert_eq!((reverse, gain, source), (false, 1.0, 0));
         }
     }
@@ -211,9 +212,9 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for width in [160.0, 280.0, 528.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let mut bounds = egui::Rect::NOTHING;
-            let output = crate::test_support::frame(
+            let output = crate::ui_kit::test_support::raw_frame(
                 &ctx,
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1600.0))), ..Default::default() },
                 |ui| {
@@ -238,12 +239,12 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
                 },
             );
             for label in ["Ctrl/Cmd", "Shift", "Middle drag", "Alt/Option", "Right drag", "Wheel", "Left click", "Right click", "Click"] {
-                let caps: Vec<_> = crate::test_support::text_shapes(&output).filter(|text| text.galley.text() == label).collect();
+                let caps: Vec<_> = crate::ui_kit::test_support::text_shapes(&output).filter(|text| text.galley.text() == label).collect();
                 assert!(!caps.is_empty(), "{width}: the {label} keycap must be painted");
                 assert!(caps.iter().all(|text| !text.galley.elided), "{width}: {label} must be complete");
             }
             for clipped in &output.shapes {
-                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
                     if let egui::Shape::Text(text) = shape {
                         assert!(
                             clipped.clip_rect.expand(1.0).contains_rect(text.galley.rect.translate(text.pos.to_vec2())),
@@ -252,7 +253,7 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
                     }
                 });
             }
-            let text: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.rect.translate(text.pos.to_vec2())).collect();
+            let text: Vec<_> = crate::ui_kit::test_support::text_shapes(&output).map(|text| text.galley.rect.translate(text.pos.to_vec2())).collect();
             assert!(text.iter().all(|rect| bounds.expand(1.0).contains_rect(*rect)), "{width}: {text:?} outside {bounds:?}");
             for (index, rect) in text.iter().enumerate() {
                 assert!(text.iter().skip(index + 1).all(|other| !rect.intersects(*other)), "{width}: binding text must not overlap");
@@ -265,8 +266,8 @@ fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
 #[test]
 fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
     for query in ["Middle drag", "Zoom toward the cursor"] {
-        let ctx = crate::fonts::test_context();
-        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        let ctx = crate::ui_kit::test_support::context();
+        let output = crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
             scope(ui, |ui| {
                 ui.set_width(280.0);
                 let _search = crate::ui_kit::settings_search::begin(ui, query, "prefs");
@@ -277,7 +278,7 @@ fn mouse_mapping_search_keeps_main_gesture_chords_and_actions() {
                 );
             });
         });
-        let text: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
+        let text: Vec<_> = crate::ui_kit::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
         assert!(text.contains(&"Ctrl/Cmd") && text.contains(&"Middle drag") && text.contains(&"Zoom toward the cursor"));
         assert!(!text.contains(&"Alt/Option") && !text.contains(&"Orbit"), "unmatched gestures stay hidden");
     }
@@ -293,10 +294,10 @@ fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
             for font_label in [base.font_label, base.font_label * 1.8] {
                 let _theme = solidcraft_theme::scoped_tokens(Tokens { font_label, ..base });
                 for (tone, ink) in [(StatusTone::Dim, base.text_dim), (StatusTone::Warning, base.warning), (StatusTone::Error, base.error)] {
-                    let ctx = crate::fonts::test_context();
+                    let ctx = crate::ui_kit::test_support::context();
                     let message = "needs a joint that turns and one that slides";
                     let mut message_rect = egui::Rect::NOTHING;
-                    let output = crate::test_support::frame(
+                    let output = crate::ui_kit::test_support::raw_frame(
                         &ctx,
                         egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 600.0))),
@@ -313,14 +314,14 @@ fn status_lines_wrap_at_form_width_and_leave_room_for_the_next_row() {
                             });
                         },
                     );
-                    let text = crate::test_support::text_shapes(&output).find(|text| text.galley.text() == message).unwrap();
+                    let text = crate::ui_kit::test_support::text_shapes(&output).find(|text| text.galley.text() == message).unwrap();
                     assert!(!text.galley.elided, "width={width}, font={font_label}");
                     if width == 160.0 {
                         assert!(text.galley.rows.len() > 1, "a narrow form must wrap");
                     }
                     assert!(text.galley.job.sections.iter().all(|section| section.format.color == ink));
                     assert!(message_rect.width() <= width + 0.5);
-                    let next = scenario::rect_of("dialog:row:Radius").unwrap();
+                    let next = registry::rect_of("dialog:row:Radius").unwrap();
                     assert!((message_rect.left() - next.left()).abs() < 0.5, "use both form columns");
                     assert!(next.top() >= message_rect.bottom(), "the next row must follow all lines");
                     let painted = text.galley.rect.translate(text.pos.to_vec2());
@@ -350,8 +351,8 @@ fn shared_picture_choices_wrap_inside_the_row_and_reserve_their_height() {
         let _theme = solidcraft_theme::scoped_tokens(if dark { Tokens::dark() } else { Tokens::light() });
         for width in [120.0, 260.0, 600.0] {
             for sized in [false, true] {
-                let ctx = crate::fonts::test_context();
-                crate::test_support::frame(
+                let ctx = crate::ui_kit::test_support::context();
+                crate::ui_kit::test_support::raw_frame(
                     &ctx,
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1000.0))),
@@ -374,13 +375,13 @@ fn shared_picture_choices_wrap_inside_the_row_and_reserve_their_height() {
                                 settings_picture_choices(ui, "shared", "Choices", &choices, usize::MAX, true)
                             };
                             assert_eq!(picked, None, "drawing does not change an unknown selection");
-                            let row_rect = scenario::rect_of("dialog:row:Choices").unwrap();
+                            let row_rect = registry::rect_of("dialog:row:Choices").unwrap();
                             for choice in &choices {
-                                let rect = scenario::rect_of(&format!("prefs:shared:{}", choice.key)).unwrap();
+                                let rect = registry::rect_of(&format!("prefs:shared:{}", choice.key)).unwrap();
                                 assert!(row_rect.expand(0.5).contains_rect(rect), "width={width}, sized={sized}: {rect:?} outside {row_rect:?}");
                             }
-                            let first = scenario::rect_of("prefs:shared:first").unwrap();
-                            let last = scenario::rect_of("prefs:shared:third").unwrap();
+                            let first = registry::rect_of("prefs:shared:first").unwrap();
+                            let last = registry::rect_of("prefs:shared:third").unwrap();
                             assert_eq!(last.top() > first.top(), width < 600.0);
                             let next = ui.label("Next").rect;
                             assert!(next.top() >= last.bottom());
@@ -398,7 +399,7 @@ fn shared_picture_choices_return_clicks_and_respect_both_disabled_states() {
     let choices =
         [PictureChoice { key: "first", label: "First", figure: |_, _| {} }, PictureChoice { key: "second", label: "Second", figure: |_, _| {} }];
     for (enabled, parent_enabled) in [(true, true), (false, true), (true, false)] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         ctx.enable_accesskit();
         let picked = Cell::new(None);
         let draw = |ui: &mut Ui| {
@@ -407,7 +408,7 @@ fn shared_picture_choices_return_clicks_and_respect_both_disabled_states() {
             });
         };
         frame(&ctx, vec![], draw);
-        let at = scenario::handle_at("prefs:shared:second").unwrap();
+        let at = registry::handle_at("prefs:shared:second").unwrap();
         frame(&ctx, pointer(at, true), draw);
         frame(&ctx, pointer(at, false), draw);
         assert_eq!(picked.get(), (enabled && parent_enabled).then_some(1));
@@ -427,7 +428,7 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for width in [140.0, 280.0, 646.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let options = [
                 PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
                 PictureChoice { key: "left", label: "Left", figure: paint_history_left },
@@ -438,13 +439,13 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
                 ui.set_width(width);
                 settings_picture_choices(ui, "geometry_history", "History", &options, 2, true);
             });
-            let row = scenario::rect_of("dialog:row:History").unwrap();
+            let row = registry::rect_of("dialog:row:History").unwrap();
             for option in &options {
-                let rect = scenario::rect_of(&format!("prefs:geometry_history:{}", option.key)).unwrap();
+                let rect = registry::rect_of(&format!("prefs:geometry_history:{}", option.key)).unwrap();
                 assert!(row.expand(0.5).contains_rect(rect), "{width}: {rect:?} outside {row:?}");
-                assert!(rect.contains(scenario::handle_at(&format!("dialog:History:{}", option.label)).unwrap()));
+                assert!(rect.contains(registry::handle_at(&format!("dialog:History:{}", option.label)).unwrap()));
             }
-            let at = scenario::handle_at("prefs:geometry_history:left").unwrap();
+            let at = registry::handle_at("prefs:geometry_history:left").unwrap();
             for down in [true, false] {
                 frame(&ctx, pointer(at, down), |ui| {
                     ui.set_width(width);
@@ -461,7 +462,7 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
 
 #[test]
 fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut value = "width / 2 + 10 mm".to_string();
     for _ in 0..3 {
         frame(&ctx, vec![], |ui| {
@@ -473,10 +474,10 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
             });
         });
     }
-    let first = scenario::rect_of("dialog:row:A long parameter label that must elide").unwrap();
-    let second = scenario::rect_of("dialog:row:Radius").unwrap();
-    let label = scenario::rect_of("dialog:label:Radius").unwrap();
-    let control = scenario::rect_of("dialog:control:Radius").unwrap();
+    let first = registry::rect_of("dialog:row:A long parameter label that must elide").unwrap();
+    let second = registry::rect_of("dialog:row:Radius").unwrap();
+    let label = registry::rect_of("dialog:label:Radius").unwrap();
+    let control = registry::rect_of("dialog:control:Radius").unwrap();
     assert_eq!(first.height(), Tokens::get().control_height);
     assert_eq!(second.height(), Tokens::get().control_height);
     // The design's grid: 28 pt controls with a 5 pt row gap and a 70 pt label column (wider only for long labels).
@@ -486,7 +487,7 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
     );
     // The long label widens the column for every row, up to 1.6 times the design's width.
     assert_eq!(label.width(), Tokens::get().form_label_width * 1.6);
-    assert_eq!(scenario::rect_of("dialog:label:A long parameter label that must elide").unwrap().width(), label.width());
+    assert_eq!(registry::rect_of("dialog:label:A long parameter label that must elide").unwrap().width(), label.width());
     assert!(control.left() > label.right());
     assert!(second.contains_rect(control));
     assert_eq!(value, "width / 2 + 10 mm");
@@ -494,7 +495,7 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
 
 #[test]
 fn section_toggles_persist_per_dialog() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut a = 0;
     let mut b = 0;
     let mut draw = |ui: &mut Ui| {
@@ -506,7 +507,7 @@ fn section_toggles_persist_per_dialog() {
         });
     };
     frame(&ctx, vec![], &mut draw);
-    let pos = scenario::handle_at("dialog:section:Options").unwrap();
+    let pos = registry::handle_at("dialog:section:Options").unwrap();
     frame(&ctx, pointer(pos, true), &mut draw);
     frame(&ctx, pointer(pos, false), &mut draw);
     frame(&ctx, vec![], &mut draw);
@@ -529,8 +530,7 @@ fn section_toggles_persist_per_dialog() {
 #[test]
 fn short_labels_keep_the_designs_label_column_and_long_ones_widen_it_for_every_row() {
     fn widths(labels: [&str; 2]) -> (f32, f32) {
-        let ctx = egui::Context::default();
-        crate::fonts::setup_fonts(&ctx);
+        let ctx = crate::ui_kit::test_support::context();
         let mut value = String::new();
         for _ in 0..3 {
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -546,8 +546,8 @@ fn short_labels_keep_the_designs_label_column_and_long_ones_widen_it_for_every_r
             output.textures_delta.clear();
         }
         (
-            scenario::rect_of(&format!("dialog:label:{}", labels[0])).unwrap().width(),
-            scenario::rect_of(&format!("dialog:label:{}", labels[1])).unwrap().width(),
+            registry::rect_of(&format!("dialog:label:{}", labels[0])).unwrap().width(),
+            registry::rect_of(&format!("dialog:label:{}", labels[1])).unwrap().width(),
         )
     }
     let t = Tokens::get();

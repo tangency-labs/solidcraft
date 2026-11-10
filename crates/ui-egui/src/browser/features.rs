@@ -372,7 +372,9 @@ fn feature_row(
         // Inside a placement, the feature's component is active while it is edited, and the one
         // active before comes back when the editor ends (#12720).
         app.edit_feature_in(id, Some((component, path)));
-    } else if r.clicked {
+    } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
+        // An open dialog whose active input takes features gets the row, as in the other
+        // History layouts (#13170).
         click_select(app, ui, order_key, Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {
@@ -395,7 +397,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
     crate::semantic_content::record_capture(ui, &response);
     let line = Rect::from_min_max(pos2(rect.left() + 2.0 + depth as f32 * INDENT, rect.top()), rect.max);
-    crate::ui_kit::history_marker(ui.painter(), line, true, solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::ui_kit::history_marker(ui.painter(), line, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);

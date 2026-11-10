@@ -15,7 +15,7 @@ pub(crate) fn settings_page<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R
     .inner
 }
 
-pub(super) fn settings_page_active(ui: &Ui) -> bool {
+pub(crate) fn settings_page_active(ui: &Ui) -> bool {
     ui.stack().iter().any(|node| node.tags().contains(SETTINGS_PAGE))
 }
 
@@ -66,7 +66,7 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         let rect = ui.max_rect();
         let side = t.space_16 + t.space_2 / 2.0;
         let icon = Rect::from_center_size(pos2(rect.left() + side / 2.0, rect.center().y), vec2(side, side));
-        crate::icons::paint_ink(ui.painter(), icon, "settings_profile", t.form_dim);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "settings_profile", t.form_dim);
         let chevron = Rect::from_center_size(pos2(rect.right() - t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         super::dropdown_indicator(ui.painter(), chevron, t.form_dim);
         let text_left = (icon.right() + t.space_8).min(chevron.left());
@@ -181,9 +181,9 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     if let Some(icon) = chip.icon {
         let at = Rect::from_center_size(pos2(rect.left() + t.space_8 + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
         if icon == "lock" {
-            crate::icons::glyphs::badge(ui.painter(), at, "lock", ink);
+            crate::ui_kit::icons::glyphs::badge(ui.painter(), at, "lock", ink);
         } else {
-            crate::icons::paint_ink(ui.painter(), at, icon, ink);
+            crate::ui_kit::icons::paint_ink(ui.painter(), at, icon, ink);
         }
     }
     let text_left = (rect.left() + t.space_8 + icon_width).min(rect.right());
@@ -226,14 +226,29 @@ fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label
             super::settings_search::block_finish(ui, &gate, false, before);
             return result;
         }
-        let result = settings_block_body(ui, label, hint, label_width, add);
+        // A block that matches is a result even when its control reports none (a plain number
+        // field, as Sketch › Window steps has): without this the page and section headings never
+        // appear and the window says nothing matched.
+        if gate.matched {
+            super::settings_search::reveal(ui);
+        }
+        let stops = super::settings_search::nav_len(ui);
+        let (result, rect) = settings_block_body(ui, label, hint, label_width, add);
+        // The arrow keys reach it too, unless a control inside already gave it a stop.
+        // A block found only by its hint is a stop too; its label is what Enter opens.
+        if super::settings_search::nav_len(ui) == stops {
+            super::settings_search::remember_matched(ui, label, hint, rect);
+        }
         super::settings_search::block_finish(ui, &gate, true, before);
         return result;
     }
-    settings_block_body(ui, label, hint, label_width, add)
+    let (result, rect) = settings_block_body(ui, label, hint, label_width, add);
+    // After Enter opened this block's page from a search, scroll to it and outline it.
+    super::settings_search::follow(ui, label, rect);
+    result
 }
 
-fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> (R, Rect) {
     let t = Tokens::get();
     let width = super::metrics::dimension(ui.available_width());
     let label_width = label_width.min(width * 0.45);
@@ -263,7 +278,7 @@ fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_wi
         .inner
     });
     solidcraft_ui_registry::publish_rect(&format!("dialog:row:{label}"), response.response.rect);
-    response.inner
+    (response.inner, response.response.rect)
 }
 
 /// A bounded control that keeps its intended width inside a larger form column.
@@ -282,40 +297,14 @@ pub(crate) fn settings_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut 
     .inner
 }
 
-/// An illustrative half-hour of autosave marks, using the actual configured interval.
-pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
-    let t = Tokens::get();
-    let (r, _) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), t.space_24 + t.space_12 + t.space_2), Sense::hover());
-    let line = r;
-    if settings_page_active(ui) {
-        solidcraft_ui_registry::publish_rect("prefs:autosave_timeline", r);
-    }
-    ui.painter().hline(line.x_range(), r.top() + t.space_10, Stroke::new(2.0, t.dialog_rule));
-    if minutes.is_finite() && minutes > 0.0 {
-        let ticks = (30.0 / minutes).floor().clamp(0.0, 60.0) as u32;
-        for i in 0..=ticks {
-            let x = line.right() - line.width() * (f64::from(i) * minutes / 30.0) as f32;
-            ui.painter().vline(x, r.top() + t.space_4..=r.top() + t.space_16, Stroke::new(2.0, t.form_primary));
-        }
-    }
-    for (share, key) in [(0.0, "prefs.timeline_half_hour"), (0.5, "prefs.timeline_quarter_hour"), (1.0, "prefs.timeline_now")] {
-        if settings_page_active(ui) && share == 0.5 {
-            continue;
-        }
-        ui.painter().text(
-            pos2(line.left() + line.width() * share, r.top() + t.space_24),
-            if share == 0.0 {
-                egui::Align2::LEFT_TOP
-            } else if share == 1.0 {
-                egui::Align2::RIGHT_TOP
-            } else {
-                egui::Align2::CENTER_TOP
-            },
-            solidcraft_ui_text::tr(key),
-            FontId::proportional(t.font_small),
-            t.form_dim,
-        );
-    }
+/// [`settings_number`] for a whole number, with step arrows (`whole_number_field`, #11829).
+pub(crate) fn settings_whole_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>) -> egui::Response {
+    ui.scope(|ui| {
+        let t = Tokens::get();
+        ui.spacing_mut().interact_size.x = t.form_label_width - t.space_6;
+        super::whole_number_field(ui, value, range, "")
+    })
+    .inner
 }
 
 /// A keyboard binding table: keycaps are separate from actions and never imply fixed bindings.

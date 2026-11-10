@@ -1354,10 +1354,8 @@ mod tests {
         assert!(error.abs() <= 1e-6, "{error}");
     }
 
-    /// The final step's last node is the interval's end itself: `-0.1 + (0.3 - -0.1)`
-    /// rounds to `0.30000000000000004`, past the end, where an integrand whose end is a
-    /// knot (a curve's span, a face's iso-u piece) would read the span beyond it. Every
-    /// node lies within `[x1, x2]`, and the step that ends the integration ends at `x2`.
+    /// A rate that is NaN, infinite or negative is refused before the integrand is
+    /// evaluated, and nothing is written.
     #[test]
     fn a_rate_that_is_not_a_finite_nonnegative_number_is_refused() {
         for rate in [
@@ -1424,6 +1422,75 @@ mod tests {
         }
     }
 
+    /// `rate` on closed forms, as the curve length uses it: a range cut into `n` equal
+    /// pieces, each integrated to half the accuracy with the range's mean as its rate.
+    /// Each step is held to half the accuracy relative to its share of the range plus
+    /// its own increment, shares that add up to twice the integral, so the pieces' sum is
+    /// within the accuracy of the whole integral however many pieces and steps there are.
+    #[test]
+    fn a_rate_holds_a_range_cut_into_pieces_to_the_accuracy_of_the_whole() {
+        use core::f64::consts::PI;
+        type Case = (fn(f64) -> f64, f64, f64, f64);
+        let cases: [Case; 3] = [
+            // e^t on [0, 4]: e^4 - 1
+            (f64::exp, 0.0, 4.0, 4.0_f64.exp() - 1.0),
+            // Runge's 1 / (1 + 25 t^2) on [-1, 1]: 2/5 atan 5
+            (
+                |t| 1.0 / (1.0 + 25.0 * t * t),
+                -1.0,
+                1.0,
+                0.4 * 5.0_f64.atan(),
+            ),
+            // 2 + sin 20t on [0, pi]: 2 pi (the sine's ten periods cancel)
+            (|t| 2.0 + (20.0 * t).sin(), 0.0, PI, 2.0 * PI),
+        ];
+        for (g, a, b, exact) in cases {
+            let rate = exact / (b - a);
+            for accuracy in [1e-4, 1e-6, 1e-8, 1e-10] {
+                for n in [1_u32, 8, 64] {
+                    let piece = (b - a) / f64::from(n);
+                    let mut sum = 0.0;
+                    for j in 0..n {
+                        let x1 = a + f64::from(j) * piece;
+                        let x2 = if j + 1 == n { b } else { x1 + piece };
+                        let mut y = [0.0];
+                        OdeIntegrator::default()
+                            .integrate(
+                                &mut y,
+                                x1,
+                                x2,
+                                OdeOptions {
+                                    accuracy: accuracy / 2.0,
+                                    initial_step: (x2 - x1) / 10.0,
+                                    minimum_step: (x2 - x1) / 1e8,
+                                    scale: None,
+                                    quadrature: true,
+                                    rounding: None,
+                                    rate: Some(rate),
+                                },
+                                |t, _, dy| {
+                                    dy[0] = g(t);
+                                    Ok(())
+                                },
+                            )
+                            .unwrap();
+                        sum += y[0];
+                    }
+                    let error = (sum - exact).abs() / exact;
+                    assert!(
+                        error <= accuracy,
+                        "[{a}, {b}] in {n} pieces at {accuracy:e}: {sum} against {exact}, \
+                         relative error {error:e}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The final step's last node is the interval's end itself: `-0.1 + (0.3 - -0.1)`
+    /// rounds to `0.30000000000000004`, past the end, where an integrand whose end is a
+    /// knot (a curve's span, a face's iso-u piece) would read the span beyond it. Every
+    /// node lies within `[x1, x2]`, and the step that ends the integration ends at `x2`.
     #[test]
     fn the_final_step_ends_at_the_interval_end_exactly() {
         let (x1, x2) = (-0.1_f64, 0.3_f64);

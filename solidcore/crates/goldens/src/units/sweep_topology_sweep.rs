@@ -11,6 +11,7 @@
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use solidcore::error::nurbs::nlib_number;
 use solidcore::geom::{
     attribute::{ids, Attribute, AttributeStore, AttributeValue, Behavior, ObjectKey, TagData},
     context::MarkType,
@@ -88,7 +89,8 @@ fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::Upstream { code, .. } => i64::from(*code),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Nlib { .. } => 1001,
+        e if nlib_number(e).is_some() => 1001,
+        SolidError::Failed(_) => e.sm_status().map_or(-1, i64::from),
         _ => -1,
     }
 }

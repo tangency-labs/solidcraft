@@ -205,13 +205,7 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
     {
         return Err(KernelError::Invalid("the two guide rails meet a section at the same point".into()));
     }
-    // The sections' normals, turned to agree with the first's.
-    let mut normals: Vec<Vec3> = Vec::with_capacity(count);
-    for s in sections {
-        let nn = s.plane.normal();
-        let prev = normals.last().copied().unwrap_or(nn);
-        normals.push(if nn.dot(prev) < 0.0 { nn * -1.0 } else { nn });
-    }
+    let normals = section_normals(sections, |v| middle(v).ok().map(|(_, d)| d), &along);
     let spans = count - 1;
     let per = (MAX_WIRES.saturating_sub(count) / spans).clamp(1, MAX_PER_SPAN);
     let mut out = Vec::with_capacity(count + spans * per);
@@ -250,6 +244,40 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
     }
     out.push(sections.last().map(|s| s.curves.clone()).ok_or_else(|| fail("sections"))?);
     Ok(out)
+}
+
+/// The sections' normals, turned so that the stations between two sections turn the right way
+/// whichever way the sections' sketches face (#12031). `along` holds the sections' parameters
+/// along the loft, and `direction(v)` gives the loft's direction there, if it has one.
+///
+/// Two sections whose planes are within 60° of each other turn the short way, from one normal
+/// to the next. That holds where the loft doubles back, too. Between planes further apart, the
+/// short way is a guess (at 90° there is none), so each normal faces along the loft. A normal
+/// that the loft cannot decide, because its plane lies along the loft's direction or the loft
+/// has no direction there, takes the short way from the section before it. The first section
+/// takes it from the nearest section the loft decides.
+pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> Option<Vec3>, along: &[f64]) -> Vec<Vec3> {
+    let turn = |n: Vec3, to: Vec3| if n.dot(to) < 0.0 { n * -1.0 } else { n };
+    let forward: Vec<Option<Vec3>> = sections
+        .iter()
+        .zip(along)
+        .map(|(s, &v)| {
+            let n = s.plane.normal();
+            let facing = direction(v).map_or(0.0, |d| n.dot(d));
+            (facing.abs() > 1e-3).then(|| if facing < 0.0 { n * -1.0 } else { n })
+        })
+        .collect();
+    let mut normals: Vec<Vec3> = Vec::with_capacity(sections.len());
+    for (s, decided) in sections.iter().zip(&forward) {
+        let n = s.plane.normal();
+        normals.push(match (normals.last(), decided) {
+            (None, Some(f)) => *f,
+            (None, None) => forward.iter().flatten().next().map_or(n, |f| turn(n, *f)),
+            (Some(prev), Some(f)) if n.dot(*prev).abs() < 0.5 => *f,
+            (Some(prev), _) => turn(n, *prev),
+        });
+    }
+    normals
 }
 
 /// The rail `pts` from its end nearer `start` (the first section's middle), and where it meets

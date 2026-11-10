@@ -9,7 +9,11 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-viewport-egui = { workspace = true }
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-control-egui = { workspace = true }

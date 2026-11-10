@@ -1241,7 +1241,9 @@ fn motion_trace_keeps_the_picked_point_path() {
     assert_eq!((&p["occurrence"], &p["joint"], &p["from"], &p["to"]), (&json!([coupler]), &json!(crank), &json!("0 deg"), &json!("360 deg")), "{p}");
     let at = |p: &Value| Vec3::new(p["point"][0].as_f64().unwrap(), p["point"][1].as_f64().unwrap(), p["point"][2].as_f64().unwrap());
     assert!(at(p).dist(placed) < 1e-6, "{p}");
-    let preview = app.session.scratch().execute("motion.trace", p).unwrap();
+    let mut scratch = app.session.scratch();
+    scratch.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let preview = scratch.execute("motion.trace", &super::trace::preview_params(p.clone())).unwrap();
     assert!(preview["samples"] == 100 && preview["stopped_at"].is_null(), "{preview}");
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
     let sketch = app.session.doc.find_feature("Motion Trace1").unwrap().id;

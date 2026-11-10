@@ -254,7 +254,9 @@ impl SphereTile<'_> {
         let t = Tokens::get();
         let accent = solidcraft_theme::TabAccent::current(ui.ctx());
         let side = t.control_height + t.space_6;
-        let line_height = ui.fonts_mut(|fonts| fonts.row_height(&crate::ui_kit::type_face::semibold(t.font_small)));
+        // A laid-out row, as the name's galley will have: layout rounds rows to the pixel grid, so
+        // the font's raw row height can fall short of two rows of text in some faces.
+        let line_height = ui.painter().layout_no_wrap(" ".to_owned(), crate::ui_kit::type_face::semibold(t.font_small), t.form_ink).size().y;
         let height = t.space_16 + side + t.space_6 + line_height * 2.0 + t.space_3;
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
         let response = ui.interact(rect, ui.make_persistent_id(self.id), Sense::click_and_drag());

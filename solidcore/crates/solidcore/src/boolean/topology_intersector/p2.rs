@@ -119,6 +119,7 @@
 //! - **Recursion.** None.
 
 use crate::curve::curve::p2::Curve;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -252,10 +253,18 @@ impl<O: Ord + Copy> MapMates<O> {
     /// `RemoveRelationship`: `SM_ERR` unless the two are a mated pair.
     fn remove(&mut self, brep_entity: Option<O>, other_entity: Option<O>) -> Result<()> {
         let (Some(b), Some(o)) = (brep_entity, other_entity) else {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_REMOVE,
+                BooleanStage::Relate,
+                "the two entities are not a related pair",
+            ));
         };
         if self.other(Some(b)) != Some(o) {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_REMOVE,
+                BooleanStage::Relate,
+                "the two entities are not a related pair",
+            ));
         }
         if let Some(m) = self.b_to_o.as_mut() {
             m.remove(&b);
@@ -440,8 +449,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             for ii in 0..c.curves_3d.len() {
                 let c3 = c.curves_3d.get(ii).copied().flatten();
-                let copy =
-                    Self::b_spline_copy(geometry, c3)?.ok_or(SolidError::sm_err(OP_REGISTER))?;
+                let copy = Self::b_spline_copy(geometry, c3)?.ok_or_else(|| {
+                    SolidError::stage_failed(
+                        OP_REGISTER,
+                        "a curve could not be copied for the intersection",
+                    )
+                })?;
                 if let Some(slot) = c.curves_3d.get_mut(ii) {
                     *slot = Some(copy);
                 }
@@ -478,7 +491,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         other_entity: Option<O>,
     ) -> Result<()> {
         if !self.is_mated_pair(brep_entity, other_entity) {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::boolean_stage_failed(
+                OP_REMOVE,
+                BooleanStage::Relate,
+                "the two entities are not a related pair",
+            ));
         }
         if let (Some(m), Some(b)) = (self.b_to_o.as_mut(), brep_entity) {
             m.remove(&b);
@@ -560,7 +577,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(other_v)?);
             let dist_new = p.distance(brep.vertex_point(other_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::sm_err(OP_SQUEEZE));
+                return Err(SolidError::boolean_stage_failed(
+                    OP_SQUEEZE,
+                    BooleanStage::Relate,
+                    "the existing relation of the vertex is better",
+                ));
             }
 
             self.remove_relationship(Some(brep_vertex), Some(other_v))?;
@@ -591,7 +612,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             let dist_old = p.distance(brep.vertex_point(brep_v)?);
             let dist_new = p.distance(brep.vertex_point(brep_vertex)?);
             if dist_new > dist_old + EFF_ZERO_SQRT {
-                return Err(SolidError::sm_err(OP_SQUEEZE));
+                return Err(SolidError::boolean_stage_failed(
+                    OP_SQUEEZE,
+                    BooleanStage::Relate,
+                    "the existing relation of the vertex is better",
+                ));
             }
 
             self.remove_relationship(Some(brep_v), Some(other_vertex))?;
@@ -778,12 +803,18 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // when no largerThanTol common edge is found between V1 and V2
                 if !found_common_edge {
                     // Have a good candidate for squeezing
-                    let other_v1 = self
-                        .other_mate(Some(v1))
-                        .ok_or(SolidError::null_pointer(OP_FIX_GAPS))?;
-                    let other_v2 = self
-                        .other_mate(Some(v2))
-                        .ok_or(SolidError::null_pointer(OP_FIX_GAPS))?;
+                    let other_v1 = self.other_mate(Some(v1)).ok_or_else(|| {
+                        SolidError::entity_missing(
+                            OP_FIX_GAPS,
+                            "a related vertex in the other B-rep",
+                        )
+                    })?;
+                    let other_v2 = self.other_mate(Some(v2)).ok_or_else(|| {
+                        SolidError::entity_missing(
+                            OP_FIX_GAPS,
+                            "a related vertex in the other B-rep",
+                        )
+                    })?;
                     // (the casts to SmVertex* are used by CombineCoincidentVertices)
                     Self::as_vertex(Some(other_v1))?;
                     Self::as_vertex(Some(other_v2))?;
@@ -989,11 +1020,23 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         deleted_edges: &mut Vec<O>,
     ) -> Result<bool> {
         // check input
-        let brep_vertex = brep_vertex.ok_or(SolidError::null_pointer(OP_CLOSE_LOOP))?;
+        let brep_vertex = brep_vertex.ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_CLOSE_LOOP,
+                BooleanStage::CloseLoop,
+                "a vertex to close the loop at",
+            )
+        })?;
 
         // find mating vertex in m_pOther brep
         let other_vertex = Self::cast(self.other_mate(Some(brep_vertex)), ClassObjectKind::Vertex)
-            .ok_or(SolidError::null_pointer(OP_CLOSE_LOOP))?;
+            .ok_or_else(|| {
+                SolidError::boolean_entity_missing(
+                    OP_CLOSE_LOOP,
+                    BooleanStage::CloseLoop,
+                    "a vertex of the other B-rep related to the loop's vertex",
+                )
+            })?;
 
         // init output
         let mut made_new_topology = false;
@@ -1758,7 +1801,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // error condition - curveClassifications not homogenized
         if cc_brep.size() != cc_other.size() {
-            return Err(SolidError::sm_err(OP_CLASS_MATES));
+            return Err(SolidError::stage_failed(
+                OP_CLASS_MATES,
+                "the curve classifications differ in length",
+            ));
         }
 
         // for every interval (the index restarts at 0 after a change)
@@ -1908,7 +1954,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let (success_o, drop_param_o, dist_to_curve_o) = drop(&pc_o)?;
 
         if !success_b && !success_o {
-            return Err(SolidError::sm_err(OP_SPLIT_PAIR));
+            return Err(SolidError::boolean_stage_failed(
+                OP_SPLIT_PAIR,
+                BooleanStage::Split,
+                "neither vertex of the pair can be dropped onto the other's curve",
+            ));
         }
 
         // pick a common curve parameter for the saved PointClasses: favor the ThisBrep
@@ -2095,7 +2145,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 edges2.push(Some(e2));
                 edges2.extend(split.new_edges2.iter().copied());
                 if edges1.len() > MAX_EDGE_LIST || edges2.len() > MAX_EDGE_LIST {
-                    return Err(SolidError::sm_err(OP_EDGE_EDGE));
+                    return Err(SolidError::boolean_stage_failed(
+                        OP_EDGE_EDGE,
+                        BooleanStage::Split,
+                        "the edges split too many times",
+                    ));
                 }
 
                 // Update tolerances (statuses unchecked).
@@ -2401,7 +2455,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             ) => return Err(err),
                             Err(_) => {
                                 if !ignore_problems {
-                                    return Err(SolidError::sm_err(OP_EDGE_FACE_COIN));
+                                    return Err(SolidError::boolean_stage_failed(OP_EDGE_FACE_COIN, BooleanStage::Coincidence, "the coincidence of an edge with a face could not be resolved"));
                                 }
                             }
                         }

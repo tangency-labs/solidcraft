@@ -70,7 +70,7 @@ impl StageBar {
         let accent = TabAccent::current(ui.ctx());
         let center = rect.center();
         let icon_side = t.control_height + t.space_2;
-        crate::icons::paint_icon(ui.painter(), Rect::from_center_size(center - vec2(0.0, t.space_16), vec2(icon_side, icon_side)), icon, 1.0);
+        crate::ui_kit::icons::paint_icon(ui.painter(), Rect::from_center_size(center - vec2(0.0, t.space_16), vec2(icon_side, icon_side)), icon, 1.0);
         super::text::paint_text(
             ui,
             Rect::from_center_size(
@@ -129,7 +129,7 @@ impl StageBar {
         let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height - t.space_2), Sense::hover());
         ui.painter().rect_filled(rect, t.control_radius, t.dialog_footer);
         let icon = Rect::from_center_size(pos2(rect.left() + t.space_8 + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
-        crate::icons::paint_ink(ui.painter(), icon, "help", t.text_dim);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "help", t.text_dim);
         super::text::paint_text(
             ui,
             Rect::from_min_max(pos2(icon.right() + t.space_6, rect.top()), rect.max),

@@ -441,7 +441,7 @@ fn available(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State) {
         });
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(Tokens::get().space_8, Tokens::get().space_8);
-            for slot in navigation_bar::CATALOGUE {
+            for slot in crate::navigation_slots::CATALOGUE {
                 if slot.kind == NavigationKind::Separator || app.preferences.navigation_bar.slots.iter().any(|id| id == slot.id) {
                     continue;
                 }

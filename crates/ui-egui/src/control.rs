@@ -49,9 +49,9 @@ use solidcraft_engine::geom::prelude::*;
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
-use solidcraft_engine::render::{Camera, StandardView};
 use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::{batch_params, timing};
+use solidcraft_viewport::{Camera, StandardView};
 
 use crate::SolveApp;
 
@@ -320,10 +320,10 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         if let Some(why) = batch_refusal(steps) {
             return err(why);
         }
-        if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
-            return ok(refusal.reply(steps.len()));
-        }
         let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
+        if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
+            return ok(refusal.reply(steps.len(), rollback));
+        }
         if rollback {
             if panels != steps.len() {
                 return err(solidcraft_engine::panels::commands::error_text(solidcraft_engine::panels::error(
@@ -350,11 +350,11 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     if let Some(why) = batch_refusal(steps) {
         return err(why);
     }
+    let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     // A step the batch would refuse at its turn refuses it now, before anything runs (#5853).
     if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
-        return ok(refusal.reply(steps.len()));
+        return ok(refusal.reply(steps.len(), rollback));
     }
-    let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let profile = p.get("profile").and_then(Value::as_bool).unwrap_or(false);
     let timed = profile || p.get("timings").and_then(Value::as_bool).unwrap_or(false);
     let mut rows = Vec::new();
@@ -478,11 +478,11 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// What a picture of the view shows: the model as the window shows it (theme and colour vision
 /// mode, the section the viewport shows: an open Section Analysis dialog's preview, a sketch's
 /// Slice), with the grid and the origin's axes as `guides` says.
-pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_engine::render::Scene, String> {
+pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_viewport::Scene, String> {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
     // The view's own background colour (#7688).
     if let Some([r, g, b]) = app.preferences.viewport_background {
-        palette.background = (solidcraft_engine::render::Rgb(r, g, b), solidcraft_engine::render::Rgb(r, g, b));
+        palette.background = (solidcraft_viewport::Rgb(r, g, b), solidcraft_viewport::Rgb(r, g, b));
     }
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
@@ -518,7 +518,7 @@ pub(crate) fn view_rgba(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, Strin
 /// [`view_rgba`] as PNG.
 pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
     let rgba = view_rgba(app, w, h)?;
-    solidcraft_engine::render::png(w as usize, h as usize, rgba).ok_or_else(|| "PNG encoding failed".to_string())
+    solidcraft_viewport::png(w as usize, h as usize, rgba).ok_or_else(|| "PNG encoding failed".to_string())
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
@@ -703,10 +703,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 ctx.request_repaint();
             }
             let availability = crate::prefs::blur_availability(app);
-            let reason = match availability {
-                crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason)),
-                crate::theme_options::Availability::Available => None,
-            };
+            let reason = crate::prefs::theme_option_reason(availability).map(|reason| app.tr(reason));
             ok(
                 json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
                     "available": availability == crate::theme_options::Availability::Available, "reason": reason,
@@ -1640,6 +1637,14 @@ mod tests {
         assert_eq!(reply["ok"], false);
         assert_eq!(reply["panel_error"]["rule"], "lifecycle");
         assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+        // Refused before its first step, nothing ran: `rolled_back` as a rollback that went back
+        // reports it (#10749).
+        let refused = json!([panel_steps()[1].clone(), {"command":"solid.boxx","params":{}}]);
+        let reply = panel_control(&mut app, "engine.batch", json!({"commands":refused.clone()}));
+        assert_eq!((&reply["result"]["completed"], &reply["result"]["rolled_back"]), (&json!(0), &json!(true)), "{reply}");
+        let reply = panel_control(&mut app, "engine.batch", json!({"commands":refused,"rollback":false}));
+        assert_eq!(reply["result"]["rolled_back"], false, "{reply}");
+        assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
     }
     #[test]
     fn panel_control_catalogue_batches_and_scripts_retain_memory_and_refuse_unsupported_atomic_domains() {
@@ -2549,7 +2554,7 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "corner": [10, -15, -10]})).unwrap();
         let mut app = SolveApp::new(s, Services::default());
-        app.cam.set_view(solidcraft_engine::render::StandardView::Front);
+        app.cam.set_view(solidcraft_viewport::StandardView::Front);
         let dir = std::env::temp_dir().join(format!("solidcraft-render-guides-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("shot.png");
@@ -3019,6 +3024,15 @@ mod tests {
         let v = batch(&mut h, json!({"commands": steps, "rollback": false}));
         assert_eq!((&v["result"]["rolled_back"], &v["result"]["undone"]), (&json!(false), &json!(0)), "{v}");
         assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(1));
+        // Refused before its first step (#10749): nothing ran, so the design is where the batch
+        // started, which `rolled_back` says as it does after a rollback that went back.
+        let refused = json!([{"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}, {"command": "solid.boxx", "params": {}}]);
+        let v = batch(&mut h, json!({"commands": refused.clone()}));
+        assert_eq!((&v["result"]["completed"], &v["result"]["not_run"]), (&json!(0), &json!([0, 1])), "{v}");
+        assert_eq!((&v["result"]["rolled_back"], &v["result"]["undone"]), (&json!(true), &json!(0)), "{v}");
+        let v = batch(&mut h, json!({"commands": refused, "rollback": false}));
+        assert_eq!(v["result"]["rolled_back"], json!(false), "{v}");
+        assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(1), "nothing ran");
     }
 
     /// Every step of a batch from an MCP server stays inside the agent's folders (#205), as an

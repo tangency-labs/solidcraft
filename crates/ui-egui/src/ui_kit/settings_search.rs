@@ -297,6 +297,10 @@ pub(crate) struct BlockGate {
     key: String,
     discover: bool,
     pub show: bool,
+    /// The block is a result in its own right: its label or hint, its section or a forced pass
+    /// matches. Such a block counts as a hit even when the control inside it (a plain number
+    /// field) does not report one.
+    pub matched: bool,
 }
 
 /// `Some` while a search is active. `show` draws the block; otherwise the caller runs it hidden
@@ -313,8 +317,14 @@ pub(crate) fn block_gate(ui: &Ui, label: &str, hint: Option<&str>) -> Option<Blo
         let discover = !state.seen_blocks.contains(&key);
         let show = state.section_matches || state.force > 0 || label_hit || state.open_blocks.contains(&key);
         state.block_matches = state.section_matches || state.force > 0 || label_hit;
-        BlockGate { key, discover, show }
+        BlockGate { key, discover, show, matched: state.block_matches }
     })
+}
+
+/// How many keyboard stops this pass has painted so far, to tell whether a block's controls
+/// registered one of their own.
+pub(crate) fn nav_len(ui: &Ui) -> usize {
+    with(ui, |state| state.nav.len()).unwrap_or(0)
 }
 
 pub(crate) fn block_finish(ui: &Ui, gate: &BlockGate, showed: bool, hits_before: u32) {
@@ -784,7 +794,13 @@ pub(crate) fn store_nav(ui: &Ui) {
 
 /// A row whose own words matched. Section titles and controls both call this once they have a rect.
 pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
-    if !ui.is_visible() || !querying(ui) || label.is_empty() || !text_hit(ui, label) {
+    remember_matched(ui, label, None, rect);
+}
+
+/// [`remember`] for a row whose hint can match too: a row found only by its hint is still a
+/// stop for the arrow keys, and its label stays the target Enter opens.
+pub(crate) fn remember_matched(ui: &mut Ui, label: &str, hint: Option<&str>, rect: Rect) {
+    if !ui.is_visible() || !querying(ui) || label.is_empty() || !(text_hit(ui, label) || hint.is_some_and(|hint| text_hit(ui, hint))) {
         return;
     }
     if with(ui, |state| state.hiding > 0).unwrap_or(true) {
@@ -824,10 +840,17 @@ pub(crate) fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
     Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
 }
 
+impl Reveal {
+    /// Whether the outline's time is up, on the same clock that set [`Reveal::until`].
+    pub(crate) fn expired(&self) -> bool {
+        now_ms() > self.until
+    }
+}
+
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
+    if reveal.expired() || fold(label) != fold(&reveal.label) {
         return;
     }
     let page = with(ui, |state| state.page_index);
@@ -850,211 +873,17 @@ fn now_ms() -> f64 {
 mod tests {
     use super::*;
 
-    #[test]
-    fn theme_picker_names_and_controls_are_searchable_and_theme_results_reveal_real_cards() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.call("ui.resize", serde_json::json!({"width":1467,"height":1146}));
-        h.call("ui.prefs", serde_json::json!({"language":"en","theme":"system","open":"Appearance"}));
-        for label in
-            ["Onyx", "Follow system", "One theme", "Carousel", "Grid", "Day theme", "Night theme", "High contrast", "Import theme file…", "Imported"]
-        {
-            h.app.prefs_window.shell.filter = label.to_owned();
-            h.frames(5);
-            let (_, _, hits) = nav(&h.ctx);
-            let matches: Vec<_> =
-                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_APPEARANCE && hit.label == label).collect();
-            assert_eq!(
-                matches.len(),
-                1,
-                "{label} has one searchable Appearance control: {:?}",
-                hits.iter().map(|hit| (&hit.label, hit.page)).collect::<Vec<_>>()
-            );
-            if label == "Onyx" {
-                set_cursor(&h.ctx, matches[0].0);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                h.frames(25);
-                let page = crate::scenario::rect_of("prefs:page_body").unwrap();
-                let target = crate::scenario::rect_of("prefs:theme:onyx").unwrap();
-                assert!(page.contains_rect(target));
-                assert_eq!(h.app.preferences.theme, "system", "revealing a theme never selects it");
-            }
-        }
-    }
-
-    #[test]
-    fn graphics_cards_tiles_and_short_status_labels_keep_search_paths_and_reveal() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", serde_json::json!({"theme":theme,"language":"en"}));
-            h.call("ui.prefs", serde_json::json!({"open":"Graphics"}));
-            for (query, label, handle) in [
-                ("Display quality", "Curved surfaces", "prefs:display_quality:normal"),
-                ("MSAA", "Anti-aliasing", "prefs:msaa:4"),
-                ("Ambient occlusion", "Ambient occlusion", "prefs:ambient_occlusion"),
-                ("Profile operations", "Profile operations", "prefs:profile_operations"),
-                ("Quick measurement in the view's corner", "Quick measurement", "prefs:quick_measure"),
-                ("Show viewport analysis status", "Analysis", "prefs:viewport_analysis_status"),
-                ("Show viewport section status", "Section", "prefs:viewport_section_status"),
-                ("Live viewport details", "Live details", "prefs:viewport_status_details"),
-                ("Fold viewport status items", "Fold items", "prefs:viewport_status_summary"),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> =
-                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_GRAPHICS && hit.label == label).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} keeps one real Graphics search target");
-                let index = matching[0].0;
-                set_cursor(&h.ctx, index);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                // Enter restores the full page; let its normal scroll animation settle.
-                h.frames(20);
-                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
-                assert!(h.app.prefs_window.shell.filter.is_empty());
-                let page = crate::scenario::rect_of("dialog:page_body").unwrap();
-                let target = crate::scenario::rect_of(handle).unwrap();
-                assert!(page.contains_rect(target), "{query} reveals the real control: page={page:?}, target={target:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn appearance_controls_keep_one_search_result_and_their_page() {
-        use egui::accesskit::Role;
-        for width in [520, 1600] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
-            h.call("ui.prefs", serde_json::json!({"language":"en","open":"Appearance"}));
-            for (query, label, row_target, native) in [
-                ("3D view colors", "3D view colors", "dialog:row:3D view colors", None),
-                ("Interface scale", "Interface scale", "dialog:row:Interface scale", Some((Role::Slider, "Interface scale", "prefs:scale"))),
-                ("Follow a theme file", "Follow a theme file", "prefs:theme_follow_toggle", None),
-                ("Background", "Background", "dialog:row:Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
-                ("Font", "Font", "dialog:row:Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
-                assert_eq!(matching.len(), 1, "width={width}: {query} needs exactly one real navigation hit");
-                assert_eq!(matching[0].page, crate::prefs::PAGE_APPEARANCE);
-                // The search field also contains the query as its accessible value. Use the
-                // indexed row so this check measures the result rather than the search field.
-                let row = crate::scenario::rect_of(row_target).unwrap();
-                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-                assert!(body.contains(row.center()), "width={width}: {query} row {row:?} outside {body:?}");
-                if let Some((role, name, target)) = native {
-                    let tree = h.output.accesskit_update.as_ref().unwrap();
-                    let controls: Vec<_> =
-                        tree.nodes.iter().filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(name)).collect();
-                    assert_eq!(controls.len(), 1, "width={width}: {query} must expose one enabled native {name} control");
-                    let bounds = controls[0].1.bounds().unwrap();
-                    let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
-                    let rect = crate::scenario::rect_of(target).unwrap();
-                    assert!(body.contains_rect(rect) && rect.contains(centre), "width={width}: {name} is visible at its real target");
-                    if name == "Interface scale" {
-                        let row = crate::scenario::rect_of("dialog:row:Interface scale").unwrap();
-                        assert!((rect.left() - row.left()).abs() <= 1.0, "accessible-only name reserves no label column");
-                    }
-                    if name == "Color" {
-                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
-                        h.frames(2);
-                        assert_eq!(h.app.preferences.viewport_background, Some([255, 255, 255]), "the search hit edits the real setting");
-                    }
-                    if name == "Interface font" {
-                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
-                        h.frames(2);
-                        assert!(crate::scenario::handle_at("prefs:font_builtin").is_some(), "real searchable font picker opens at either width");
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn search_matches_a_label_a_subsequence_and_the_english_source() {
-        crate::i18n::install();
-        assert!(matches_text("zoom", &["Reverse zoom direction"]));
-        assert!(matches_text("zo", &["Reverse zoom direction"]));
-        assert!(!matches_text("rzd", &["Reverse zoom direction"]));
-        assert!(!matches_text("q", &["Units of new designs"]));
-        assert!(!matches_text("qqqq", &["Units of new designs"]));
-        let _language = solidcraft_ui_text::scope("fr");
-        assert!(matches_text("units", &["Unités des nouvelles conceptions"]));
-        assert!(matches_text("preferences", &["préférences"]));
-        assert!(matches_text("dark", &["Theme"]));
-        assert!(matches_text("antialiasing", &["Anti-aliasing"]));
-        assert!(!matches_text("dark", &["Units of new designs"]));
-    }
-
-    /// A multi-word right-to-left label reaches the search in display order while the query is
-    /// typed in reading order: typing the label's words as written must find the row (#10471).
-    #[test]
-    fn layout_controls_keep_one_real_search_target_and_native_names() {
-        use egui::accesskit::Role;
-        for width in [600, 1600] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
-            h.call("ui.prefs", serde_json::json!({"language":"en","open":"Layout"}));
-            for (query, native) in [
-                ("History", None),
-                ("Browser", None),
-                ("Components start open", Some((Role::CheckBox, "prefs:browser_components_open"))),
-                ("Menus", None),
-                ("Highlight active commands", Some((Role::CheckBox, "prefs:persistent_ribbon_pressed"))),
-                ("Show navigation bar", Some((Role::CheckBox, "prefs:navbar:show"))),
-                ("Position", None),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().filter(|hit| hit.page == crate::prefs::PAGE_LAYOUT && hit.label == query).collect();
-                assert_eq!(matching.len(), 1, "{width}: {query} has one real Layout target");
-                if let Some((role, target)) = native {
-                    let tree = h.output.accesskit_update.as_ref().unwrap();
-                    let nodes: Vec<_> =
-                        tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(query) && !node.is_disabled()).collect();
-                    assert_eq!(nodes.len(), 1, "{query} retains its native accessible name");
-                    let bounds = nodes[0].1.bounds().unwrap();
-                    let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
-                    assert!(crate::scenario::rect_of(target).unwrap().contains(centre));
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn search_finds_right_to_left_labels_typed_in_reading_order() {
-        crate::i18n::install();
-        let _language = solidcraft_ui_text::scope("he");
-        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
-        assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
-        assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
-        assert!(matches_text("תיקיות", &[label]), "one word still matches");
-        let _language = solidcraft_ui_text::scope("ar");
-        let label = solidcraft_ui_text::tr("prefs.bodies_folders");
-        assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
-        assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
-        assert!(matches_text("مجلدات", &[label]), "one word still matches");
-    }
-
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
     #[test]
     fn shared_standalone_cards_and_chips_filter_index_and_reveal_their_bounds() {
         use crate::ui_kit::{self, Card};
         for kind in 0..4 {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let mut target = Rect::NOTHING;
             let mut miss = Rect::NOTHING;
             let mut draw = |filter: &str| {
-                crate::test_support::frame(&ctx, Default::default(), |ui| {
+                crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                     let _search = begin(ui, filter, "prefs");
                     begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
                     for label in ["Performance", "Quality"] {
@@ -1083,9 +912,9 @@ mod tests {
             assert_eq!(hits.len(), 1, "control {kind} owns one real keyboard target");
             assert_eq!((hits[0].page, hits[0].label.as_str()), (crate::prefs::PAGE_LAYOUT, "Quality"));
             set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_LAYOUT, label: "Quality".into(), until: f64::MAX, prefix: "prefs".into() }));
-            crate::scenario::clear_handles();
+            solidcraft_ui_registry::clear_handles();
             // The search is cleared before the selected setting is revealed.
-            crate::test_support::frame(&ctx, Default::default(), |ui| {
+            crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                 let _search = begin(ui, "", "prefs");
                 begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
                 let card = Card {
@@ -1104,7 +933,7 @@ mod tests {
                     2 => ui_kit::preset_card(ui, "Quality", "", false, false, &|_, _, _| {}, 100.0),
                     _ => ui_kit::settings_chip(ui, "Quality", Default::default()),
                 };
-                assert_eq!(crate::scenario::handle_at("prefs:revealed"), Some(response.rect.center()));
+                assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(response.rect.center()));
             });
         }
     }
@@ -1115,9 +944,9 @@ mod tests {
         let choices =
             [PictureChoice { key: "on", label: "Anti-aliasing", figure: |_, _| {} }, PictureChoice { key: "off", label: "Off", figure: |_, _| {} }];
         for (query, expected) in [("Sampling", "Sampling"), ("Anti-aliasing", "Anti-aliasing"), ("msaa", "Anti-aliasing")] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             for _ in 0..4 {
-                crate::test_support::frame(&ctx, Default::default(), |ui| {
+                crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                     let _search = begin(ui, query, "prefs");
                     begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
                     assert_eq!(ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true), None);
@@ -1129,576 +958,13 @@ mod tests {
             assert_eq!(hits[0].label, expected);
             assert_eq!(hits[0].page, crate::prefs::PAGE_GRAPHICS);
             set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_GRAPHICS, label: expected.into(), until: f64::MAX, prefix: "prefs".into() }));
-            crate::test_support::frame(&ctx, Default::default(), |ui| {
+            crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                 let _search = begin(ui, "", "prefs");
                 begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
                 ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true);
-                let rect = crate::scenario::rect_of(if expected == "Sampling" { "dialog:row:Sampling" } else { "prefs:shared:on" }).unwrap();
-                assert_eq!(crate::scenario::handle_at("prefs:revealed"), Some(rect.center()));
+                let rect = solidcraft_ui_registry::rect_of(if expected == "Sampling" { "dialog:row:Sampling" } else { "prefs:shared:on" }).unwrap();
+                assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(rect.center()));
             });
-        }
-    }
-
-    #[test]
-    fn the_search_field_names_the_window_it_searches() {
-        crate::i18n::install();
-        let name = solidcraft_ui_text::tr("ui.preferences").to_lowercase();
-        for id in ["prefs.search", "prefs.search_empty"] {
-            let text = solidcraft_ui_text::tr(id).to_lowercase();
-            assert!(text.contains(&name), "`{text}` should name the window `{name}`");
-        }
-    }
-
-    #[test]
-    fn general_redesigned_controls_remain_searchable_without_duplicate_settings() {
-        use egui::accesskit::Role;
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        h.app.preferences.language = "en".into();
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
-        for (query, label) in [
-            ("reopen the designs", "Reopen the designs that were open last time"),
-            ("autosave every", "Autosave every"),
-            ("largest file to open: step", "Largest file to open: STEP and import"),
-            ("largest file to open: design", "Largest file to open: Design"),
-            ("allow network locations", "Allow network locations in designs"),
-            ("slicer that is already running", "Open files in a slicer that is already running"),
-            ("print face highlight", "Print face highlight"),
-            ("interface language", "Interface language"),
-        ] {
-            h.app.prefs_window.shell.filter = query.into();
-            h.frames(4);
-            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-            let at = h.widget(label).unwrap_or_else(|| panic!("{label} must match {query}"));
-            assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)), "{label} is drawn in the results");
-            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none(), "{query} has a real result instead of the empty-results message");
-            let (_, _, hits) = nav(&h.ctx);
-            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
-            assert_eq!(matching.len(), 1, "{label} must have one real search result");
-            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
-            let control = match label {
-                "Autosave every" => Some(("prefs:autosave_minutes", Role::SpinButton, "Minutes", h.app.autosave_minutes)),
-                "Largest file to open: STEP and import" => {
-                    Some(("prefs:max_step_file_mb", Role::SpinButton, label, h.app.preferences.max_step_file_mb as f64))
-                }
-                "Largest file to open: Design" => {
-                    Some(("prefs:max_design_file_mb", Role::SpinButton, label, h.app.preferences.max_design_file_mb as f64))
-                }
-                "Print face highlight" => {
-                    Some(("prefs:print_face_highlight", Role::Slider, label, f64::from(h.app.preferences.print_face_highlight)))
-                }
-                _ => None,
-            };
-            if let Some((identity, role, accessible_label, value)) = control {
-                let field = crate::scenario::rect_of(identity).expect("the matching field retains its stable identity");
-                assert!(body.contains_rect(field), "{identity} is drawn in the results");
-                let tree = h.output.accesskit_update.as_ref().unwrap();
-                // Search also measures invisible, disabled probe UIs. Count the live control.
-                let controls: Vec<_> = tree
-                    .nodes
-                    .iter()
-                    .filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(accessible_label))
-                    .collect();
-                assert_eq!(controls.len(), 1, "{identity} must have one real searchable control");
-                let node = &controls[0].1;
-                assert_eq!(node.numeric_value(), Some(value), "{identity} exposes its actual setting value");
-                let bounds = node.bounds().unwrap();
-                assert!(field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32)));
-            }
-        }
-        // An unavailable control is still a real result. Invisible search probes are also
-        // disabled, so require the live navigation hit and painted label as well as metadata.
-        h.app.updater.kind = Some(crate::update::InstallKind::Dev);
-        assert!(!crate::update::available(&mut h.app));
-        let label = "Check at start and once a day";
-        h.app.prefs_window.shell.filter = label.into();
-        for checked in [false, true] {
-            h.app.preferences.check_updates = checked;
-            h.frames(4);
-            let (_, _, hits) = nav(&h.ctx);
-            let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
-            assert_eq!(matching.len(), 1, "the disabled setting has one live result");
-            assert_eq!(matching[0].page, crate::prefs::PAGE_GENERAL);
-            assert!(h.widget(h.app.tr("prefs.search_empty")).is_none());
-            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
-            let field = crate::scenario::rect_of("prefs:check_updates").expect("the real scheduling control");
-            assert!(body.contains_rect(field));
-            let tree = h.output.accesskit_update.as_ref().unwrap();
-            let (_, node) = tree
-                .nodes
-                .iter()
-                .rev()
-                .find(|(_, node)| {
-                    node.role() == Role::CheckBox
-                        && node.label() == Some(label)
-                        && node.bounds().is_some_and(|bounds| {
-                            field.contains(egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32))
-                        })
-                })
-                .expect("the disabled checkbox exposes its real state at the rendered control");
-            assert!(node.is_disabled());
-            assert_eq!(node.toggled(), Some(if checked { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False }));
-            let painted = h
-                .shapes
-                .iter()
-                .filter(|shape| {
-                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label && body.contains(text.pos) && shape.clip_rect.contains(text.pos))
-                })
-                .count();
-            assert_eq!(painted, 1, "one visible disabled control is painted, beyond probe metadata");
-            h.step(&serde_json::json!({"click":{"handle":"prefs:check_updates"}})).unwrap();
-            assert_eq!(h.app.preferences.check_updates, checked, "the search result cannot edit an unavailable setting");
-        }
-    }
-
-    /// Typing focuses the field, Enter opens that setting, and Escape returns to the page
-    /// that was up when the search started. Recording a shortcut keeps the key.
-    #[test]
-    fn preferences_search_types_opens_and_returns() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GRAPHICS);
-        h.frames(2);
-        h.step(&serde_json::json!({"key": "F", "cmd": true})).expect("find");
-        h.frames(1);
-        assert!(h.ctx.memory(|memory| memory.has_focus(crate::prefs::search_id())), "Cmd+F focuses search");
-        h.step(&serde_json::json!({"text": "zo"})).expect("type");
-        h.frames(20);
-        assert!(h.widget("Reverse zoom direction").is_some(), "typed letters search from the open page");
-        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS);
-        let first = crate::scenario::handle_at("prefs:search:current");
-        h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
-        h.frames(1);
-        let second = crate::scenario::handle_at("prefs:search:current");
-        assert!(first.is_some() && second.is_some() && first != second, "Down moves to the next match");
-        h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
-        h.frames(1);
-        assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
-        let (_, _, hits) = nav(&h.ctx);
-        let cursor = hits
-            .iter()
-            .position(|hit| hit.page == crate::prefs::PAGE_NAVIGATION && hit.label == "Reverse zoom direction")
-            .expect("the Navigation setting remains keyboard reachable");
-        set_cursor(&h.ctx, cursor);
-        h.frames(2);
-        h.step(&serde_json::json!({"key": "Enter"})).expect("open");
-        h.frames(2);
-        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
-        assert!(h.app.prefs_window.shell.filter.is_empty());
-        assert!(h.widget("Reverse zoom direction").is_some());
-        assert!(crate::scenario::handle_at("prefs:revealed").is_some(), "the opened row is highlighted");
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GRAPHICS);
-        h.frames(2);
-        h.step(&serde_json::json!({"text": "zo"})).expect("search again");
-        h.frames(2);
-        h.step(&serde_json::json!({"key": "Escape"})).expect("clear");
-        h.frames(1);
-        assert!(h.app.prefs_window.shell.filter.is_empty());
-        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GRAPHICS, "Escape returns to the page from before the search");
-    }
-
-    #[test]
-    fn sketch_picture_groups_and_options_have_one_real_search_hit_and_enter_reveals_the_cards() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
-            h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
-            let original = (h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies);
-            for (query, target, option) in [
-                ("When a sketch ends", "prefs:sketch_exit_view:choices", "Keep"),
-                ("Return to the view before", "prefs:sketch_exit_view:previous", "Return to the view before"),
-                ("Keep", "prefs:sketch_exit_view:keep", "Keep"),
-                ("Unless turned", "prefs:sketch_exit_view:unless_rotated", "Unless turned"),
-                ("Click selects", "prefs:pick_bodies:choices", "Whole bodies"),
-                ("Faces and edges", "prefs:pick_bodies:faces_edges", "Faces and edges"),
-                ("Whole bodies", "prefs:pick_bodies:bodies", "Whole bodies"),
-            ] {
-                h.call("ui.prefs", serde_json::json!({"open":"General"}));
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SKETCH).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} has exactly one real Sketch setting hit");
-                assert_eq!(matching[0].1.label, query);
-                let tree = h.output.accesskit_update.as_ref().unwrap();
-                assert!(
-                    tree.nodes.iter().any(|(_, node)| {
-                        node.role() == egui::accesskit::Role::RadioButton && node.label() == Some(option) && !node.is_disabled()
-                    }),
-                    "{query} exposes the enabled native card"
-                );
-                set_cursor(&h.ctx, matching[0].0);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                // Enter restores the full page; allow its scroll animation to settle.
-                h.frames(20);
-                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SKETCH);
-                assert!(h.app.prefs_window.shell.filter.is_empty());
-                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
-                let actual = crate::scenario::rect_of(target).unwrap();
-                let revealed = crate::scenario::handle_at("prefs:revealed").expect("Enter publishes an actual reveal target");
-                assert!(body.contains_rect(actual), "{theme}: {query} reveals the actual cards inside the body");
-                assert!(revealed.distance(actual.center()) <= 1.0, "{theme}: {query} outlines its real group/card");
-                if target.ends_with(":choices") {
-                    let group = crate::scenario::rect_of(&format!("dialog:row:{query}")).unwrap();
-                    assert!((actual.left() - group.left()).abs() <= 1.0, "{theme}: {query} has no phantom label column beside its cards");
-                }
-                assert_eq!((h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies), original, "navigation does not change a choice");
-            }
-        }
-    }
-
-    #[test]
-    fn sketch_short_labels_keep_the_legacy_search_terms_in_every_complete_locale() {
-        crate::i18n::install();
-        let cases = [
-            ("prefs.sketch.tracking_guides", "Center and midpoint alignment guides"),
-            ("prefs.sketch.tracking_points", "Alignment guides from end points and corners while drawing"),
-            ("prefs.sketch.recent_snap", "Auto snap to recent centers and midpoints"),
-            ("prefs.sketch.align_points", "Line up with other sketch points while drawing"),
-            ("prefs.sketch.center_arc", "Center point arc follows the cursor's direction"),
-            ("prefs.sketch.auto_locate", "Also place them from the origin (fully constrained)"),
-            ("prefs.sketch.shortcut_cycles_modes", "Pressing a tool's shortcut again switches its mode"),
-            ("prefs.sketch.project_options", "Project options dialog"),
-            ("prefs.sketch.exit_previous", "Return to the previous view"),
-            ("prefs.sketch.exit_keep", "Keep the current view"),
-            ("prefs.sketch.exit_unless_rotated", "Return unless rotated"),
-            ("prefs.sketch.state_icons", "Sketch icons in the color of their state"),
-            ("prefs.sketch.conflict_colour", "Conflicting geometry in the conflict color"),
-            ("prefs.sketch.hide_glyphs", "Hide constraint glyphs when zoomed out"),
-            ("prefs.sketch.prefer_free_points", "Prefer movable sketch points when points overlap"),
-            ("prefs.sketch.select_other_hidden", "Select hidden geometry with Select Other"),
-            ("prefs.sketch.whole_bodies", "Click selects whole bodies"),
-        ];
-        for lang in ["en", "en-GB", "ar", "de", "he", "ja", "ko", "vi", "zh"] {
-            let _language = solidcraft_ui_text::scope(lang);
-            for (id, legacy) in cases {
-                assert!(matches_text(legacy, &[solidcraft_ui_text::tr(id)]), "{lang}: {legacy} still finds {id}");
-            }
-        }
-    }
-
-    /// Typing in a number field (the largest STEP file) edits that field instead of starting
-    /// a search.
-    #[test]
-    fn preferences_number_fields_keep_typed_text() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
-        h.frames(2);
-        crate::prefs::reveal_preference(&mut h, "prefs:max_step_file_mb");
-        let field = crate::scenario::rect_of("prefs:max_step_file_mb").expect("STEP limit field");
-        assert!(crate::scenario::rect_of("prefs:page_body").expect("Preferences body").contains_rect(field));
-        h.step(&serde_json::json!({"click": [field.center().x, field.center().y]})).expect("click the field");
-        h.frames(2);
-        let focused = h.ctx.memory(|memory| memory.focused()).expect("the number editor has focus");
-        assert!(field.contains_rect(h.ctx.read_response(focused).expect("focused editor response").rect));
-        h.step(&serde_json::json!({"text": "7"})).expect("type");
-        h.frames(2);
-        assert!(h.app.prefs_window.shell.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.shell.filter);
-    }
-
-    /// The selected match is scrolled to when the arrows move it, not on every frame, so the
-    /// wheel can scroll the results away from it.
-    #[test]
-    fn navigation_and_mouse3d_search_hits_reveal_the_actual_cards_and_controls() {
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
-            h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
-            for (query, page, target) in [
-                ("Orbit around", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:View center"),
-                ("Under the cursor", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Under the cursor"),
-                ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
-                ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
-                ("Axes", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
-                ("Cube", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Cube"),
-                ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
-                ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
-                ("Zoom with two-finger scroll while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
-                ("Overall speed", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_speed"),
-                ("Traced", crate::prefs::PAGE_MOUSE3D, "prefs:3d_mouse_orbit_traced"),
-                ("Position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
-            ] {
-                h.call("ui.prefs", serde_json::json!({"open":"General"}));
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matching: Vec<_> =
-                    hits.iter().enumerate().filter(|(_, hit)| hit.page == page && (query != "Cube" || hit.label == "Cube")).collect();
-                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
-                set_cursor(&h.ctx, matching[0].0);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                h.frames(20);
-                assert_eq!(h.app.prefs_window.shell.section, page);
-                assert!(h.app.prefs_window.shell.filter.is_empty());
-                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
-                assert!(body.contains_rect(crate::scenario::rect_of(target).unwrap()), "{query} reveals its live control");
-            }
-        }
-    }
-
-    #[test]
-    fn preferences_search_results_scroll_freely() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
-        h.frames(2);
-        h.app.prefs_window.shell.filter = "view".into();
-        h.frames(20);
-        let first = crate::scenario::handle_at("prefs:search:current").expect("first match");
-        let wheel = egui::Event::MouseWheel {
-            source: egui::MouseWheelSource::Unknown,
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, -400.0),
-            modifiers: egui::Modifiers::NONE,
-            phase: egui::TouchPhase::Move,
-        };
-        // The wheel scrolls smoothly: give it time to come to rest before each check.
-        h.frame_with(vec![egui::Event::PointerMoved(first), wheel.clone()]);
-        h.frames(60);
-        let scrolled = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
-        assert!(scrolled.y < first.y - 100.0, "the wheel scrolls past the first match ({} -> {})", first.y, scrolled.y);
-        h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
-        h.frames(60);
-        let next = crate::scenario::handle_at("prefs:search:current").expect("next match");
-        let body = crate::scenario::rect_of("dialog:page_body").expect("page body");
-        assert!(body.contains(next), "Down brings the next match into view ({next:?} in {body:?})");
-        h.frame_with(vec![egui::Event::PointerMoved(next), wheel]);
-        h.frames(60);
-        let after = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
-        assert!(after.y < next.y - 100.0, "the wheel still scrolls after Down ({} -> {})", next.y, after.y);
-    }
-
-    #[test]
-    fn preferences_search_filters_live_controls_across_pages() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
-        h.frames(2);
-        assert!(h.widget("Units of new designs").is_none(), "another page stays put until a search");
-        h.app.prefs_window.shell.filter = "units".into();
-        h.frames(20);
-        assert!(h.widget("Units of new designs").is_some(), "a row is found from its label");
-        assert!(h.widget("Reverse zoom direction").is_none());
-        h.app.prefs_window.shell.filter = "zoom".into();
-        h.frames(20);
-        assert!(h.widget("Reverse zoom direction").is_some());
-        assert!(h.widget("Units of new designs").is_none());
-        assert!(h.widget("Grid").is_none(), "a checkbox on another page stays hidden");
-        assert!(h.widget("Interface language").is_none(), "the page around a match stays hidden");
-        assert!(h.widget("Advanced").is_none(), "a folded heading is not a match");
-        let search = crate::scenario::handle_at("prefs:search").expect("search field");
-        let hit = h.widget("Reverse zoom direction").expect("zoom row");
-        let gap = hit[1] - f64::from(search.y);
-        assert!(gap < 520.0, "search results leave a {gap:.0}px gap under the field");
-        assert!(h.widget("Translation X").is_none(), "unmatched pages do not stack on the result");
-        h.app.prefs_window.shell.filter = "extrude".into();
-        h.frames(20);
-        assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_some(), "shortcut matches collapse to one row");
-        assert!(crate::scenario::rect_of("dialog:cell:Extrude").is_none(), "the shortcut list stays closed");
-        h.step(&serde_json::json!({"click": {"handle": "prefs:search:clear"}})).expect("clear");
-        h.frames(2);
-        assert!(h.app.prefs_window.shell.filter.is_empty(), "the search X clears the field");
-        h.app.prefs_window.shell.filter = "fusion".into();
-        h.frames(20);
-        assert!(h.widget("Mouse mapping").is_some(), "the dropdown's current value counts");
-        h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
-        h.frames(2);
-        assert!(h.widget("No matching preferences").is_some());
-        h.app.prefs_window.shell.filter = "units".into();
-        h.frames(2);
-        h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("design page");
-        h.frames(2);
-        assert!(h.app.prefs_window.shell.filter.is_empty(), "a page tab clears the search");
-        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_DESIGN);
-        assert!(h.widget("Units of new designs").is_some(), "the tab shows its own page");
-        assert!(crate::scenario::rect_of("prefs:search:shortcuts").is_none(), "shortcut matches leave with the search");
-        h.app.prefs_window.shell.filter = "zoom".into();
-        h.frames(2);
-        h.step(&serde_json::json!({"click": {"handle": "prefs:page:Design"}})).expect("same page");
-        h.frames(2);
-        assert!(h.app.prefs_window.shell.filter.is_empty(), "the current tab also clears the search");
-        assert!(h.widget("Reverse zoom direction").is_none());
-        assert!(h.widget("Units of new designs").is_some());
-    }
-    /// Settings drawn in a row with no label of their own are found by the words they show (#9265).
-    #[test]
-    fn preferences_search_finds_settings_in_rows_without_a_label() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_LAYOUT);
-        h.frames(2);
-        // Drawn, not merely present: a hidden row's controls still exist, far off screen.
-        let drawn = |h: &crate::scenario::Harness, label: &str| {
-            let body = crate::scenario::rect_of("dialog:page_body");
-            h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
-        };
-        let rows = [
-            ("status bar", "Status bar"),
-            ("sketch tab shown", "Keep the Sketch tab shown"),
-            ("search results", "Show search results in the ribbon"),
-            ("play history", "Play History button"),
-            ("view's corner", "Also in the view's corner"),
-            ("highlight active", "Highlight active commands"),
-            ("On hover", "On hover"),
-        ];
-        for (query, label) in rows {
-            h.app.prefs_window.shell.filter = query.into();
-            h.frames(4);
-            assert!(drawn(&h, label), "searching '{query}' should show '{label}'");
-        }
-        h.app.prefs_window.shell.filter = "status bar".into();
-        h.frames(4);
-        assert!(!drawn(&h, "Keep the Sketch tab shown"), "a row that does not match stays out of the result");
-        // Three unlabelled rows sit under one labelled row: each is found on its own words only.
-        h.app.prefs_window.shell.filter = "sketch tab shown".into();
-        h.frames(4);
-        assert!(drawn(&h, "Keep the Sketch tab shown"));
-        assert!(!drawn(&h, "Highlight active commands"), "its neighbour is not a match");
-        assert!(!drawn(&h, "Show search results in the ribbon"), "its neighbour is not a match");
-        h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
-        h.frames(4);
-        assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
-    }
-    #[test]
-    fn design_and_tools_short_labels_keep_legacy_search_and_reveal_the_real_control() {
-        for language in ["en", "ja"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.call("ui.prefs", serde_json::json!({"language":language,"open":"General"}));
-            for (query, id, page, handle) in [
-                ("Step values with the arrow keys and the wheel", "ui.step_values", crate::prefs::PAGE_DESIGN, "prefs:step_values"),
-                ("For files from unknown programs", "prefs.stand_up_unknown", crate::prefs::PAGE_DESIGN, "prefs:stand_up_unknown"),
-                ("Hide origin by default", "ui.hide_origin_by_default", crate::prefs::PAGE_DESIGN, "prefs:hide_origin"),
-                ("Snap to face and edge centres", "Snap to face and edge centres", crate::prefs::PAGE_TOOLS, "prefs:hole_snaps"),
-                ("Move holes by clicking or dragging", "Move holes by clicking or dragging", crate::prefs::PAGE_TOOLS, "prefs:hole_moves"),
-                ("Several holes on one face", "prefs.design_tools.hole_several", crate::prefs::PAGE_TOOLS, "prefs:hole_several"),
-                ("Group holes made together", "prefs.design_tools.hole_group", crate::prefs::PAGE_TOOLS, "prefs:hole_group"),
-                ("Show moved parts' old place as a ghost", "prefs.design_tools.ghost", crate::prefs::PAGE_TOOLS, "prefs:drive_joints_ghost"),
-                ("Near-axis rotation step (°)", "joint_move.coarse", crate::prefs::PAGE_TOOLS, "prefs:joint_rotation_coarse"),
-                ("Far-axis rotation step (°)", "joint_move.fine", crate::prefs::PAGE_TOOLS, "prefs:joint_rotation_fine"),
-                ("Show X/Y/Z distances", "settings.measure_axis_distances", crate::prefs::PAGE_TOOLS, "prefs:measure_axis_distances"),
-                ("Show tool at cursor", "Show tool at cursor", crate::prefs::PAGE_TOOLS, "view:tool_cursor"),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let label = h.app.tr(id);
-                let matches: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page && hit.label == label).collect();
-                assert_eq!(matches.len(), 1, "{language}: {query} has one real setting");
-                set_cursor(&h.ctx, matches[0].0);
-                h.frames(2);
-                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-                // Let the normal scroll animation settle after opening the longer Design page.
-                h.frames(20);
-                assert_eq!(h.app.prefs_window.shell.section, page);
-                assert!(h.app.prefs_window.shell.filter.is_empty());
-                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
-                let target = crate::scenario::rect_of(handle).unwrap();
-                assert!(body.contains_rect(target), "{language}: {query} reveals {handle}: body={body:?}, target={target:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn moved_preferences_search_paths_and_enter_follow_window_groups() {
-        for (query, path, page) in [
-            ("Direct interaction", "Work > Tools", crate::prefs::PAGE_TOOLS),
-            ("Navigate with the 3D mouse", "Input > 3D mouse", crate::prefs::PAGE_MOUSE3D),
-            ("Origin plane names", "Work > Design", crate::prefs::PAGE_DESIGN),
-            ("Status bar", "Look > Layout", crate::prefs::PAGE_LAYOUT),
-        ] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
-            h.app.prefs_window.shell.filter = query.into();
-            h.frames(4);
-            assert!(h.widget(path).is_some(), "{query} shows {path}");
-            let (_, _, hits) = nav(&h.ctx);
-            let index = hits.iter().position(|hit| hit.page == page && hit.label == query).expect("moved control is keyboard reachable");
-            set_cursor(&h.ctx, index);
-            h.frames(2);
-            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
-            h.frames(2);
-            assert_eq!(h.app.prefs_window.shell.section, page);
-            assert!(h.app.prefs_window.shell.filter.is_empty());
-            assert!(h.widget(query).is_some());
-        }
-    }
-
-    #[test]
-    fn collapsed_shortcut_results_enter_reveals_the_command_despite_an_old_page_filter() {
-        use serde_json::json;
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.app.preferences.ai_features = false;
-            h.call("ui.resize", json!({"width":1600,"height":1000}));
-            h.call("ui.prefs", json!({"open":"Shortcuts","theme":theme}));
-            h.step(&json!({"click":{"handle":"keymap:filter"}})).unwrap();
-            h.step(&json!({"text":"solid.extrude"})).unwrap();
-            let command = solidcraft_engine::command_specs().last().unwrap().id;
-            let original = crate::toolbar_custom::export(&h.app);
-            h.app.prefs_window.shell.filter = command.into();
-            h.frames(4);
-            let (_, _, hits) = nav(&h.ctx);
-            let matches: Vec<_> =
-                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command)).collect();
-            assert_eq!(matches.len(), 1, "a collapsed result owns one real keyboard target");
-            set_cursor(&h.ctx, matches[0].0);
-            h.frames(2);
-            h.step(&json!({"key":"Enter"})).unwrap();
-            h.frames(30);
-            assert!(h.app.prefs_window.shell.filter.is_empty());
-            assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
-            let target = crate::scenario::rect_of(&format!("keymap:capture:{command}")).unwrap();
-            let body = crate::scenario::rect_of("dialog:page_body").unwrap();
-            assert!(body.contains_rect(target), "Enter reveals the actual off-screen command, clearing the old local filter");
-            assert!(crate::scenario::handle_at("prefs:revealed").is_some());
-            assert_eq!(crate::toolbar_custom::export(&h.app), original);
-        }
-    }
-
-    #[test]
-    fn assistant_permission_options_and_limited_value_have_real_enter_targets_while_ai_is_off() {
-        use serde_json::json;
-        for theme in ["light", "dark"] {
-            let mut h = crate::scenario::Harness::new();
-            h.app.home.open = false;
-            h.app.preferences.ai_features = false;
-            h.call("ui.resize", json!({"width":1600,"height":1200}));
-            h.call("ui.prefs", json!({"open":"General","theme":theme}));
-            let original = (h.app.preferences.ai_permissions, h.app.preferences.agent_chat_turn_limit);
-            for (query, target) in [
-                ("Ask first", "prefs:ai_mode:ask"),
-                ("Make edits", "prefs:ai_mode:edits"),
-                ("Do everything", "prefs:ai_mode:all"),
-                ("Limited", "prefs:agent_chat_turn_limit:mode"),
-            ] {
-                h.app.prefs_window.shell.filter = query.into();
-                h.frames(5);
-                let (_, _, hits) = nav(&h.ctx);
-                let matches: Vec<_> =
-                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_ASSISTANT && hit.label == query).collect();
-                assert_eq!(matches.len(), 1, "{query} owns a single real setting target");
-                set_cursor(&h.ctx, matches[0].0);
-                h.frames(2);
-                h.step(&json!({"key":"Enter"})).unwrap();
-                h.frames(30);
-                assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_ASSISTANT);
-                let rect = crate::scenario::rect_of(target).unwrap();
-                let revealed = crate::scenario::handle_at("prefs:revealed").unwrap();
-                assert!(revealed.distance(rect.center()) <= 1.0, "{query} reveals its real control");
-                assert_eq!(
-                    (h.app.preferences.ai_permissions, h.app.preferences.agent_chat_turn_limit),
-                    original,
-                    "navigation never selects an option"
-                );
-            }
         }
     }
 }

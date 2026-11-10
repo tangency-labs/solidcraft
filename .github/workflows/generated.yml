@@ -1,4 +1,4 @@
-# Files generated from the code are rewritten here, on main, after each merge, so pull requests
+# Files generated from the code are rewritten here, on main, once a night, so pull requests
 # never edit them (two pull requests that each regenerated one would always conflict):
 # THIRD-PARTY-LICENSES.txt (`cargo xtask licences`) and docs/features.md (`cargo xtask features`).
 # Pending files (assets/locales/pending, attribution/pending) are folded into the catalogs and
@@ -6,26 +6,10 @@
 name: Generated files
 
 on:
-  push:
-    branches: [main]
-    # THIRD-PARTY-LICENSES.txt follows the manifests, the lockfile, the vendored crates' licence
-    # files and the fonts' licences; docs/features.md follows the command registry (crates/engine),
-    # read through solidcraft-cli. Other pushes regenerate nothing.
-    paths:
-      - "Cargo.lock"
-      - "**/Cargo.toml"
-      - "vendor/**"
-      # solidcore's licence files are embedded in THIRD-PARTY-LICENSES.txt.
-      - "solidcore/LICENSE"
-      - "solidcore/NOTICE"
-      - "solidcore/ATTRIBUTION.md"
-      - "assets/fonts/**"
-      - "crates/engine/**"
-      - "apps/solidcraft-cli/**"
-      - "xtask/**"
-      - "assets/locales/pending/*.json"
-      - "attribution/pending/*.md"
-      - ".github/workflows/generated.yml"
+  # Nightly, outside merge hours. A push straight to main resets every merge-queue batch, so the
+  # regeneration no longer runs on each push.
+  schedule:
+    - cron: "17 8 * * *"
   workflow_dispatch:
 
 permissions:
