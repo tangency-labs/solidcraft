@@ -315,7 +315,7 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
 /// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
 /// directions, so a direction's settings sit together (#9634).
-fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
+fn pattern_direction_group(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
     let (key, title, quantity_label, spacing_label) = if index == 0 {
         ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
     } else {
@@ -324,7 +324,7 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
     let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
     ui_kit::section(ui, key, title, true, |ui| {
         let mut enter = false;
-        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2, &mut app.corner_kept);
         if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
             let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
             enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
