@@ -1169,6 +1169,65 @@ mod tests {
     }
 
     #[test]
+    fn piece_mixed_through_cpt_mut_is_refused() {
+        // `Surface::new` refuses a mixed net, but `cpt_mut` can mix one later. Their
+        // rational conversion judges a piece by `Pw[0][0]` alone: it would give the
+        // weighted points of a "non-rational" piece the weight 1.0 (moving them), and
+        // keep `NOW` as a weight on a "rational" one. So `join` and `make_compatible`
+        // refuse such a piece themselves (not only through the `Surface::new` of the
+        // joined net), and `make_compatible` changes nothing.
+        fn refused_by<T>(r: &Result<T>, op: &str) -> bool {
+            const WHY: &str = "control points mix rational and non-rational";
+            matches!(r, Err(SolidError::InvalidInput { operation, reason }) if *operation == op && *reason == WHY)
+        }
+        let mut not_refused = Vec::new();
+        let s = sample();
+        for (t, dir) in [(0.4, Direction::U), (0.3, Direction::V)] {
+            let (a, b) = super::super::p1::split(&s, t, dir).unwrap();
+            let mut rational = a.clone();
+            rational.non_rat_to_rat();
+            // An inner point, and the last one (on the joint row when the piece is first).
+            for last in [false, true] {
+                let at = |x: &Surface| if last { (x.n(), x.m()) } else { (1, 1) };
+                // A weighted point among non-rational ones, and the reverse.
+                let mut weighted = b.clone();
+                let (i, k) = at(&weighted);
+                let c = weighted.cpt_mut(i, k).unwrap();
+                *c = CPoint::new(c.x * 2.0, c.y * 2.0, c.z * 2.0, 2.0);
+                let mut unweighted = rational.clone();
+                let (i, k) = at(&unweighted);
+                let c = unweighted.cpt_mut(i, k).unwrap();
+                *c = c.unweighted();
+                let pairs = [
+                    (&rational, &weighted),
+                    (&weighted, &rational),
+                    (&a, &weighted),
+                    (&unweighted, &a),
+                    (&a, &unweighted),
+                ];
+                for (n, (p1, p2)) in pairs.into_iter().enumerate() {
+                    let r = join(p1, p2, dir, 1e-9);
+                    if !refused_by(&r, "nurbs::srf_tool::p3::join") {
+                        not_refused
+                            .push(format!("join {dir:?} last={last} pair {n}: {:?}", r.err()));
+                    }
+                    let mut pair = [p1.clone(), p2.clone()];
+                    let r = make_compatible(&mut pair, dir);
+                    if !refused_by(&r, "nurbs::srf_tool::p3::make_compatible")
+                        || pair != [p1.clone(), p2.clone()]
+                    {
+                        not_refused.push(format!(
+                            "make_compatible {dir:?} last={last} pair {n}: {:?}",
+                            r.err()
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(not_refused.is_empty(), "{not_refused:#?}");
+    }
+
+    #[test]
     fn compatible_surfaces_share_knots() {
         let s = sample();
         let mut t = elevate_degree(&s, 1, Direction::V).unwrap();
