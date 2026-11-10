@@ -2100,7 +2100,8 @@ fn a_projected_view_draws_its_parents_exploded_view_until_it_sets_its_own() {
 /// view they would measure the parts assembled: they are refused there until they read what the
 /// view draws. An edit that would explode a view holding one, itself or through a view that follows
 /// it, is refused and changes nothing; one whose follower draws assembled goes ahead. A note on the
-/// view itself, not its model, is no hindrance.
+/// view itself is no hindrance, unless a branch points at its model; on an exploded view, a note's
+/// branches can't be edited.
 #[test]
 fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
     let (mut s, view, [first, _], apart) = exploded_pair();
@@ -2123,7 +2124,11 @@ fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
     run(&mut s, "drawing.note.add", note);
     unchanged(&mut s, view, json!({"exploded": apart}), blocked);
     run(&mut s, "edit.undo", json!({}));
-    run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}));
+    let branched = json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Deburr", "branches": [{"edge": first_cubes_edge(first)}]});
+    run(&mut s, "drawing.note.add", branched.clone());
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    let plain = run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}))["note"].clone();
     edit_view(&mut s, view, json!({"exploded": apart}));
     assert!((width(&mut s, view) - 70.0).abs() < 1e-6, "a note on the view isn't on its model");
 
@@ -2139,6 +2144,13 @@ fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
     let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
     let e = s.execute("drawing.note.add", &note).unwrap_err().to_string();
     assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
+    let e = s.execute("drawing.note.add", &branched).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let add = json!({"note": plain, "set": {"branches": {"remove": [], "add": [{"edge": first_cubes_edge(first)}]}}});
+    let e = s.execute("drawing.note.edit", &add).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: notes on its model on an exploded view"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
 
     // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
     edit_view(&mut s, view, json!({"exploded": "assembled"}));

@@ -841,6 +841,7 @@ fn a_dimension_an_exploded_view_holds_back_is_out_of_date_everywhere() {
     settled(&mut s, sheet);
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(scene["out_of_date"], json!([id]), "{scene}");
+    assert_eq!(scene["dimensions"], json!([]), "not drawn: {scene}");
     assert_eq!(listed(&mut s, sheet), std::slice::from_ref(&id), "as the export lists it");
     let (reply, words) = status_of(&mut s);
     assert!(all_are(&words, "current"), "{reply}");
@@ -853,6 +854,45 @@ fn a_dimension_an_exploded_view_holds_back_is_out_of_date_everywhere() {
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(scene["out_of_date"], json!([id]), "deferred: {scene}");
     assert_eq!(out_of_date_dimensions(&status_of(&mut s).0), [id], "deferred");
+}
+
+/// A note on the model of a view that draws an exploded view, as a file can hold it, is held back as
+/// a dimension is: unread, undrawn and listed out of date by the scene and the export, whether its
+/// anchor or only a branch points at the model. A note on the view itself is drawn.
+#[test]
+fn a_note_on_the_model_an_exploded_view_holds_back_is_out_of_date() {
+    let (mut s, sheet, [assembled, ..], apart) = two_assembled_one_apart();
+    let first = s.doc.occurrences[0].id;
+    let edge = json!({"point": [5, 0, 0], "path": [first]});
+    let view = ids::encode(assembled);
+    let note = |s: &mut Session, add: Value| run(s, "drawing.note.add", add)["note"].clone();
+    let on_edge = note(&mut s, json!({"anchor": {"edge": {"view": view, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
+    let branched = note(&mut s, json!({"anchor": {"view": view}, "at": [60, -40], "content": "Both", "branches": [{"edge": edge}]}));
+    let plain = note(&mut s, json!({"anchor": {"view": view}, "at": [0, -40], "content": "Exploded"}));
+    // As a file holds them: drawing.view.edit refuses to explode a view with a note on its model.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == assembled).unwrap();
+    Arc::make_mut(record).settings.exploded = Some(Exploded::View(apart));
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    // By view and id, as every list of a view's dimensions and notes is.
+    let mut held = [on_edge, branched];
+    held.sort_by_key(|id| ids::decode(id.as_str().unwrap()).unwrap());
+    settled(&mut s, sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["out_of_date"], json!(held), "{scene}");
+    let listed_notes: Vec<(Value, Value)> = scene["notes"].as_array().unwrap().iter().map(|n| (n["note"].clone(), n["drawn"].clone())).collect();
+    assert_eq!(listed_notes, [(plain.clone(), json!(true))], "{scene}");
+    let drawn: Vec<u64> = built(&s, sheet).scene.groups.iter().filter(|g| g.kind == ObjectKind::Note).map(|g| g.object).collect();
+    assert_eq!(drawn, [ids::decode(plain.as_str().unwrap()).unwrap()]);
+    assert_eq!(listed(&mut s, sheet), held, "as the export lists them");
+    assert!(status_of(&mut s).0.get("held").is_none());
+
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["out_of_date"], json!(held), "deferred: {scene}");
 }
 
 /// A deferred drawing draws nothing until `drawing.update`: then from the model as it is now, until
@@ -1346,6 +1386,7 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         views: Vec::new(),
         objects: Vec::new(),
         dimensions: Vec::new(),
+        notes: Vec::new(),
         out_of_date: Vec::new(),
         param_warnings: Vec::new(),
     };
@@ -1489,7 +1530,7 @@ fn a_views_box_is_what_it_draws() {
             frame: None,
             owners: None,
         };
-        let (_, _, objects, _) =
+        let (_, _, objects, _, _) =
             assemble(&record, Projection::Third, &labels(&record), &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
@@ -1707,11 +1748,12 @@ fn out_of_date_dimensions(reply: &Value) -> Vec<Value> {
     dimensions.filter(|d| d["out_of_date"] == json!(true)).map(|d| d["dimension"].clone()).collect()
 }
 
-/// A deferred drawing, its front view's bottom edge dimensioned, updated and drawn, then closed while
-/// `change` runs on the model and opened again: the session, its sheet and the dimension.
-fn held_after(change: impl FnOnce(&mut Session)) -> (Session, u64, u64) {
+/// A deferred drawing, its front view marked by `mark` (a dimension or a note on it), updated and
+/// drawn, then closed while `change` runs on the model and opened again: the session, its sheet and
+/// the mark.
+fn held_after(mark: fn(&mut Session, u64) -> u64, change: impl FnOnce(&mut Session)) -> (Session, u64, u64) {
     let (mut s, sheet, [front, _]) = front_and_top();
-    let id = front_edge(&mut s, front);
+    let id = mark(&mut s, front);
     let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
     run(&mut s, "drawing.set", json!({"updates": "deferred"}));
     run(&mut s, "drawing.update", json!({}));
@@ -1734,7 +1776,7 @@ fn nothing_waits_once_updated(s: &mut Session, sheet: u64) {
 /// the sheet shows its last reading too, as `drawing.export` lists it.
 #[test]
 fn status_lists_a_held_views_dimensions_with_it() {
-    let (mut s, sheet, id) = held_after(|s| {
+    let (mut s, sheet, id) = held_after(front_edge, |s| {
         let block = s.doc.features[0].id;
         run(s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 120}}));
     });
@@ -1751,7 +1793,7 @@ fn status_lists_a_held_views_dimensions_with_it() {
 /// the drawing held though no view waits, as `drawing.export` lists it.
 #[test]
 fn status_lists_dimensions_out_of_date_whose_views_are_current() {
-    let (mut s, sheet, id) = held_after(|s| {
+    let (mut s, sheet, id) = held_after(front_edge, |s| {
         run(s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
         run(s, "sketch.finish", json!({}));
     });
@@ -1760,6 +1802,23 @@ fn status_lists_dimensions_out_of_date_whose_views_are_current() {
     assert_eq!((&reply["held"], &reply["waiting"]), (&json!(true), &json!(0)), "{reply}");
     assert_eq!(out_of_date_dimensions(&reply), [json!(ids::encode(id))], "{reply}");
     assert_eq!(out_of_date_dimensions(&reply), listed(&mut s, sheet), "as the export lists it");
+    nothing_waits_once_updated(&mut s, sheet);
+}
+
+/// The same change, with a note on the front view's edge and no dimension: the note was read from the
+/// model before it, so the drawing is held though no view waits, as `drawing.export` lists the note;
+/// `dimensions` lists none out of date, as it lists dimensions only.
+#[test]
+fn status_holds_for_a_note_out_of_date_whose_view_is_current() {
+    let edge_note = |s: &mut Session, front: u64| view_note(s, front, Some([50.0, 0.0, 0.0]), [60.0, 40.0], json!("Deburr"));
+    let (mut s, sheet, note) = held_after(edge_note, |s| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+        run(s, "sketch.finish", json!({}));
+    });
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current") && out_of_date_dimensions(&reply).is_empty(), "{reply}");
+    assert_eq!((&reply["held"], &reply["waiting"]), (&json!(true), &json!(0)), "{reply}");
+    assert_eq!(listed(&mut s, sheet), [json!(ids::encode(note))], "as the export lists it");
     nothing_waits_once_updated(&mut s, sheet);
 }
 
@@ -1922,6 +1981,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
     let dimension = |id, items| DrawnDimension {
         dimension: id,
         view: front,
+        kind: ObjectKind::Dimension,
         status: solidcraft_doc::drawing::dimension::Status::Ok,
         group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
         fonts: Vec::new(),
@@ -1932,7 +1992,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
     let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
     let fits = dimension(3, vec![stroke(Vec2::X)]);
     assembly.add_dimensions([&too_many, &off_paper, &fits].into_iter());
-    let (scene, _, objects, states) = assembly.finish().unwrap();
+    let (scene, _, objects, states, _) = assembly.finish().unwrap();
     assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|w| w.contains("records")), "{:?}", states[0]);
     assert!(!states[1].drawn && states[1].why.is_some(), "{:?}", states[1]);
     assert!(states[2].drawn && states[2].why.is_none(), "{:?}", states[2]);
@@ -1965,6 +2025,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
         DrawnDimension {
             dimension: id,
             view: front,
+            kind: ObjectKind::Dimension,
             status: solidcraft_doc::drawing::dimension::Status::Ok,
             group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
             fonts,
@@ -1978,7 +2039,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let mut assembly =
         assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
-    let (scene, _, objects, states) = assembly.finish().unwrap();
+    let (scene, _, objects, states, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
     assert_eq!(scene.fonts.len(), 1);
     assert_eq!(scene.fonts[0].glyphs.len(), shared, "its 7 stays out");
@@ -1996,7 +2057,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let fits = text(5, "8", (room - records(&bare) - fonts) / per_line);
     assert!(records(&over) <= room);
     assembly.add_dimensions([&over, &fits].into_iter());
-    let (_, _, _, states) = assembly.finish().unwrap();
+    let (_, _, _, states, _) = assembly.finish().unwrap();
     assert!(!states[0].drawn && states[0].why.as_deref().is_some_and(|why| why.contains("records")), "{:?}", states[0]);
     assert!(states[1].drawn, "{:?}", states[1]);
 }
@@ -2631,4 +2692,240 @@ fn seeded_edits_steps_and_jobs_always_end_at_the_built_scene() {
         assert!(end.stale.is_empty(), "seed {seed}");
         assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene), "seed {seed}");
     }
+}
+
+/// A note on sheet `sheet` at `at`, saying `content`: its id.
+fn sheet_note(s: &mut Session, sheet: u64, at: [f64; 2], content: Value) -> u64 {
+    let added = run(s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": at, "content": content}));
+    ids::decode(added["note"].as_str().unwrap()).unwrap()
+}
+
+/// A note `at` from view `view`'s centre, saying `content`; on its model edge through `on` when given.
+fn view_note(s: &mut Session, view: u64, on: Option<[f64; 3]>, at: [f64; 2], content: Value) -> u64 {
+    let v = ids::encode(view);
+    let anchor = on.map_or_else(|| json!({"view": v}), |point| json!({"edge": {"view": v, "edge": point}}));
+    let added = run(s, "drawing.note.add", json!({"anchor": anchor, "at": at, "content": content}));
+    ids::decode(added["note"].as_str().unwrap()).unwrap()
+}
+
+/// A group's text, run by run, and its arrowheads' tips.
+fn text_and_tips(group: &Group) -> (Vec<String>, Vec<Vec2>) {
+    let (mut texts, mut tips) = (Vec::new(), Vec::new());
+    for item in &group.items {
+        match item {
+            Item::Text(run) => texts.push(run.text.clone()),
+            Item::Fill { region } => tips.push(region.outer.segs[0].start()),
+            _ => {}
+        }
+    }
+    (texts, tips)
+}
+
+/// "Sheet {number} of {count}": a note's fields, read for its sheet.
+fn sheet_of_count() -> Value {
+    json!([{"text": "Sheet "}, {"field": {"source": "sheet", "key": "number"}}, {"text": " of "}, {"field": {"source": "sheet", "key": "count"}}])
+}
+
+/// Notes are drawn: a view's with its view's dimensions, after its views, and the sheet's after them,
+/// each its text, its fields read; one on an edge with its leader's arrowhead on the edge's middle on
+/// paper. `build`, the provider and `drawing.scene` agree; `dimensions` lists only dimensions; a point
+/// on a note's text hits it.
+#[test]
+fn notes_are_drawn_on_the_sheet_and_on_their_views() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let dimension = top_edge(&mut s, front);
+    let general = sheet_note(&mut s, sheet, [60.0, 40.0], json!("General note"));
+    let field = view_note(&mut s, front, None, [0.0, -30.0], sheet_of_count());
+    let edge = view_note(&mut s, front, Some([50.0, 0.0, 0.0]), [60.0, -40.0], json!("Deburr"));
+    let built = built(&s, sheet);
+    let after_views: Vec<(u64, ObjectKind)> = built
+        .scene
+        .groups
+        .iter()
+        .map(|g| (g.object, g.kind))
+        .skip_while(|(_, k)| matches!(k, ObjectKind::DrawingBorder | ObjectKind::View))
+        .collect();
+    let mut on_view = vec![(dimension, ObjectKind::Dimension), (field, ObjectKind::Note), (edge, ObjectKind::Note)];
+    on_view.sort_by_key(|(id, _)| *id);
+    on_view.push((general, ObjectKind::Note));
+    assert_eq!(after_views, on_view);
+    assert_eq!(text_and_tips(group_of(&built.scene, field)), (vec!["Sheet 1 of 1".to_string()], Vec::new()));
+    assert_eq!(text_and_tips(group_of(&built.scene, general)).0, vec!["General note".to_string()]);
+    // The front view at 1:2 centred at (150, 150) on the block's middle (50, 10): its bottom edge's
+    // middle at (150, 145).
+    let (texts, tips) = text_and_tips(group_of(&built.scene, edge));
+    assert_eq!(texts, vec!["Deburr".to_string()]);
+    assert!(tips.len() == 1 && tips[0].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
+    // Its text centred on its place from the view's centre, (150, 150) + (60, -40): one line, its
+    // capitals 3.5 mm high, so its baseline 1.75 mm below the middle.
+    let starts: Vec<Vec2> =
+        group_of(&built.scene, edge).items.iter().filter_map(|i| if let Item::Text(run) = i { Some(run.origin) } else { None }).collect();
+    assert!(starts.len() == 1 && (starts[0].y - 108.25).abs() < 1e-9 && starts[0].x < 210.0, "{starts:?}");
+    assert!(built.notes.iter().all(|n| n.drawn && n.status == solidcraft_doc::drawing::dimension::Status::Ok), "{:?}", built.notes);
+    assert_eq!(built.notes.last().map(|n| (n.note, n.view)), Some((general, None)));
+
+    let provided = settled(&mut s, sheet);
+    assert_eq!((bytes(&provided.scene), &provided.notes), (bytes(&built.scene), &built.notes));
+    let reply = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["dimensions"].as_array().map(Vec::len), Some(1), "{reply}");
+    let notes: Vec<(Value, Option<Value>)> = reply["notes"].as_array().unwrap().iter().map(|n| (n["note"].clone(), n.get("view").cloned())).collect();
+    assert_eq!(notes.len(), 3);
+    assert!(notes.contains(&(json!(ids::encode(general)), None)) && notes.contains(&(json!(ids::encode(edge)), Some(json!(ids::encode(front))))));
+    let export = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(export["notes"], reply["notes"]);
+    let hit = run(&mut s, "drawing.scene.hit", json!({"sheet": ids::encode(sheet), "point_mm": [60.0, 40.0]}));
+    assert_eq!((&hit["hit"]["object"], &hit["hit"]["kind"]), (&json!(ids::encode(general)), &json!("note")), "{hit}");
+}
+
+/// Moving a view moves its notes, their same lines moved to its new centre, and projects nothing; the sheet's note stays.
+/// A second sheet changes the count both notes read, though neither note nor the view changed.
+#[test]
+fn a_views_notes_move_with_it_and_read_their_fields_again() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let general = sheet_note(&mut s, sheet, [60.0, 40.0], sheet_of_count());
+    let field = view_note(&mut s, front, None, [0.0, -30.0], sheet_of_count());
+    let edge = view_note(&mut s, front, Some([50.0, 0.0, 0.0]), [60.0, -40.0], json!("Deburr"));
+    let before = settled(&mut s, sheet);
+    // Each view note is kept centred on its view, and the scene moves it to the view's centre.
+    let kept = |s: &Session, id: u64| s.drawing_scenes.dimensions[&id].drawn.group.clone().unwrap();
+    let was = [field, edge].map(|id| kept(&s, id));
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [170.0, 130.0]}}}));
+    let after = settled(&mut s, sheet);
+    assert_eq!(s.drawing_scenes.projections, projections, "a move projects nothing");
+    for (id, was) in [field, edge].into_iter().zip(was) {
+        assert_eq!(bytes_of(&kept(&s, id)), bytes_of(&was), "{id}: the same lines");
+        assert_eq!(bytes_of(group_of(&after.scene, id)), bytes_of(&moved(&was, Vec2::new(170.0, 130.0))), "{id}: moved to the view's new centre");
+    }
+    // Where the edge note's arrow ends on the sheet, worked out by hand: the edge's middle (50, 0, 0) at 1:2,
+    // from the block's centre (50, 25, 10), is 5 below the view's new centre (170, 130).
+    let tip = text_and_tips(group_of(&after.scene, edge)).1[0];
+    assert!((tip.x - 170.0).abs() < 1e-9 && (tip.y - 125.0).abs() < 1e-9, "{tip:?}");
+    assert_eq!(bytes_of(group_of(&after.scene, general)), bytes_of(group_of(&before.scene, general)));
+
+    run(&mut s, "drawing.sheet.add", json!({}));
+    let counted = settled(&mut s, sheet);
+    for id in [field, general] {
+        assert_eq!(text_and_tips(group_of(&counted.scene, id)).0, vec!["Sheet 1 of 2".to_string()], "{id}");
+    }
+    assert_eq!(bytes(&counted.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A note on a view with branches draws a leader to each, its first branch as its first leader. A
+/// branch whose edge is lost draws nothing, and the note stays drawn and ok, its other leader kept.
+#[test]
+fn a_notes_branches_are_drawn_and_a_lost_one_draws_nothing() {
+    let (mut s, sheet, front, _, drawing) = holed();
+    let branches = json!([{"edge": [56, 0, 10]}, {"edge": [50, 0, 0]}]);
+    let added =
+        run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [60.0, 40.0], "content": "Ream", "branches": branches}));
+    let id = ids::decode(added["note"].as_str().unwrap()).unwrap();
+    let before = settled(&mut s, sheet);
+    let tips = text_and_tips(group_of(&before.scene, id)).1;
+    // The bottom edge's middle (50, 0, 0) at 1:2 from the block's middle (50, 10) round (150, 150).
+    assert!(tips.len() == 2 && tips[1].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
+    delete_hole(&mut s, &drawing);
+    let lost = settled(&mut s, sheet);
+    let state = lost.notes.iter().find(|n| n.note == id).unwrap();
+    assert!(state.drawn && state.status == solidcraft_doc::drawing::dimension::Status::Ok, "{state:?}");
+    let tips = text_and_tips(group_of(&lost.scene, id)).1;
+    assert!(tips.len() == 1 && tips[0].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
+    assert_eq!(bytes(&lost.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A note whose edge is lost keeps its text where it was, with no leader, drawn and listed lost;
+/// the rest of the sheet is drawn. Undone, its leader is back, the same bytes.
+#[test]
+fn a_note_whose_edge_is_lost_keeps_its_text() {
+    let (mut s, sheet, front, _, drawing) = holed();
+    let id = view_note(&mut s, front, Some([56.0, 0.0, 10.0]), [60.0, 40.0], json!("Ream"));
+    let before = settled(&mut s, sheet);
+    assert_eq!(text_and_tips(group_of(&before.scene, id)).1.len(), 1);
+    delete_hole(&mut s, &drawing);
+    let lost = settled(&mut s, sheet);
+    let state = lost.notes.iter().find(|n| n.note == id).unwrap();
+    assert!(state.drawn && matches!(state.status, solidcraft_doc::drawing::dimension::Status::Lost(..)), "{state:?}");
+    let (texts, tips) = text_and_tips(group_of(&lost.scene, id));
+    assert_eq!((texts, tips.len()), (vec!["Ream".to_string()], 0));
+    assert_eq!(bytes(&lost.scene), bytes(&built(&s, sheet).scene));
+    let reply = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    let listed = reply["notes"].as_array().unwrap().iter().find(|n| n["note"] == json!(ids::encode(id))).cloned().unwrap();
+    assert_eq!((&listed["status"], &listed["drawn"]), (&json!("lost"), &json!(true)), "{listed}");
+
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(bytes_of(group_of(&settled(&mut s, sheet).scene, id)), bytes_of(group_of(&before.scene, id)));
+}
+
+/// A held deferred drawing keeps a view's note as it keeps its dimensions: closed during a change and
+/// opened again, it shows the note as it was and lists it out of date, and a background export
+/// writes the same; updated, the note is read again.
+#[test]
+fn a_held_drawing_keeps_its_notes_and_exports_them_from_a_scratch_copy() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let id = view_note(&mut s, front, Some([50.0, 0.0, 20.0]), [60.0, 40.0], json!("Top"));
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let before = settled(&mut s, sheet);
+    let open = s.open_drawing.unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.drawing_scenes.kept.of(open).is_some_and(|kept| kept.dimensions.contains_key(&id)), "kept at the close");
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing);
+
+    let held = settled(&mut s, sheet);
+    assert_eq!(bytes_of(group_of(&held.scene, id)), bytes_of(group_of(&before.scene, id)), "as it was");
+    assert!(listed(&mut s, sheet).contains(&json!(ids::encode(id))));
+    let svg = json!({"sheet": ids::encode(sheet), "format": "svg"});
+    let there = s.scratch_as_shown().execute("drawing.export", &svg).unwrap();
+    let here = run(&mut s, "drawing.export", svg);
+    assert_eq!((&there["svg"], &there["out_of_date"], &there["notes"]), (&here["svg"], &here["out_of_date"], &here["notes"]));
+
+    run(&mut s, "drawing.update", json!({}));
+    let now = settled(&mut s, sheet);
+    assert_eq!(bytes(&now.scene), bytes(&built(&s, sheet).scene));
+    assert_ne!(bytes_of(group_of(&now.scene, id)), bytes_of(group_of(&before.scene, id)), "its leader to the edge 40 tall");
+    assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))));
+}
+
+/// A held deferred drawing lists a note out of date on a view that still shows the same: after a
+/// sketch (a new world state that adds no body), the top view takes the new state, up to date, but
+/// its note was read from the old one. Updated, the note is read again.
+#[test]
+fn a_held_drawing_lists_a_note_whose_view_shows_the_same() {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    let id = view_note(&mut s, top, None, [0.0, -30.0], json!("Top"));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))));
+    // Closed during the change and opened again, as a held drawing is (a drawing open refuses a model change).
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.open", drawing);
+    assert!(!extract(&mut s, sheet).unwrap().stale.contains(&top), "the top view shows the same");
+    assert!(listed(&mut s, sheet).contains(&json!(ids::encode(id))), "held, the note is out of date");
+
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))), "updated, the note is read again");
+}
+
+/// A sheet's note edited is drawn with its new text: the scene kept for the sheet isn't shown again.
+#[test]
+fn a_sheet_note_edited_draws_its_new_text() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = sheet_note(&mut s, sheet, [60.0, 40.0], json!("General note"));
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.note.edit", json!({"note": ids::encode(id), "set": {"content": "Revised note"}}));
+    let after = settled(&mut s, sheet);
+    assert_eq!(text_and_tips(group_of(&after.scene, id)).0, vec!["Revised note".to_string()]);
+    assert_eq!(bytes(&after.scene), bytes(&built(&s, sheet).scene));
 }

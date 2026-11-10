@@ -17,6 +17,7 @@ pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
 pub mod drawing_dimension_paper;
+pub mod drawing_note_paper;
 pub mod drawing_picture;
 pub mod drawing_pictures;
 pub mod drawing_scene;

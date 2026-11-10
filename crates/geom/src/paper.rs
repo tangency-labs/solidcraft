@@ -154,6 +154,8 @@ pub enum ObjectKind {
     View,
     /// A dimension's lines and arrowheads.
     Dimension,
+    /// A note's text, with its leader when it points at the model.
+    Note,
 }
 
 impl ObjectKind {
@@ -169,6 +171,7 @@ impl ObjectKind {
             ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
+            ObjectKind::Note => "NOTE",
         }
     }
 }

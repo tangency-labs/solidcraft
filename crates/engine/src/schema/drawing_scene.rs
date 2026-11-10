@@ -24,8 +24,8 @@ pub struct SheetSceneParams {
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each image's picture
 /// (object and source: the placement), then each view's strokes (object: the view), then each
-/// dimension's lines and arrowheads (object: the dimension), then the title block's (object: the
-/// sheet).
+/// dimension's lines and arrowheads (object: the dimension) and each note of a view (object: the
+/// note), then each note on the sheet, then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -37,7 +37,7 @@ impl JsonSchema for SheetPaperScene {
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         paper_scene_schema(
             generator,
-            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::TitleBlock],
+            &[ObjectKind::DrawingBorder, ObjectKind::SheetImage, ObjectKind::View, ObjectKind::Dimension, ObjectKind::Note, ObjectKind::TitleBlock],
             true,
         )
     }
@@ -68,6 +68,21 @@ impl From<ViewState> for SheetSceneView {
 pub struct SheetSceneDimension {
     pub dimension: String,
     pub view: String,
+    pub status: &'static str,
+    pub drawn: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// One note of the sheet: on a view (or what it shows) or on the sheet itself; where what it points
+/// at stands with the model, in `drawing.dimension.inspect`'s words (ok when it points at nothing);
+/// and whether it is in the scene, with why not, or what of it is left out.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetSceneNote {
+    pub note: String,
+    /// The view it moves with; none for a note on the sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
     pub status: &'static str,
     pub drawn: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,8 +255,11 @@ pub struct SheetSceneResult {
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<SheetSceneDimension>,
-    /// The views and dimensions a deferred drawing shows as they last were, and the dimensions a view
-    /// drawing an exploded view holds back.
+    /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<SheetSceneNote>,
+    /// The views, dimensions and notes a deferred drawing shows as they last were, and the dimensions
+    /// and notes on its model a view drawing an exploded view holds back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

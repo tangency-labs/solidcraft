@@ -21,10 +21,10 @@ use solidcraft_sketch::{DimFrame, DimSizes, Outcome, PaperFonts, TextStyle, dim_
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
-/// A filled arrowhead, its line stopped at its base by [`stop_at_base`].
-const ARROW: Terminator = Terminator::Arrow { shape: ArrowShape::Filled, length_mm: SIZES.arrow, angle: PI / 9.0 };
-/// The height of a dimension's capitals.
-const TEXT_MM: f64 = 3.5;
+/// A filled arrowhead, its line stopped at its base by [`stop_at_base`]: a note's leader ends in it too.
+pub(crate) const ARROW: Terminator = Terminator::Arrow { shape: ArrowShape::Filled, length_mm: SIZES.arrow, angle: PI / 9.0 };
+/// The height of a dimension's capitals, and a note's unless it sets its own.
+pub(crate) const TEXT_MM: f64 = 3.5;
 /// How close two points of a layout are when they are one point.
 const SAME_POINT_MM: f64 = 1e-6;
 
@@ -36,23 +36,24 @@ struct Piece {
     text: Text,
 }
 
-/// A text set once and measured, upright from the sheet's origin, for the layout to place.
-struct Text {
-    runs: Vec<TextRun>,
-    fonts: Vec<Font>,
+/// A text set once and measured, upright from the sheet's origin, for a layout to place
+/// ([`placed`]): a dimension's, or a note's.
+pub(crate) struct Text {
+    pub(crate) runs: Vec<TextRun>,
+    pub(crate) fonts: Vec<Font>,
     /// Half its size.
-    half: Vec2,
+    pub(crate) half: Vec2,
     /// Why it isn't set, when it can't be.
-    why: Option<String>,
+    pub(crate) why: Option<String>,
     /// Whether it is unset only until the search for a font to fall back to answers.
-    pending: bool,
+    pub(crate) pending: bool,
 }
 
 impl Text {
-    /// `text` in the drawing's `lettering`.
-    fn set(text: Option<&str>, lettering: &PaperFonts) -> Text {
-        let unset = |why, pending| Text { runs: Vec::new(), fonts: Vec::new(), half: Vec2::new(0.0, TEXT_MM * 0.5), why, pending };
-        match text.map(|text| Outcome::from(lettering.text(text, Vec2::ZERO, TEXT_MM, 0.0, &TextStyle::default()))) {
+    /// `text` in the drawing's `lettering`, its capitals `cap_mm` high.
+    pub(crate) fn set(text: Option<&str>, cap_mm: f64, lettering: &PaperFonts) -> Text {
+        let unset = |why, pending| Text { runs: Vec::new(), fonts: Vec::new(), half: Vec2::new(0.0, cap_mm * 0.5), why, pending };
+        match text.map(|text| Outcome::from(lettering.text(text, Vec2::ZERO, cap_mm, 0.0, &TextStyle::default()))) {
             None | Some(Outcome::Set(None)) => unset(None, false),
             Some(Outcome::Pending) => unset(None, true),
             Some(Outcome::Refused(why)) => unset(Some(why), false),
@@ -60,7 +61,7 @@ impl Text {
                 let width = runs.iter().map(TextRun::reach).fold(0.0, f64::max);
                 // Its lines stand below the first one's baseline.
                 let below = runs.iter().map(|run| -run.origin.y).fold(0.0, f64::max);
-                Text { runs, fonts, half: Vec2::new(width, TEXT_MM + below) * 0.5, why: None, pending: false }
+                Text { runs, fonts, half: Vec2::new(width, cap_mm + below) * 0.5, why: None, pending: false }
             }
         }
     }
@@ -86,10 +87,10 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut arrows = Vec::new();
     let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
-    let set = |text: Option<&str>| Text::set(text, lettering);
+    let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
-        texts.extend(placed(piece.text.runs, piece.text.half, layout.text, layout.text_dir));
+        texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
         pending |= piece.text.pending;
@@ -112,10 +113,11 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why, pending })
 }
 
-/// `runs` of a text `half` in size, centred on `centre` and running along `dir`.
-fn placed(runs: Vec<TextRun>, half: Vec2, centre: Vec2, dir: Vec2) -> impl Iterator<Item = Item> {
+/// `runs` of a text `half` in size, its capitals `cap_mm` high, centred on `centre` and running along
+/// `dir`.
+pub(crate) fn placed(runs: Vec<TextRun>, half: Vec2, cap_mm: f64, centre: Vec2, dir: Vec2) -> impl Iterator<Item = Item> {
     let up = dir.perp();
-    let start = centre - dir * half.x + up * (half.y - TEXT_MM);
+    let start = centre - dir * half.x + up * (half.y - cap_mm);
     runs.into_iter().map(move |run| Item::Text(TextRun { origin: start + dir * run.origin.x + up * run.origin.y, angle: dir.angle(), ..run }))
 }
 

@@ -138,6 +138,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         report: ExportReport { widths_snapped: grid.widths_snapped, pieces_merged: grid.pieces_merged, pixels },
         views: built.views.into_iter().map(Into::into).collect(),
         dimensions: super::drawing_scene::dimension_results(built.dimensions),
+        notes: super::drawing_scene::note_results(built.notes),
         out_of_date: built.out_of_date.iter().map(|id| ids::encode(*id)).collect(),
         param_warnings: Vec::new(),
     };
