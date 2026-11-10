@@ -11,6 +11,7 @@ pub mod api_surfaces;
 pub mod cornered;
 pub mod directed;
 pub mod extrude;
+pub mod loft_rails;
 pub mod rotational_sweep_geometry;
 pub mod screw;
 pub mod section_blend;
