@@ -1,0 +1,700 @@
+{
+ "cases": [
+  {
+   "name": "issue1556_disk_bounded_eps1e-06_orientation0_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      0.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps1e-06_orientation1_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      1.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      0.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      1.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps0.001_orientation0_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      0.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps0.001_orientation1_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      1.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      0.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_bounded_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      1.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps1e-06_orientation0_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      0.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps1e-06_orientation1_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      1.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      0.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      1.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps0.001_orientation0_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      0.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps0.001_orientation1_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      1.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      0.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_unbounded_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1234567.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      1.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps1e-06_orientation0_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      0.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps1e-06_orientation1_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      1.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps1e-06_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      0.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps1e-06_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      1e-06,
+      0.0,
+      1.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps0.001_orientation0_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      0.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps0.001_orientation1_flags3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      1.0,
+      3.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps0.001_orientation0_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      0.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  },
+  {
+   "name": "issue1556_disk_halfopen_eps0.001_orientation1_flags63",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp: SmFace::ComputePreciseProperties (GetUVDomain().GetMin().y), SmODEAreaIFEO::Evaluate; #1556 disk of radius 0.5 on a plane whose UV domain is unbounded in v (default path, fix flag off)",
+   "inputs": {
+    "geometry": {
+     "op": "face",
+     "kind": 1,
+     "parameters": [
+      100.0,
+      200.0,
+      300.0,
+      1.0,
+      1.0,
+      -1.0,
+      -1234567.0,
+      1.0,
+      1.0,
+      100.37,
+      200.21,
+      300.41,
+      0.001,
+      0.0,
+      1.0,
+      63.0
+     ],
+     "query": 0
+    }
+   }
+  }
+ ]
+}

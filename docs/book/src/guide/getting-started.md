@@ -24,7 +24,8 @@ cargo run --release -p solidcraft -- --sample   # opens with a sample part
 
 SolidCraft opens on the start page; the house at the top left brings it back.
 
-![The start page, numbered 1 to 6](../media/getting-started/start.png)
+<img class="dark-ui" src="../media/getting-started/start.png" alt="The start page, numbered 1 to 6">
+<img class="light-ui" src="../media/getting-started/start.light.png" alt="The start page, numbered 1 to 6">
 
 **1** A new design in millimetres (or inches, beside it) · **2** Open a saved design ·
 **3** Import a STEP, IGES or mesh file as a new design · **4** Designs you opened recently ·
@@ -135,10 +136,6 @@ every change). **Both can break, and a design saved in them may not open in the 
 keeps its designs, settings and recovery copies apart from the release's, so trying one never
 changes what the release sees, and nothing is copied between them: to move a design, save it to
 a file in one and open the file in the other. Search engines are told to skip both.
-
-Planned worker and tiered-storage integration is
-described in [web-runtime.md](https://github.com/tangency-labs/solidcraft/blob/main/docs/web-runtime.md)
-(design; not yet wired in the shipped wasm build).
 
 After the first visit the web app works offline: the browser keeps a copy of it. Online, each
 launch gets the latest published build (the browser downloads it once when it changes); offline,

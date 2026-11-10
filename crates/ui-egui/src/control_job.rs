@@ -79,6 +79,7 @@ const READ_ON_A_COPY: &[&str] = &[
     "document.inspect",
     "inspect.clearance",
     "inspect.interference",
+    "inspect.parameter_variants",
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",
@@ -182,7 +183,7 @@ impl ControlJob {
 }
 
 fn label(app: &SolveApp, command: &str) -> String {
-    let language = crate::i18n::Locale::for_language(&app.preferences.language);
+    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     language.label(solidcraft_engine::find_command(command).map_or(command, |c| c.label)).to_string()
 }
 
@@ -221,9 +222,20 @@ impl Steps {
     /// What the chip says: the command running, and in a batch which step it is
     /// (`3/21 · Extrude`).
     pub(crate) fn shown(&self) -> String {
+        let (done, total) = self.counts();
+        let label = self.current();
+        if total > 1 { format!("{}/{total} · {label}", done + 1) } else { label }
+    }
+
+    /// The command running, as the toolbar names it.
+    pub(crate) fn current(&self) -> String {
         let now = self.now.load(Ordering::Relaxed).max(1);
-        let label = self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default();
-        if self.total > 1 { format!("{now}/{} · {label}", self.total) } else { label }
+        self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default()
+    }
+
+    /// Steps done (the one running not yet) and how many there are.
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        (self.now.load(Ordering::Relaxed).max(1).saturating_sub(1).min(self.total), self.total)
     }
 }
 
@@ -367,6 +379,12 @@ impl SolveApp {
             .or_else(|| self.agent.computing())
     }
 
+    /// How far the agent's design change computing off the window thread is, when it counts its
+    /// steps ([`Steps`]).
+    pub(crate) fn agent_steps(&self) -> Option<Arc<Steps>> {
+        self.control_job.as_ref().map_or_else(|| self.agent.computing_steps(), |j| j.steps.clone())
+    }
+
     /// Stop waiting for the agent's design change that is computing: it is answered as stopped
     /// and nothing of it is applied (its worker finishes on its own, unseen). Requests waiting
     /// behind it go on.
@@ -473,7 +491,7 @@ impl SolveApp {
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
         let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
         if reply["ok"] == true && export {
-            let language = crate::i18n::Locale::for_language(&self.preferences.language);
+            let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
         }
         let _ = job.req.reply.send(reply);

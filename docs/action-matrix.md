@@ -277,16 +277,16 @@ make a legacy face sketch there).
 | 100 | #492 | A face split into pieces by a later feature | `face.extrude` 25, `face.offset_plane` 25, `face.press_pull` 25, `face.sketch` 25 | 5 | corpus/issue-489-stacked-join `Body1/F2:top#[F2:side:l1,F4:side:l5]` |
 | 98 | #491 | A face that a Join merged from two features' faces | `face.sketch` 27, `face.offset_plane` 25, `face.extrude` 23, `face.press_pull` 23 | 12 | corpus/issue-489-stacked-join `Body1/F2:side:l2` |
 | 86 |  | Shell's other refusals: a removed face meeting a round as large as the wall, freeform (loft) faces, walls thinner than twice the shell (expected, not filed) | `face.shell` 86 | 22 | corpus/modern-plastic `Body1/F3:face:15` |
-| 84 | #566 | Shell of swept and sheet metal bodies: a corner whose faces don't meet the same way | `face.shell` 84 | 12 | oracle/30-fillet-after-shell `Box/F3:inner:F2:start` |
+| 84 | #566 | Shell of swept and sheet metal bodies: a corner whose faces don't meet the same way | `face.shell` 84 | 12 | oracle/30-fillet-after-shell `Box/F3:inner(F2:start)` |
 | 80 | #562 | Press Pull beside rounds and curved neighbours: the join fails | `face.extrude` 40, `face.press_pull` 40 | 13 | demo/enclosure_steps `Enclosure/F2:start` |
-| 69 |  | Blend larger than the faces around it (the 10% radius doesn't fit; expected, not filed) | `edge.chamfer` 38, `edge.fillet` 31 | 11 | corpus/modern-plastic `Body1/F2:inner:F1:+x\|F3:face:19` |
+| 69 |  | Blend larger than the faces around it (the 10% radius doesn't fit; expected, not filed) | `edge.chamfer` 38, `edge.fillet` 31 | 11 | corpus/modern-plastic `Body1/F2:inner(F1:+x)\|F3:face:19` |
 | 56 | #563 | Draft and tapered Extrude drop the faces' sources | `face.extrude` 14, `face.offset_plane` 14, `face.press_pull` 14, `face.sketch` 14 | 3 | oracle/05-taper-extrude `Frustum/F2:start` |
 | 48 | #564 | The rim a Shell leaves has no source | `face.extrude` 12, `face.offset_plane` 12, `face.press_pull` 12, `face.sketch` 12 | 8 | demo/pi-case `Body1/F2:top` |
 | 18 | #567 | Axis or tangent plane on a drill tip: no face at NaN | `curved.axis` 9, `curved.tangent_plane` 9 | 3 | oracle/18-hole-features `Plate/F5:face:15` |
-| 9 |  | Axis through a face the kernel sees as a cylinder that the command doesn't (sensor enclosure slot ends; not filed yet) | `curved.axis` 9 | 1 | examples/sensor_enclosure `Lid/F15:blend:F14:side:l2\|F14:side:l3` |
+| 9 |  | Axis through a face the kernel sees as a cylinder that the command doesn't (sensor enclosure slot ends; not filed yet) | `curved.axis` 9 | 1 | examples/sensor_enclosure `Lid/F15:blend(F14:side:l2\|F14:side:l3)` |
 | 7 |  | Other failures in the edit round: the hole cut and blend sizes above, and an extrude from the M0 box's top face whose profile isn't found again (not filed yet) | `face.hole+edit` 3, `face.extrude+edit` 1, `face.press_pull+edit` 1, `edge.chamfer+edit` 1 | 4 | corpus/m0-box-fillet-hole `Body1/F2:top` |
 | 2 |  | A helix edge projected along its axis is a point (expected) | `edge.project` 2 | 1 | oracle/50-sweep-tight-bend `Bend/F3:side:c1#1\|F3:side:c1#2~2` |
-| 1 | #566 | Shell after the edit round: a corner whose faces don't meet the same way after the move | `face.shell+edit` 1 | 1 | demo/pi-case `Body1/F4:inner:F2:start#[…]#[F6:side:c2@F7.2]` |
+| 1 | #566 | Shell after the edit round: a corner whose faces don't meet the same way after the move | `face.shell+edit` 1 | 1 | demo/pi-case `Body1/F4:inner(F2:start#[…])#[F6:side:c2@F7.2]` |
 
 Where the face history stands (`crates/kernel/src/history.rs`, [face attachments](face-attachments.md)):
 a flat face takes an attached sketch when the body carries an exact source certificate for it

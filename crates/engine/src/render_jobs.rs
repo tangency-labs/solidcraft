@@ -53,19 +53,28 @@ struct Completed {
 
 pub(crate) struct BatchShot {
     pub name: String,
-    pub camera: solidcraft_render::Camera,
+    pub camera: solidcraft_viewport::Camera,
     pub request: Arc<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, serde::Serialize)]
+/// The shot queue (`render.batch`), as Render Progress and Cancel Render report it. Its schema
+/// is part of their replies (`schema::render_jobs`).
+#[derive(Clone, Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct RenderQueueState {
+    /// How many of this design's jobs are still running.
     pub running: usize,
+    /// How many shots wait for their turn.
     pub waiting: usize,
-    /// A real native preparation claim, separate from an invented running job.
+    /// A real native preparation claim, separate from an invented running job. Present, and
+    /// true, only while the queue prepares a shot that has no job yet.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub preparing: bool,
+    /// The queue's current job, or `null`.
+    #[schemars(with = "Option<crate::schema::render_jobs::Job>")]
     pub job: Option<JobId>,
+    /// The name of the shot that job renders, or `null`.
     pub shot: Option<String>,
+    /// Why the queue stopped, or `null`.
     pub error: Option<String>,
 }
 

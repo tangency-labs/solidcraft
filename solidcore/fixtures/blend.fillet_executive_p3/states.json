@@ -1,0 +1,564 @@
+{
+  "cases": [
+    {
+      "name": "op0-target0-init0-bool0",
+      "inputs": {
+        "record": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target0-init0-bool1",
+      "inputs": {
+        "record": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target0-init1-bool0",
+      "inputs": {
+        "record": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target0-init1-bool1",
+      "inputs": {
+        "record": [
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target1-init0-bool0",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target1-init0-bool1",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          0,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target1-init1-bool0",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          1,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op0-target1-init1-bool1",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          1,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target0-init0-bool0",
+      "inputs": {
+        "record": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target0-init0-bool1",
+      "inputs": {
+        "record": [
+          1,
+          0,
+          0,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target0-init1-bool0",
+      "inputs": {
+        "record": [
+          1,
+          0,
+          1,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target0-init1-bool1",
+      "inputs": {
+        "record": [
+          1,
+          0,
+          1,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target1-init0-bool0",
+      "inputs": {
+        "record": [
+          1,
+          1,
+          0,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target1-init0-bool1",
+      "inputs": {
+        "record": [
+          1,
+          1,
+          0,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target1-init1-bool0",
+      "inputs": {
+        "record": [
+          1,
+          1,
+          1,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op1-target1-init1-bool1",
+      "inputs": {
+        "record": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target0-init0-bool0",
+      "inputs": {
+        "record": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target0-init0-bool1",
+      "inputs": {
+        "record": [
+          2,
+          0,
+          0,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target0-init1-bool0",
+      "inputs": {
+        "record": [
+          2,
+          0,
+          1,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target0-init1-bool1",
+      "inputs": {
+        "record": [
+          2,
+          0,
+          1,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target1-init0-bool0",
+      "inputs": {
+        "record": [
+          2,
+          1,
+          0,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target1-init0-bool1",
+      "inputs": {
+        "record": [
+          2,
+          1,
+          0,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target1-init1-bool0",
+      "inputs": {
+        "record": [
+          2,
+          1,
+          1,
+          0,
+          0,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "op2-target1-init1-bool1",
+      "inputs": {
+        "record": [
+          2,
+          1,
+          1,
+          1,
+          1,
+          1,
+          6,
+          1e-05,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "default-sentinel",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          9876543.21,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "negative-tolerance",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          -0.25,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "negative-default-magnitude",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          -9876543.21,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "negative-tiny-tolerance",
+      "inputs": {
+        "record": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          -1e-300,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    }
+  ]
+}

@@ -2,8 +2,8 @@
 use crate::{Result, params::bad};
 use serde::Deserialize;
 use solidcore_record::Vec3;
-use solidcraft_render::{
-    ProductScene,
+use solidcraft_render::ProductScene;
+use solidcraft_viewport::{
     clear_coat::ClearCoat,
     surface::{OpaqueSurface, srgb8_to_linear},
 };

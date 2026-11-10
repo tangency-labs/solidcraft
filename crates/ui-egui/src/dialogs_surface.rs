@@ -3,6 +3,7 @@
 //! Fair Surface, Match Surface and Split Face. Each has a live preview and Edit Feature.
 
 use crate::dialogs::put;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
@@ -150,6 +151,38 @@ impl Surf {
     }
 }
 
+/// The one control that chooses a continuity order, wherever one is chosen: a dropdown of
+/// `allowed` (what the construction builds, `Construction::offered`). Its labels are the orders'
+/// plain words and its hover text a line per order naming its code, both from the kernel's one
+/// table of orders; a value not in `allowed` shows the first. Tokens: `row, dropdown`.
+pub(crate) fn continuity_row(ui: &mut egui::Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity]) -> egui::Response {
+    continuity_row_explained(ui, label, id, value, allowed, &continuity_tip(allowed))
+}
+
+/// [`continuity_row`] whose hover text says what each order builds there (`tip`, which names
+/// each order's code), for a choice whose orders stand for constructions (a fillet's corners).
+pub(crate) fn continuity_row_explained(
+    ui: &mut egui::Ui,
+    label: &str,
+    id: &str,
+    value: &mut Continuity,
+    allowed: &[Continuity],
+    tip: &str,
+) -> egui::Response {
+    let labels: Vec<&str> = allowed.iter().map(|g| g.label_id()).collect();
+    let mut index = allowed.iter().position(|g| g == value).unwrap_or(0);
+    let response = choice_row(ui, label, id, &mut index, &labels);
+    if let Some(g) = allowed.get(index) {
+        *value = *g;
+    }
+    response.backing_on_hover_text(tip)
+}
+
+/// The hover text of a continuity choice: each order's own line, which names its code.
+pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
+    allowed.iter().map(|g| solidcraft_ui_text::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+}
+
 /// What each dialog's continuity rows offer: the orders its construction builds, from the
 /// kernel's table, so an order a construction learns shows up by itself.
 fn patch_orders() -> Vec<Continuity> {
@@ -160,7 +193,7 @@ fn patch_orders() -> Vec<Continuity> {
 /// faces meet each other with different curvatures (tangent only: no surface smooth at the corner
 /// has both curvatures there).
 fn patch_continuity_tip() -> String {
-    format!("{}\n{}", ui_kit::continuity_tip(&patch_orders()), crate::i18n::tr("ui.patch_continuity_corner_tip"))
+    format!("{}\n{}", continuity_tip(&patch_orders()), solidcraft_ui_text::tr("ui.patch_continuity_corner_tip"))
 }
 
 fn blend_orders() -> Vec<Continuity> {
@@ -204,7 +237,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
         }
         Surf::Loft { .. } => {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
-            vec![SelInput::new("Sections", PROFILES | CURVES, true), rail, rail2]
+            vec![SelInput::new("Sections", PROFILES | CURVES | EDGES, true), rail, rail2]
         }
         Surf::Blend { .. } => vec![SelInput::new("From edges", EDGES, true), SelInput::new("To edges", EDGES, true)],
         Surf::Boundary { .. } => vec![SelInput::new("Curves", CURVES | EDGES, true), SelInput::new("Cross curves", CURVES | EDGES, true)],
@@ -262,14 +295,14 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             form_row(ui, "ui.fair_iterations", |ui| {
                 ui_kit::number_field(ui, iterations, 1..=1000, 1.0, "");
             });
-            enter |= hint_row(ui, "Tolerance", tolerance, crate::i18n::tr_label("ui.fair_tolerance_default"));
+            enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr_label("ui.fair_tolerance_default"));
             ui_kit::options(ui, "fair_options", &mut [("ui.fair_keep_edges", keep_edges)]);
         }
         Surf::Match { order } => {
             choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
         }
         Surf::Stitch { tolerance } => {
-            enter |= hint_row(ui, "Tolerance", tolerance, crate::i18n::tr("ui.stitch_tolerance_hint"));
+            enter |= hint_row(ui, "Tolerance", tolerance, solidcraft_ui_text::tr("ui.stitch_tolerance_hint"));
         }
         Surf::Thicken { thickness, symmetric, operation } => {
             enter |= expr_row(ui, "Thickness", thickness);
@@ -319,23 +352,23 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             ui_kit::options(ui, "untrim_options", &mut [("Restore outer boundary", outer), ("In place (surfaces)", in_place)]);
         }
         Surf::Patch { continuity } => {
-            ui_kit::continuity_row_explained(ui, "Continuity", "pa_cont", continuity, &patch_orders(), &patch_continuity_tip());
+            continuity_row_explained(ui, "Continuity", "pa_cont", continuity, &patch_orders(), &patch_continuity_tip());
         }
         Surf::Blend { continuity, bulge, stitch } => {
             let [from, to] = continuity;
             let [from_bulge, to_bulge] = bulge;
-            ui_kit::continuity_row(ui, "Start continuity", "bl_cont0", from, &blend_orders());
+            continuity_row(ui, "Start continuity", "bl_cont0", from, &blend_orders());
             form_row(ui, "Start bulge", |ui| {
                 ui_kit::scalar_field(ui, from_bulge, -0.9..=3.0);
             });
-            ui_kit::continuity_row(ui, "End continuity", "bl_cont1", to, &blend_orders());
+            continuity_row(ui, "End continuity", "bl_cont1", to, &blend_orders());
             form_row(ui, "End bulge", |ui| {
                 ui_kit::scalar_field(ui, to_bulge, -0.9..=3.0);
             });
             ui_kit::options(ui, "blend_options", &mut [("Stitch to both bodies", stitch)]);
         }
         Surf::Boundary { continuity, join } => {
-            ui_kit::continuity_row(ui, "Continuity", "bo_cont", continuity, &boundary_orders());
+            continuity_row(ui, "Continuity", "bo_cont", continuity, &boundary_orders());
             form_row(ui, "Operation", |ui| {
                 let mut op = usize::from(*join);
                 combo(ui, "bo_op", &BOUNDARY_OPS, &mut op);
@@ -559,33 +592,34 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(0, "the sections")?;
             // Each picked profile is a section, and so is each chain of picked curves (those of
             // one sketch that meet end to end), in the order of their first pick: two sections
-            // can come from one sketch (#8221).
+            // can come from one sketch (#8221). Body edge chains are also sections.
             let picks = items(inputs, 0);
-            let curves: Vec<Sel> = picks.iter().filter(|x| matches!(x, Sel::SketchCurve { .. })).cloned().collect();
-            let mut chained: Vec<Option<Chain>> = chains(app, &curves)?.into_iter().map(Some).collect();
+            let curves_and_edges: Vec<Sel> = picks.iter().filter(|x| matches!(x, Sel::SketchCurve { .. } | Sel::Edge { .. })).cloned().collect();
+            let mut chained: Vec<Option<Chain>> = chains(app, &curves_and_edges)?.into_iter().map(Some).collect();
             let mut sections: Vec<Value> = Vec::new();
-            let mut sketches: Vec<u64> = Vec::new();
             for x in picks {
                 match x {
                     Sel::Profile { sketch, index } => {
                         sections.push(json!({"sketch": sketch, "profiles": [index]}));
-                        sketches.push(*sketch);
                     }
                     Sel::SketchCurve { id, .. } => {
                         let sk = crate::dialogs::picks_sketch(app, std::slice::from_ref(x), None).ok_or("a picked curve is no longer in a sketch")?;
                         let holds = |c: &Option<Chain>| matches!(c, Some(Chain::Sketch { sketch, ids }) if *sketch == sk && ids.contains(id));
                         if let Some(Some(Chain::Sketch { sketch, ids })) = chained.iter_mut().find(|c| holds(c)).map(Option::take) {
                             sections.push(json!({"sketch": sketch, "curves": ids}));
-                            sketches.push(sketch);
+                        }
+                    }
+                    Sel::Edge { body, point, .. } => {
+                        let holds = |c: &Option<Chain>| matches!(c, Some(Chain::Edges { body: b, points }) if b == body && points.contains(point));
+                        if let Some(Some(Chain::Edges { body, points })) = chained.iter_mut().find(|c| holds(c)).map(Option::take) {
+                            sections.push(json!({"body": body, "edges": points.into_iter().map(pt).collect::<Vec<_>>()}));
                         }
                     }
                     _ => {}
                 }
             }
-            sketches.sort_unstable();
-            sketches.dedup();
-            if sketches.len() < 2 {
-                return Err("pick sections in two or more sketches".into());
+            if sections.len() < 2 {
+                return Err("pick at least two sections".into());
             }
             let mut p = json!({ "sections": sections });
             crate::dialogs_sweep::rail_params(app, *rail_fit, [items(inputs, 1), items(inputs, 2)], &mut p)?;
@@ -875,7 +909,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),
                 AxisRef::SketchAxis { axis } => (Some(Sel::Axis { name: axis.to_ascii_lowercase() }), None),
-                AxisRef::SketchLine { curve } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: Some(owner) } => (Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: None } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
                 AxisRef::Construction { name } => (Some(Sel::Axis { name: name.to_string() }), None),
                 AxisRef::Line { origin, dir } => (None, Some(crate::dialogs::line_axis_value(s, frame, origin, dir.0))),
                 // An edge or face that is gone stays the reference until another is picked.
@@ -972,7 +1007,16 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         }
         FeatureKind::SurfaceLoft { sections, rails, rail_fit, .. } => {
             let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
-            let picked = sections.iter().flat_map(|sec| sheet_sels(app, sec.sketch.0, sec.profiles.as_ref(), &sec.curves)).collect();
+            let picked: Vec<Sel> = sections
+                .iter()
+                .flat_map(|sec| {
+                    if let Some(body) = &sec.body {
+                        sec.edges.iter().filter_map(|p| crate::dialogs::edge_sel_on(&app.session, Some(body), p.0)).collect()
+                    } else {
+                        sheet_sels(app, sec.sketch.0, sec.profiles.as_ref(), &sec.curves)
+                    }
+                })
+                .collect();
             (Surf::Loft { rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) }, vec![picked, rail, rail2])
         }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
@@ -1177,12 +1221,13 @@ mod tests {
     /// its hover line names the code for those who know it.
     #[test]
     fn continuity_rows_are_words_and_keep_the_codes_for_the_hover_text() {
+        crate::i18n::install();
         for orders in [patch_orders(), blend_orders(), boundary_orders()] {
             assert_eq!(orders.first(), Some(&Continuity::G0), "{orders:?}");
         }
         assert_eq!(blend_orders().last(), Some(&Continuity::G3), "a blend builds up to G3 today");
         for lang in ["en", "ar", "he", "ja", "zh", "de", "ko"] {
-            let locale = crate::i18n::Locale::for_language(lang);
+            let locale = solidcraft_ui_text::Locale::for_language(lang);
             for g in Continuity::ALL {
                 let (label, tip) = (locale.text(g.label_id()), locale.text(g.tip_id()));
                 assert!(label != g.label_id() && tip != g.tip_id(), "{lang}: {g:?} has no text");
@@ -1190,7 +1235,7 @@ mod tests {
                 assert!(tip.contains(g.code()), "{lang}: the {g:?} hover text names its code: {tip}");
             }
         }
-        assert_eq!(ui_kit::continuity_tip(&blend_orders()).lines().count(), 4);
+        assert_eq!(continuity_tip(&blend_orders()).lines().count(), 4);
         // The patch's hover text adds what it does at a corner whose faces' curvatures differ.
         let tip = patch_continuity_tip();
         assert_eq!(tip.lines().count(), patch_orders().len() + 1, "{tip}");

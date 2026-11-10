@@ -1,0 +1,259 @@
+{
+  "cases": [
+    {
+      "name": "guard_op0_circle_radius_1e-300",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-300, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op0_circle_radius_1e-13",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-13, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op0_circle_radius_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-12, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op0_circle_radius_2e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 2e-12, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op0_circle_radius_-0.1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 1, 1, 3, 3, 0.5, 0.5, 0, -0.1, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op0_magnitude_1e+13",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 10000000000000.0, 0.3, 0, 20000000000000.0, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op0_magnitude_1e+14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 100000000000000.0, 0.3, 0, 200000000000000.0, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op0_span_u_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 2e-09, 0.3, 0, 7e-09, 0, 0, 1e-08, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op0_span_v_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 0.2, 3e-09, 0, 0.7, 0, 0, 1, 1e-08, 1, 1, 6e-09, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op0_span_uv_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 2e-09, 3e-09, 0, 7e-09, 0, 0, 1e-08, 1e-08, 1, 1, 6e-09, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op0_kind0_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 0, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "guard_op0_kind1_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 1, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 360.5, 1e-07, 0, 1, -0.5, 360.5, 100] }
+    },
+    {
+      "name": "guard_op0_kind2_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [0, 2, 2, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "guard_op1_circle_radius_1e-300",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-300, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op1_circle_radius_1e-13",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-13, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op1_circle_radius_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-12, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op1_circle_radius_2e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 2e-12, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op1_circle_radius_-0.1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 1, 1, 3, 3, 0.5, 0.5, 0, -0.1, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op1_magnitude_1e+13",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 10000000000000.0, 0.3, 0, 20000000000000.0, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op1_magnitude_1e+14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 100000000000000.0, 0.3, 0, 200000000000000.0, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op1_span_u_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 2e-09, 0.3, 0, 7e-09, 0, 0, 1e-08, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op1_span_v_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 0.2, 3e-09, 0, 0.7, 0, 0, 1, 1e-08, 1, 1, 6e-09, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op1_span_uv_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 2e-09, 3e-09, 0, 7e-09, 0, 0, 1e-08, 1e-08, 1, 1, 6e-09, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op1_kind0_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 0, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "guard_op1_kind1_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 1, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 360.5, 1e-07, 0, 1, -0.5, 360.5, 100] }
+    },
+    {
+      "name": "guard_op1_kind2_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [1, 2, 2, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "guard_op2_circle_radius_1e-300",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-300, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op2_circle_radius_1e-13",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-13, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op2_circle_radius_1e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 1e-12, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op2_circle_radius_2e-12",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 1, 1, 3, 3, 0.5, 0.5, 0, 2e-12, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op2_circle_radius_-0.1",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 1, 1, 3, 3, 0.5, 0.5, 0, -0.1, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 360, 1e-07, 0, 1, 0, 360, 100] }
+    },
+    {
+      "name": "guard_op2_magnitude_1e+13",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 10000000000000.0, 0.3, 0, 20000000000000.0, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op2_magnitude_1e+14",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 100000000000000.0, 0.3, 0, 200000000000000.0, 0, 0, 1, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op2_span_u_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 2e-09, 0.3, 0, 7e-09, 0, 0, 1e-08, 1, 1, 1, 0.6, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op2_span_v_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 0.2, 3e-09, 0, 0.7, 0, 0, 1, 1e-08, 1, 1, 6e-09, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op2_span_uv_1e-8",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 2e-09, 3e-09, 0, 7e-09, 0, 0, 1e-08, 1e-08, 1, 1, 6e-09, 0, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "guard_op2_kind0_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 0, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "guard_op2_kind1_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 1, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 360.5, 1e-07, 0, 1, -0.5, 360.5, 100] }
+    },
+    {
+      "name": "guard_op2_kind2_outside_natural_domain",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:8462-10420 (PR #152 FFI guard review regression)",
+      "inputs": { "record": [2, 2, 2, 1, 3, 3, 0.2, 0.3, 0, 0.7, 0, 0, 1, 1, 1, 1, 0.6, 0, -0.5, 1.5, 1e-07, 0, 1, -0.5, 1.5, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_bottom_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 0.5, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_top_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, 0.5, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_downward_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.6, 0.2, 2, 0.6, 0, 0, 1, 1, 1, 1, 0.2, -1, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_slanted_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.1, 0.2, -0.5, 0.8, 0, 0, 1, 1, 1, 1, 0.7, 1.5, 0, 1, 1e-07, 1, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_param_vertical_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 1, 2, 0, 0.5, 100, 0.5, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_bottom_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 0.5, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_top_only",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, 0.5, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_downward_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.6, 0.2, 2, 0.6, 0, 0, 1, 1, 1, 1, 0.2, -1, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_slanted_both_w_planes",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.1, 0.2, -0.5, 0.8, 0, 0, 1, 1, 1, 1, 0.7, 1.5, 0, 1, 1e-07, 0, 1, 0, 1, 100] }
+    },
+    {
+      "name": "wr155_space_vertical_preclassified",
+      "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:9970-10420 (WR-155 shared slot-4/5 solution buffer, PR #152 integration)",
+      "inputs": { "record": [4, 3, 0, 2, 2, 2, 0.3, 0.4, -1, 0.3, 0, 0, 1, 1, 1, 1, 0.4, 2, 0, 1, 1e-07, 0, 2, 0, 0.5, 100, 0.5, 1, 100] }
+    }
+  ]
+}

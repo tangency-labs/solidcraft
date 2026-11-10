@@ -1,0 +1,209 @@
+{
+  "cases": [
+    {
+      "name": "lazy_line_canonical",
+      "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb)",
+      "inputs": {
+        "surf": {
+          "gen": {
+            "kind": "lazy_line",
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              1
+            ]
+          },
+          "build": {
+            "mode": "canonical",
+            "vec": [
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        "op": "build"
+      }
+    },
+    {
+      "name": "lazy_line_copy",
+      "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb)",
+      "inputs": {
+        "surf": {
+          "gen": {
+            "kind": "lazy_line",
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              1
+            ]
+          },
+          "build": {
+            "mode": "canonical",
+            "vec": [
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        "op": "copy"
+      }
+    },
+    {
+      "name": "lazy_line_adjust",
+      "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb)",
+      "inputs": {
+        "surf": {
+          "gen": {
+            "kind": "lazy_line",
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              1
+            ]
+          },
+          "build": {
+            "mode": "canonical",
+            "vec": [
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        "op": "adjust",
+        "dom": [
+          0.2,
+          -2,
+          0.8,
+          3
+        ]
+      }
+    },
+    {
+      "name": "lazy_line_reparam",
+      "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb)",
+      "inputs": {
+        "surf": {
+          "gen": {
+            "kind": "lazy_line",
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              1
+            ]
+          },
+          "build": {
+            "mode": "canonical",
+            "vec": [
+              0,
+              0,
+              1
+            ]
+          }
+        },
+        "op": "reparam",
+        "dom": [
+          -2,
+          -3,
+          4,
+          5
+        ]
+      }
+    },
+    {
+      "name": "lazy_line_finite_swapped",
+      "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb)",
+      "inputs": {
+        "surf": {
+          "gen": {
+            "kind": "lazy_line",
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              1
+            ]
+          },
+          "build": {
+            "mode": "ctor",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "vec": [
+              0,
+              0,
+              1
+            ],
+            "domain": [
+              -0.5,
+              -2,
+              2,
+              3
+            ]
+          },
+          "swap": true
+        },
+        "op": "build"
+      }
+    },
+    {
+      "name": "lazy_line_infinite_swapped",
+      "upstream_ref": "source/SMLib/src/SmSurfOfExtrusion.cpp:3668 (GetCanonical virtual MakeNurb)",
+      "inputs": {
+        "surf": {
+          "gen": {
+            "kind": "lazy_line",
+            "a": [
+              0,
+              0,
+              0
+            ],
+            "b": [
+              1,
+              0,
+              1
+            ]
+          },
+          "build": {
+            "mode": "infinite",
+            "vec": [
+              0,
+              0.5,
+              2
+            ]
+          },
+          "swap": true
+        },
+        "op": "build"
+      }
+    }
+  ]
+}

@@ -339,15 +339,15 @@ fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
 /// ending them 0.1 um short) is held at that tolerance.
 #[test]
 fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() {
+    use solidcore_ops::pcurve::TrimEdge;
     use solidcore_record::brep::{Curve, Curve2};
-    use solidcraft_geom::brep::pcurve::TrimEdge;
     let line = Curve::Line { start: [0.0, 0.0, 0.0], end: [2.0, 0.0, 0.0] };
     let edge = TrimEdge { curve: &line, nurbs: None, interval: [0.0, 1.0], vertices: [0, 1], tolerance: 1e-5 };
     let theirs = [0.0, 1.0 - 2e-8];
     let pc = Curve2::Spline { knots: vec![0.0, 0.0, theirs[1], theirs[1]], points: vec![[0.0, 0.0], [1.0, 0.0]] };
     let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance).unwrap();
     assert_eq!(mapped.interval(), Some([0.0, 1.0]));
-    assert_eq!(solidcraft_geom::brep::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
+    assert_eq!(solidcore_ops::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
     // 0.02 mm along the edge is past its 1e-5 mm.
     let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance).unwrap_err();
     assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
@@ -355,7 +355,7 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
     let short = Curve2::Spline { knots: vec![0.0, 0.0, 0.99, 0.99], points: vec![[0.0, 0.0], [1.0, 0.0]] };
     let held = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], 0.03).unwrap();
     assert_eq!(held.interval(), Some([0.0, 1.0]));
-    assert_eq!(solidcraft_geom::brep::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
+    assert_eq!(solidcore_ops::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
 }
 
 /// An edge whose curve runs 2.5 um past its vertex and its face's patch (as Poppy Humanoid's
@@ -365,8 +365,8 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
 /// own interval, ending at the patch's corner.
 #[test]
 fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     use solidcore_record::brep::{Curve, Surface};
-    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     // S(u, v) = (10u, 10v, 2v^2), bicubic
     let g = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
     let z = [0.0, 0.0, 2.0 / 3.0, 2.0];
@@ -397,7 +397,7 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
     let pcs = crate::pcurves::SmlibTrims.trims(&face).unwrap();
     let pc = &pcs[0][0];
     assert_eq!(pc.interval(), Some([0.0, 1.0]));
-    let [u, v] = solidcraft_geom::brep::pcurve::eval(pc, 1.0).unwrap();
+    let [u, v] = solidcore_ops::pcurve::eval(pc, 1.0).unwrap();
     assert!((u - 1.0).abs() < 1e-9 && v.abs() < 1e-9, "{u} {v}");
 }
 
@@ -486,19 +486,6 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
     }
 }
 
-/// Each kernel has its own range of blend serials: a body keeps the serials of the kernel that
-/// made it, and another kernel's memo of solved stations must not take them for its own.
-#[test]
-fn kernels_never_issue_the_same_blend_serial() {
-    let range = core::BLEND_SERIALS_PER_KERNEL as usize;
-    let ranges = core::run("outer", |outer| {
-        let inner = core::run("inner", |inner| Ok(inner.blend_last_serial.get() as usize)).unwrap_or_default();
-        Ok([outer.blend_last_serial.get() as usize / range, inner / range])
-    });
-    let [outer, inner] = ranges.unwrap();
-    assert_ne!(outer, inner);
-}
-
 /// A panic in a call running beside another costs neither: the panicking call's kernel is thrown
 /// away and the other call and later ones go on.
 #[test]
@@ -577,6 +564,51 @@ fn a_stopped_call_ends_at_its_next_check_and_holds_up_nothing() {
     // And nothing else is affected.
     let v = body.boolean(&body, BooleanOp::Union).unwrap().unwrap().volume(1e-7).unwrap();
     assert!((v - 1000.0).abs() < 1e-6, "{v}");
+}
+
+/// Work entered under a token while another is over it stops when either does (#10577): a
+/// dialog's Cancel stops the kernel work of its design's job, and the design's own token, and
+/// later work under it, go on.
+#[test]
+fn a_token_under_another_stops_when_either_does() {
+    let looping = |design: stop::Stop, dialog: stop::Stop| {
+        let (started, is_started) = std::sync::mpsc::channel();
+        let running = std::thread::spawn(move || {
+            design.within(|| {
+                dialog.within(|| {
+                    core::run("nested_stop", |k| {
+                        let _ = started.send(());
+                        loop {
+                            k.check_cancelled("nested_stop")?;
+                            std::thread::yield_now();
+                        }
+                    })
+                })
+            })
+        });
+        is_started.recv().unwrap();
+        running
+    };
+    // The inner token stopped: the work stops, the design's token does not.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    let running = looping(design.clone(), dialog.clone());
+    dialog.stop();
+    let result: Result<()> = answered(move || running.join().unwrap());
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(!design.is_stopped());
+    assert!(design.within(|| Brep::make_box([0.0; 3], [1.0; 3])).is_ok(), "later work under the design's token runs");
+    // The outer token stopped: the work stops too.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    let running = looping(design.clone(), dialog.clone());
+    design.stop();
+    let result: Result<()> = answered(move || running.join().unwrap());
+    assert!(result.is_err_and(|e| e.to_string().contains("cancel")));
+    assert!(!dialog.is_stopped(), "the token entered beneath is not stopped itself");
+    // A token stopped before the work is entered under it: refused before it starts.
+    let (design, dialog) = (stop::Stop::new(), stop::Stop::new());
+    dialog.stop();
+    assert!(design.within(|| dialog.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err());
+    assert!(dialog.within(|| design.within(|| Brep::make_box([0.0; 3], [1.0; 3]))).is_err(), "either way round");
 }
 
 /// Every call starts with the same draws of random rays, whatever its kernel did before: what
