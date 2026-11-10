@@ -3650,14 +3650,17 @@ mod native_camera_queue_preparation {
         }
         let (mut s, host) = fixture(2);
         let seen = Arc::new(AtomicBool::new(false));
-        let probe =
-            DropInScope { path: std::env::temp_dir().join("solidcraft-batch-scope-drop.hdr").to_string_lossy().into_owned(), seen: seen.clone() };
+        let probe = DropInScope {
+            path: solidcraft_io::vfs::temp_dir().join("solidcraft-batch-scope-drop.hdr").to_string_lossy().into_owned(),
+            seen: seen.clone(),
+        };
         s.set_command_check(Some(Arc::new(move |_, _, _| {
             assert!(!probe.path.is_empty());
             Ok(())
         })));
         let mut params = Some(json!({}));
-        let mut scope = Some(solidcraft_io::vfs::PathScope::new([std::env::temp_dir()]));
+        // The long-name spelling: the path check refuses a short (8.3) %TEMP% such as ABCDEF~1.XYZ (#14320).
+        let mut scope = Some(solidcraft_io::vfs::PathScope::new([solidcraft_io::vfs::temp_dir()]));
         let claim = batch::claim(&mut s, &mut params, &mut scope, CancelToken::default()).unwrap();
         let (mut prepared, worker) = Worker::prepare(claim);
         batch::finish_retained(&mut s, &mut prepared).unwrap();

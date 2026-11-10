@@ -364,6 +364,19 @@ fn a_messages_changes_undo_as_one_step() {
     assert!(matches!(app.agent_chat.items[n], Item::Changes { undone: true, .. }));
 }
 
+/// The conversation knows a design by its revision: the very design the host gave it, never an
+/// equal copy, and only the host's own type gets the design back (#13438).
+#[test]
+fn a_revision_is_the_very_design_not_an_equal_one() {
+    let design = Arc::new(String::from("plate"));
+    let equal = Arc::new(String::from("plate"));
+    let revision = Revision::of(&design);
+    assert!(revision.is(&design) && !revision.is(&equal), "an equal design is another design");
+    assert!(revision.same(&Revision::of(&design)) && !revision.same(&Revision::of(&equal)));
+    assert!(revision.get::<String>().is_some_and(|d| Arc::ptr_eq(&d, &design)), "the host gets its own design back");
+    assert!(revision.get::<u32>().is_none(), "and nothing of another type");
+}
+
 /// Saving waits for Allow or Deny; Deny answers the agent without running it, Allow runs it.
 #[test]
 fn file_actions_wait_for_the_user() {
@@ -4248,6 +4261,10 @@ fn an_attached_picture_and_the_views_picture_share_the_viewer() {
 fn add_agent_opens_its_dialog_from_home() {
     use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
+    // The search for installed agents counts as done, so it doesn't start when the page opens
+    // (#14384): finishing between the frame that drew Add agent and the click, it replaced the
+    // "Detecting…" line above the button, which moved, and the click missed it.
+    h.app.agent_chat.detection = Some(Default::default());
     h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
     h.call("ui.home", json!({"open": true}));
     h.call("ui.prefs", json!({"open": "AI"}));

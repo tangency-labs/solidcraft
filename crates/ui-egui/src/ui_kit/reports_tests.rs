@@ -1,13 +1,13 @@
 use super::*;
-use crate::scenario;
 use crate::ui_kit::{self, test_support as harness};
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn fitting_crash_rows_stay_inside_list_and_enclosing_horizontal_viewport() {
     for ppp in [1.0, 1.25, 2.0] {
         for width in [340.0, 499.0, 500.3, 524.0, 760.0] {
             for count in [1, 12] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 ctx.set_pixels_per_point(ppp);
                 for _ in 0..3 {
                     harness::frame(&ctx, vec![], |ui| {
@@ -42,8 +42,8 @@ fn fitting_crash_rows_stay_inside_list_and_enclosing_horizontal_viewport() {
                             outer.inner_rect
                         );
                     });
-                    let viewport = scenario::rect_of("dialog:list:reports:viewport").unwrap();
-                    let content = scenario::count_of("dialog:list:reports:content_width").unwrap() as f32;
+                    let viewport = registry::rect_of("dialog:list:reports:viewport").unwrap();
+                    let content = registry::count_of("dialog:list:reports:content_width").unwrap() as f32;
                     assert!(content <= viewport.width().ceil(), "{width} at {ppp}, {count} rows: content {content}, viewport {viewport:?}");
                 }
             }

@@ -15,7 +15,10 @@ use super::CommandSpec;
 use super::features::{add_feature, axis_param, check_expr, extent_param, feature_sketch, operation, plane_param, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
 use crate::schema::features::{FeatureResult, SurfaceSweepParams};
-use crate::schema::surface::{FairParams, OffsetParams, ReverseNormalParams, StitchParams, ThickenParams, UnstitchParams, UntrimParams};
+use crate::schema::surface::{
+    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceTrimParams, ThickenParams, UnstitchParams, UntrimParams,
+};
+use crate::schema::surface_blend::BlendParams;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -26,7 +29,10 @@ const THICKEN_CONTRACT: TypedContract<ThickenParams> = TypedContract::new();
 const OFFSET_CONTRACT: TypedContract<OffsetParams> = TypedContract::new();
 const UNTRIM_CONTRACT: TypedContract<UntrimParams> = TypedContract::new();
 const FAIR_CONTRACT: TypedContract<FairParams> = TypedContract::new();
+const SURFACE_EXTEND_CONTRACT: TypedContract<SurfaceExtendParams> = TypedContract::new();
+const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::new();
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
+const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.patch", "Patch", patch)
@@ -45,13 +51,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&THICKEN_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("bodies: [surface names]; thickness: expr (negative: against the normal); symmetric?: bool; operation?: new|join|cut|intersect; targets?"),
-    CommandSpec::new("surface.extend", "Extend", extend)
+    CommandSpec::new("surface.extend", "Extend", crate::checked!("surface.extend", extend))
         .at("SURFACE", "MODIFY")
         .icon("surface_extend")
+        .contract(&SURFACE_EXTEND_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; edges: [[x,y,z]] (points on boundary edges to push out); distance: expr (unless up_to); mode?: natural (the surface itself continued: a B-spline's end spans continued, which keeps planes and surfaces of revolution on themselves; the default) | tangent (the face continued tangent to its surface across the edge, G1) | curvature (continued keeping the surface's curvature across the edge too, G2); up_to?: plane (XY|XZ|YZ|plane name|{origin, normal}) | {body, point} (a face, its surface extended) | \"bounds\" (natural: back to the surface's own bounds, undoing a trim); neighbours?: bool (default true: the edges next to an extended edge are lengthened to meet it; false: the extension's sides run square to the edge)"),
-    CommandSpec::new("surface.trim", "Trim", trim)
+    CommandSpec::new("surface.trim", "Trim", crate::checked!("surface.trim", trim))
         .at("SURFACE", "MODIFY")
         .icon("surface_trim")
+        .contract(&SURFACE_TRIM_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("body: surface name; plane: XY|XZ|YZ|plane name|{origin, normal} or tool: {body, point} (a face, its surface extended) or curves: {sketch, curves?: [curve ids] (chains of curves meeting end to end; default every curve), direction?: normal|[x,y,z] (swept onto the surface along the sketch's normal, the default, or this direction)}; keep: [x,y,z] (a point on the side to keep) or [[x,y,z], ...] (points on the regions to keep: the pieces that hang together once cut). Mutual trim: with: another surface (one face each; leave out plane, tool and curves), keep_with: [x,y,z] or [[x,y,z], ...] (what to keep of it); each is cut where the other's surface (extended) meets it; extend?: bool (a surface that stops short of the other is extended to meet it); stitch?: bool (the kept pieces sewn into `body`; `with` is then gone)"),
     CommandSpec::new("surface.extrude", "Surface Extrude", surface_extrude)
         .at("SURFACE", "CREATE")
@@ -60,7 +70,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.revolve", "Surface Revolve", surface_revolve)
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); axis: sketch line id|x|y|X|Y|Z|{type: world, axis: X|Y|Z}|{sketch, curve} (a line of another sketch, followed in that sketch)|construction axis name|{origin, dir} (origin: numbers or length expressions, followed when parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle?: expr (default 360 deg); angle2?: expr (the other side); symmetric?: bool; name?, body_name? (a surface body, no caps; a solid where a full turn closes it)"),
     CommandSpec::new("surface.sweep", "Surface Sweep", crate::checked!("surface.sweep", surface_sweep))
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
@@ -81,9 +91,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SURFACE", "CREATE")
         .icon("surface_ruled")
         .params("body; edges: [[x,y,z]] (points on a chain of its edges, open or closed); distance: expr (how far the strip reaches); mode?: normal|tangent|angle|direction (default normal: along the normal of the face beside each edge; tangent: continuing it); angle?: expr (angle mode: from `direction`, else from the face's normal, turned away from the face; 90 deg from the normal is tangent); direction?: [x,y,z] (direction mode: the rulings; angle mode: the reference, e.g. a pull direction for a draft); face?: [x,y,z] (a point on the face the directions come from; default: the face beside the most picked edges); flip?: bool (the other side); corners?: mitre|round (sharp corners of the chain; inside corners are always cut back); far?: [null|[[x,y,z]]] (per chain edge, the interior control points of a free strip's far curve, as the default curve's handles list them; null: the default). A constant ruling, or one keeping its angle to an arc's axis, gives an exact plane, cylinder or cone; where the rulings turn freely along an edge, the strip is the exact ruled surface to a far curve of its own (from corner to corner, fair, near the rulings' ends). A new surface body"),
-    CommandSpec::new("surface.blend", "Blend Surface", blend)
+    CommandSpec::new("surface.blend", "Blend Surface", crate::checked!("surface.blend", blend))
         .at("SURFACE", "CREATE")
         .icon("surface_blend")
+        .contract(&BLEND_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("from, to: {body, edges: [[x,y,z]]} (points on the edges of one chain of each body: two picks on the same edge is that one edge, more chain up); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g1: how much of the surface at the picked edges the blend repeats — the tangent plane, the curvature, or how that curvature changes); bulge?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); align?: [[x,y,z], [x,y,z]] (a point each end leaves towards, when the faces at the picks do not say); seam?: [[x,y,z], [x,y,z]] (a point on each chain its stations start from: two closed chains otherwise pair the way that keeps the blend from twisting; an open chain starts at the end nearer its point; a closed chain blends only to a closed chain); stitch?: bool (sew the blend onto its two bodies where the boundaries meet, replacing them); name?, body_name?"),
     CommandSpec::new("surface.untrim", "Untrim", crate::checked!("surface.untrim", untrim))
         .at("SURFACE", "MODIFY")

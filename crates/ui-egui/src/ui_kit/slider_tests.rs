@@ -1,110 +1,7 @@
 use super::*;
-use crate::scenario;
 use egui::{Rect, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
-
-#[test]
-fn theme_notice_actions_fit_wrap_and_accept_native_pointer_clicks_in_both_themes() {
-    const NOTICE: &str = "A theme option changed. Undo restores the previous value; dismiss keeps the current value and closes this notice.";
-
-    fn frame(ctx: &egui::Context, width: f32, can_undo: bool, events: Vec<egui::Event>) -> (bool, bool) {
-        scenario::clear_handles();
-        let mut clicked = (false, false);
-        crate::test_support::frame(
-            ctx,
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1200.0, 1600.0))),
-                events,
-                focused: true,
-                ..Default::default()
-            },
-            |ui| {
-                let mut content = Rect::NOTHING;
-                let allocated = ui.allocate_ui_with_layout(vec2(width, ui.available_height()), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.set_width(width);
-                    content = ui.max_rect().intersect(ui.clip_rect());
-                    ui.set_clip_rect(content);
-                    scope(ui, |ui| {
-                        clicked = theme_option_notice(ui, "guard", NOTICE, can_undo);
-                    });
-                });
-                for (target, present) in [("prefs:theme_notice_undo:guard", can_undo), ("prefs:theme_notice_dismiss:guard", true)] {
-                    let rect = scenario::rect_of(target);
-                    if present {
-                        let rect = rect.expect("notice action");
-                        assert!(content.contains_rect(rect), "{target} clips at width {width}: {rect:?} outside {content:?}");
-                        assert!(allocated.response.rect.contains_rect(rect), "{target} must be inside the allocated notice content");
-                        assert!(rect.is_positive());
-                        assert_eq!(scenario::handle_at(target), Some(rect.center()));
-                    } else {
-                        assert!(rect.is_none(), "Undo must be absent when unavailable");
-                    }
-                }
-            },
-        );
-        clicked
-    }
-
-    let previous = solidcraft_theme::is_dark();
-    for dark in [false, true] {
-        solidcraft_theme::set_dark(dark);
-        for language in ["en", "de"] {
-            let _language = solidcraft_ui_text::scope(language);
-            let t = Tokens::get();
-            let mut undo_width = 0.0;
-            let mut dismiss_width = 0.0;
-            let mut label_wrap_width = 0.0;
-            test_support::frame(&crate::fonts::test_context(), vec![], |ui| {
-                undo_width = ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo"));
-                dismiss_width = ContentWidth::button(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"));
-                label_wrap_width = (ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.theme_notice_dismiss")) / 3.0).ceil();
-            });
-            let actions_width = undo_width + dismiss_width + t.space_8 * 2.0;
-            let narrow_width = undo_width.max(dismiss_width);
-            for (width, stacked, label_wrap) in
-                [(actions_width + t.form_card_width, false, false), (narrow_width, true, false), (label_wrap_width, true, true)]
-            {
-                for can_undo in [true, false] {
-                    let ctx = crate::fonts::test_context();
-                    assert_eq!(frame(&ctx, width, can_undo, vec![]), (false, false));
-                    let text = scenario::rect_of("dialog:hint:guard").expect("notice text");
-                    let dismiss = scenario::rect_of("prefs:theme_notice_dismiss:guard").expect("Dismiss");
-                    let undo = scenario::rect_of("prefs:theme_notice_undo:guard");
-                    if stacked {
-                        assert!(dismiss.top() >= text.bottom(), "Dismiss must move below the text");
-                        if let Some(undo) = undo {
-                            assert!(undo.top() >= text.bottom(), "Undo must move below the text");
-                            assert!(dismiss.top() >= undo.bottom(), "actions must wrap onto separate rows at width {width}");
-                        }
-                    } else {
-                        assert_eq!(dismiss.top(), text.top(), "wide notices retain the inline layout");
-                        if let Some(undo) = undo {
-                            assert_eq!(undo.top(), text.top());
-                            assert!(dismiss.left() >= undo.right());
-                        }
-                        // The wide notice retains the original action budget and text allocation.
-                        let expected = width - dismiss_width - t.space_8 - if can_undo { undo_width + t.space_8 } else { 0.0 };
-                        assert_eq!(text.width(), expected);
-                    }
-                    if label_wrap {
-                        assert!(dismiss.height() > t.control_height, "an individual long action label must wrap");
-                    }
-                    for (target, expected) in [("prefs:theme_notice_undo:guard", (true, false)), ("prefs:theme_notice_dismiss:guard", (false, true))]
-                    {
-                        if expected.0 && !can_undo {
-                            continue;
-                        }
-                        let at = if expected.0 { undo.expect("Undo").center() } else { dismiss.center() };
-                        assert_eq!(frame(&ctx, width, can_undo, test_support::pointer(at, true)), (false, false), "{target} on press");
-                        assert_eq!(frame(&ctx, width, can_undo, test_support::pointer(at, false)), expected, "{target} on release");
-                        assert_eq!(frame(&ctx, width, can_undo, vec![]), (false, false), "{target} must not repeat");
-                    }
-                }
-            }
-        }
-    }
-    solidcraft_theme::set_dark(previous);
-}
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn blur_meter_boundaries_and_off_thumb() {
@@ -114,7 +11,7 @@ fn blur_meter_boundaries_and_off_thumb() {
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for radius in [0.0, 18.25, 40.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let t = Tokens::get();
             let mut value = radius;
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -125,7 +22,7 @@ fn blur_meter_boundaries_and_off_thumb() {
             out.textures_delta.clear();
             assert_eq!(value, radius, "drawing cannot round persisted fractional values");
             assert_eq!(out.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Circle(_))).count(), 1, "off/solid thumb has no native duplicate");
-            let hit = scenario::rect_of("dialog:slider_track:").expect("blur slider track");
+            let hit = registry::rect_of("dialog:slider_track:").expect("blur slider track");
             assert_eq!(
                 out.shapes.iter().filter(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect.left() < hit.right())).count(),
                 2,
@@ -153,7 +50,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
         solidcraft_theme::set_dark(dark);
         for (show_value, integer, enabled) in [(true, false, true), (true, false, false), (false, true, true)] {
             for formatted in [false, true] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let t = Tokens::get();
                 let mut value: f64 = 1.0;
                 let mut output = ctx.run_ui(
@@ -204,14 +101,14 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
 #[test]
 fn slider_steps_endpoints_disabled_input_and_hidden_editor_keep_native_behaviour() {
     for (show_value, integer, enabled) in [(true, false, true), (false, true, true), (true, false, false)] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut value: f64 = 1.0;
         let (min, max) = if integer { (0.0, 4.0) } else { (0.5, 2.5) };
         let track = std::cell::Cell::new(Rect::NOTHING);
         let mut draw = |ui: &mut Ui| {
             ui.add_enabled_ui(enabled, |ui| {
                 let response = slider(ui, &mut value, min..=max, Slider { step: Some(0.05), show_value, integer, ..Default::default() });
-                track.set(scenario::rect_of("dialog:slider_track:").expect("slider track"));
+                track.set(registry::rect_of("dialog:slider_track:").expect("slider track"));
                 assert_eq!(response.rect.height(), Tokens::get().control_height);
             });
         };
@@ -248,7 +145,7 @@ fn slider_steps_endpoints_disabled_input_and_hidden_editor_keep_native_behaviour
 
 #[test]
 fn continuous_slider_drawing_preserves_precision_and_all_scenario_aliases() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut value = 0.123456789;
     test_support::frame(&ctx, vec![], |ui| {
         row(ui, "Opacity", |ui| {
@@ -256,14 +153,14 @@ fn continuous_slider_drawing_preserves_precision_and_all_scenario_aliases() {
         });
     });
     assert_eq!(value, 0.123456789);
-    let rect = scenario::rect_of("dialog:slider:Opacity").expect("opacity slider rect");
-    assert!(rect.contains(scenario::handle_at("dialog:slider:Opacity").expect("opacity slider handle")));
-    assert!(scenario::rect_of("dialog:widget:Opacity").is_some());
+    let rect = registry::rect_of("dialog:slider:Opacity").expect("opacity slider rect");
+    assert!(rect.contains(registry::handle_at("dialog:slider:Opacity").expect("opacity slider handle")));
+    assert!(registry::rect_of("dialog:widget:Opacity").is_some());
 }
 
 #[test]
 fn formatted_slider_editor_fits_without_shifting_the_track_during_a_scale_drag() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut widths = Vec::new();
     for mut value in [0.5, 1.0, 1.5, 2.5] {
         test_support::frame(&ctx, vec![], |ui| {
@@ -271,7 +168,7 @@ fn formatted_slider_editor_fits_without_shifting_the_track_during_a_scale_drag()
             let response =
                 slider(ui, &mut value, 0.5..=2.5, Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() });
             assert!(response.rect.right() <= right, "formatted editor must fit: {:?} > {right}", response.rect);
-            widths.push(scenario::rect_of("dialog:slider_track:").expect("slider track").width());
+            widths.push(registry::rect_of("dialog:slider_track:").expect("slider track").width());
         });
     }
     assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "dragging must not move the input range: {widths:?}");
@@ -283,13 +180,13 @@ fn formatted_slider_editor_fits_without_shifting_the_track_during_a_scale_drag()
 fn a_sliders_value_box_takes_typed_numbers_and_clamps_them_to_its_range() {
     use crate::ui_kit::test_support::*;
     for (typed, expected) in [("1.5", 1.5), ("9", 3.0), ("-4", 0.0), ("0", 0.0)] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut value = 1.0_f32;
         let mut draw = |ui: &mut Ui| {
             slider(ui, &mut value, 0.0..=3.0, Slider { step: Some(0.05), format: |v| format!("{v:.2}×"), ..Default::default() });
         };
         frame(&ctx, vec![], &mut draw);
-        let track = scenario::rect_of("dialog:slider_track:").unwrap_or_else(|| scenario::rects("dialog:slider").first().expect("the slider").1);
+        let track = registry::rect_of("dialog:slider_track:").unwrap_or_else(|| registry::rects("dialog:slider").first().expect("the slider").1);
         let at = egui::pos2(track.right() + 30.0, track.center().y);
         frame(&ctx, pointer(at, true), &mut draw);
         frame(&ctx, pointer(at, false), &mut draw);
@@ -309,12 +206,12 @@ fn slider_endpoints_have_no_duplicate_native_handle_or_rail_and_keep_the_editor(
         solidcraft_theme::set_dark(dark);
         for show_value in [false, true] {
             for endpoint in [0.0, 2.0] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut value = endpoint;
                 let output = slider_test_frame(&ctx, vec![], |ui| {
                     slider(ui, &mut value, 0.0..=2.0, Slider { step: Some(0.05), show_value, ..Default::default() });
                 });
-                let hit = scenario::rect_of("dialog:slider_track:").expect("slider track");
+                let hit = registry::rect_of("dialog:slider_track:").expect("slider track");
                 assert_slider_paint(&output.shapes, hit, Tokens::get(), endpoint, show_value, 1.0);
                 assert_eq!(value, endpoint);
             }
@@ -330,13 +227,13 @@ fn narrow_sliders_do_not_retain_native_chrome_when_the_handle_range_reverses() {
         solidcraft_theme::set_dark(dark);
         for width in [24.0, 28.0] {
             for saved in [0.0, 0.73123456789, 2.0] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut value = saved;
                 let output = slider_test_frame(&ctx, vec![], |ui| {
                     ui.set_width(width);
                     slider(ui, &mut value, 0.0..=2.0, Slider { show_value: false, ..Default::default() });
                 });
-                let hit = scenario::rect_of("dialog:slider_track:").expect("narrow slider track");
+                let hit = registry::rect_of("dialog:slider_track:").expect("narrow slider track");
                 assert!(hit.width() < 28.0, "the fixture must constrain the native track");
                 assert_slider_paint(&output.shapes, hit, Tokens::get(), saved, false, 1.0);
                 assert_eq!(value, saved);
@@ -347,8 +244,8 @@ fn narrow_sliders_do_not_retain_native_chrome_when_the_handle_range_reverses() {
 }
 
 fn slider_test_frame(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&mut Ui)) -> egui::FullOutput {
-    scenario::clear_handles();
-    crate::test_support::frame(
+    registry::clear_handles();
+    crate::ui_kit::test_support::raw_frame(
         ctx,
         egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 200.0))), events, focused: true, ..Default::default() },
         |ui| {
@@ -411,12 +308,12 @@ fn slider_preserves_translucent_parent_paints_and_inherited_opacity_without_a_ba
             for opacity in [1.0, 0.45] {
                 for show_value in [false, true] {
                     for saved in [0.0, 0.73123456789, 2.0] {
-                        let ctx = crate::fonts::test_context();
+                        let ctx = crate::ui_kit::test_support::context();
                         let mut value = saved;
                         slider_test_frame(&ctx, vec![], |ui| {
                             slider(ui, &mut value, 0.0..=2.0, Slider { show_value, ..Default::default() });
                         });
-                        let hit = scenario::rect_of("dialog:slider_track:").expect("slider track");
+                        let hit = registry::rect_of("dialog:slider_track:").expect("slider track");
                         slider_test_frame(&ctx, vec![], |ui| {
                             ui.multiply_opacity(opacity);
                             // A synthetic parent callback stands in for background effects;
@@ -458,12 +355,12 @@ fn clipping_out_the_native_track_preserves_the_editor_when_the_paint_signature_d
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut value = 1.0;
         slider_test_frame(&ctx, vec![], |ui| {
             slider(ui, &mut value, 0.0..=2.0, Default::default());
         });
-        let hit = scenario::rect_of("dialog:slider_track:").expect("slider track");
+        let hit = registry::rect_of("dialog:slider_track:").expect("slider track");
         let output = slider_test_frame(&ctx, vec![], |ui| {
             // egui omits its rail/handle when only the editor intersects the clip.
             // The first native shapes are now editor paints and must survive.
@@ -490,7 +387,7 @@ fn slider_keyboard_focus_and_accessibility_keep_native_steps_and_editor_focus() 
             }
             let _tokens = solidcraft_theme::scoped_tokens(t);
             for show_value in [false, true] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 ctx.enable_accesskit();
                 let value = std::cell::Cell::new(1.0_f64);
                 let draw = |events| {
@@ -516,7 +413,7 @@ fn slider_keyboard_focus_and_accessibility_keep_native_steps_and_editor_focus() 
                 let focus = ctx.memory(|m| m.focused()).expect("Tab focuses the slider");
                 let focused = ctx.read_response(focus).expect("focused slider response");
                 assert!(focused.has_focus());
-                let hit = scenario::rect_of("dialog:slider_track:").expect("slider track");
+                let hit = registry::rect_of("dialog:slider_track:").expect("slider track");
                 assert!(hit.contains(focused.rect.center()));
                 let changed = draw(test_support::key(egui::Key::ArrowRight));
                 assert!((value.get() - 1.05).abs() < 1e-8);
@@ -556,7 +453,7 @@ fn disabled_and_invisible_sliders_keep_native_input_and_paint_suppression() {
         solidcraft_theme::set_dark(dark);
         for show_value in [false, true] {
             for visible in [false, true] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 ctx.enable_accesskit();
                 let value = std::cell::Cell::new(0.73123456789);
                 let draw = |events| {
@@ -575,7 +472,7 @@ fn disabled_and_invisible_sliders_keep_native_input_and_paint_suppression() {
                 };
                 draw(vec![]);
                 let idle = draw(vec![]);
-                let hit = scenario::rect_of("dialog:slider_track:").expect("hidden slider still allocates its track");
+                let hit = registry::rect_of("dialog:slider_track:").expect("hidden slider still allocates its track");
                 if visible {
                     let tree = idle.platform_output.accesskit_update.as_ref().expect("disabled accessibility tree");
                     assert!(tree.nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Slider && n.is_disabled()));

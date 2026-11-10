@@ -16,7 +16,7 @@ fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
         return t.glyph_text;
     }
-    solidcraft_theme::TabAccent::for_tab(t, tab).color
+    crate::workspace::tab_accent(t, tab).color
 }
 
 /// Panels shown on each tab (in order). Commands come from the registry by (tab, panel).
@@ -743,7 +743,7 @@ fn paint_persistent_ribbon(app: &SolveApp, ui: &egui::Ui, paints: Vec<Persistent
                 enabled: paint.enabled,
                 name,
                 checkable,
-                accent: solidcraft_theme::TabAccent::for_tab(&t, tab),
+                accent: crate::workspace::tab_accent(&t, tab),
             };
             tips.push((paint.deferred.response.clone(), paint.command, paint.disabled));
             (paint.deferred, look)
@@ -810,7 +810,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool>
                 .map(|(id, label)| ribbon::Tab {
                     id,
                     label,
-                    accent: solidcraft_theme::TabAccent::for_tab(&t, id),
+                    accent: crate::workspace::tab_accent(&t, id),
                     contextual: contextual_tab(app, id),
                     aliases: tab_aliases(id),
                 })
@@ -1383,7 +1383,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let panels = RibbonPanels::new(app, ui, &tab, &lists, &painter, running.clone());
         let more_tip = solidcraft_ui_text::tr_label("More toolbar panels");
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, &tab);
+        let accent = crate::workspace::tab_accent(&t, &tab);
         let row = panels.row(accent, labels, reveal.as_ref().map(|r| ribbon::Reveal { id: r.id, preview: r.preview, strength: pulse }), more_tip);
         let mut out = {
             let mut more_rows = |ui: &mut egui::Ui, group: usize| {
@@ -1765,7 +1765,7 @@ fn menu_style(app: &SolveApp) -> ribbon::MenuStyle<'static> {
     ribbon::MenuStyle {
         pin_tip: solidcraft_ui_text::tr_label("Pin to Toolbar"),
         unpin_tip: solidcraft_ui_text::tr_label("Remove from Toolbar"),
-        accent: solidcraft_theme::TabAccent::for_tab(&Tokens::get(), &app.ui.tab),
+        accent: crate::workspace::tab_accent(&Tokens::get(), &app.ui.tab),
         focus: egui::Id::unique("dropdown_row"),
         entry: &["toolbar:", "dropdown:"],
         pin: "dropdown_pin:",
@@ -2908,7 +2908,7 @@ mod header_report_tests {
             for vision in solidcraft_theme::ColorVision::ALL {
                 let t = Tokens::themed(dark, vision);
                 for tab in TABS.iter().copied().chain(["SKETCH", "FORM", "RENDER"]) {
-                    assert_eq!(panel_accent(&t, tab, "CREATE"), solidcraft_theme::TabAccent::for_tab(&t, tab).color);
+                    assert_eq!(panel_accent(&t, tab, "CREATE"), crate::workspace::tab_accent(&t, tab).color);
                     assert_eq!(panel_accent(&t, tab, "CONSTRAIN"), t.glyph_text);
                 }
             }
@@ -3994,7 +3994,7 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "button:sketch.ellipse"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.ellipse"), "the click starts the tool");
         h.frames(3);
-        let soft = solidcraft_theme::TabAccent::for_tab(&solidcraft_theme::Tokens::get(), "SKETCH").soft;
+        let soft = crate::workspace::tab_accent(&solidcraft_theme::Tokens::get(), "SKETCH").soft;
         let pressed = |h: &Harness, id: &str| {
             let r = rect_of(&format!("button:{id}")).unwrap();
             let mut all = Vec::new();
@@ -4239,16 +4239,16 @@ mod ribbon_label_tests {
     fn a_selected_contextual_tab_stands_out_and_an_unselected_one_is_outlined() {
         for t in tab_test_themes() {
             for tab in ["SKETCH", "SHEET METAL"] {
-                let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
+                let accent = crate::workspace::tab_accent(&t, tab);
                 for hovered in [false, true] {
-                    let active = ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), true, true, hovered);
-                    let inactive = ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), true, false, hovered);
+                    let active = ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), true, true, hovered);
+                    let inactive = ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), true, false, hovered);
                     assert_eq!(active, ribbon::TabStyle { fill: accent.color, ink: accent.on_fill(&t), outline: Color32::TRANSPARENT });
                     assert_eq!(
                         inactive,
                         ribbon::TabStyle {
                             outline: accent.color,
-                            ..ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, false, hovered)
+                            ..ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), false, false, hovered)
                         }
                     );
                     assert!(solidcraft_theme::contrast_ratio(active.ink, active.fill) >= 4.5, "{tab}: selected text must remain readable");
@@ -4267,16 +4267,16 @@ mod ribbon_label_tests {
     fn ordinary_tabs_keep_their_selected_hovered_and_idle_colors() {
         for t in tab_test_themes() {
             for tab in ["MODEL", "SURFACE", "SHEET METAL"] {
-                let accent = solidcraft_theme::TabAccent::for_tab(&t, tab);
+                let accent = crate::workspace::tab_accent(&t, tab);
                 for hovered in [false, true] {
                     let none = Color32::TRANSPARENT;
                     assert_eq!(
-                        ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, true, hovered),
+                        ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), false, true, hovered),
                         ribbon::TabStyle { fill: accent.soft, ink: accent.ink, outline: none }
                     );
                     let idle = if hovered { t.hover } else { none };
                     assert_eq!(
-                        ribbon::tab_style(&t, solidcraft_theme::TabAccent::for_tab(&t, tab), false, false, hovered),
+                        ribbon::tab_style(&t, crate::workspace::tab_accent(&t, tab), false, false, hovered),
                         ribbon::TabStyle { fill: idle, ink: t.text, outline: none }
                     );
                 }
@@ -4931,7 +4931,7 @@ mod persistent_ribbon_tests {
             h.app.session.execute("inspect.zebra", &json!({})).unwrap();
             h.frame();
             assert_presentation(&h, "inspect.zebra", enabled, enabled);
-            let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+            let accent = crate::workspace::tab_accent(&Tokens::get(), "INSPECT");
             assert!(button_shapes(&h, "inspect.zebra").iter().any(|shape| matches!(shape, egui::Shape::Rect(rect) if rect.rect == zebra && rect.stroke.width == 2.0 && rect.stroke.color == accent.color.gamma_multiply(h.app.sbox.reveal.as_ref().unwrap().strength(h.ctx.input(|input| input.time), h.ctx.global_style().animation_time > 0.0)))), "the upstream pulse remains painted above the selected background");
             for (id, active) in [("inspect.draft", true), ("inspect.draft", false)] {
                 let at = scenario::handle_at(&format!("button:{id}")).unwrap();
@@ -5413,7 +5413,7 @@ mod persistent_ribbon_tests {
         assert_eq!(scenario::count_of("ribbon:pressed"), Some(0.0));
         assert_presentation(&h, "inspect.continuity", false, false);
         let r = scenario::rect_of("button:inspect.continuity").unwrap();
-        let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+        let accent = crate::workspace::tab_accent(&Tokens::get(), "INSPECT");
         assert!(
             button_shapes(&h, "inspect.continuity")
                 .iter()
@@ -5444,7 +5444,7 @@ mod persistent_ribbon_tests {
     fn persistent_click_clear_and_replacement_remove_old_tool_paint_in_the_release_frame() {
         fn no_tool_paint(h: &Harness) {
             let r = scenario::rect_of("button:inspect.continuity").unwrap();
-            let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "INSPECT");
+            let accent = crate::workspace::tab_accent(&Tokens::get(), "INSPECT");
             assert!(
                 !button_shapes(h, "inspect.continuity")
                     .iter()

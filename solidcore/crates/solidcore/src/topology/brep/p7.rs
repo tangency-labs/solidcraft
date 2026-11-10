@@ -960,7 +960,7 @@ fn make_face_transfer_attempt_with_state(
     out.face = attempt.face;
     let result = (|| {
         if let Err(error) = attempt.status {
-            if matches!(error, SolidError::Upstream { .. }) {
+            if error.upstream_status().is_some() {
                 out.status = Err(error);
                 return Ok(());
             }
@@ -1846,7 +1846,7 @@ fn make_face_with_curves_transfer_impl(
         let r = face_create_uv_trim_curves(k, b, face, false, uv, orients);
         match r {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR => {
+            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR) => {
                 // delete the edge uses of the face's edges
                 for e in face_edges(b, face)? {
                     for eu in ed::edgeuses(b, e, None, None)? {

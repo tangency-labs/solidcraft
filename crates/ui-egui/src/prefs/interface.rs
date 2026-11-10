@@ -150,7 +150,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     });
                     app.preferences.ui_scale
                 },
-                ui_kit::scale_specimen,
+                super::figures::scale_specimen,
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
@@ -201,7 +201,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
             });
-            ui_kit::status_palette_sample(ui, app.preferences.color_vision);
+            super::figures::status_palette_sample(ui, app.preferences.color_vision);
             // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
             // their colours in every mode.
             ui_kit::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
@@ -290,7 +290,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dialog_left: app.preferences.dialog_place == crate::dialog_column::DialogPlace::LeftColumn,
                     }
                 },
-                ui_kit::layout_preview,
+                |ui, state| ui_kit::layout_preview(ui, state, solidcraft_ui_text::tr("prefs.layout_note")),
             );
             layout_check(
                 ui,
@@ -466,8 +466,9 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "browser_body_features",
                 );
             });
-            // A folder's icon from its features (#12514), in a row of its own: one more box in the
-            // row above widens it past the page at narrow windows.
+            // A folder's icon from its features (#12514) and the History controls' steps (#11430), in
+            // a row of their own: one more box in the row above widens it past the page at narrow
+            // windows.
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
                 layout_check(
@@ -476,6 +477,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.history_folder_kind_icon_note"),
                     &mut app.preferences.history_folder_kind_icon,
                     "history_folder_kind_icon",
+                );
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_steps_component"),
+                    app.tr("prefs.history_steps_component_note"),
+                    &mut app.preferences.history_steps_component,
+                    "history_steps_component",
                 );
             });
         });

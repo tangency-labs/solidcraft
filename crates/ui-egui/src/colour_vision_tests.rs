@@ -1038,6 +1038,7 @@ fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
 
 #[test]
 fn onyx_keeps_gold_dimensions_distinct_from_grey_construction_lines() {
+    crate::test_support::host_data();
     use crate::theme_files::{OptionValue, builtin, resolve_with};
     let onyx = builtin().iter().find(|theme| theme.id == "onyx").unwrap();
     for (foreground, gold, driven) in [("muted", [199, 178, 139], [165, 148, 116]), ("vibrant", [255, 209, 102], [255, 177, 102])] {

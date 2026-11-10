@@ -8,13 +8,9 @@
 // `eval` and `form` name the record's geometry through their parent (`super::Curve`).
 use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
 
-pub mod check;
 pub mod eval;
 pub mod form;
-pub mod geometry;
-pub mod label;
 pub mod normal_section;
-pub mod pcurve;
 pub mod placement;
 mod split;
 pub use split::split_edges;

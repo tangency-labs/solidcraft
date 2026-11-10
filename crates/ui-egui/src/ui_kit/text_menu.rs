@@ -252,7 +252,7 @@ pub(crate) fn menu(ui: &Ui, response: &mut Response, text: &mut dyn TextBuffer, 
         super::Menu::show(ui, super::LIST_W, |ui| {
             for edit in Edit::ALL {
                 let (row, message, icon, key) = edit.row();
-                let shortcut = crate::keymap::display(key);
+                let shortcut = super::chord_label(key);
                 let mut item = super::MenuItem::new(row, solidcraft_ui_text::tr(message), icon);
                 item.shortcut = &shortcut;
                 item.enabled = enabled(edit, state);

@@ -3,6 +3,7 @@
 
 use solidcraft_engine::CommandSpec;
 use solidcraft_engine::doc::FeatureKind;
+use solidcraft_theme::{AccentRamp, TabAccent, TabStyle, TabTable, Tokens};
 
 pub const RENDER_TABS: &[&str] = &["RENDER"];
 
@@ -33,6 +34,63 @@ pub fn tab_name(tab: &str) -> String {
 }
 
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
+
+/// Every tab's exact registry name with its accent: the contextual and specialty tabs, and the
+/// legacy Render sub-tabs that still share the Render accent. Theme files key their per-tab
+/// tables by these names; an unknown name must never silently become Model on import. Model
+/// and the utility tabs keep the main accent.
+pub const TAB_ACCENTS: TabTable = TabTable::new(&[
+    tab_style("MODEL", AccentRamp::Main, None),
+    tab_style("SKETCH", AccentRamp::Sketch, Some("sketch")),
+    tab_style("SURFACE", AccentRamp::Surface, Some("surface")),
+    tab_style("MESH", AccentRamp::Mesh, Some("mesh")),
+    tab_style("FORM", AccentRamp::Form, Some("form")),
+    tab_style("SHEET METAL", AccentRamp::Sheet, None),
+    tab_style("WELDMENTS", AccentRamp::Main, None),
+    tab_style("ASSEMBLE", AccentRamp::Main, None),
+    tab_style("INSERT", AccentRamp::Main, None),
+    tab_style("INSPECT", AccentRamp::Main, None),
+    tab_style("MANAGE", AccentRamp::Main, None),
+    tab_style("VIEW", AccentRamp::Main, None),
+    tab_style("RENDER", AccentRamp::Render, None),
+    tab_style("RENDER APPEARANCE", AccentRamp::Render, None),
+    tab_style("RENDER SCENE", AccentRamp::Render, None),
+    tab_style("RENDER CAMERA", AccentRamp::Render, None),
+]);
+
+const fn tab_style(name: &'static str, ramp: AccentRamp, icon_accent: Option<&'static str>) -> TabStyle {
+    TabStyle { name, ramp, icon_accent }
+}
+
+/// Install [`TAB_ACCENTS`] as the theme's tab table (theme files key their per-tab tables by
+/// these names): at startup, before any theme file is read, and in every test context. Calling
+/// it again does nothing.
+pub fn install_tabs() {
+    solidcraft_theme::install_tabs(TAB_ACCENTS);
+}
+
+/// The selection colours of `tab` in `t` ([`TAB_ACCENTS`]).
+pub fn tab_accent(t: &Tokens, tab: &str) -> TabAccent {
+    TAB_ACCENTS.accent(t, tab)
+}
+
+/// The icon accent of a history step: the accent of the tab its feature kind belongs to.
+/// Surface aliases also cover Patch/Stitch/Thicken and other surface features without a
+/// Surface-prefixed kind.
+pub fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
+    let tab = if kind.starts_with("Sketch") {
+        "SKETCH"
+    } else if kind.starts_with("Surface") || icon.starts_with("surface_") || icon == "continuity" {
+        "SURFACE"
+    } else if kind.starts_with("Mesh") {
+        "MESH"
+    } else if kind.starts_with("Form") {
+        "FORM"
+    } else {
+        "MODEL"
+    };
+    TAB_ACCENTS.icon_accent(tab)
+}
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
@@ -814,6 +872,44 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn every_tab_keeps_its_accent_ramp_and_icon_accent_and_unknown_tabs_take_model() {
+        type Slots = fn(&Tokens) -> [egui::Color32; 3];
+        let main: Slots = |t| [t.accent, t.selected_ink, t.accent_soft];
+        let render: Slots = |t| [t.render_fill, t.render_ink, t.render_soft];
+        let tabs: [(&str, Slots, Option<&str>); 16] = [
+            ("MODEL", main, None),
+            ("SKETCH", |t| [t.sketch_accent, t.sketch_ink, t.sketch_soft], Some("sketch")),
+            ("SURFACE", |t| [t.surface_fill, t.surface_ink, t.surface_soft], Some("surface")),
+            ("MESH", |t| [t.mesh_fill, t.mesh_ink, t.mesh_soft], Some("mesh")),
+            ("FORM", |t| [t.form_fill, t.form_tab_ink, t.form_soft], Some("form")),
+            ("SHEET METAL", |t| [t.sheet_fill, t.sheet_ink, t.sheet_soft], None),
+            ("WELDMENTS", main, None),
+            ("ASSEMBLE", main, None),
+            ("INSERT", main, None),
+            ("INSPECT", main, None),
+            ("MANAGE", main, None),
+            ("VIEW", main, None),
+            ("RENDER", render, None),
+            ("RENDER APPEARANCE", render, None),
+            ("RENDER SCENE", render, None),
+            ("RENDER CAMERA", render, None),
+        ];
+        assert_eq!(TAB_ACCENTS.names().collect::<Vec<_>>(), tabs.iter().map(|(tab, _, _)| *tab).collect::<Vec<_>>());
+        for t in [Tokens::light(), Tokens::dark()] {
+            for (tab, slots, icon) in tabs {
+                let [color, _, soft] = slots(&t);
+                let accent = tab_accent(&t, tab);
+                assert_eq!((accent.color, accent.soft), (color, soft), "{tab}");
+                assert_eq!(TAB_ACCENTS.icon_accent(tab), icon, "{tab}");
+            }
+            for unknown in ["SOLID", "unknown", ""] {
+                assert_eq!(tab_accent(&t, unknown), tab_accent(&t, "MODEL"), "{unknown}");
+                assert_eq!(TAB_ACCENTS.icon_accent(unknown), None);
+            }
+        }
+    }
+
+    #[test]
     fn modify_groups_order_commands_and_keep_unlisted_commands_at_the_end() {
         let specs = solidcraft_engine::command_specs();
         let (commands, _) = layout("MODEL", "MODIFY", &specs).unwrap();
@@ -1351,7 +1447,14 @@ mod tests {
         s.execute("file.export", &json!({"path": h.dir.join("part2.step")})).unwrap();
         h.step(&json!({"choose_file": "part1.solidcraft"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
-        h.frames(3);
+        // The file pick and the insert finish on later frames; wait for them like the STEP case below
+        // instead of assuming three frames is enough on a loaded machine.
+        for _ in 0..600 {
+            if h.app.session.world_state().unwrap().bodies.len() == 1 {
+                break;
+            }
+            h.frames(1);
+        }
         let links = h.app.session.execute("component.links", &json!({})).unwrap();
         assert_eq!(links["links"][0]["name"], "part1", "{links}");
         assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
