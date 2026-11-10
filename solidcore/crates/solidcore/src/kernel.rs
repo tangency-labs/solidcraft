@@ -148,9 +148,9 @@ impl Caches {
     }
 }
 
-/// Counts of the work done by the steps of a boolean or a blend whose cost once grew with
-/// the square of the body's size, so a test can check how that work grows: the same on every
-/// machine, where a ratio of times is not (the SolidCraft fork's `SmWorkCounters`,
+/// Counts of the work done by the steps of a boolean, a blend or a tight box whose cost once
+/// grew with the square of the body's size, so a test can check how that work grows: the same
+/// on every machine, where a ratio of times is not (the SolidCraft fork's `SmWorkCounters`,
 /// tangency-labs/smlib@2e9e6b2 and @edf7414).
 ///
 /// Each count is added where its work is done; counting changes no result. The fork's
@@ -163,6 +163,7 @@ pub struct WorkCounters {
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
+    face_extreme_control_points: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -199,12 +200,23 @@ impl WorkCounters {
         self.proto_edge_intersections.get()
     }
 
+    /// Control points of the B-spline nets the trimmed-face tight box's directed solves
+    /// ran on (`face_directed_max`, WR-588), summed over its solves: a solve's control-net
+    /// guesses read every control point of the surface it is given. Each cell of a
+    /// B-spline face is solved on its own subpatch, so the count grows with the cells'
+    /// spans, not with the cells times the whole net. Not the fork's.
+    #[must_use]
+    pub fn face_extreme_control_points(&self) -> u64 {
+        self.face_extreme_control_points.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
         self.proto_edge_intersections.set(0);
+        self.face_extreme_control_points.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -228,6 +240,12 @@ impl WorkCounters {
     pub(crate) fn add_proto_edge_intersection(&self) {
         self.proto_edge_intersections
             .set(self.proto_edge_intersections.get().saturating_add(1));
+    }
+
+    /// Counts the control points of the net one trimmed-face extreme solve ran on.
+    pub(crate) fn add_face_extreme_control_points(&self, n: u64) {
+        self.face_extreme_control_points
+            .set(self.face_extreme_control_points.get().saturating_add(n));
     }
 }
 
