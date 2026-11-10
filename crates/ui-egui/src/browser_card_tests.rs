@@ -184,6 +184,8 @@ fn folder_visibility_shortcut_does_not_take_dialog_body_picks_or_chevrons() {
     h.step(&json!({"click":{"chevron":"Bodies"}})).unwrap();
     h.step(&json!({"key":"V"})).unwrap();
     assert!(!h.app.session.folder_hidden("c0/bodies"), "the fold arrow does not pick a visibility target");
+    // The click below picks the body, so Bodies must start empty (#13098 fills in an only body).
+    h.app.preferences.export_selects_only_body = false;
     h.app.start("file.save_mesh");
     h.settle();
     h.step(&json!({"click":{"handle":"row:Bodies"}})).unwrap();
