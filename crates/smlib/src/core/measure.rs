@@ -159,13 +159,7 @@ pub(crate) fn area(body: &Body, relative_accuracy: f64) -> Result<f64> {
 
 /// `smlib_brep_bounds`: `SmBrep::CalculateTightBoundingBox`.
 pub(crate) fn bounds(body: &Body) -> Result<([f64; 3], [f64; 3])> {
-    bounds_with(body, false)
-}
-
-/// [`bounds`], stopped by the token over this thread's work when `stoppable` (a body the
-/// caller consumes: [`super::with_own_body`]).
-pub(crate) fn bounds_with(body: &Body, stoppable: bool) -> Result<([f64; 3], [f64; 3])> {
-    let run = |k: &mut Kernel, b: &mut solidcore::topology::Brep| {
+    with_body("bounds", body, |k, b| {
         let x = brep_bounding_box(k, b, true)?;
         let (lo, hi) = (x.min(), x.max());
         let (lo, hi) = ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
@@ -173,8 +167,7 @@ pub(crate) fn bounds_with(body: &Body, stoppable: bool) -> Result<([f64; 3], [f6
             return Err(invalid("no box"));
         }
         Ok((lo, hi))
-    };
-    if stoppable { super::with_own_body("bounds", body, run) } else { with_body("bounds", body, run) }
+    })
 }
 
 /// `smlib_brep_edge_face_distance`: SMLib's own edge/face gap (`SmEdgeuse::CalcMaxEdgeFaceGap`'s
