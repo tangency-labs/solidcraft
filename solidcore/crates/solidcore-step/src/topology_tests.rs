@@ -1466,3 +1466,120 @@ fn face_domain_sliver_at_a_natural_bound() {
     assert!((mid[1][1] - mid[1][0] - OPEN_DOMAIN_SPAN).abs() < 1e-12 && mid[1][0] < 0.0 && mid[1][1] > 1e-6, "{mid:?}");
     assert!(face_domain(&ball, &loop_at(FRAC_PI_2 + 1e-4, FRAC_PI_2 + 2e-4)).is_err());
 }
+
+/// A prism over a closed periodic cubic (an octagon's uniform B-spline, written unclamped with
+/// v_closed .T., its first three control points repeated at the end, as exporters write a closed
+/// spline) from z = 0 to 4: its side is a ruled spline closed in v, bounded by the two closed
+/// B-spline curves without a seam edge, closed by two planar caps. The unclamped knots are
+/// clamped on reading (the same surface: its points at the domain's ends are the curves'), and
+/// the side gets a seam along its boundary row from the bottom curve's vertex to the top's.
+#[test]
+fn a_spline_closed_in_v_without_a_seam_gets_one() {
+    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * t.cos(), 5.0 * t.sin(), 0.0]).collect();
+    let wrapped: Vec<V> = octagon.iter().chain(octagon.iter().take(3)).copied().collect();
+    let knots = (0..15).map(|k| real(f64::from(k))).collect::<Vec<_>>().join(",");
+    let ones = vec!["1"; 15].join(",");
+    let mut w = W::default();
+    let at = |p: V, z: f64| [p[0], p[1], z];
+    let curve = |w: &mut W, z: f64| {
+        let pts: Vec<u64> = wrapped.iter().map(|p| w.pt(at(*p, z))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.T.,.F.,({ones}),({knots}),.UNSPECIFIED.)", list(&pts)))
+    };
+    // The uniform cubic at its domain's start (t = 3): (P0 + 4 P1 + P2) / 6.
+    let start = |z: f64| {
+        let [a, b, c] = [octagon[0], octagon[1], octagon[2]];
+        [(a[0] + 4.0 * b[0] + c[0]) / 6.0, (a[1] + 4.0 * b[1] + c[1]) / 6.0, z]
+    };
+    let edge = |w: &mut W, z: f64| {
+        let k = curve(w, z);
+        let v = w.vertex(start(z));
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (bottom, top) = (edge(&mut w, 0.0), edge(&mut w, 4.0));
+    let rows: Vec<String> = [0.0, 4.0]
+        .iter()
+        .map(|z| {
+            let pts: Vec<u64> = wrapped.iter().map(|p| w.pt(at(*p, *z))).collect();
+            format!("({})", list(&pts))
+        })
+        .collect();
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,3,({}),.RULED_SURF.,.F.,.T.,.F.,(2,2),({ones}),(0.,1.),({knots}),.UNSPECIFIED.)",
+        rows.join(",")
+    ));
+    // The side's normal (along z, then round counter-clockwise) points in: same_sense .F.;
+    // outward, the bottom curve runs counter-clockwise about +z, the top clockwise.
+    let (x, y) = (w.oe(bottom, true), w.oe(top, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let side = w.face(&[bx, by], surface, false);
+    let plane_b = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(bottom, false);
+    let bx = w.bound(&[x], true, true);
+    let cap_b = w.face(&[bx], plane_b, false);
+    let plane_t = w.plane([0.0, 0.0, 4.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(top, true);
+    let bx = w.bound(&[x], true, true);
+    let cap_t = w.face(&[bx], plane_t, true);
+    let shell = closed_shell(&mut w, &[side, cap_b, cap_t]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('prism',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // Clamped: the side's knots repeat their ends four times.
+    let side = s.brep.faces.iter().find_map(|f| match &f.surface {
+        BSurface::Spline { v_knots, .. } => Some(v_knots.clone()),
+        _ => None,
+    });
+    let v_knots = side.expect("the side's spline");
+    assert!(v_knots.iter().take(4).all(|k| *k == 3.0) && v_knots.iter().rev().take(4).all(|k| *k == 11.0), "{v_knots:?}");
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 3.0)]);
+}
+
+/// A cone as a B-spline surface closed in v whose first u row collapses to its apex, bounded by
+/// its base curve alone (a closed B-spline without a seam edge) and a planar cap: the face covers
+/// the apex, a pole at the start of its u range, which lies on the side of lower u of a loop
+/// running +v. It gets one seam along its boundary row, from the base curve's vertex to a new
+/// vertex at the apex.
+#[test]
+fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
+    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * t.cos(), 5.0 * t.sin(), 0.0]).collect();
+    let wrapped: Vec<V> = octagon.iter().chain(octagon.iter().take(3)).copied().collect();
+    let knots = (0..15).map(|k| real(f64::from(k))).collect::<Vec<_>>().join(",");
+    let ones = vec!["1"; 15].join(",");
+    let mut w = W::default();
+    let pts: Vec<u64> = wrapped.iter().map(|p| w.pt(*p)).collect();
+    let base = w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.T.,.F.,({ones}),({knots}),.UNSPECIFIED.)", list(&pts)));
+    // The uniform cubic at its domain's start (t = 3): (P0 + 4 P1 + P2) / 6.
+    let [a, b, c] = [octagon[0], octagon[1], octagon[2]];
+    let v = w.vertex([(a[0] + 4.0 * b[0] + c[0]) / 6.0, (a[1] + 4.0 * b[1] + c[1]) / 6.0, 0.0]);
+    let edge = w.add(format!("EDGE_CURVE('',#{v},#{v},#{base},.T.)"));
+    let apex: Vec<u64> = wrapped.iter().map(|_| w.pt([0.0, 0.0, 4.0])).collect();
+    let rim: Vec<u64> = wrapped.iter().map(|p| w.pt(*p)).collect();
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,3,(({}),({})),.UNSPECIFIED.,.F.,.T.,.F.,(2,2),({ones}),(0.,1.),({knots}),.UNSPECIFIED.)",
+        list(&apex),
+        list(&rim)
+    ));
+    // From the apex (u = 0) down to the rim, then round counter-clockwise: the normal points
+    // out, and outward the base curve runs counter-clockwise about +z.
+    let x = w.oe(edge, true);
+    let bx = w.bound(&[x], true, true);
+    let side = w.face(&[bx], surface, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(edge, false);
+    let bx = w.bound(&[x], true, true);
+    let cap = w.face(&[bx], plane, false);
+    let shell = closed_shell(&mut w, &[side, cap]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('cone',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    assert!(
+        s.brep.vertices.iter().any(|v| {
+            let d = sub3(v.point, [0.0, 0.0, 4.0]);
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= 1e-9
+        }),
+        "no vertex at the apex"
+    );
+    faces_away(&s.brep, 0, |_| [0.0, 0.0, 1.0]);
+}
