@@ -293,7 +293,7 @@ pub fn draws_exploded(d: &Drawing, id: u64) -> bool {
     d.resolve_view(id).is_ok_and(|view| view.exploded.value != Exploded::Assembled)
 }
 
-/// Refuses `what` (dimensions, balloons, notes) on view `view` of `d` when it draws an exploded view
+/// Refuses `what` (dimensions, balloons, centre annotations, notes) on view `view` of `d` when it draws an exploded view
 /// ([`draws_exploded`]).
 pub fn refuse_on_exploded(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
     if draws_exploded(d, view) { Err(bad(cmd, format!("not supported yet: {what} on an exploded view"))) } else { Ok(()) }

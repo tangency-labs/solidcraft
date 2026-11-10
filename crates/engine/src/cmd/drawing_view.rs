@@ -33,6 +33,8 @@ use solidcore_record::Vec2;
 use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
+use solidcraft_doc::drawing::centre_line::CentreLine;
+use solidcraft_doc::drawing::centre_mark::CentreMark;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths};
@@ -95,7 +97,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies or nothing_chosen)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; no model is evaluated."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies or nothing_chosen)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], centre_marks: [its manual marks' ids], centre_lines: [its manual lines' ids], choices: {visual_style, scale}}. Read-only; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
@@ -116,7 +118,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<ToSheetResult>)
-        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space or lies over its title block]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions and balloons are copied with it, with ids of their own. One undo step."),
+        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space or lies over its title block]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions, balloons, notes, centre marks and centre lines are copied with it, with ids of their own. One undo step."),
     CommandSpec::new(BASE, "Base View", crate::checked!("drawing.view.base", base))
         .icon("new")
         .in_drawing()
@@ -357,6 +359,15 @@ pub(super) fn drawn_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIte
     not_drawn(record, view, paths).map(|why| format!("view {} doesn't draw this part now: {why}", ids::encode(view))).into_iter().collect()
 }
 
+/// Warnings for centre references read from the assembled model.
+pub(super) fn centre_warning<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Vec<String> {
+    let mut warnings = drawn_warning(record, view, paths);
+    if crate::drawing_view::draws_exploded(record, view) {
+        warnings.push("centre annotations are not drawn on an exploded view; a held sheet may show its last accepted frame".into());
+    }
+    warnings
+}
+
 /// Refused when `view` would show nothing of a design that has bodies to show. One with nothing to
 /// measure anyway isn't the choice's fault, and gets its placeholder.
 fn check_shows_bodies(shown: &std::result::Result<ShownSet, Unmeasured>, view: &ResolvedView, cmd: &str) -> Result<()> {
@@ -466,6 +477,8 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         }),
         dimensions: d.dimensions.iter().filter(|dimension| dimension.view == view.id).map(|dimension| ids::encode(dimension.id)).collect(),
         balloons: d.balloons.iter().filter(|balloon| balloon.view == view.id).map(|balloon| ids::encode(balloon.id)).collect(),
+        centre_marks: d.centre_marks.iter().filter(|mark| mark.view == view.id).map(|mark| ids::encode(mark.id)).collect(),
+        centre_lines: d.centre_lines.iter().filter(|line| line.view == view.id).map(|line| ids::encode(line.id)).collect(),
         choices: ChoicesResult {
             visual_style: VisualStyle::ALL.iter().map(|s| snake_name(*s)).collect(),
             scale: PRESETS.iter().map(ToString::to_string).collect(),
@@ -677,8 +690,8 @@ fn exploded_of(s: &Session, chosen: &ExplodedParam, cmd: &str) -> Result<Explode
 }
 
 /// Refuses a drawing in which one of `views` draws an exploded view it can't draw yet: shaded
-/// ([`crate::drawing_view::not_drawable_exploded`]), or with dimensions, balloons or notes on its
-/// model ([`crate::drawing_view::draws_exploded`]), which would measure its parts assembled.
+/// ([`crate::drawing_view::not_drawable_exploded`]), or with model annotations
+/// ([`crate::drawing_view::draws_exploded`]), which would read its parts assembled.
 fn check_exploded(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> Result<()> {
     let on_model = |view: u64| {
         d.dimensions.iter().any(|record| record.view == view)
@@ -691,6 +704,11 @@ fn check_exploded(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> R
         }
         if crate::drawing_view::draws_exploded(d, view) && on_model(view) {
             return Err(bad(cmd, "not supported yet: an exploded view with dimensions, balloons or notes on its model"));
+        }
+        if crate::drawing_view::draws_exploded(d, view)
+            && (d.centre_marks.iter().any(|mark| mark.view == view) || d.centre_lines.iter().any(|line| line.view == view))
+        {
+            return Err(bad(cmd, "not supported yet: an exploded view with centre annotations"));
         }
     }
     Ok(())
@@ -777,17 +795,21 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let originals: Vec<u64> = std::iter::once(id).chain(linked.into_iter().filter(|_| with_linked)).collect();
-    // Each view's dimensions, balloons and notes are part of what it shows, so they are copied with it.
+    // Each view's annotations are copied with it, with fresh ids.
     let measured: Vec<u64> = record.dimensions.iter().filter(|d| originals.contains(&d.view)).map(|d| d.id).collect();
     let ballooned: Vec<u64> = record.balloons.iter().filter(|b| originals.contains(&b.view)).map(|b| b.id).collect();
+    let marked: Vec<u64> = record.centre_marks.iter().filter(|m| originals.contains(&m.view)).map(|m| m.id).collect();
+    let lined: Vec<u64> = record.centre_lines.iter().filter(|line| originals.contains(&line.view)).map(|line| line.id).collect();
     let noted: Vec<u64> = record.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| originals.contains(&v))).map(|n| n.id).collect();
-    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + noted.len())
+    let mut copies = (0..originals.len() + measured.len() + ballooned.len() + marked.len() + lined.len() + noted.len())
         .map(|_| record.allocate_id(&mut s.ids))
         .collect::<solidcraft_doc::Result<Vec<u64>>>()
         .map_err(|e| bad(COPY, e.to_string()))?;
     let mut dimension_copies = copies.split_off(originals.len());
     let mut balloon_copies = dimension_copies.split_off(measured.len());
-    let note_copies = balloon_copies.split_off(ballooned.len());
+    let mut mark_copies = balloon_copies.split_off(ballooned.len());
+    let mut line_copies = mark_copies.split_off(marked.len());
+    let note_copies = line_copies.split_off(lined.len());
     let copy_of = |old: u64| originals.iter().position(|o| *o == old).and_then(|i| copies.get(i)).copied();
     let sheet = s.edit_drawing(COPY, |d| {
         let (sheet, middle) = sheet_named(d, &request.sheet, COPY)?;
@@ -852,6 +874,24 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         d.notes.add(copied);
+        let copied: Vec<Arc<CentreMark>> = marked
+            .iter()
+            .zip(&mark_copies)
+            .filter_map(|(old, new)| {
+                let original = d.centre_mark(*old)?;
+                Some(Arc::new(CentreMark { id: *new, view: copy_of(original.view)?, ..original.clone() }))
+            })
+            .collect();
+        d.add_centre_marks(copied);
+        let copied: Vec<Arc<CentreLine>> = lined
+            .iter()
+            .zip(&line_copies)
+            .filter_map(|(old, new)| {
+                let original = d.centre_line(*old)?;
+                Some(Arc::new(CentreLine { id: *new, view: copy_of(original.view)?, ..original.clone() }))
+            })
+            .collect();
+        d.add_centre_lines(copied);
         Ok(sheet)
     })?;
     let first = copies.first().copied().unwrap_or_default();

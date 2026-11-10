@@ -2162,6 +2162,27 @@ fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
     assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
 }
 
+/// A projected view's centre annotation blocks its parent from exploding until the follower
+/// explicitly chooses the assembled design for itself.
+#[test]
+fn a_centre_line_on_a_follower_blocks_an_exploded_parent() {
+    let (mut s, parent, [first, _], apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(parent), "side": "above", "place": {"at": [150, 250]}}));
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(above), "a": {"point": [0, 0, 0], "path": [first]}, "b": {"point": [10, 0, 0], "path": [first]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .clone();
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let error = edit_refused(&mut s, parent, json!({"exploded": apart}));
+    assert!(error.contains("exploded view with centre annotations"), "{error}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, parent, json!({"exploded": apart}));
+    assert_eq!(run(&mut s, "drawing.center_line.inspect", json!({"line": line}))["status"], "ok");
+}
+
 /// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
 /// can't be shaded yet. Whichever setting would make one, the exploded choice, a style or following a
 /// shaded parent, it is refused and changes nothing, on the view itself or on a view that follows it;
