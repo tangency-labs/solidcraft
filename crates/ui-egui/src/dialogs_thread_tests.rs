@@ -21,22 +21,19 @@ fn shaft() -> Harness {
 }
 
 #[test]
-fn a_new_thread_uses_the_preference_and_an_edit_keeps_its_saved_layout() {
+fn a_new_thread_leaves_the_flank_layout_out_and_an_edit_keeps_its_saved_layout() {
     for continuous in [false, true] {
         let mut h = shaft();
-        h.app.preferences.thread_continuous_flanks = continuous;
         h.app.session.selection = vec![thread_face(&h.app, "Body1")];
         h.app.dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread");
-        // The command's default (continuous) stays out of the command; the historical layout is sent.
-        let sent = params(&h).get("continuous_flanks").cloned();
-        assert_eq!(sent, (!continuous).then_some(json!(false)));
+        // Continuous flanks are the command's default, so a new thread's dialog never sends the field.
+        assert_eq!(params(&h).get("continuous_flanks"), None);
+        // A saved thread (an old design's has the historical layout) keeps its layout when edited.
         h.app.run("solid.thread", json!({"face": [4,0,5], "designation": "M8", "continuous_flanks": continuous})).unwrap();
         let saved = h.app.session.doc.features.last().unwrap().kind.clone();
-        h.app.preferences.thread_continuous_flanks = !continuous;
         let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
         crate::dialogs_thread::reopen(&mut d, &h.app.session, &saved);
         assert_eq!(d.extra["continuous_flanks"], json!(continuous));
-        assert!(serde_json::to_value(&h.app.preferences).unwrap().get("thread_continuous_flanks").is_some());
     }
 }
 
