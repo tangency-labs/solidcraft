@@ -1,0 +1,80 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b3",
+        "b4"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2927-flanged-spool-cut-at-bore-step",
+  "expected": {
+    "body_count": 1,
+    "method": "Subtracting z >= 130 removes the upper 10 mm [130, 140] of the scalloped top flange right at the horizontal bore step plane z = 130 (r = 31 -> 35). From V_full = 248052.0320278483 mm^3, the removed [130, 140] slab has 9 mm of constant scalloped section A(0) = 5509.766677996032 mm^2 on [130, 139], 1 mm of upper chamfer [139, 140] of exact Simpson integral (A(0) + 4 A(0.5) + A(1)) / 6 = 5444.496350618749 mm^2, less the r = 35 bore of height 10 (pi * 1225 * 10 = 38484.510006474966 mm^3) and 6 countersunk holes (each pi * 25 * 9 + pi/3 * (25 + 30 + 36) = 802.1533245966821 mm^3), removing 30555.35494957667 mm^3 and leaving 217496.67707827163 mm^3.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcore#2927"
+    ],
+    "volume_mm3": 217496.67707827163,
+    "what": "half-space box z >= 130 subtracted from the 92-face flanged spool right on the inner bore step plane z = 130 (r = 31 to r = 35), where merging the tool's +Z cap face with the spool's -Z step face across r = 35 previously inverted the r = 31 bore loop (WR-759) and returned volume 609976 mm^3"
+  },
+  "expressible": true,
+  "gallery_note": "Horizontal cut on the z = 130 bore step plane: merging the opposite-normal annular step face with the tool cap preserves the r = 31 inner bore loop.",
+  "operation_expressible": true,
+  "records": "2927-flanged-spool-cut-at-bore-step.bodies.json.gz",
+  "result": [
+    {
+      "body": "spool",
+      "made": "b5"
+    }
+  ],
+  "sources": [
+    "tangency-labs/solidcore#2927"
+  ],
+  "ungraded": [],
+  "what": "half-space box z >= 130 subtracted from the 92-face flanged spool right on the inner bore step plane z = 130 (r = 31 to r = 35), where merging the tool's +Z cap face with the spool's -Z step face across r = 35 previously inverted the r = 31 bore loop (WR-759) and returned volume 609976 mm^3",
+  "why_not": []
+}
