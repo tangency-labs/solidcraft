@@ -3,7 +3,8 @@
 """STEP reader bake-off: run one or more readers over the corpus fetch.sh built.
 
 Each reader is LABEL=COMMAND, run as `COMMAND eval FILE --json-out OUT` and read as
-`solidcraft-cli eval` writes it (`bodies`: objects with `volume_mm3`, `faces` and `closed`), or
+`solidcraft-cli eval` writes it (`bodies`: objects with `volume_mm3`, `faces` and `closed`; older
+builds name `closed` `solid`, which is read in its place), or
 LABEL=probe:COMMAND, run as `COMMAND FILE` and printing one JSON object with `status`
 ("opened"/"refused"), `bodies`, `solids`, `faces` and `volume` (a reader without SolidCraft's
 CLI, such as a probe over another library). A `.p21` file is passed as a `.step` copy.
@@ -21,6 +22,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -42,9 +44,14 @@ def run_probe(command, local, tmp, timeout):
         data = json.loads(p.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
     except (ValueError, IndexError):
         return {"status": "crashed", "wall_s": wall, "error": p.stderr.decode("utf-8", "replace")[-200:]}
-    if data.get("status") != "opened" or not data.get("bodies"):
-        return {"status": "refused", "wall_s": wall, "error": str(data.get("error", "no bodies"))[:200]}
-    return {"status": "opened", "bodies": data["bodies"], "closed": data.get("solids", 0), "faces": data.get("faces", 0), "volume": float(data.get("volume", 0.0)), "wall_s": wall}
+    try:
+        if data.get("status") != "opened" or not data.get("bodies"):
+            return {"status": "refused", "wall_s": wall, "error": str(data.get("error", "no bodies"))[:200]}
+        counts = {"bodies": int(data["bodies"]), "closed": int(data.get("solids") or 0), "faces": int(data.get("faces") or 0)}
+        volume = float(data.get("volume") or 0.0)
+    except (TypeError, ValueError, AttributeError):
+        return {"status": "refused", "wall_s": wall, "error": "bad json"}
+    return {"status": "opened", **counts, "volume": volume, "wall_s": wall}
 
 
 def run_one(label, command, path, timeout):
@@ -72,11 +79,14 @@ def run_one(label, command, path, timeout):
         bodies = data.get("bodies") or []
         if not bodies:
             return {"status": "refused", "wall_s": wall, "error": "no bodies"}
-        vol = sum(b.get("volume_mm3") or 0.0 for b in bodies)
-        faces = sum(b.get("faces") or 0 for b in bodies)
-        closed = sum(1 for b in bodies if b.get("closed", b.get("solid")) is True)
-        # Faces the import left out, as its warnings name them ("left out: face #…").
-        warnings = " ".join(str(t.get("warning") or "") for t in data.get("timeline") or [])
+        try:
+            vol = sum(float(b.get("volume_mm3") or 0.0) for b in bodies)
+            faces = sum(int(b.get("faces") or 0) for b in bodies)
+            closed = sum(1 for b in bodies if b.get("closed", b.get("solid")) is True)
+            # Faces the import left out, as its warnings name them ("left out: face #…").
+            warnings = " ".join(str(t.get("warning") or "") for t in data.get("timeline") or [])
+        except (TypeError, ValueError, AttributeError):
+            return {"status": "refused", "wall_s": wall, "error": "bad json"}
         left_out = warnings.count("left out:")
         return {"status": "opened", "bodies": len(bodies), "closed": closed, "faces": faces, "volume": vol, "wall_s": wall, "left_out": left_out}
 
@@ -102,8 +112,10 @@ def main():
     a = ap.parse_args()
     readers = []
     for r in a.reader:
-        label, _, cmd = r.partition("=")
-        readers.append((label, cmd.split()))
+        label, sep, cmd = r.partition("=")
+        if not sep or not label or not cmd.strip():
+            ap.error(f"--reader needs LABEL=COMMAND, got {r!r}")
+        readers.append((label, shlex.split(cmd)))
     with open(os.path.join(a.corpus, "manifest.tsv")) as f:
         files = [line.rstrip("\n").split("\t") for line in f.readlines()[1:]]
     refs = references()

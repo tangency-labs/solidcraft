@@ -72,15 +72,16 @@ pub enum BlendRefusal {
         /// The least setback: the farthest the rails beside an edge cross it.
         least: f64,
     },
-    /// A setback asked at `vertex` that, with its ease, does not fit on the corner's edges
-    /// (each edge's length less the far end's claim on it), or on its rounds (each round's
-    /// rails reach along its edge only as far as a far corner cuts them): one below
-    /// `largest` fits.
+    /// A setback asked at `vertex` that does not fit on the corner's edges, or on its rounds
+    /// where a far corner cuts them: one below `largest` fits. `why` says which test
+    /// refused it.
     SetbackTooLong {
         /// The corner's vertex.
         vertex: VertexId,
-        /// The bound below which a setback fits.
+        /// The size the refusing test names ([`SetbackTooLongWhy`] says which and how).
         largest: f64,
+        /// Which test refused it.
+        why: SetbackTooLongWhy,
     },
     /// A chamfer's angle to its first face that runs out past the other face instead of
     /// meeting it: the chamfer's line and the other face meet only at an angle less than
@@ -94,6 +95,33 @@ pub enum BlendRefusal {
         /// The bound below which an angle meets the other face: pi less the wedge.
         largest: f64,
     },
+}
+
+/// Which test refused a setback as too long ([`BlendRefusal::SetbackTooLong`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SetbackTooLongWhy {
+    /// With its ease it leaves an edge at its corner no length past the far end's claim (that
+    /// end's fill's setback and ease, or the setback set on its corner; 0 where it has none):
+    /// an open bound. Every set-back corner, before the blends are traced; `largest` is the
+    /// least of `length - ease - far` less the fit margin, a thousand of the edge's
+    /// tolerances, and a setback above it is refused.
+    Overlap,
+    /// At a Setback corner, with its ease it does not lie below an edge's room by the
+    /// tolerance: `setback + ease >= length - claim - tol`, the far end's claim its fill's
+    /// setback and ease (0 where the far end has no fill: a far N x N corner's set setback is
+    /// claimed by [`SetbackTooLongWhy::Overlap`] only). `largest` is the least of
+    /// `room - ease`.
+    Room,
+    /// At a Setback corner, with its ease it reaches along an edge as far as a far corner
+    /// cuts one of the edge's round's rails, less the fit margin. `largest` is that reach
+    /// less the ease.
+    PastRails,
+    /// At a Setback corner, it takes a spring curve off its face: the curve comes within the
+    /// tolerances of another edge of the face, or is not shown not to (solidcore#2343 (d)).
+    /// `largest` is the largest scale of the asked setbacks that keeps every spring curve on
+    /// its face, times the setback.
+    SpringLeaves,
 }
 
 impl BlendRefusal {

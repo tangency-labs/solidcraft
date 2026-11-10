@@ -125,7 +125,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         let mut at = pos2(radio.x + t.space_12, rect.top() + t.space_10);
         if let Some(icon) = choice.icon {
             let cue = Rect::from_min_size(at, vec2(t.space_14, t.space_14));
-            crate::icons::paint_icon(ui.painter(), cue, icon, 1.0);
+            crate::ui_kit::icons::paint_icon(ui.painter(), cue, icon, 1.0);
             solidcraft_ui_registry::publish_rect(&format!("{}:icon", choice.key), cue);
             at.x += icon_width;
         }
@@ -159,7 +159,7 @@ pub(crate) fn settings_pointer_preview(ui: &mut Ui, visible: bool, speed: &str, 
         ui.painter().circle_filled(point, t.space_3, t.control_border);
     }
     if visible {
-        crate::icons::pointer::paint(&ui.painter().with_clip_rect(rect.shrink(t.space_4)), path.get(1).copied().unwrap_or(rect.center()));
+        crate::ui_kit::icons::glyphs::pointer(&ui.painter().with_clip_rect(rect.shrink(t.space_4)), path.get(1).copied().unwrap_or(rect.center()));
     }
     let caption = if visible {
         solidcraft_ui_text::format("ai.prefs.pointer_preview_speed", &[("speed", speed)])

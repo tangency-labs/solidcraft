@@ -770,6 +770,37 @@ fn exploded_views_show_without_changing_the_design() {
     assert_eq!(run(&mut s, "explode.list", json!({}))["views"].as_array().map(Vec::len), Some(2));
 }
 
+/// An exploded view's move is a world translation: a part inside a component turned 90° about z
+/// moves the way the view gives, not along the turned component's own x (#13939).
+#[test]
+fn an_exploded_part_inside_a_turned_component_moves_the_way_given() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Frame"}));
+    run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 10, "center": [30, 10, 5], "body_name": "Rail"}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Frame"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 30, "center": [30, 10, 25], "body_name": "Peg"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let frame = occ(&s, "Frame");
+    run(&mut s, "occurrence.ground", json!({"occurrence": frame, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": frame, "space": "world", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    let centre = |s: &mut Session| {
+        let bbox = run(s, "inspect.measure", json!({"bodies": ["Peg"]}))["bodies"][0]["bbox"].clone();
+        let mid = |k: usize| (bbox["min"][k].as_f64().unwrap_or(f64::NAN) + bbox["max"][k].as_f64().unwrap_or(f64::NAN)) / 2.0;
+        Vec3::new(mid(0), mid(1), mid(2))
+    };
+    let placed = centre(&mut s);
+    assert!(placed.dist(Vec3::new(-10.0, 30.0, 25.0)) < 1e-6, "turned with the frame: {placed:?}");
+
+    let pin = occ(&s, "Pin");
+    let r = run(&mut s, "explode.create", json!({"name": "Out", "moves": [{"occurrence": pin, "translate": [80, 0, 0]}]}));
+    assert_eq!(r["moves"][0]["translate"], json!([80.0, 0.0, 0.0]), "the view keeps the world move it was given");
+    run(&mut s, "explode.show", json!({"view": "Out"}));
+    let shown = centre(&mut s);
+    assert!(shown.dist(placed + Vec3::new(80.0, 0.0, 0.0)) < 1e-6, "80 mm along world x: {placed:?} -> {shown:?}");
+    run(&mut s, "explode.show", json!({"view": null}));
+    assert!(centre(&mut s).dist(placed) < 1e-6, "assembled again");
+}
+
 /// #9142: on a part of plain bodies (the sample plate) Exploded View opened its dialog and failed
 /// on OK ("an exploded view needs two or more occurrences"). It is greyed out instead, saying why,
 /// until the design has two components to pull apart.

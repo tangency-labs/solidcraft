@@ -826,3 +826,26 @@ fn a_ring_touching_itself_at_a_vertex_meshes_strictly() {
     let ring = ok(stepped.faces(1e-4)).into_iter().find(|f| (f.centroid.z - 5.0).abs() < 1e-6).unwrap();
     assert!((ring.area - 300.0 * PI).abs() < 0.05, "ring area {}", ring.area);
 }
+
+/// `rod_doubled_edge` (tests/step-regressions): one of its edges runs twice round its loop, and
+/// sampling it reaches the most nodes an edge may have. The face it bounds is left out of the
+/// plan and named with the edge; the other four faces are meshed, at the display and the export
+/// tolerance alike, where before the whole body was refused.
+#[test]
+fn a_face_whose_edge_cannot_be_sampled_is_left_out_and_the_rest_meshed() {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-regressions/rod_doubled_edge.step")).unwrap();
+    let import = ok(crate::step_import(&text));
+    let body = &import.bodies[0].body;
+    let rec = record(body);
+    for t in [crate::MeshTolerance::display_of(body.size()), crate::MeshTolerance::export_of(body.size())] {
+        let (plan, stats) = match solidcore_tess::plan(&rec, &t, body.size()) {
+            Ok(p) => p,
+            Err(e) => panic!("{t:?}: {e}"),
+        };
+        let has = plan.faces_with_triangles(rec.faces.len());
+        assert_eq!(has.iter().filter(|h| **h).count(), rec.faces.len() - 1, "{t:?}: {has:?}");
+        let [left_out] = stats.unmeshed.as_slice() else { panic!("{t:?}: {:?}", stats.unmeshed) };
+        assert!(!has[left_out.face], "{t:?}");
+        assert!(left_out.reason.contains("nodes"), "{t:?}: {}", left_out.reason);
+    }
+}

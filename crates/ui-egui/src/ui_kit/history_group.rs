@@ -2,7 +2,7 @@
 //! rule, the disclosure arrow in a well of its own. The joints, feature folders and long runs of a
 //! component's features use it. Open, a group's items show after its chip inside a tray that
 //! reaches from the chip to its last item.
-use crate::icons;
+use crate::ui_kit::icons;
 use egui::{Painter, Pos2, Rect, Stroke, pos2, vec2};
 use solidcraft_theme::{TabAccent, Tokens};
 

@@ -150,11 +150,8 @@ pub(crate) fn curved_arrow(painter: &egui::Painter, at: Pos2, clockwise: bool, h
 }
 /// The pointer target around a compass end: larger than the drawn disc, so it is easy to hit.
 pub(crate) const AXIS_RADIUS: f32 = 15.0;
-pub(crate) fn axis_tip(painter: &egui::Painter, c: Pos2, name: &str, d: [f64; 3], at: Pos2, depth: f64, hovered: bool, t: Tokens) {
-    axis_tip_scaled(painter, c, name, d, at, depth, hovered, t, 1.0);
-}
 
-/// The same compass artwork at a uniform scale, including its lettering and strokes.
+/// A compass axis end at a uniform scale, including its lettering and strokes.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn axis_tip_scaled(painter: &egui::Painter, c: Pos2, name: &str, d: [f64; 3], at: Pos2, depth: f64, hovered: bool, t: Tokens, scale: f32) {
     let col = if d[0] != 0.0 {

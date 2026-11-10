@@ -534,17 +534,6 @@ pub struct UpstreamFixes {
     pub curve_check_zero_speed_tangent_end: bool,
     /// `SmFace::ComputeLoopOrientation`'s 3D path holds a loop's dimensionless area to a floor relative to the loop's own bounding box instead of the face's whole domain, so a loop far smaller than its face (a 0.002 hole in a 3 m plate) is oriented (WR-561, #1523; tangency-labs/smlib 54ca3e0).
     pub loop_orientation_floor_from_loop_box: bool,
-    /// `SmConic::Evaluate` ([`crate::curve::conic::Conic::evaluate_with_fixes`], forwarded by
-    /// [`crate::curve::curve::Curve::evaluate`], [`crate::curve::curve::Curve::evaluate_into`],
-    /// and `<Conic as CurveEvaluate>::evaluate`) uses the computed second derivative `sSec`
-    /// when `bNonZeroTangents` replaces a near-zero first derivative (`|C'| < 1.1 * dScaledZero`)
-    /// for `lNumDerivatives == 2`, scaling `sSec` to `1.1 * dScaledZero` (negated above the
-    /// natural interval midpoint) when `|sSec| > 1.1 * dScaledZero`. Pinned v1.0.1 reads
-    /// `aPointAndDerivatives[2]` (`Vec3::UNDEF` on a fresh array, never exceeding
-    /// `1.1 * dScaledZero`) before writing `sSec` into slot `2` (WR-27, #2202;
-    /// `plan/upstream-issues/WR-27--addendum-2026-11-01-conic-zero-tangent-second-deriv.md`).
-    /// Off by default for pinned C++ parity.
-    pub conic_evaluate_uses_computed_second_deriv: bool,
     /// The N-dimensional local solve takes no value from a failed evaluation (WR-253; the fork's tangency-labs/smlib@d2757e1). The one-dimensional solver does this by default since #2574, so this flag no longer reaches it. `SmLocalSolveNd::SolveIt` sums no equations of a failed clamped or scaled evaluation, takes the clamped-and-scaled step only when it evaluated, and then with that evaluation's Jacobian and found flag (upstream kept the unscaled point's), stops the line search when the clamped step failed and no scaled one was taken, and finds no solution when the best guess cannot be re-evaluated (#1945), nor when the guess's first evaluation fails, where upstream reports the unevaluated guess as found (WR-20; the fork's tangency-labs/smlib@d5c5cfd).
     pub oscillating_skips_failed_guesses: bool,
     /// `sm_RefineCCSolutions` judges a range end's shift by its distance from 1 (WR-383, #527).
@@ -709,16 +698,6 @@ pub struct UpstreamFixes {
     pub taper_pivot_nearest_corner: bool,
     /// A taper extrude with linear-extension (tangent) corners of a profile of lines and circular arcs with a sharp corner continues each wall as its tangent plane to meet its neighbour along their exact seam (a line's wall is its own plane, so two lines meet at a corner edge), and refuses a corner it cannot close (`create_taper_extrude_with_corner` reports why and where), instead of ruling separate corner faces from offset extension lines; with fillet corners, or a profile with another curve kind, nothing changes (WR-521, #1449; SolidCraft change, tangency-labs/smlib e8f23e0).
     pub taper_tangent_corner_planes: bool,
-    /// `SmCurve::CurveMaxDistanceBetween` and `SmCrvOnSurf::SurfaceCurveMaxDistanceBetween`
-    /// with `num_samples == 1` sample the interval midpoints (`per = 0.5`) when the
-    /// single-span line/line two-sample override does not apply, instead of dividing
-    /// `0.0 / (num_samples - 1) = 0.0 / 0.0 = NaN` (WR-36, #2203; see
-    /// `plan/upstream-issues/WR-36--addendum-2026-11-01-single-sample-midpoint.md`).
-    /// `SmCrvOnSurf::SurfaceCurveMaxDistanceBetween`'s `bDoPrecise = FALSE` guard before
-    /// its disabled `LocalCurveSolve` refinement stays unchanged, as upstream intentionally
-    /// turned those broken solver calls off (`num_samples == 0` still takes the dense
-    /// `22 + this_knots + other_knots` sample pass). Off by default for C++ parity.
-    pub curve_max_distance_single_sample_midpoint: bool,
     /// The curvature-keeping and tangent corner rules of `create_taper_extrude` (`sm_CreateCurvatureKeepingWalls`) follow the section up the height: a wall whose section shrinks to nothing below the far end ends at that apex and its neighbours meet from there up (two lines brought face to face close together along their common line, and the walls beyond them meet from its other end), where the fork's first version refused the draft (`SM_TCR_WALL_CLOSES`) though the solid exists. A wall closing at the far end, the whole section closing, and an arc shrinking to its centre are still refused (WR-571; the fork's tangency-labs/smlib@183ea65).
     pub taper_wall_closes_at_apex: bool,
     /// A full-turn rotational sweep makes a closed shell inside another solid its cavity (WR-403, #478).

@@ -8,8 +8,9 @@
 //! control points mapped); a circle about the axis of a cylinder, cone, sphere or torus (v
 //! constant, u the circle's angle plus a constant, or minus it where the circle turns the other
 //! way); a line along a ruling of a cylinder or cone (u constant, v linear). Each exact pcurve is
-//! checked by lifting it; anything else, and any exact one that misses, is a cubic B-spline fitted
-//! within the tolerance, never a polyline.
+//! checked by lifting it. On a spline face, a straight (u, v) line is taken where it lifts onto
+//! the edge within the tolerance. Anything else, and any exact one that misses, is refused
+//! (`Failed`, "no exact pcurve"): nothing is fitted.
 //!
 //! Periodic parameters are unwrapped along each curve, and each loop's uses are moved by whole
 //! periods so every use starts where the one before it ends: a seam edge used twice gets two

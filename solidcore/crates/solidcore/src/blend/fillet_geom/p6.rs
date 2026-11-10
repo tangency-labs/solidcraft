@@ -948,6 +948,20 @@ impl FilletBrep {
                     curr = Some(eu);
                 }
             }
+            // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth edge
+            // ends on a side edge on the face beyond, which the original edge does not bound;
+            // the chain is walked on the end face the two side edges share
+            if curr.is_none() {
+                let shared = match eu1::radial(target, fv_eu)? {
+                    Some(r) => eu1::faceuse(target, r)?,
+                    None => None,
+                };
+                for eu in edge::edgeuses(target, orig_edge, None, None)? {
+                    if curr.is_none() && shared.is_some() && eu1::faceuse(target, eu)? == shared {
+                        curr = Some(eu);
+                    }
+                }
+            }
             let mut curr = Some(curr.ok_or_else(nul)?);
             if edge::start_vertex(target, orig_edge)? != Some(corner_vertex)
                 && edge::end_vertex(target, orig_edge)? != Some(corner_vertex)
@@ -989,6 +1003,24 @@ impl FilletBrep {
                     )?,
                     None => None,
                 };
+                // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth
+                // edge ends on the side edge beyond it, which the chain reaches across that
+                // edge's vertex (the walk stops at the rail end's edge)
+                if curr.is_none() {
+                    curr = match to {
+                        Some(to) => {
+                            crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                                k,
+                                target,
+                                eu,
+                                to,
+                                None,
+                                tangency_tol_radians,
+                            )?
+                        }
+                        None => None,
+                    };
+                }
                 from = to;
             }
             if !reached {
@@ -1881,6 +1913,28 @@ impl FilletBrep {
         }
 
         if idx > 1 {
+            // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth far
+            // edge of its solver's face, the whole length, lies on the face beyond; the side
+            // edge use of the face it rolled off is still its side
+            if let Some(solver_id) = geom.fillet_solver() {
+                let solver = resolve(solver_id)?;
+                for (rail, rolled) in solver.rolled_faces.iter().enumerate() {
+                    let Some(rolled) = rolled else {
+                        continue;
+                    };
+                    let Some(own) = solver.edgeuse(rail)? else {
+                        continue;
+                    };
+                    let rail_face = if rail == 0 { face0 } else { face1 };
+                    let own_face = eu1::face(target, own)?;
+                    if rail_face == Some(*rolled)
+                        && (own_face == eu1::face(target, eu)?
+                            || own_face == eu1::face(target, radial_eu)?)
+                    {
+                        return Ok(rail);
+                    }
+                }
+            }
             return Err(SolidError::sm_err(OP_SIDE_EU));
         }
         Ok(idx)
