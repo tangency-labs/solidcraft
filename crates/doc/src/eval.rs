@@ -1,5 +1,7 @@
 //! Timeline evaluation.
 
+#[path = "eval_overlap.rs"]
+mod overlap;
 #[path = "placed_mesh.rs"]
 mod placed_mesh;
 #[path = "placement_reuse.rs"]
@@ -1642,6 +1644,15 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
     Ok(())
 }
 
+/// [`check_kept`] of bodies whose checks were detached from them ([`kernel::detach_kept`]), by
+/// body name, in order: the first that fails is the feature's error, as there.
+fn run_kept(checks: Vec<(String, kernel::KeptCheck)>) -> kernel::Result<()> {
+    for (name, check) in checks {
+        check.run().map_err(|e| kernel::KernelError::Failed(format!("body `{name}`: {e}")))?;
+    }
+    Ok(())
+}
+
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
 /// still its result in `doc`: a feature saved before format 14 names the pieces it splits a body
 /// into as the later features pick them ([`crate::lineage::order_legacy_lumps`]), which neither
@@ -2408,147 +2419,397 @@ impl Model {
         let mut moved: Vec<(u64, Vec<ModelBody>)> = Vec::new();
         // The features that failed so far in this pass, by id: their names and errors (#9075).
         let mut failed: std::collections::HashMap<u64, (String, String)> = std::collections::HashMap::new();
-        for (i, f) in doc.features.iter().enumerate() {
-            if let Some(r) = out.last()
-                && let Some(e) = &r.error
-            {
-                failed.insert(r.id, (r.name.clone(), e.clone()));
+        // SMLib's check of a feature's bodies runs on another thread while the features after it
+        // are evaluated ([`overlap`]). Their results, and the cache entries held until every
+        // check before them passed, stand only once those checks pass; a refusal takes the pass
+        // back to the refused feature, which then fails with the check's error, as it would have.
+        let mut checks = overlap::Checks::new(validation);
+        let mut start = 0;
+        let mut back: Option<overlap::Refused> = None;
+        'pass: loop {
+            if let Some(refused) = back.take() {
+                let s = refused.saved;
+                start = refused.index;
+                state = s.state;
+                reserved = s.reserved;
+                out.truncate(s.out_len);
+                reuse = s.reuse;
+                prev_fp = s.prev_fp;
+                recomputed = s.recomputed;
+                restored = s.restored;
+                poses = s.poses;
+                moved = s.moved;
+                failed = s.failed;
+                rolled_results = s.rolled_results;
+                checks.refuse(refused.index, refused.failure);
             }
-            self.placement_local = self.placement_local && placement_reuse::local_geometry(f, &feature_component);
-            let rolled_back = i >= marker;
-            // Retain at most one active result per rolled-back feature, even across several
-            // marker moves. Build the map anew so deleted features release their states too.
-            let rolled = rolled_results.remove(&f.id);
-            let rolled = if self.no_cache {
-                None
-            } else if rolled_back {
-                let active = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && !r.stale && !r.unkept);
-                if let Some(saved) = active.map(|r| (previous_context, r.clone())).or(rolled) {
-                    self.rolled_results.insert(f.id, saved);
+            for (i, f) in doc.features.iter().enumerate().skip(start) {
+                if let Some(refused) = checks.settle(false, &self.cache, &self.kept) {
+                    back = Some(refused);
+                    continue 'pass;
                 }
-                None
-            } else {
-                rolled.filter(|(context, _)| *context == ctx).map(|(_, r)| r)
-            };
-            // Opening was cancelled: the rest is skipped and the result discarded.
-            let cancelled = watched.step(i);
-            let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
-            prev_fp = fp;
-            let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
-            if let Some(pose) = pose {
-                poses.insert(f.id, pose);
-            }
-            let posed = pose.is_none_or(|pose| self.poses.get(&f.id) == Some(&pose));
-            let current = |old: &&FeatureResult| old.id == f.id && old.fingerprint == fp && !old.stale && posed;
-            // A state the saved model did not keep is evaluated again from the one before it; the
-            // results after it that the model did keep still stand (#3220).
-            let unkept = reuse && self.results.get(i).filter(current).is_some_and(|old| old.unkept);
-            if f.suppressed && !rolled_back {
-                reserved.extend(f.body_names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(str::to_string));
-            }
-            // A feature that names its pieces as later features pick them (saved before format 14)
-            // has a result only while those picks are what they were.
-            if reuse
-                && !unkept
-                && let Some(old) = self
-                    .results
-                    .get(i)
-                    .filter(current)
-                    .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, &feature_component))
-                    .filter(|old| old.skipped || legacy_current(doc, f, &state, &old.state))
-            {
-                if moved.is_empty() {
-                    if !old.skipped {
-                        state = old.state.clone();
+                let (reuse_in, prev_fp_in) = (reuse, prev_fp);
+                if let Some(r) = out.last()
+                    && let Some(e) = &r.error
+                {
+                    failed.insert(r.id, (r.name.clone(), e.clone()));
+                }
+                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, &feature_component);
+                let rolled_back = i >= marker;
+                // Retain at most one active result per rolled-back feature, even across several
+                // marker moves. Build the map anew so deleted features release their states too.
+                let rolled = rolled_results.remove(&f.id);
+                let rolled = if self.no_cache {
+                    None
+                } else if rolled_back {
+                    let active = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && !r.stale && !r.unkept);
+                    if let Some(saved) = active.map(|r| (previous_context, r.clone())).or(rolled) {
+                        self.rolled_results.insert(f.id, saved);
                     }
-                    out.push(old.clone());
+                    None
                 } else {
-                    if !old.skipped {
-                        state = with_moved(&old.state, &moved);
+                    rolled.filter(|(context, _)| *context == ctx).map(|(_, r)| r)
+                };
+                // Opening was cancelled: the rest is skipped and the result discarded.
+                let cancelled = watched.step(i);
+                let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
+                prev_fp = fp;
+                let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
+                if let Some(pose) = pose {
+                    poses.insert(f.id, pose);
+                }
+                let posed = pose.is_none_or(|pose| self.poses.get(&f.id) == Some(&pose));
+                let current = |old: &&FeatureResult| old.id == f.id && old.fingerprint == fp && !old.stale && posed;
+                // A state the saved model did not keep is evaluated again from the one before it; the
+                // results after it that the model did keep still stand (#3220).
+                let unkept = reuse && self.results.get(i).filter(current).is_some_and(|old| old.unkept);
+                if f.suppressed && !rolled_back {
+                    reserved.extend(f.body_names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(str::to_string));
+                }
+                // A feature that names its pieces as later features pick them (saved before format 14)
+                // has a result only while those picks are what they were.
+                if reuse
+                    && !unkept
+                    && let Some(old) = self
+                        .results
+                        .get(i)
+                        .filter(current)
+                        .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, &feature_component))
+                        .filter(|old| old.skipped || legacy_current(doc, f, &state, &old.state))
+                {
+                    if moved.is_empty() {
+                        if !old.skipped {
+                            state = old.state.clone();
+                        }
+                        out.push(old.clone());
+                    } else {
+                        if !old.skipped {
+                            state = with_moved(&old.state, &moved);
+                        }
+                        out.push(FeatureResult { state: state.clone(), ..old.clone() });
                     }
-                    out.push(FeatureResult { state: state.clone(), ..old.clone() });
+                    continue;
                 }
-                continue;
-            }
-            // Reuse goes on past a pose-only feature evaluated again for its pose alone.
-            let reusing = reuse && !unkept && pose.is_some();
-            reuse = unkept && !cancelled;
-            if f.suppressed || rolled_back || cancelled {
-                out.push(FeatureResult {
-                    id: f.id,
-                    name: f.name.clone(),
-                    error: None,
-                    internal: false,
-                    warning: None,
-                    import_report: None,
-                    repair: None,
-                    ms: 0.0,
-                    skipped: true,
-                    stale: false,
-                    fingerprint: fp,
-                    unkept: false,
-                    state: state.clone(),
-                });
-                continue;
-            }
-            // Taken from the design each time: a state taken from an earlier evaluation may have
-            // been made before a rename freed a name or a feature was suppressed.
-            if state.reserved_body_names != reserved {
-                Arc::make_mut(&mut state).reserved_body_names.clone_from(&reserved);
-            }
-            // A sketch the feature is built from failed earlier in this pass: the feature fails naming
-            // that sketch, with its error, as one using a failed parameter does (#9075), not as a
-            // sketch that must come earlier in the timeline. Never cached: the cache key holds
-            // neither the sketch's name nor its error (a rename, another failing value).
-            let failed_sketch = if failed.is_empty() {
-                None
-            } else {
-                f.kind.input_sketches().into_iter().find_map(|id| failed.get(&id)).map(|(name, e)| format!("sketch `{name}` failed: {e}"))
-            };
-            if let Some(e) = failed_sketch {
+                // Reuse goes on past a pose-only feature evaluated again for its pose alone.
+                let reusing = reuse && !unkept && pose.is_some();
+                reuse = unkept && !cancelled;
+                if f.suppressed || rolled_back || cancelled {
+                    out.push(FeatureResult {
+                        id: f.id,
+                        name: f.name.clone(),
+                        error: None,
+                        internal: false,
+                        warning: None,
+                        import_report: None,
+                        repair: None,
+                        ms: 0.0,
+                        skipped: true,
+                        stale: false,
+                        fingerprint: fp,
+                        unkept: false,
+                        state: state.clone(),
+                    });
+                    continue;
+                }
+                // Taken from the design each time: a state taken from an earlier evaluation may have
+                // been made before a rename freed a name or a feature was suppressed.
+                if state.reserved_body_names != reserved {
+                    Arc::make_mut(&mut state).reserved_body_names.clone_from(&reserved);
+                }
+                // A sketch the feature is built from failed earlier in this pass: the feature fails naming
+                // that sketch, with its error, as one using a failed parameter does (#9075), not as a
+                // sketch that must come earlier in the timeline. Never cached: the cache key holds
+                // neither the sketch's name nor its error (a rename, another failing value).
+                let failed_sketch = if failed.is_empty() {
+                    None
+                } else {
+                    f.kind.input_sketches().into_iter().find_map(|id| failed.get(&id)).map(|(name, e)| format!("sketch `{name}` failed: {e}"))
+                };
+                if let Some(e) = failed_sketch {
+                    recomputed += 1;
+                    reuse = false;
+                    out.push(FeatureResult {
+                        id: f.id,
+                        name: f.name.clone(),
+                        error: Some(e),
+                        internal: false,
+                        warning: None,
+                        import_report: None,
+                        repair: None,
+                        ms: 0.0,
+                        skipped: false,
+                        stale: false,
+                        fingerprint: fp,
+                        unkept: false,
+                        state: state.clone(),
+                    });
+                    continue;
+                }
+                // The same feature on the same inputs: its earlier result.
+                let key = cache_key(
+                    f,
+                    fp,
+                    fingerprint(doc, 0, f, &vals, false, &self.import_digests) ^ placement_digest(doc, f, Some(&state)),
+                    ctx,
+                    &state,
+                );
+                let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
+                if !self.no_cache
+                    && let Some(c) = self
+                        .cache
+                        .lock()
+                        .ok()
+                        .and_then(|mut m| m.get(key))
+                        .or_else(|| kept.and_then(|k| k.get(key)))
+                        .filter(|c| c.error.is_some() || legacy_current(doc, f, &state, &c.state))
+                {
+                    if let Some(k) = kept {
+                        k.put(key, &c);
+                    }
+                    restored += 1;
+                    if c.error.is_none() {
+                        state = c.state.clone();
+                    }
+                    // A kept result after a failed one would not be this evaluation's.
+                    reuse &= c.error.is_none();
+                    if reusing
+                        && c.error.is_none()
+                        && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
+                    {
+                        moved.retain(|(id, _)| *id != f.id);
+                        moved.push((f.id, bodies));
+                        reuse = true;
+                    }
+                    out.push(FeatureResult {
+                        id: f.id,
+                        name: f.name.clone(),
+                        error: c.error,
+                        internal: false,
+                        warning: c.warning,
+                        import_report: c.import_report,
+                        repair: c.repair,
+                        ms: c.ms,
+                        skipped: false,
+                        stale: false,
+                        fingerprint: fp,
+                        unkept: false,
+                        state: state.clone(),
+                    });
+                    continue;
+                }
+                // An active result hidden by the marker, or evaluated ahead on these same inputs
+                // (the same chain of definitions from the start). Changed inputs never reuse it.
+                if let Some(r) = rolled
+                    .as_ref()
+                    .filter(|_| moved.is_empty())
+                    .filter(current)
+                    .or_else(|| primed.as_ref().filter(|_| moved.is_empty()).and_then(|p| p.get(&f.id)).filter(current))
+                    .filter(|r| r.error.is_some() || legacy_current(doc, f, &state, &r.state))
+                {
+                    restored += 1;
+                    if r.error.is_none() {
+                        state = r.state.clone();
+                    }
+                    reuse &= r.error.is_none();
+                    out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
+                    continue;
+                }
                 recomputed += 1;
-                reuse = false;
-                out.push(FeatureResult {
-                    id: f.id,
-                    name: f.name.clone(),
-                    error: Some(e),
-                    internal: false,
-                    warning: None,
-                    import_report: None,
-                    repair: None,
-                    ms: 0.0,
-                    skipped: false,
-                    stale: false,
-                    fingerprint: fp,
-                    unkept: false,
-                    state: state.clone(),
-                });
-                continue;
-            }
-            // The same feature on the same inputs: its earlier result.
-            let key =
-                cache_key(f, fp, fingerprint(doc, 0, f, &vals, false, &self.import_digests) ^ placement_digest(doc, f, Some(&state)), ctx, &state);
-            let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
-            if !self.no_cache
-                && let Some(c) = self
-                    .cache
-                    .lock()
-                    .ok()
-                    .and_then(|mut m| m.get(key))
-                    .or_else(|| kept.and_then(|k| k.get(key)))
-                    .filter(|c| c.error.is_some() || legacy_current(doc, f, &state, &c.state))
-            {
-                if let Some(k) = kept {
-                    k.put(key, &c);
+                // Each feature computed is a profiler span named after its kind.
+                let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
+                let before = state.clone();
+                let t0 = now();
+                let mut next = (*state).clone();
+                // The names the design must not use again travel with the state (#4957, #4302).
+                next.reserved_body_names.clone_from(&reserved);
+                next.frame_bodies = Arc::downgrade(&self.frame_bodies);
+                for b in &mut next.bodies {
+                    b.made = crate::lineage::Made::Before;
                 }
-                restored += 1;
-                if c.error.is_none() {
-                    state = c.state.clone();
+                let mut warning = None;
+                let mut import_report = None;
+                let mut repair = None;
+                // Face references by name: move each face point onto its named face (on the body the
+                // feature names, when it names one and the face is there).
+                let renamed;
+                let mut frame_error: Option<String> = None;
+                let f = match with_named_face_points(doc, &state, f) {
+                    Ok(Some((g, notes))) => {
+                        if !notes.is_empty() {
+                            warning = Some(notes.join("; "));
+                        }
+                        renamed = g;
+                        &renamed
+                    }
+                    Ok(None) => f,
+                    Err(e) => {
+                        frame_error = Some(e.in_feature(&f.name).to_string());
+                        f
+                    }
+                };
+                // A parameter with an error fails the features using it, with that error.
+                let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
+                // The bodies whose check runs beside the features after this one.
+                let mut apart: Option<Vec<(String, kernel::KeptCheck)>> = None;
+                let refused = checks.refused(i);
+                let mut r = match frame_error.or(bad_param) {
+                    Some(e) => Err(kernel::KernelError::Failed(e)),
+                    None if refused.is_some() => {
+                        let refused = refused.clone().map(|x| (x.error, x.warning, x.import_report, x.repair));
+                        match refused {
+                            Some((e, w, ir, rp)) => {
+                                (warning, import_report, repair) = (w, ir, rp);
+                                Err(e)
+                            }
+                            None => Ok(()),
+                        }
+                    }
+                    None => kernel::guard(&f.name, || {
+                        let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
+                        let (r, deferred) =
+                            kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
+                        r.map_err(|e| match e {
+                            // A panic the kernel caught stays one.
+                            crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
+                            e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
+                        })?;
+                        // The checks the feature's steps left to its end: the bodies it keeps.
+                        if !deferred {
+                            Ok(())
+                        } else if let Some(detached) = checks.detach(&state, &next) {
+                            apart = Some(detached);
+                            Ok(())
+                        } else {
+                            check_kept(&state, &next)
+                        }
+                    }),
+                };
+                if r.is_ok()
+                    && let Some(after) = apart.take()
+                {
+                    // Where a refusal of this feature's check, running beside the features after
+                    // it, takes the evaluation back to: the loop's state before this feature.
+                    let saved = overlap::Saved {
+                        state: state.clone(),
+                        reserved: reserved.clone(),
+                        out_len: out.len(),
+                        reuse: reuse_in,
+                        prev_fp: prev_fp_in,
+                        recomputed: recomputed - 1,
+                        restored,
+                        poses: poses.clone(),
+                        moved: moved.clone(),
+                        failed: failed.clone(),
+                        rolled_results: rolled_results.clone(),
+                    };
+                    let failure = overlap::Failure {
+                        error: kernel::KernelError::Failed(String::new()),
+                        warning: warning.clone(),
+                        import_report: import_report.clone(),
+                        repair: repair.clone(),
+                        ms: t0.elapsed().as_secs_f64() * 1000.0,
+                    };
+                    let name = f.name.clone();
+                    r = checks.start(i, saved, failure, move || kernel::guard(&name, || run_kept(after)));
                 }
-                // A kept result after a failed one would not be this evaluation's.
-                reuse &= c.error.is_none();
+                if r.is_ok() {
+                    // Profiles picked by curves that no longer bound a profile exactly were found
+                    // by their best match: say which.
+                    let thin = matches!(&f.kind, FeatureKind::Extrude { thin: Some(_), .. });
+                    for (sketch, sel) in f.kind.profile_sels() {
+                        if let (false, Some(ss)) = (thin, state.sketch(sketch)) {
+                            for note in crate::profile_fallback_notes(ss, sel) {
+                                append_warning(&mut warning, note);
+                            }
+                        }
+                    }
+                    track_altered_sheets(&state, &mut next, f, &mut warning);
+                    note_join_apart(&state, &next, f, &mut warning);
+                }
+                let ms = refused.map_or(t0.elapsed().as_secs_f64() * 1000.0, |x| x.ms);
+                let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
+                let error = match r {
+                    Ok(()) => {
+                        // Copies are named after their sources through the instance transforms.
+                        let mats = match &f.kind {
+                            FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern).unwrap_or_default(),
+                            FeatureKind::Mirror { plane, .. } => {
+                                doc.resolve_plane_in(&vals, plane, 0, Some(&state)).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
+                            }
+                            _ => Vec::new(),
+                        };
+                        // Copies made through a pattern or mirror among the sources come after (#395).
+                        let mats = match &f.kind {
+                            FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
+                                copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
+                            }
+                            _ => mats,
+                        };
+                        // A revolve axis origin that follows parameters names its faces from its values.
+                        let named = naming_feature(&vals, f);
+                        next.stamp(doc, &state, &named, key, mats);
+                        // Evaluated again only for what came before it (a mirror moved by a drag).
+                        if let Some(old) = self.results.get(i).filter(|old| old.id == f.id) {
+                            let made = old.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| (b.name.as_str(), b));
+                            let made: std::collections::HashMap<&str, &ModelBody> = made.collect();
+                            for b in next.bodies.iter_mut().filter(|b| b.feature == f.id) {
+                                if let Some(old) = made.get(b.name.as_str()) {
+                                    b.keep_meshes_of(old);
+                                }
+                            }
+                        }
+                        for b in &mut next.bodies {
+                            if !b.transferred {
+                                b.component = match doc.body_components.get(&b.name) {
+                                    Some(c) => *c,
+                                    None => feature_component.get(&b.feature).copied().unwrap_or(0),
+                                };
+                            }
+                        }
+                        state = Arc::new(next);
+                        // A window opening the design can show what is built so far.
+                        watched.offer(i + 1, doc, &state);
+                        None
+                    }
+                    Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
+                };
+                // A panic is no result to reuse: the kernel was replaced after it.
+                if !self.no_cache && !watched.cancelled() && !internal {
+                    let e = CachedEval {
+                        error: error.clone(),
+                        warning: warning.clone(),
+                        import_report: import_report.clone(),
+                        repair: repair.clone(),
+                        ms,
+                        bytes: state.added_bytes(&before),
+                        state: state.clone(),
+                    };
+                    // Held while a check before it, or its own, runs.
+                    checks.store(i, key, e, &self.cache, &self.kept);
+                }
+                reuse &= error.is_none();
                 if reusing
-                    && c.error.is_none()
+                    && error.is_none()
                     && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
                 {
                     moved.retain(|(id, _)| *id != f.id);
@@ -2558,190 +2819,25 @@ impl Model {
                 out.push(FeatureResult {
                     id: f.id,
                     name: f.name.clone(),
-                    error: c.error,
-                    internal: false,
-                    warning: c.warning,
-                    import_report: c.import_report,
-                    repair: c.repair,
-                    ms: c.ms,
+                    error,
+                    internal,
+                    warning,
+                    import_report,
+                    repair,
+                    ms,
                     skipped: false,
                     stale: false,
                     fingerprint: fp,
                     unkept: false,
                     state: state.clone(),
                 });
-                continue;
             }
-            // An active result hidden by the marker, or evaluated ahead on these same inputs
-            // (the same chain of definitions from the start). Changed inputs never reuse it.
-            if let Some(r) = rolled
-                .as_ref()
-                .filter(|_| moved.is_empty())
-                .filter(current)
-                .or_else(|| primed.as_ref().filter(|_| moved.is_empty()).and_then(|p| p.get(&f.id)).filter(current))
-                .filter(|r| r.error.is_some() || legacy_current(doc, f, &state, &r.state))
-            {
-                restored += 1;
-                if r.error.is_none() {
-                    state = r.state.clone();
-                }
-                reuse &= r.error.is_none();
-                out.push(FeatureResult { state: state.clone(), unkept: false, ..r.clone() });
-                continue;
+            // Every check still running ends before the results stand.
+            if let Some(refused) = checks.settle(true, &self.cache, &self.kept) {
+                back = Some(refused);
+                continue 'pass;
             }
-            recomputed += 1;
-            // Each feature computed is a profiler span named after its kind.
-            let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
-            let before = state.clone();
-            let t0 = now();
-            let mut next = (*state).clone();
-            // The names the design must not use again travel with the state (#4957, #4302).
-            next.reserved_body_names.clone_from(&reserved);
-            next.frame_bodies = Arc::downgrade(&self.frame_bodies);
-            for b in &mut next.bodies {
-                b.made = crate::lineage::Made::Before;
-            }
-            let mut warning = None;
-            let mut import_report = None;
-            let mut repair = None;
-            // Face references by name: move each face point onto its named face (on the body the
-            // feature names, when it names one and the face is there).
-            let renamed;
-            let mut frame_error: Option<String> = None;
-            let f = match with_named_face_points(doc, &state, f) {
-                Ok(Some((g, notes))) => {
-                    if !notes.is_empty() {
-                        warning = Some(notes.join("; "));
-                    }
-                    renamed = g;
-                    &renamed
-                }
-                Ok(None) => f,
-                Err(e) => {
-                    frame_error = Some(e.in_feature(&f.name).to_string());
-                    f
-                }
-            };
-            // A parameter with an error fails the features using it, with that error.
-            let bad_param = param_names(f).into_iter().find_map(|n| self.param_errors.get(&n).map(|e| format!("parameter `{n}`: {e}")));
-            let r = match frame_error.or(bad_param) {
-                Some(e) => Err(kernel::KernelError::Failed(e)),
-                None => kernel::guard(&f.name, || {
-                    let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
-                    let (r, deferred) =
-                        kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
-                    r.map_err(|e| match e {
-                        // A panic the kernel caught stays one.
-                        crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
-                        e => kernel::KernelError::Failed(e.in_feature(&f.name).to_string()),
-                    })?;
-                    // The checks the feature's steps left to its end: the bodies it keeps.
-                    if deferred { check_kept(&state, &next) } else { Ok(()) }
-                }),
-            };
-            if r.is_ok() {
-                // Profiles picked by curves that no longer bound a profile exactly were found
-                // by their best match: say which.
-                let thin = matches!(&f.kind, FeatureKind::Extrude { thin: Some(_), .. });
-                for (sketch, sel) in f.kind.profile_sels() {
-                    if let (false, Some(ss)) = (thin, state.sketch(sketch)) {
-                        for note in crate::profile_fallback_notes(ss, sel) {
-                            append_warning(&mut warning, note);
-                        }
-                    }
-                }
-                track_altered_sheets(&state, &mut next, f, &mut warning);
-                note_join_apart(&state, &next, f, &mut warning);
-            }
-            let ms = t0.elapsed().as_secs_f64() * 1000.0;
-            let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
-            let error = match r {
-                Ok(()) => {
-                    // Copies are named after their sources through the instance transforms.
-                    let mats = match &f.kind {
-                        FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern).unwrap_or_default(),
-                        FeatureKind::Mirror { plane, .. } => {
-                            doc.resolve_plane_in(&vals, plane, 0, Some(&state)).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
-                        }
-                        _ => Vec::new(),
-                    };
-                    // Copies made through a pattern or mirror among the sources come after (#395).
-                    let mats = match &f.kind {
-                        FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } if bodies.is_empty() => {
-                            copy_instances(doc, &vals, &state, features, &mats).unwrap_or(mats)
-                        }
-                        _ => mats,
-                    };
-                    // A revolve axis origin that follows parameters names its faces from its values.
-                    let named = naming_feature(&vals, f);
-                    next.stamp(doc, &state, &named, key, mats);
-                    // Evaluated again only for what came before it (a mirror moved by a drag).
-                    if let Some(old) = self.results.get(i).filter(|old| old.id == f.id) {
-                        let made = old.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| (b.name.as_str(), b));
-                        let made: std::collections::HashMap<&str, &ModelBody> = made.collect();
-                        for b in next.bodies.iter_mut().filter(|b| b.feature == f.id) {
-                            if let Some(old) = made.get(b.name.as_str()) {
-                                b.keep_meshes_of(old);
-                            }
-                        }
-                    }
-                    for b in &mut next.bodies {
-                        if !b.transferred {
-                            b.component = match doc.body_components.get(&b.name) {
-                                Some(c) => *c,
-                                None => feature_component.get(&b.feature).copied().unwrap_or(0),
-                            };
-                        }
-                    }
-                    state = Arc::new(next);
-                    // A window opening the design can show what is built so far.
-                    watched.offer(i + 1, doc, &state);
-                    None
-                }
-                Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
-            };
-            // A panic is no result to reuse: the kernel was replaced after it.
-            if !self.no_cache && !watched.cancelled() && !internal {
-                let e = CachedEval {
-                    error: error.clone(),
-                    warning: warning.clone(),
-                    import_report: import_report.clone(),
-                    repair: repair.clone(),
-                    ms,
-                    bytes: state.added_bytes(&before),
-                    state: state.clone(),
-                };
-                if let Some(k) = &self.kept.0 {
-                    k.put(key, &e);
-                }
-                if let Ok(mut m) = self.cache.lock() {
-                    m.put(key, e);
-                }
-            }
-            reuse &= error.is_none();
-            if reusing
-                && error.is_none()
-                && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
-            {
-                moved.retain(|(id, _)| *id != f.id);
-                moved.push((f.id, bodies));
-                reuse = true;
-            }
-            out.push(FeatureResult {
-                id: f.id,
-                name: f.name.clone(),
-                error,
-                internal,
-                warning,
-                import_report,
-                repair,
-                ms,
-                skipped: false,
-                stale: false,
-                fingerprint: fp,
-                unkept: false,
-                state: state.clone(),
-            });
+            break;
         }
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
