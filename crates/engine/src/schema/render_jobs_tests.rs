@@ -47,6 +47,7 @@ fn schemas_and_the_key_check_agree() {
     }
     assert_keys(input_schema_for::<RegradeParams>(), &["job", "presentation"]);
     assert_keys(input_schema_for::<ExportParams>(), &["format", "job", "overwrite", "path"]);
+    assert_eq!(input_schema_for::<super::ExportFormat>().as_value()["enum"], json!(["png", "exr", "denoise_mask"]));
 }
 
 /// #12836: `JobPhase` names every phase the render crate has, as it spells them. The match has
@@ -103,6 +104,7 @@ fn strict_keeps_todays_errors() {
         ("render.export", json!({"path": "shot.png", "format": null})),
         ("render.export", json!({"path": "shot.png", "overwrite": "yes"})),
         ("render.export", json!({"path": "shot.txt"})),
+        ("render.export", json!({"path": "mask.exr", "format": "denoise_mask"})),
         ("render.export", json!({"path": "shot.png", "job": foreign_job()})),
     ]);
 }
@@ -168,6 +170,7 @@ fn the_checks_take_what_the_schemas_allow() {
         ("render.export", json!({"path": "shot.png"}), true),
         ("render.export", json!({"path": "shot.txt"}), true),
         ("render.export", json!({"path": "shot.exr", "format": "exr", "overwrite": true, "job": null}), true),
+        ("render.export", json!({"path": "mask.png", "format": "denoise_mask", "job": job}), true),
         ("render.export", json!({"path": 5}), false),
         ("render.export", json!({"path": "shot.png", "format": "PNG"}), false),
         ("render.export", json!({"path": "shot.png", "format": null}), false),
@@ -215,7 +218,7 @@ fn render_job_commands_reply_with_their_schemas() {
     assert_eq!(
         exported,
         json!({"job": job, "path": path, "bytes": written, "format": "png", "encoding": "srgb", "alpha": "straight",
-            "frame": state["frame"], "linear_master": null, "presentation": null})
+            "frame": state["frame"], "linear_master": null, "presentation": null, "denoise_mask": null})
     );
     assert_eq!(reply(&mut s, "render.result.pin", json!({"job": null}), &pinned), json!({"frame": null}));
 
@@ -230,8 +233,8 @@ fn render_job_commands_reply_with_their_schemas() {
 }
 
 /// #12836: Regrade Linear Master replies as its output schema says, and so does Export Render
-/// Image for the linear master (EXR) and for the regraded image, whose replies describe the
-/// master and the presentation.
+/// Image for the linear master (EXR), the regraded colour PNG and the retained guide masks.
+/// Every export preserves the parent colour frame, master, presentation and mask metadata.
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 #[test]
 fn regrade_and_export_of_a_linear_master_reply_with_their_schemas() {
@@ -239,7 +242,8 @@ fn regrade_and_export_of_a_linear_master_reply_with_their_schemas() {
     s.execute(
         "render.settings.set",
         &json!({"name": "Master", "set": {"width": 8, "height": 8, "job": {"method": "cpu_raytrace",
-            "options": {"progressive": {"samples_per_pixel": 1, "seed": 7}, "lights": [], "output": {"linear_exr": true}}}}}),
+            "options": {"progressive": {"samples_per_pixel": 1, "seed": 7}, "lights": [], "denoise_diagnostics": true,
+                "output": {"linear_exr": true}}}}}),
     )
     .unwrap_or_else(|e| panic!("{e}"));
     s.set_render_job_host(Some(CpuHost::for_platform().unwrap_or_else(|e| panic!("{e}")))).unwrap_or_else(|e| panic!("{e}"));
@@ -257,10 +261,30 @@ fn regrade_and_export_of_a_linear_master_reply_with_their_schemas() {
     let regraded: JobId = serde_json::from_value(regraded["job"].clone()).unwrap_or_else(|e| panic!("{e}"));
     wait(&s, regraded);
     let exported = output_schema_for::<ImageExported>();
-    for (job, format) in [(master, "exr"), (regraded, "png")] {
-        let path = std::env::temp_dir().join(format!("solidcraft-render-jobs-schema-{}-{}.{format}", std::process::id(), job.serial));
+    for (job, format, extension) in
+        [(master, "exr", "exr"), (regraded, "png", "png"), (master, "denoise_mask", "png"), (regraded, "denoise_mask", "png")]
+    {
+        let frame = s.render_jobs.frame(job).unwrap_or_else(|e| panic!("{e}"));
+        let mask_info = json!(frame.denoise_mask_info().unwrap_or_else(|| panic!("missing retained guide mask")));
+        let expected = match format {
+            "exr" => frame.linear_exr().unwrap_or_else(|| panic!("missing retained linear master")),
+            "denoise_mask" => frame.denoise_mask_png().unwrap_or_else(|| panic!("missing retained guide mask")),
+            _ => frame.png(),
+        };
+        let path = std::env::temp_dir().join(format!("solidcraft-render-jobs-schema-{}-{}-{format}.{extension}", std::process::id(), job.serial));
         let r = reply(&mut s, "render.export", json!({"job": job, "path": path, "format": format, "overwrite": true}), &exported);
+        assert_eq!(std::fs::read(&path).unwrap_or_else(|e| panic!("{e}")), expected);
         let _ = std::fs::remove_file(&path);
+        assert_eq!(r["format"], format);
+        assert_eq!(r["frame"], json!(frame.info));
+        assert_eq!(r["denoise_mask"], mask_info);
+        let (encoding, alpha) = match format {
+            "exr" => ("scene_linear_srgb_d65", "coverage_premultiplied"),
+            "denoise_mask" => ("categorical_srgb", "opaque"),
+            _ => ("srgb", "straight"),
+        };
+        assert_eq!(r["encoding"], encoding);
+        assert_eq!(r["alpha"], alpha);
         assert!(r["linear_master"].is_object(), "{r}");
         if job == regraded {
             assert!(r["presentation"].is_object(), "{r}");

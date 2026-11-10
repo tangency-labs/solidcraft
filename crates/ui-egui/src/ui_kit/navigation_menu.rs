@@ -1,7 +1,7 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
-use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons;
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 

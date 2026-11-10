@@ -14,7 +14,7 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
 use crate::prefs::{OrbitAround, pivot_under};
@@ -446,7 +446,7 @@ pub(crate) struct KeyHold {
 
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
-    (app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_LAYOUT)
+    (app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_LAYOUT)
         || egui::Popup::is_any_open(ctx)
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
@@ -719,7 +719,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
         && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
         && !view_keys_blocked(app, ui.ctx(), Some(resp.id))
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !crate::dim_view::editing();
     if primary_pressed {
         app.viewport.zoom_shortcut_drag = inside && zoom_held;
@@ -1614,7 +1614,7 @@ mod tests {
     fn touchpad_free_orbit_setting_reaches_the_shared_command() {
         use super::*;
         for caps in [NavCaps::MODEL, NavCaps::RENDER, NavCaps { orbit: false, pick: false }] {
-            for up in [solidcraft_engine::render::UpAxis::Y, solidcraft_engine::render::UpAxis::Z] {
+            for up in [solidcraft_viewport::UpAxis::Y, solidcraft_viewport::UpAxis::Z] {
                 for free in [false, true] {
                     let ctx = egui::Context::default();
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
@@ -1649,7 +1649,7 @@ mod tests {
     #[test]
     fn touchpad_free_orbit_keeps_the_rigid_pivot_in_both_projections() {
         use super::*;
-        for up in [solidcraft_engine::render::UpAxis::Y, solidcraft_engine::render::UpAxis::Z] {
+        for up in [solidcraft_viewport::UpAxis::Y, solidcraft_viewport::UpAxis::Z] {
             for fov in [0.0, 0.6] {
                 for around in [OrbitAround::Origin, OrbitAround::Cursor] {
                     let ctx = egui::Context::default();
@@ -1713,7 +1713,7 @@ mod tests {
     #[test]
     fn every_standard_direction_preserves_its_nearby_quarter_orientation() {
         use super::*;
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
                 for direction in snap_directions() {
@@ -1742,7 +1742,7 @@ mod tests {
     #[test]
     fn free_orbit_shift_snaps_direction_and_quarter_turn_roll() {
         use super::*;
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
@@ -1772,7 +1772,7 @@ mod tests {
     #[test]
     fn free_orbit_shift_keeps_the_pivot_and_resumes_the_unsnapped_drag() {
         use super::*;
-        use solidcraft_engine::render::UpAxis;
+        use solidcraft_viewport::UpAxis;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
@@ -1854,7 +1854,7 @@ mod tests {
     #[test]
     fn free_orbit_upright_turns_about_the_vertical_axis_past_the_pole() {
         use super::*;
-        for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             let mut h = crate::scenario::Harness::new();
             h.app.preferences.free_orbit = true;
             h.app.preferences.free_orbit_upright = true;
@@ -1896,14 +1896,14 @@ mod tests {
     #[test]
     fn solidworks_mouse_orbit_passes_the_pole_and_shift_snaps() {
         use serde_json::json;
-        for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
             for button in ["middle", "right"] {
                 let mut h = crate::scenario::Harness::new();
                 h.app.home.open = false;
                 h.app.preferences.nav = "solidworks".into();
                 h.app.preferences.free_orbit = true;
                 h.app.ui.up_axis = up;
-                h.app.cam = solidcraft_engine::render::Camera { yaw: 0.0, pitch: 1.4, up, ..Default::default() };
+                h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, up, ..Default::default() };
                 let before = h.app.cam;
                 h.call("ui.drag", json!({"x0":800,"y0":400,"x1":800,"y1":480,"button":button,"steps":40}));
                 assert!((h.app.cam.back().dot(before.back()) - 0.64_f64.cos()).abs() < 1e-6, "{up:?} {button}: {:?}", h.app.cam);
@@ -2696,7 +2696,7 @@ mod tests {
             let mut app = crate::SolveApp::new(session, crate::Services::default());
             if app.session.active_sketch.is_some() {
                 // Square to the sketch, as a sketch opens.
-                app.cam = solidcraft_engine::render::Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() };
+                app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Default::default() };
             }
             let before = app.cam;
             app.viewport.bridge_motion = Some(orbit);
@@ -2826,7 +2826,7 @@ mod tests {
     #[test]
     fn the_3d_mouse_turns_a_sketch_only_after_the_view_is_tilted() {
         use crate::space_mouse::{DeviceMotion, Motion};
-        use solidcraft_engine::render::Camera;
+        use solidcraft_viewport::Camera;
         let mut s = solidcraft_engine::Session::default();
         s.execute("sketch.create", &serde_json::json!({"plane": "XY"})).unwrap();
         let mut app = crate::SolveApp::new(s, crate::Services::default());
@@ -2863,7 +2863,7 @@ mod tests {
     #[test]
     fn the_3d_mouse_turns_a_square_on_sketch_when_the_preference_allows_it() {
         use crate::space_mouse::{BridgeMotion, DeviceMotion, Motion};
-        use solidcraft_engine::render::Camera;
+        use solidcraft_viewport::Camera;
         let mut s = solidcraft_engine::Session::default();
         s.execute("sketch.create", &serde_json::json!({"plane": "XY"})).unwrap();
         let mut app = crate::SolveApp::new(s, crate::Services::default());
@@ -2953,8 +2953,8 @@ mod view_key_tests {
         let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
             assert!(ui.memory(|memory| memory.focused().is_none()));
             assert!(!egui::Popup::is_any_open(ui.ctx()));
-            app.prefs_window.open = true;
-            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            app.prefs_window.shell.open = true;
+            app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
             let log = app.session.log.len();
             assert!(!super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
@@ -2962,11 +2962,11 @@ mod view_key_tests {
             assert_eq!(app.session.log.len(), log);
             assert!(app.viewport.key_hold.is_none());
 
-            app.prefs_window.section = crate::prefs::PAGE_GENERAL;
+            app.prefs_window.shell.section = crate::prefs::PAGE_GENERAL;
             assert!(super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
             assert!(app.viewport.key_hold.is_some(), "General retains unfocused arrow camera preview");
             app.now += super::TAP_SECONDS + 1.0;
-            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            app.prefs_window.shell.section = crate::prefs::PAGE_LAYOUT;
             let before = app.cam;
             assert!(ui.input(|input| input.key_down(egui::Key::ArrowLeft)));
             super::step_key_hold(&mut app, ui.ctx());
@@ -3066,7 +3066,7 @@ mod view_key_tests {
     /// do; the keys are ordinary shortcuts, so one can be moved to another command and back.
     #[test]
     fn ctrl_digits_turn_to_the_standard_views_and_can_be_rebound() {
-        use solidcraft_engine::render::StandardView;
+        use solidcraft_viewport::StandardView;
         let mut h = Harness::new();
         h.app.preferences.look_at_anim = false;
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();

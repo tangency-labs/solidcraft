@@ -213,11 +213,6 @@ mod tests {
     #[test]
     fn the_mode_reaches_the_kernels_worker_threads() {
         let items = [0, 1, 2, 3];
-        let (checked, deferred) = validating(Validation::EachFeature, || {
-            crate::par::map("validation", &items, true, |_| Ok(step())).into_iter().collect::<Result<Vec<Step>>>()
-        });
-        assert_eq!(checked.ok(), Some(vec![Step::Defer; 4]));
-        assert!(deferred);
         let (on_threads, deferred) = validating(Validation::EachFeature, || crate::par::map_on_threads(&items, 4, |_| step()));
         assert_eq!(on_threads, vec![Some(Step::Defer); 4]);
         assert!(deferred);

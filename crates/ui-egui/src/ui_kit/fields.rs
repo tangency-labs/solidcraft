@@ -111,18 +111,30 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let t = Tokens::get();
     let reserve = (t.control_height * 0.75).round();
     let (enter, _, response) = editor_reserving(ui, value, "", true, reserve);
-    let rect = response.rect;
-    let column = egui::Rect::from_min_max(egui::pos2((rect.right() - reserve).max(rect.left()), rect.top()), rect.max);
+    let row = label(ui).to_owned();
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_count(value, delta, limits)) {
+        *value = next;
+    }
+    enter
+}
+
+/// The up and down step arrows at the right edge of a field (`rect`), in a column `width` wide:
+/// `next(1)` and `next(-1)` say what each arrow steps to, None disabling it. Returns what the
+/// clicked arrow stepped to. Tokens: `control_border`, `control_radius`, `selected_bg`,
+/// `form_ink`, `form_dim`.
+fn step_arrows<V>(ui: &mut Ui, rect: egui::Rect, width: f32, row: &str, next: impl Fn(i64) -> Option<V>) -> Option<V> {
+    let t = Tokens::get();
+    let column = egui::Rect::from_min_max(egui::pos2((rect.right() - width).max(rect.left()), rect.top()), rect.max);
     let painter = ui.painter_at(rect);
     painter.vline(column.left(), column.y_range().shrink(t.space_4), egui::Stroke::new(1.0, t.control_border));
-    let row = label(ui).to_owned();
+    let mut stepped = None;
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
-        let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let next = next(delta);
+        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", row, name)), egui::Sense::click());
         let enabled = ui.is_enabled() && next.is_some();
-        // The arrows stand inside the editor, which claims the text cursor across its whole
-        // rect: they are not text, so each one takes the ordinary cursor back after it. The
-        // pointer is read from the rect rather than from the hover the editor competes for.
+        // The arrows stand inside the field, which claims the pointer across its whole rect:
+        // they are not text, so each one takes the ordinary cursor back after it. The pointer
+        // is read from the rect rather than from the hover the field competes for.
         let over = ui.rect_contains_pointer(half);
         if over {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
@@ -131,7 +143,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
         }
         let ink = if enabled { t.form_ink } else { t.form_dim };
-        let (c, w, h) = (half.center(), (reserve * 0.18).max(2.0), (half.height() * 0.2).max(2.0));
+        let (c, w, h) = (half.center(), (width * 0.18).max(2.0), (half.height() * 0.2).max(2.0));
         let tip = if delta > 0 { -h } else { h };
         painter.add(egui::Shape::convex_polygon(
             vec![egui::pos2(c.x, c.y + tip * 0.5), egui::pos2(c.x + w, c.y - tip * 0.5), egui::pos2(c.x - w, c.y - tip * 0.5)],
@@ -139,13 +151,13 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
             egui::Stroke::NONE,
         ));
         let sign = if delta > 0 { "+1" } else { "−1" };
-        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", solidcraft_ui_text::tr_label(&row))));
+        arrow.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{} {sign}", solidcraft_ui_text::tr_label(row))));
         solidcraft_ui_registry::publish_handle(&format!("dialog:{row} {name}"), half.center());
-        if let (true, true, Some(next)) = (enabled, arrow.clicked(), next) {
-            *value = next;
+        if enabled && arrow.clicked() {
+            stepped = next;
         }
     }
-    enter
+    stepped
 }
 
 /// `text` stepped by `delta` whole numbers within `limits`, or None when it does not evaluate
@@ -398,7 +410,9 @@ fn searchable_dropdown_with(
         .selected_text(if icon.is_some() { "" } else { current })
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let combo = if let Some(icon) = icon {
-        combo.icon(move |ui, rect, _, _| crate::icons::paint_ink(ui.painter(), rect.shrink(Tokens::get().space_2), icon, Tokens::get().form_dim))
+        combo.icon(move |ui, rect, _, _| {
+            crate::ui_kit::icons::paint_ink(ui.painter(), rect.shrink(Tokens::get().space_2), icon, Tokens::get().form_dim)
+        })
     } else {
         combo.icon(dropdown_arrow)
     };
@@ -945,7 +959,7 @@ fn paint_dropdown_icon(ui: &Ui, rect: egui::Rect, icon: &str) {
         egui::pos2(rect.left() + ui.spacing().button_padding.x + t.space_8, rect.center().y),
         vec2(t.space_16, t.space_16),
     );
-    crate::icons::paint_ink(ui.painter(), rect, icon, t.form_ink);
+    crate::ui_kit::icons::paint_ink(ui.painter(), rect, icon, t.form_ink);
     solidcraft_ui_registry::publish_rect(&format!("dialog:dropdown_icon:{icon}"), rect);
 }
 
@@ -1187,8 +1201,9 @@ pub(crate) fn value_pair(ui: &mut Ui, label: &str, values: [&mut String; 2], axe
     })
 }
 
-/// Paired bounded numeric fields in the shared value-pair row geometry.
-pub(crate) fn number_pair<T: egui::emath::Numeric>(
+/// Paired fields that retain authored out-of-range values until an explicit edit.
+/// Uses the same row geometry; typing and dragging still respect the current bounds.
+pub(crate) fn number_pair_preserving<T: egui::emath::Numeric>(
     ui: &mut Ui,
     label: &str,
     values: [&mut T; 2],
@@ -1203,7 +1218,7 @@ pub(crate) fn number_pair<T: egui::emath::Numeric>(
         values.map(|value| {
             ui.allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
-                number_field(ui, value, range.clone(), speed, suffix)
+                number_field_preserving(ui, value, range.clone(), speed, suffix)
             })
             .inner
         })
@@ -1379,7 +1394,7 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), height), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     let icon = egui::Rect::from_center_size(egui::pos2(response.rect.left() + t.space_12, response.rect.center().y), vec2(t.space_12, t.space_12));
-    crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
+    crate::ui_kit::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint);
@@ -1412,7 +1427,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     let glyph = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_8 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
-    crate::icons::paint_ink(ui.painter(), glyph, "zoom", t.form_dim);
+    crate::ui_kit::icons::paint_ink(ui.painter(), glyph, "zoom", t.form_dim);
     let field = egui::Rect::from_min_max(egui::pos2((glyph.right() + t.space_8).min(rect.right()), rect.top()), rect.max);
     let hint_text = solidcraft_ui_text::tr_label(hint);
     let response = ui
@@ -1796,6 +1811,34 @@ fn bounded_number_field<T: egui::emath::Numeric>(
     response
 }
 
+/// [`number_field`] for a whole number, with the step arrows a count field has at its right edge
+/// (#11829): an arrow steps the value by one within `range`, as Up and Down do. The field grows
+/// by the arrows' column, so its text keeps its room. Tokens: `control_height`, number_field and
+/// step arrow tokens.
+pub(crate) fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, suffix: &str) -> Response {
+    let reserve = (Tokens::get().control_height * 0.75).round();
+    let mut response = ui
+        .scope(|ui| {
+            ui.spacing_mut().interact_size.x += reserve;
+            number_field(ui, value, range.clone(), 1.0, suffix)
+        })
+        .inner;
+    let row = label(ui).to_owned();
+    let (now, lo, hi) = (value.to_f64(), range.start().to_f64(), range.end().to_f64());
+    if let Some(next) = step_arrows(ui, response.rect, reserve, &row, |delta| step_whole(now, lo, hi, delta)) {
+        *value = T::from_f64(next);
+        response.mark_changed();
+    }
+    response
+}
+
+/// `now` stepped by `delta` whole numbers within `lo..=hi`, or None when that does not move it the
+/// arrow's way: at a limit, or past one (a saved value the arrow must not pull the other way).
+fn step_whole(now: f64, lo: f64, hi: f64, delta: i64) -> Option<f64> {
+    let next = (now.round() + delta as f64).clamp(lo, hi);
+    if delta > 0 { next > now } else { next < now }.then_some(next)
+}
+
 /// Three bounded numeric components sharing the available control-column width.
 /// Each field retains the standard parser, bevel and focus behaviour. Tokens:
 /// number_field typography/chrome and the enclosing row's spacing.
@@ -2015,4 +2058,27 @@ pub(crate) fn placement_field_content_size(ui: &Ui, value: &str) -> egui::Vec2 {
     // Retain the native hit target: a taller editor would intercept nearby sketch picks.
     let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + ui.spacing().extra_text_line_spacing + t.space_4;
     vec2(grown_width(ui, value, &font, t.control_height * 3.0 - t.space_6), height)
+}
+
+#[cfg(test)]
+mod step_whole_tests {
+    use super::step_whole;
+
+    #[test]
+    fn a_step_moves_one_whole_number_within_the_limits() {
+        assert_eq!(step_whole(2.0, 0.0, 6.0, 1), Some(3.0));
+        assert_eq!(step_whole(2.0, 0.0, 6.0, -1), Some(1.0));
+        assert_eq!(step_whole(6.0, 0.0, 6.0, 1), None);
+        assert_eq!(step_whole(0.0, 0.0, 6.0, -1), None);
+    }
+
+    /// A value past a limit (#11829) only steps back into range: Up never lowers it, Down never
+    /// raises it.
+    #[test]
+    fn a_value_past_a_limit_is_not_pulled_the_other_way() {
+        assert_eq!(step_whole(300.0, 1.0, 200.0, 1), None);
+        assert_eq!(step_whole(300.0, 1.0, 200.0, -1), Some(200.0));
+        assert_eq!(step_whole(-3.0, 0.0, 6.0, -1), None);
+        assert_eq!(step_whole(-3.0, 0.0, 6.0, 1), Some(0.0));
+    }
 }

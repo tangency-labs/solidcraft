@@ -745,3 +745,21 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
     assert_eq!(tube(&whole), (-1.0, 3.0));
     assert!(form::surface_on_own_arcs(&Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }, label, tol).is_none());
 }
+
+/// A whole turn whose seam lies a rounding short of a quarter line (as a file's seam on its
+/// frame's x axis measures, 2π − 2e-12 or −2e-12) has its form from that quarter line: four
+/// quarters that end where the seam's second use lies (#12760; from the quarter before, the
+/// form ended a quarter short of it and the face's last quarter was off its form).
+#[test]
+fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
+    let cylinder = Surface::Cylinder { frame: a_frame(), radius: 21.2 };
+    let u_knots = |s: &Surface| match s {
+        Surface::RationalSpline { u_knots, .. } => (u_knots.first().copied().unwrap(), u_knots.last().copied().unwrap()),
+        _ => panic!("not a NURBS: {s:?}"),
+    };
+    for (start, q) in [(TAU - 2e-12, 4.0), (-2.2e-12, 0.0), (TAU + 2e-12, 4.0)] {
+        let (form, domain) = form::surface_within(&cylinder, [[start, start + TAU], [0., 10.]], 2e-5).unwrap();
+        assert_eq!(u_knots(&form), (q, q + 4.0), "seam at {start}");
+        assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
+    }
+}

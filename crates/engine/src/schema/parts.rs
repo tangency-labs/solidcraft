@@ -27,7 +27,7 @@ pub struct PartsLibraryParams {
 #[schemars(deny_unknown_fields)]
 pub struct PartsInsertParams {
     /// The family, as `parts.library` lists it: socket_head_cap_screw, button_head_cap_screw,
-    /// hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_cap_screw_inch,
+    /// countersunk_socket_screw, hex_bolt, hex_nut, washer, set_screw, dowel_pin, bearing, hex_cap_screw_inch,
     /// hex_nut_inch, washer_sae or washer_uss.
     #[serde(deserialize_with = "family")]
     pub family: String,

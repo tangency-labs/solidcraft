@@ -179,7 +179,7 @@ fn a_pick_in_the_viewport_leaves_the_browser_alone_while_its_rows_start_closed()
     // The call's frames took the hover from the pointer, which is elsewhere.
     h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
     let lit = super::Lit::of(&mut h.app);
-    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body; the picked face marks its feature");
+    assert_eq!(lit.paths, [vec![copy]], "the placement above the hovered body, which also holds the picked face, once");
 }
 
 /// #8768: while the Browser's rows start closed, a new design's Bodies and Sketches folders list
@@ -670,4 +670,34 @@ fn find_in_browser_opens_placements_that_start_closed() {
         h.app.tree.content.owner(crate::semantic_content::ContentOwner::BROWSER).unwrap().order.contains(&format!("b:{body}")),
         "the body's row is drawn"
     );
+}
+
+/// #11547: a selected face lit its body's row only while the pointer was over the model. With the
+/// pointer off the model, the body's row keeps the faint bar of a row that holds something lit,
+/// without the selection colour: the body itself is not selected.
+#[test]
+fn a_body_keeps_a_faint_bar_while_one_of_its_faces_is_selected() {
+    let (mut h, component, occurrence) = fixture();
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    let point = solidcore_record::Vec3::new(0.0, 5.0, 5.0);
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let face = solidcraft_engine::doc::appearance::face_index_at(state.body(&body).unwrap(), point).unwrap();
+    let row = |app: &mut crate::SolveApp| {
+        let lit = super::Lit::of(app);
+        lit.row(app, &super::entries(app, component, "bodies")[0])
+    };
+    // The row of the placement the body is in.
+    let placement = |app: &mut crate::SolveApp| {
+        let lit = super::Lit::of(app);
+        lit.placement(&app.session.doc, &[occurrence], component)
+    };
+    h.app.run("select.set", json!({"items":[Sel::Face{body:body.clone(),index:face,point}]})).unwrap();
+    h.app.viewport.hover = None;
+    assert_eq!(row(&mut h.app), (false, super::Mark::Branch), "a face of the body selected, the pointer off the model");
+    assert_eq!(placement(&mut h.app), super::Mark::Branch, "the placement holding the body keeps its faint bar too");
+    h.app.run("select.set", json!({"items":[Sel::Body{name:body}]})).unwrap();
+    assert_eq!(row(&mut h.app), (true, super::Mark::Here), "the body itself selected");
+    h.app.run("select.clear", json!({})).unwrap();
+    assert_eq!(row(&mut h.app), (false, super::Mark::None), "nothing selected");
+    assert_eq!(placement(&mut h.app), super::Mark::None, "and its placement is clear");
 }

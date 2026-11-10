@@ -18,6 +18,7 @@
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::Unsound`]             | `SM_ERR` (solidcore-native)               |
 //!
 //! Deviations: not upstream. Entity ids are those of the operation's input B-rep.
@@ -143,6 +144,15 @@ pub enum OffsetFailure {
         /// The face, of the operation's input.
         face: FaceId,
     },
+    /// An offset face has a gap in its loops, and the straight segment that would bridge
+    /// it could not be established within tolerance (the fork's
+    /// `SmOffsetExecutive::CloseLoopGap`). Refused where the bridge construction is
+    /// uncertified, before the result's soundness is judged.
+    LoopGapUncertified {
+        /// The face, of the operation's input, whose offset left the gap, where it comes
+        /// from one.
+        face: Option<FaceId>,
+    },
     /// A local operation built a body that fails what its input did not
     /// ([`crate::topology::brep::validation::soundness`] of both): refused, the input B-rep
     /// left as it came in.
@@ -172,8 +182,11 @@ pub enum Unsoundness {
     GeometryUnchecked,
     /// The input was a manifold solid and the body is not.
     NotManifoldSolid,
-    /// The body is a manifold solid whose volume is not positive.
+    /// The body is a manifold solid whose volume's enclosure lies below 0.
     VolumeNotPositive,
+    /// The body is a manifold solid whose volume's enclosure still holds 0 after its
+    /// budget: its sign is not proved.
+    VolumeUndecided,
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -231,6 +244,7 @@ impl OffsetFailure {
             Self::EdgeVanishes { edge, face } => edge
                 .map(EntityRef::Edge)
                 .or_else(|| face.map(EntityRef::Face)),
+            Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
             Self::ExactCurveUncut
             | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
@@ -248,6 +262,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => SM_ERR,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
@@ -271,6 +286,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
                 ErrorKind::InvalidInput
@@ -449,7 +465,17 @@ impl core::fmt::Display for OffsetFailure {
                     "the local operation's body is a manifold solid whose volume is not \
                      positive: refused, the input unchanged",
                 ),
+                Unsoundness::VolumeUndecided => f.write_str(
+                    "the local operation's body is a manifold solid whose volume's sign \
+                     could not be proved: refused, the input unchanged",
+                ),
             },
+            Self::LoopGapUncertified { face } => write!(
+                f,
+                "{} leaves a gap in its loops, and the straight segment that would bridge \
+                 it could not be established within tolerance: the gap stays open",
+                offset_of(face)
+            ),
             Self::ExactCurveUncut => f.write_str(
                 "the extended faces beside an edge meet on an exact curve that could not be \
                  cut into its pieces with their UV curves, so the edge's offsets cannot be \

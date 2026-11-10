@@ -360,12 +360,14 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
     // Check every mesh now, so the command fails rather than the timeline.
     let mut meshes = Vec::with_capacity(objects.len());
     for o in &objects {
-        solidcraft_kernel::mesh_body(&o.positions, &o.triangles).map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
+        solidcraft_kernel::mesh_body_with_normals(&o.positions, &o.triangles, &o.corner_normals)
+            .map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
         meshes.push(solidcraft_doc::MeshData {
             name: o.name.clone(),
             positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: o.triangles.iter().flatten().copied().collect(),
             color: o.color,
+            corner_normals: o.corner_normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         });
     }
     let name = match objects.as_slice() {
@@ -875,7 +877,18 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
         (Vec::new(), 0)
     };
     let transparency = 1.0 - paint.map(|p| p.opacity).unwrap_or(1.0);
-    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color(), transparency, looks, tri_looks, tri_faces, faces })
+    Ok(MeshObject {
+        name: b.name.clone(),
+        positions,
+        triangles,
+        color: b.body.color(),
+        transparency,
+        looks,
+        tri_looks,
+        tri_faces,
+        faces,
+        corner_normals: Vec::new(),
+    })
 }
 
 /// STEP assembly of a design with components: a product per component holding its bodies in

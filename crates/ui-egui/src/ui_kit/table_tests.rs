@@ -1,12 +1,12 @@
 use super::*;
-use crate::scenario;
 use crate::ui_kit::{self, test_support as harness};
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_scales() {
     for ppp in [1.0, 1.25, 2.0] {
         for width in [260.0, 319.0, 320.0, 499.0, 500.3, 748.0, 749.0, 762.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             ctx.set_pixels_per_point(ppp);
             for _ in 0..3 {
                 harness::frame(&ctx, vec![], |ui| {
@@ -36,20 +36,20 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
                     );
                 });
             }
-            let viewport = scenario::rect_of("dialog:table:fit:viewport").unwrap();
-            let content = scenario::count_of("dialog:table:fit:content_width").unwrap() as f32;
+            let viewport = registry::rect_of("dialog:table:fit:viewport").unwrap();
+            let content = registry::count_of("dialog:table:fit:content_width").unwrap() as f32;
             assert!(content <= viewport.width().ceil(), "{width} at {ppp}: content {content}, viewport {viewport:?}");
-            let row = scenario::rect_of("dialog:table:fit:row").unwrap();
-            let first = scenario::rect_of("dialog:table:fit:row:cell:Name").unwrap();
-            let last = scenario::rect_of("dialog:table:fit:row:cell:Value").unwrap();
+            let row = registry::rect_of("dialog:table:fit:row").unwrap();
+            let first = registry::rect_of("dialog:table:fit:row:cell:Name").unwrap();
+            let last = registry::rect_of("dialog:table:fit:row:cell:Value").unwrap();
             assert_eq!(first.left() - row.left(), Tokens::get().space_8);
             assert!(
                 (row.right() - last.right() - Tokens::get().space_8).abs() <= egui::emath::GUI_ROUNDING,
                 "width {width} at {ppp}: row {row:?} last {last:?}"
             );
             for label in ["Name", "Expression", "Value"] {
-                let header = scenario::rect_of(&format!("dialog:column:fit:{label}")).unwrap();
-                let cell = scenario::rect_of(&format!("dialog:table:fit:row:cell:{label}")).unwrap();
+                let header = registry::rect_of(&format!("dialog:column:fit:{label}")).unwrap();
+                let cell = registry::rect_of(&format!("dialog:table:fit:row:cell:{label}")).unwrap();
                 assert_eq!(header.x_range(), cell.x_range());
             }
         }
@@ -58,7 +58,7 @@ fn fitting_flex_tables_have_no_horizontal_scrollbar_at_card_widths_and_pixel_sca
 
 #[test]
 fn genuinely_wide_tables_keep_horizontal_scrolling() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     harness::frame(&ctx, vec![], |ui| {
         table_custom(ui, "overflow", &[Column::new("Name", 1.0).flex().min_content_width(400.0)], "Empty", |ui, table| {
             table.headers(ui, |_, _| false);
@@ -68,14 +68,14 @@ fn genuinely_wide_tables_keep_horizontal_scrolling() {
         });
     });
     assert!(
-        scenario::count_of("dialog:table:overflow:content_width").unwrap()
-            > f64::from(scenario::rect_of("dialog:table:overflow:viewport").unwrap().width().ceil())
+        registry::count_of("dialog:table:overflow:content_width").unwrap()
+            > f64::from(registry::rect_of("dialog:table:overflow:viewport").unwrap().width().ceil())
     );
 }
 
 #[test]
 fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut value = "10 mm".to_owned();
     let mut selected = 0;
     let mut draw = |ui: &mut Ui| {
@@ -114,10 +114,10 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
             ui_kit::scope(ui, &mut draw)
         });
     output.textures_delta.clear();
-    let row = scenario::rect_of("dialog:table:hover:row").unwrap();
+    let row = registry::rect_of("dialog:table:hover:row").unwrap();
     let mut targets = vec![row.left_center() + vec2(1.0, 0.0)];
     for handle in ["dialog:cell:Width", "dialog:Field", "dialog:Choice", "dialog:button:Action:Delete"] {
-        targets.push(scenario::handle_at(handle).unwrap());
+        targets.push(registry::handle_at(handle).unwrap());
     }
     for (enabled, clipped) in [(true, false), (false, false), (true, true)] {
         for at in &targets {
@@ -141,7 +141,7 @@ fn row_hover_paints_under_every_interactive_child_and_respects_clip_and_enabled(
 
 #[test]
 fn add_prompt_is_short_rounded_and_uses_a_hand_cursor() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut draw = |ui: &mut Ui| {
         table_custom(ui, "prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
             table.headers(ui, |_, _| false);
@@ -149,7 +149,7 @@ fn add_prompt_is_short_rounded_and_uses_a_hand_cursor() {
         });
     };
     harness::frame(&ctx, vec![], &mut draw);
-    let rect = scenario::rect_of("dialog:table:prompt:add").unwrap();
+    let rect = registry::rect_of("dialog:table:prompt:add").unwrap();
     assert_eq!(rect.height(), row_height() - Tokens::get().space_4);
     assert_eq!(harness::frame_cursor(&ctx, rect.center(), &mut draw), egui::CursorIcon::PointingHand);
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -177,7 +177,7 @@ fn add_prompt_is_short_rounded_and_uses_a_hand_cursor() {
 #[test]
 fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
     for dark in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut pending = false;
         let mut removed = false;
@@ -220,26 +220,26 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
         for _ in 0..3 {
             harness::frame(&ctx, vec![], &mut draw);
         }
-        assert!(scenario::handle_at("dialog:button:Name:×").is_none());
-        let header = scenario::rect_of("dialog:column:shared:Name").unwrap();
+        assert!(registry::handle_at("dialog:button:Name:×").is_none());
+        let header = registry::rect_of("dialog:column:shared:Name").unwrap();
         harness::frame(&ctx, vec![egui::Event::PointerMoved(header.center())], &mut draw);
-        let remove = scenario::handle_at("dialog:button:Name:×").unwrap();
+        let remove = registry::handle_at("dialog:button:Name:×").unwrap();
         assert!(header.contains(remove));
         harness::frame(&ctx, harness::pointer(remove, true), &mut draw);
         harness::frame(&ctx, harness::pointer(remove, false), &mut draw);
-        let add = scenario::handle_at("dialog:table:shared:add").unwrap();
+        let add = registry::handle_at("dialog:table:shared:add").unwrap();
         harness::frame(&ctx, harness::pointer(add, true), &mut draw);
         harness::frame(&ctx, harness::pointer(add, false), &mut draw);
         harness::frame(&ctx, vec![], &mut draw);
-        let row = scenario::rect_of("dialog:table:shared:draft").unwrap();
+        let row = registry::rect_of("dialog:table:shared:draft").unwrap();
         assert_eq!(row.height(), crate::ui_kit::table_row_height());
-        assert!(scenario::rect_of("dialog:column:shared:Name").unwrap().bottom() <= row.top());
-        assert!(row.bottom() <= scenario::rect_of("dialog:table:shared:add").unwrap().top());
-        let bin = scenario::handle_at("dialog:button:Actions:Delete").unwrap();
+        assert!(registry::rect_of("dialog:column:shared:Name").unwrap().bottom() <= row.top());
+        assert!(row.bottom() <= registry::rect_of("dialog:table:shared:add").unwrap().top());
+        let bin = registry::handle_at("dialog:button:Actions:Delete").unwrap();
         assert!(row.contains(bin));
         harness::frame(&ctx, harness::pointer(bin, true), &mut draw);
         harness::frame(&ctx, harness::pointer(bin, false), &mut draw);
-        let plus = scenario::handle_at("dialog:menu:Add Column").unwrap();
+        let plus = registry::handle_at("dialog:menu:Add Column").unwrap();
         harness::frame(&ctx, harness::pointer(plus, true), &mut draw);
         harness::frame(&ctx, harness::pointer(plus, false), &mut draw);
         harness::frame(&ctx, vec![], &mut draw);
@@ -249,7 +249,7 @@ fn hover_remove_bin_prompt_and_plus_menu_share_one_grid() {
 
 #[test]
 fn add_column_is_small_and_unfilled_until_hovered() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let draw = |ui: &mut Ui| {
         ui.allocate_ui(egui::vec2(40.0, 36.0), |ui| {
             ui.set_min_size(egui::vec2(40.0, 36.0));
@@ -264,7 +264,7 @@ fn add_column_is_small_and_unfilled_until_hovered() {
         output
     };
     let out = render(vec![]);
-    let rect = scenario::rect_of("dialog:menu:Add Column").unwrap();
+    let rect = registry::rect_of("dialog:menu:Add Column").unwrap();
     assert!((20.0..=22.0).contains(&rect.width()));
     assert_eq!(rect.width(), rect.height());
     let fills =
@@ -279,7 +279,7 @@ fn add_column_is_small_and_unfilled_until_hovered() {
 #[test]
 fn horizontal_bar_is_painted_only_for_actual_table_overflow() {
     for overflow in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         ctx.global_style_mut(|style| style.spacing.scroll = egui::style::ScrollStyle::solid());
         for frame in 0..4 {
             let mut output = ctx.run_ui(
@@ -298,7 +298,7 @@ fn horizontal_bar_is_painted_only_for_actual_table_overflow() {
                 },
             );
             output.textures_delta.clear();
-            let bottom = scenario::rect_of("dialog:table:bar:row").unwrap().bottom();
+            let bottom = registry::rect_of("dialog:table:bar:row").unwrap().bottom();
             let bar = output.shapes.iter().any(|shape| {
                 matches!(&shape.shape,
                 egui::Shape::Rect(r) if r.fill.a() > 0 && r.rect.width() > 100.0 && r.rect.height() <= 10.0
@@ -317,7 +317,7 @@ fn horizontal_bar_is_painted_only_for_actual_table_overflow() {
 fn name_list_gives_the_name_the_width_the_other_cells_leave() {
     let long = "a-rather-long-stored-design-name-for-the-bracket-v12.solidcraft";
     for (width, cut) in [(900.0, false), (420.0, true)] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         for _ in 0..4 {
             harness::frame(&ctx, vec![], |ui| {
                 ui.set_width(width);
@@ -337,10 +337,10 @@ fn name_list_gives_the_name_the_width_the_other_cells_leave() {
             });
         }
         let t = Tokens::get();
-        let row = scenario::rect_of(&format!("dialog:table:files:{long}")).unwrap();
-        let name = scenario::rect_of(&format!("dialog:table:files:{long}:cell:Name")).unwrap();
-        let size = scenario::rect_of(&format!("dialog:table:files:{long}:cell:Size")).unwrap();
-        let actions = scenario::rect_of(&format!("dialog:table:files:{long}:cell:Actions")).unwrap();
+        let row = registry::rect_of(&format!("dialog:table:files:{long}")).unwrap();
+        let name = registry::rect_of(&format!("dialog:table:files:{long}:cell:Name")).unwrap();
+        let size = registry::rect_of(&format!("dialog:table:files:{long}:cell:Size")).unwrap();
+        let actions = registry::rect_of(&format!("dialog:table:files:{long}:cell:Actions")).unwrap();
         // The actions end at the row's inset: nothing is left over on the right.
         assert!((row.right() - actions.right() - t.space_8).abs() <= 1.0, "{width}: row {row:?} actions {actions:?}");
         // The size and actions are as wide as their content, not wider; the name has the rest.
@@ -350,8 +350,8 @@ fn name_list_gives_the_name_the_width_the_other_cells_leave() {
         assert!(size.width() >= ctx_label("12.3 KB") * 0.8, "{width}: size {size:?}");
         assert!(actions.width() >= ctx_label("OpenSave to computer…Delete"), "{width}: actions {actions:?}");
         assert!((size.left() - name.right() - t.space_8).abs() <= 1.0);
-        assert_eq!(scenario::count_of(&format!("dialog:name:{long}:cut")), Some(f64::from(u8::from(cut))), "{width}: name {name:?}");
-        assert_eq!(scenario::count_of("dialog:name:b.step:cut"), Some(0.0));
+        assert_eq!(registry::count_of(&format!("dialog:name:{long}:cut")), Some(f64::from(u8::from(cut))), "{width}: name {name:?}");
+        assert_eq!(registry::count_of("dialog:name:b.step:cut"), Some(0.0));
     }
 }
 

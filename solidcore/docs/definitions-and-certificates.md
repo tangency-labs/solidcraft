@@ -126,6 +126,17 @@ give the same class, and the net lies on that class's surface derived from the s
 parametrisation's: the net reversed, swapped, split or trimmed is still on S, so those edits
 carry it.
 
+A round of the `Circle` class is certified on its own torus. The class is read within the body's
+tolerance, so supports only that close to it (a plane 1e-13 off square to a cylinder's axis, as a
+record can carry them) have no torus that touches both exactly, and the round the solver builds,
+tangent to the supports as they are, lies on a torus of its own. Its definition is that torus: the
+torus of the net's own form (`own_torus`: a revolution's axis and generating arc, or a torus's
+label), which the form is proved to lie on (`lies_on`), at bound 0; and the distance from it to the
+class's torus derived from the supports, stated (`ExactRound::supports_distance`: the axes' angle
+times the reach, the centres' distance and the radii's differences) and refused past the tolerance
+the class was read within. Supports exactly of the class give a distance at rounding. The supports
+are never moved to fit.
+
 ### 3.4 The blend definition
 
 `ProceduralBlend` holds the net (`net`, a `BSplineSurface`) and the definition
@@ -266,6 +277,7 @@ written as the operations it counts:
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
 | `surface::implicit::lies_on` | γ_K, K = 4d(p + 1)(q + 1) + 16 | an implicit equation's Bernstein coefficient |
+| `sweep::stations` (`rail_crossing`) | γ_5 S_i, S_i = Σ_j (\|x_ij\| + \|p_j\| w_i) \|t_j\| | a rail's Bernstein distance coefficient from a station's plane; within it, taken as 0 |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
 η = `STATION_STEP` (1 + max |knot|), L the support's derivative bounds), M the net's size about the
@@ -457,6 +469,9 @@ A reviewer checks each of these on a change that touches a definition, a net or 
    proof: an identity for ε = 0, an enclosure otherwise. No net is stored with an estimated bound.
 2. **S answers final questions.** Intersection points, projections, the model check and continuity
    grading read S, or B only inside a `NetScope` that asks for at least ε.
+   Until the volume enclosure widens a certified face by its ε, the sign of a body's volume (the
+   solid test and the local operation's gate) reads such a face on its net B, so it decides on the
+   body as stored.
 3. **A refusal names the size that fits.** A construction that cannot be certified returns a typed
    error with the cause and, where one exists, the largest size that builds (`FitSize`,
    `ExtendRefusal`'s distance), computed from the cause's geometry, never by building again.

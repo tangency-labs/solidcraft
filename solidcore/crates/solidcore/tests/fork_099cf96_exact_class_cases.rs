@@ -665,7 +665,7 @@ fn the_pipes_join_only_with_wr77() {
     let case = cases().into_iter().find(|c| c.name == PIPES).unwrap();
     let got = grade(&case, &mut Kernel::default());
     assert!(
-        matches!(&got, Graded::Body(e) if e.contains("code: 1001")),
+        matches!(&got, Graded::Body(e) if e.contains("status: 1001")),
         "{got:?}"
     );
 }

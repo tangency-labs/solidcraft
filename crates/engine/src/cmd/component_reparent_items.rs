@@ -13,7 +13,7 @@ use super::move_features::move_features;
 use super::reparent::{follow_visibility, reparent};
 use super::transfer;
 use super::*;
-use crate::params::{name_or_id_list, string_list};
+use crate::params::{name_or_id_values, string_list};
 
 /// Most items of each kind in one move.
 const MAX_ITEMS: usize = 1000;
@@ -50,7 +50,8 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
     let dest = if p.get("component").is_some() { component(s, p, "component", cmd)? } else { s.active_component };
     let dest_path = p.get("component_path").cloned();
     let occurrences = placements(s, p, cmd)?;
-    let features = name_or_id_list(cmd, p, "features")?;
+    // Named or numbered: an exact name wins over an id it looks like, as in the timeline (#9748).
+    let features = name_or_id_values(cmd, p, "features")?;
     let bodies = string_list(cmd, p, "bodies")?;
     if features.len() > MAX_ITEMS || bodies.len() > MAX_ITEMS {
         return Err(bad(cmd, format!("`features` and `bodies` must list at most {MAX_ITEMS} items each")));
@@ -62,8 +63,8 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "finish timeline rollback before moving"));
     }
     let mut feature_ids = BTreeSet::new();
-    for k in &features {
-        feature_ids.insert(s.doc.find_feature(k).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?);
+    for k in features {
+        feature_ids.insert(crate::cmd::edit::feature_id(s, Some(k), cmd)?);
     }
     {
         let state = s.model.state();

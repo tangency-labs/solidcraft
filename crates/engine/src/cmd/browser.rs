@@ -156,7 +156,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FOLD_CONTRACT)
         .output(output_schema_for::<BrowserFoldResult>)
         .params(
-        "path?: [occurrence ids]; component?: id; omit both for the whole tree. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
+        "path?: [occurrence ids] (that placement's branch); component?: id; omit both for the whole tree: every placement, folder and group at every level. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
     ),
 ];
@@ -933,22 +933,36 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
     }
 }
 
+/// Every placement row from `start` down, at every level, as the browser lists them: a
+/// component's placements under each placement of it, an id already on the path left out. The
+/// walk reads the design's placements only, so one placement whose transform or component is
+/// broken neither stops the fold nor costs a world placement per row (#11866).
 fn walk_fold(s: &Session, start: &[u64], root_extras: bool, keys: &mut FoldKeys, cmd: &str) -> Result<()> {
-    let mut stack = vec![start.to_vec()];
+    let start_component = if start.is_empty() { 0 } else { s.occurrence_placement(start)?.component };
+    let mut children: BTreeMap<u64, Vec<(u64, u64)>> = BTreeMap::new();
+    for o in &s.doc.occurrences {
+        children.entry(o.parent).or_default().push((o.id, o.component));
+    }
+    let mut stack = vec![(start.to_vec(), start_component)];
     let mut count = 0usize;
-    while let Some(path) = stack.pop() {
+    while let Some((path, component)) = stack.pop() {
         count += 1;
         if count > MAX_FOLD_PLACEMENTS {
             return Err(bad(cmd, "expand/collapse exceeds 100000 placements"));
         }
-        let component = if path.is_empty() { 0 } else { s.occurrence_placement(&path)?.component };
         let prefix = if path.is_empty() { "c0".to_string() } else { occurrence_fold_key(&path) };
         collect_component_keys(s, &prefix, component, root_extras && path.is_empty(), keys);
-        for child in s.occurrence_children(&path)? {
-            if child.path.len() > 64 {
+        if path.len() >= 64 {
+            continue;
+        }
+        for (id, child_component) in children.get(&component).into_iter().flatten() {
+            if path.contains(id) {
                 continue;
             }
-            stack.push(child.path);
+            let mut child = Vec::with_capacity(path.len() + 1);
+            child.extend_from_slice(&path);
+            child.push(*id);
+            stack.push((child, *child_component));
         }
     }
     Ok(())
@@ -1090,7 +1104,7 @@ pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::
 
 /// The camera `view.apply` turns to for a `camera` it is given, as the handler reads it (and
 /// `ApplyCamera`, its contract type), or the message the handler refuses it with.
-pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::render::Camera, String> {
+pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<solidcraft_viewport::Camera, String> {
     if c.get("up").is_some() {
         return Err("camera `up` is not supported: the up axis comes from the design settings".into());
     }
@@ -1103,7 +1117,7 @@ pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::rende
     if !(v.pitch.abs() <= std::f64::consts::FRAC_PI_2 + 1e-9) {
         return Err("camera `pitch` must be within ±π/2 radians (±90°)".into());
     }
-    let cam = crate::render::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) };
+    let cam = solidcraft_viewport::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) };
     if !usable_camera(&cam) {
         return Err("the camera must be finite with a positive distance".into());
     }
@@ -1112,7 +1126,7 @@ pub(crate) fn applied_camera_form(c: &Value) -> std::result::Result<crate::rende
 
 /// A camera the viewport can be put at: finite, with a positive distance and a field of view of
 /// at least 0.
-fn usable_camera(cam: &crate::render::Camera) -> bool {
+fn usable_camera(cam: &solidcraft_viewport::Camera) -> bool {
     cam.is_valid() && cam.fov.is_finite() && cam.fov >= 0.0
 }
 
@@ -1143,11 +1157,11 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None) => return Err(bad(cmd, "`view` (a name) or `camera` is required")),
         (None, Some(c)) => applied_camera_form(c).map_err(|e| bad(cmd, e))?,
         // Standard view names come first, as in the browser's Named Views folder.
-        (Some(name), None) => match crate::render::StandardView::parse(name) {
+        (Some(name), None) => match solidcraft_viewport::StandardView::parse(name) {
             Some(sv) => {
                 let mut c = crate::view::home_camera(s)?;
                 c.set_view(sv);
-                c.fit(&crate::view::bounds(s)?);
+                c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
                 c
             }
             None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
@@ -1161,8 +1175,8 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The orbit camera of a named view (Z up, no roll).
-fn camera_of(v: &solidcraft_doc::NamedView) -> crate::render::Camera {
-    crate::render::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
+fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
+    solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
 }
 
 fn view_index(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
@@ -2452,7 +2466,7 @@ mod tests {
     /// camera past a pole or a NaN behind.
     #[test]
     fn applying_a_camera_by_view_angles_reads_back_and_refuses_hostile_pitch() {
-        use crate::render::ViewAngles;
+        use solidcraft_viewport::ViewAngles;
         let mut s = Session::default();
         for (view, (yaw, pitch)) in
             [("front", (0.0, 0.0)), ("left", (90.0, 0.0)), ("right", (-90.0, 0.0)), ("back", (180.0, 0.0)), ("top", (0.0, 90.0))]
@@ -2462,7 +2476,7 @@ mod tests {
             assert!((a.yaw - yaw).abs() < 1e-3 && (a.pitch - pitch).abs() < 1e-3 && a.roll == 0.0, "{view}: {a:?}");
         }
         let typed = ViewAngles { yaw: -30.0, pitch: 15.0, roll: 5.0 };
-        let cam = crate::render::Camera::default().with_view_angles(typed).expect("finite angles");
+        let cam = solidcraft_viewport::Camera::default().with_view_angles(typed).expect("finite angles");
         let p = json!({"camera": {"target": [0, 0, 0], "yaw": cam.yaw, "pitch": cam.pitch, "roll": cam.roll, "distance": 80}});
         run(&mut s, "view.apply", p);
         let a = s.camera.expect("the typed camera").view_angles();
@@ -2655,7 +2669,7 @@ mod tests {
         run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
         let body = s.model.state().bodies[0].name.clone();
         let drain_name = s.doc.feature(drain).unwrap().name.clone();
-        let cam = solidcraft_render::Camera::default();
+        let cam = solidcraft_viewport::Camera::default();
         let lines = |s: &Session| crate::view::scene(s, &cam).unwrap().lines.len();
         let shown = |s: &mut Session| {
             let d = run(s, "document.inspect", json!({}));
@@ -2750,7 +2764,7 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
         s.mark_saved();
-        let cam = solidcraft_render::Camera::default();
+        let cam = solidcraft_viewport::Camera::default();
         let drawn = |s: &Session| crate::view::scene(s, &cam).unwrap().meshes.len();
         assert!(drawn(&s) > 0, "the box is drawn");
         assert!(!s.is_dirty());
@@ -3032,6 +3046,46 @@ mod tests {
         let open = strs(&only, "open_by_default");
         assert!(open.iter().any(|k| k.starts_with('c') && k != "c0" && !k.starts_with("c0/")), "{open:?}");
         assert!(!open.contains(&format!("o:{occ}")), "{open:?}");
+    }
+
+    /// #11866: Collapse All on the whole tree rolls up every nested level, placements inside
+    /// placements and their folders included, and one placement that cannot be placed doesn't
+    /// stop it.
+    #[test]
+    fn collapse_all_folds_every_nested_placement_and_survives_a_broken_one() {
+        let mut s = Session::default();
+        let a = run(&mut s, "component.create", json!({"name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let b = run(&mut s, "component.create", json!({"name": "B"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let c = run(&mut s, "component.create", json!({"name": "C"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let [a, b, c] = [&a, &b, &c].map(|r| r["occurrence"].as_u64().unwrap());
+        let nested = [
+            format!("o:{a}"),
+            format!("o:{a}/bodies"),
+            format!("o:{a}/{b}"),
+            format!("o:{a}/{b}/bodies"),
+            format!("o:{a}/{b}/sketches"),
+            format!("o:{a}/{b}/{c}"),
+        ];
+
+        let open = strs(&run(&mut s, "browser.collapse_all", json!({})), "open_by_default");
+        for key in &nested {
+            assert!(open.contains(key), "{key} folds: {open:?}");
+        }
+
+        // A placement whose transform went bad still has a row, and so do the ones under it.
+        if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == b) {
+            o.transform[0][0] = f64::NAN;
+        }
+        assert!(s.occurrence_placement(&[a, b]).is_err());
+        let open = strs(&run(&mut s, "browser.collapse_all", json!({})), "open_by_default");
+        for key in &nested {
+            assert!(open.contains(key), "{key} folds with a broken placement: {open:?}");
+        }
     }
 
     #[test]
