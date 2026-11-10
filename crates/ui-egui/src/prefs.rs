@@ -1128,6 +1128,11 @@ preference_settings! {
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
+    /// Dragging a part a ball joint holds to a part fixed in place turns it like a trackball: by
+    /// the smallest turn about the joint, on a sphere at least the part's size (`joint_drag`,
+    /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
+    /// before.
+    joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.

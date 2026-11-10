@@ -1,0 +1,42 @@
+{
+  "en": {
+    "prefs.assemblies": "Assemblies",
+    "prefs.joint_drag_trackball": "Turn parts on a ball joint like a trackball when dragged",
+    "prefs.joint_drag_trackball_help": "Dragging a part that a ball joint holds turns it by the smallest turn about the joint, as if rolling a ball the size of the part. Off: the point you grabbed follows the pointer exactly, and the part may also spin about it."
+  },
+  "ar": {
+    "prefs.assemblies": "التجميعات",
+    "prefs.joint_drag_trackball": "تدوير الأجزاء على مفصل كروي مثل كرة التتبع عند سحبها",
+    "prefs.joint_drag_trackball_help": "سحب جزء يثبّته مفصل كروي يدوّره بأصغر دوران حول المفصل، كأنك تدحرج كرة بحجم الجزء. عند الإيقاف: تتبع النقطة التي أمسكتها المؤشر تمامًا، وقد يدور الجزء أيضًا حولها."
+  },
+  "de": {
+    "prefs.assemblies": "Baugruppen",
+    "prefs.joint_drag_trackball": "Teile an einem Kugelgelenk beim Ziehen wie einen Trackball drehen",
+    "prefs.joint_drag_trackball_help": "Wenn Sie ein Teil ziehen, das ein Kugelgelenk hält, dreht es sich um die kleinste Drehung um das Gelenk, als rollten Sie eine Kugel von der Größe des Teils. Aus: Der gegriffene Punkt folgt genau dem Zeiger, und das Teil kann sich zusätzlich um ihn drehen."
+  },
+  "he": {
+    "prefs.assemblies": "מכלולים",
+    "prefs.joint_drag_trackball": "סיבוב חלקים על מפרק כדורי כמו כדור עקיבה בעת גרירה",
+    "prefs.joint_drag_trackball_help": "גרירת חלק שמפרק כדורי מחזיק מסובבת אותו בסיבוב הקטן ביותר סביב המפרק, כאילו מגלגלים כדור בגודל החלק. כבוי: הנקודה שתפסת עוקבת אחרי המצביע במדויק, והחלק עלול גם להסתובב סביבה."
+  },
+  "ja": {
+    "prefs.assemblies": "アセンブリ",
+    "prefs.joint_drag_trackball": "ボールジョイントの部品をドラッグするとトラックボールのように回転",
+    "prefs.joint_drag_trackball_help": "ボールジョイントで保持された部品をドラッグすると、部品の大きさのボールを転がすように、ジョイントを中心に最小の回転で回ります。オフ：つかんだ点がポインターに正確に追従し、部品がその点を軸にさらに回転することがあります。"
+  },
+  "ko": {
+    "prefs.assemblies": "어셈블리",
+    "prefs.joint_drag_trackball": "볼 조인트의 부품을 끌 때 트랙볼처럼 회전",
+    "prefs.joint_drag_trackball_help": "볼 조인트가 잡고 있는 부품을 끌면 부품 크기의 공을 굴리듯 조인트를 중심으로 가장 작은 회전만큼 돌아갑니다. 끄면: 잡은 점이 포인터를 정확히 따라가고, 부품이 그 점을 축으로 더 돌 수도 있습니다."
+  },
+  "vi": {
+    "prefs.assemblies": "Cụm lắp ráp",
+    "prefs.joint_drag_trackball": "Xoay chi tiết trên khớp cầu như trackball khi kéo",
+    "prefs.joint_drag_trackball_help": "Kéo một chi tiết do khớp cầu giữ sẽ xoay nó theo góc xoay nhỏ nhất quanh khớp, như lăn một quả bóng có kích thước bằng chi tiết. Tắt: điểm bạn nắm theo đúng con trỏ, và chi tiết có thể tự xoay quanh điểm đó."
+  },
+  "zh": {
+    "prefs.assemblies": "装配",
+    "prefs.joint_drag_trackball": "拖动球关节上的零件时像轨迹球一样旋转",
+    "prefs.joint_drag_trackball_help": "拖动由球关节固定的零件时，它绕关节以最小的转动旋转，就像滚动一个与零件同样大小的球。关闭：抓取的点精确跟随指针，零件还可能绕该点自旋。"
+  }
+}
