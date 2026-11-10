@@ -406,3 +406,26 @@ fn a_body_the_view_leaves_out_is_skipped_as_not_drawn() {
     let why = reply["skipped"].as_array().unwrap().iter().find(|k| k["reason"] == "not_drawn").unwrap()["why"].as_str().unwrap().to_string();
     assert!(why.contains("doesn't draw that part: its source draws only the occurrences it chose"), "{why}");
 }
+
+/// A view that draws an exploded view takes no model dimensions, as `drawing.dimension.add` takes none
+/// there: one rule where both place a dimension. They would measure its parts where the design places
+/// them. The refusal leaves the drawing and the undo steps as they were.
+#[test]
+fn an_exploded_view_takes_no_model_dimensions() {
+    let (mut s, _) = plate();
+    run(&mut s, "component.create", json!({"name": "Bolt"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 40, "corner": [0, 0, 20], "body_name": "Shank"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    // An exploded view pulls components apart, so the design needs two.
+    run(&mut s, "component.create", json!({"name": "Nut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 20], "body_name": "Nut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let bolt = s.doc.occurrences.first().unwrap().id;
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    let top = view(&mut s, json!("top"), [150.0, 150.0]);
+    run(&mut s, "drawing.view.edit", json!({"view": top, "set": {"exploded": "Apart"}}));
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let e = refused(&mut s, json!({"view": top}));
+    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+}

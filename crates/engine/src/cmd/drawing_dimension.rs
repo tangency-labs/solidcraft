@@ -122,7 +122,6 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let mut record = Drawing::clone(s.drawing(ADD)?);
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
-    crate::drawing_view::refuse_on_exploded(&record, view, "dimensions", ADD)?;
     let (doc, model) = (&s.doc, &s.model);
     let edge = |e: &EdgeParam| doc.edge_reference(model, &e.pick, &e.path).map_err(|why| bad(ADD, why.to_string()));
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
@@ -208,8 +207,9 @@ impl Refused {
     }
 }
 
-/// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added:
-/// refused when its view doesn't draw what it measures or can't measure it; a new id; a radial one
+/// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added: an
+/// error when its view draws an exploded view ([`crate::drawing_view::refuse_on_exploded`]); refused
+/// when its view doesn't draw what it measures or can't measure it; a new id; a radial one
 /// a diameter when it is a whole circle, if left to the default; a linear, length or chain one,
 /// with no offset given, on the side away from what it measures. It is read on `record` itself,
 /// which is left as it was. One rule for every command that adds a dimension.
@@ -219,6 +219,7 @@ pub(crate) fn placed(
     cmd: &str,
     new: NewDimension,
 ) -> Result<std::result::Result<(Dimension, Option<Resolved>), Refused>> {
+    crate::drawing_view::refuse_on_exploded(record, new.view, "dimensions", cmd)?;
     if let Err(e) = check_drawn(record, new.view, new.kind.paths(), cmd) {
         return Ok(Err(Refused::NotDrawn(e)));
     }
