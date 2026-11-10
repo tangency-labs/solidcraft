@@ -446,7 +446,9 @@ mod tests {
         ];
         let error = extend_path_curves(&paths, true, false, 0.15824074046667785).unwrap_err();
         assert!(
-            error.to_string().contains("create_extended_curve_by_distance"),
+            error
+                .to_string()
+                .contains("create_extended_curve_by_distance"),
             "{error}"
         );
     }

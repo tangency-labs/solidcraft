@@ -995,7 +995,7 @@ mod tests {
     }
 
     /// WR-10: axis-aligned collinear points are Linear (pinned v1.0.1: Planar), with
-    /// x_axis along the line and a degenerate tight box.
+    /// `x_axis` along the line and a degenerate tight box.
     #[test]
     fn wr10_point_set_collinear_axes() {
         let pts_x = vec![
