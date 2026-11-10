@@ -615,3 +615,19 @@ fn hostile_saved_names_cover_nothing() {
         assert_ne!(coverage_of(&reply, plate)["state"], json!("covered"), "{}", name.len());
     }
 }
+
+/// A note placed off the paper is outside the sheet, as a dimension is: a note is one of the sheet's
+/// objects since notes came to the sheet (#13060). One on the paper isn't listed.
+#[test]
+fn a_note_off_the_paper_is_listed() {
+    let (mut s, _) = plate();
+    let (sheet, _) = drawn(&mut s);
+    let note = |s: &mut Session, at: [f64; 2]| {
+        run(s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": at, "content": "General"}))["note"].clone()
+    };
+    note(&mut s, [20.0, 20.0]);
+    assert!(of_kind(&checked(&mut s, json!({})), "outside_sheet").is_empty());
+    let off = note(&mut s, [1000.0, 20.0]);
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &off)], "{reply}");
+}
