@@ -1066,6 +1066,26 @@ fn align_by_frames_follows_its_target() {
     assert!(r.model.results.iter().any(|x| x.error.as_deref().is_some_and(|e| e.contains("degenerate"))), "the Align reports its frame");
 }
 
+/// A coil keeps the faces its saved references name, now that the kernel's screw sweep builds it
+/// (#11582): a square section's two sides along the axis sweep cylinders, which come in half
+/// turns, and its two radial sides are cut with them, four pieces each over two revolutions, 18
+/// faces with the caps; a round section sweeps no cylinder, so its wall is one face. The volume is
+/// Pappus's, the section's area times the path of its centre.
+#[test]
+fn a_coil_keeps_its_half_turn_faces() {
+    use std::f64::consts::{PI, TAU};
+    for (section, faces, area) in [("square", 18, 16.0), ("circle", 3, PI * 4.0)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.coil", json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section": section, "section_size": 4}));
+        let st = s.model.state();
+        let body = &st.bodies[0].body;
+        assert_eq!(body.record().faces.len(), faces, "{section}");
+        assert!(body.validity().is_empty(), "{section}");
+        drop(st);
+        assert!(rel(volume(&mut s), area * TAU * 20.0 * 2.0) < 1e-3, "{section}: {}", volume(&mut s));
+    }
+}
+
 #[test]
 fn coil_and_loft_to_a_point() {
     use std::f64::consts::{PI, TAU};

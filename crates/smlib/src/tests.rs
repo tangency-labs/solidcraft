@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 66] = [
+const ANSWERING: [&str; 63] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -159,9 +159,6 @@ const ANSWERING: [&str; 66] = [
     "loft",
     "sweep_stations",
     "loft_to_point",
-    "screw_sweep",
-    "screw_sweep_radial",
-    "screw_sweep_with_options",
 ];
 
 /// Every `pub fn` of the files that hold the crate's kernel entry points is accounted for.
@@ -281,19 +278,6 @@ fn every_entry_point_answers() {
     let i3 = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     says("sweep_stations", Brep::sweep_stations(&lines, &[Affine { m: i3, t: [0.0; 3] }, Affine { m: i3, t: [0.0, 0.0, 2.0] }], Ends::Capped));
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
-    says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
-    says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
-    says(
-        "screw_sweep_with_options",
-        Brep::screw_sweep_with_options(
-            &lines,
-            p(30.0, 0.0, 0.0),
-            p(0.0, 0.0, 1.0),
-            12.0,
-            1.0,
-            crate::sweeps::ScrewSweepOptions { law: None, join_spline_walls: true, tolerance: 0.01 },
-        ),
-    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -652,7 +636,7 @@ fn every_call_starts_clean_on_any_kernel() {
 #[test]
 fn status_sites_only_shrink() {
     const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 9), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+        &[("core/blend.rs", 9), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 3), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {
