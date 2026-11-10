@@ -7,13 +7,17 @@ use std::collections::{BTreeMap, HashSet};
 use crate::link::{LinkGeom, LinkKind, LinkSource, sketch_axis_geom};
 use crate::union_find::{find, union};
 
-/// Hard caps that keep hostile input from exhausting memory or time.
-pub const MAX_POINTS: usize = 20_000;
-pub const MAX_CONSTRAINTS: usize = 40_000;
+/// The default caps on what a sketch builds; [`crate::limits`] says the caps in force, which the
+/// app may raise up to the ceilings below.
+pub const MAX_POINTS: usize = crate::limits::DEFAULT_POINTS;
+pub const MAX_CONSTRAINTS: usize = 2 * MAX_POINTS;
 /// Curves need points, so this follows the point cap.
 pub const MAX_CURVES: usize = MAX_POINTS;
-// [`SketchError::TooLarge`]'s message names this number; keep them matched (#10874).
-const _: () = assert!(MAX_POINTS == 20_000);
+/// Hard caps that keep hostile input from exhausting memory or time: the most a sketch read from
+/// a design may hold, whatever limit the app that made it had (#10874).
+pub const CEILING_POINTS: usize = crate::limits::CEILING_POINTS;
+pub const CEILING_CONSTRAINTS: usize = 2 * CEILING_POINTS;
+pub const CEILING_CURVES: usize = CEILING_POINTS;
 
 /// Largest coordinate or dimension value (mm) a sketch accepts.
 pub const MAX_COORD: f64 = 1e9;
@@ -43,11 +47,13 @@ pub enum SketchError {
     Duplicate(String),
     #[error("invalid value: {0}")]
     Invalid(String),
-    /// Cap hit on points, curves or constraints ([`MAX_POINTS`], [`MAX_CURVES`],
-    /// [`MAX_CONSTRAINTS`]). Insert SVG/DXF of a dense drawing (a floorplan) often hits this;
-    /// scale alone does not reduce how many curves the file has (#10874).
+    /// Cap hit on points, curves or constraints ([`crate::limits::max_points`] and the others).
+    /// Insert SVG/DXF of a dense drawing (a floorplan) often hits this; scale alone does not
+    /// reduce how many curves the file has, and the limit can be raised (#10874).
     #[error(
-        "sketch is too large (at most 20000 points or curves); simplify the drawing or split it across sketches — changing scale does not reduce how many curves it has"
+        "sketch is too large (at most {} points or curves); simplify the drawing, split it across sketches or raise Preferences > Sketch > Largest sketch (up to {}) — changing scale does not reduce how many curves it has",
+        crate::limits::max_points(),
+        crate::limits::CEILING_POINTS
     )]
     TooLarge,
 }
@@ -972,7 +978,7 @@ impl Sketch {
     /// [`Sketch::add_point`], with the ids a [`SketchBatch`] keeps when given.
     fn add_point_with(&mut self, p: Vec2, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
         let p = Self::check_pos(p)?;
-        if self.points.len() >= MAX_POINTS {
+        if self.points.len() >= crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
@@ -1101,7 +1107,7 @@ impl Sketch {
         if let Some(same) = self.same_constraint(&kind) {
             return Ok(same.to_string());
         }
-        if self.constraints.len() >= MAX_CONSTRAINTS {
+        if self.constraints.len() >= crate::limits::max_constraints() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;
@@ -1622,7 +1628,7 @@ impl Sketch {
     /// drawing.
     pub fn virtual_corners(&self) -> Vec<(usize, Vec<(Vec2, Vec2)>)> {
         const MAX_POINT_REFERENCES: usize = 1_000_000;
-        if self.points.len() > MAX_POINTS || self.constraints.len() > MAX_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
+        if self.points.len() > CEILING_POINTS || self.constraints.len() > CEILING_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
             return Vec::new();
         }
         let mut remaining = MAX_POINT_REFERENCES;

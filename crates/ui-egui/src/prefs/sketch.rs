@@ -241,6 +241,29 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
         }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        sketch_size(app, ui, t.space_24 * 8.0 + t.space_8);
+    });
+}
+
+/// The most points or curves one sketch holds (#10874): a dense SVG or DXF drawing needs more
+/// than the default.
+fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+    let label = app.tr("prefs.sketch.max_points").to_string();
+    let unit = app.tr("prefs.sketch.max_points_unit").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.max_points_note"), label_width, |ui| {
+        ui.horizontal(|ui| {
+            let t = Tokens::get();
+            ui.spacing_mut().item_spacing.x = t.space_4;
+            let field = ui
+                .scope(|ui| {
+                    ui.spacing_mut().interact_size.x = t.space_24 * 3.0;
+                    ui_kit::number_field(ui, &mut app.preferences.max_sketch_points, DEFAULT_POINTS..=CEILING_POINTS, 100.0, "")
+                })
+                .inner;
+            crate::scenario::publish_rect("prefs:max_sketch_points", field.rect);
+            ui_kit::settings_inline_note(ui, &unit);
+        });
     });
 }
 
