@@ -3207,6 +3207,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`symmetric` offsets both sides, so `side` has no side left to pick: drop one of them"));
     }
     let instances = offset_instances(s, p, cmd)?;
+    for key in ["param", "param2"] {
+        if p.get(key).is_some_and(|value| !value.is_null() && !value.is_string()) {
+            return Err(bad(cmd, format!("`{key}` must be a parameter name (a string)")));
+        }
+    }
+    let name = str_(p, "param");
+    let name2 = str_(p, "param2");
+    if name2.is_some() && expression2.is_none() {
+        return Err(bad(cmd, "`param2` names the dimension of the second side: give `distance2` too"));
+    }
+    if name.is_some() && name == name2 {
+        return Err(bad(cmd, "`param` and `param2` must be different names"));
+    }
     let ((sides, param, param2), info) = edit(s, p, cmd, true, |sk, doc| {
         sk.refresh_offsets()?;
         let rep = solve_current(sk, doc)?;
@@ -3215,8 +3228,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sk.refresh_offsets()?;
         let eligible = sk.curves.iter().map(|c| c.id.clone()).collect::<std::collections::HashSet<_>>();
-        let param = doc.new_model_param(&expression, "mm");
-        let param2 = expression2.as_ref().map(|e| doc.new_model_param(e, "mm"));
+        let mut make = |name: Option<&str>, e: &str| match name {
+            Some(name) => doc.new_named_model_param(name, e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
+            None => Ok(doc.new_model_param(e, "mm")),
+        };
+        // A chosen name is made before a generated one, so `param2: "d1"` is not taken by the
+        // `d1` generated for an unnamed first side.
+        let (param, param2) = if name.is_none() && name2.is_some() {
+            let param2 = expression2.as_ref().map(|e| make(name2, e)).transpose()?;
+            (make(name, &expression)?, param2)
+        } else {
+            let param = make(name, &expression)?;
+            (param, expression2.as_ref().map(|e| make(name2, e)).transpose()?)
+        };
         let made: Vec<String> = std::iter::once(param.clone()).chain(param2.clone()).collect();
         let mut pending = ids.clone();
         let mut sides = Vec::new();
@@ -3491,7 +3515,7 @@ fn copy_through(
     keep: &dyn Fn(Vec2) -> bool,
     scale_r: f64,
 ) -> Result<(Vec<usize>, Vec<(usize, usize)>)> {
-    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::MAX_CURVES {
+    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::limits::max_curves() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
     let pts = involved_points(sk, cs, ps);
@@ -3924,3 +3948,7 @@ mod corner_tests;
 #[cfg(test)]
 #[path = "sketch_trim_path_tests.rs"]
 mod trim_path_tests;
+
+#[cfg(test)]
+#[path = "offset_param_name_tests.rs"]
+mod offset_param_name_tests;

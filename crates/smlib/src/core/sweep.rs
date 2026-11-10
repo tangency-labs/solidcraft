@@ -922,6 +922,9 @@ pub(crate) fn sweep_placed(profile: &[Profile], path: &[Profile], frame: SweepFr
 }
 
 /// `smlib_loft`: a skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` across them.
+/// Two sections of lines whose sides are all flat are built as planar faces instead
+/// ([`planar_loft`]): the skin would make each side a B-spline surface, which nothing downstream
+/// takes for the plane it is (solidcraft#13331).
 pub(crate) fn loft(sections: &[Vec<Profile>], degree: u32, cap: bool) -> Result<Body> {
     if sections.len() < 2 || sections.len() > MAX_CURVES || !(1..=3).contains(&degree) {
         return Err(Error::Argument);
@@ -936,12 +939,95 @@ pub(crate) fn loft(sections: &[Vec<Profile>], degree: u32, cap: bool) -> Result<
             return Ok(Err(Error::Argument));
         }
         let counts: Vec<usize> = sections.iter().map(Vec::len).collect();
+        if let Some(planar) = planar_loft(k, &counts, &curves, cap)? {
+            return Ok(planar);
+        }
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
         match create_skin_primitive(k, &counts, &refs, degree as usize, cap) {
             Ok(r) => finish(r.brep, cap),
             Err(e) => Ok(Err(status(e))),
         }
     })
+}
+
+/// `planar_loft`: a loft of two sections of lines in equal number, each running round one loop,
+/// whose every side (a line of the first section and its partner in the second) is flat: the
+/// sides as planar faces on their 3D lines and, when `cap`, the sections as the caps, stitched
+/// (`CreatePlanarFaceWith3DCurves` and `StitchAndOrient`, as [`loft_to_point`] builds a pyramid).
+/// `None` for any other loft (more sections, a curved piece, a side whose four corners are not
+/// in one plane within 10⁻⁹ of the loft's size, or a side that shrinks to a line): the skin takes
+/// it. A side between parallel lines of different lengths (a tapered duct) is a planar trapezoid,
+/// which the skin would make a bilinear B-spline surface.
+fn planar_loft(k: &mut Kernel, counts: &[usize], curves: &[Curve], cap: bool) -> solidcore::Result<Option<Out<Brep>>> {
+    let &[n0, n1] = counts else { return Ok(None) };
+    if n0 != n1 || n0 < 3 || curves.len() != n0 + n1 || curves.iter().any(|c| !matches!(c.kind(), CurveKind::Line(_))) {
+        return Ok(None);
+    }
+    let (first, second) = curves.split_at(n0);
+    if !one_loop(k, first, 1e-6)? || !one_loop(k, second, 1e-6)? {
+        return Ok(None);
+    }
+    // Each section's corners: its lines' starts, in order.
+    let mut bottom = Vec::with_capacity(n0);
+    for c in first {
+        bottom.push(ends(k, c)?.0);
+    }
+    let mut top = Vec::with_capacity(n0);
+    for c in second {
+        top.push(ends(k, c)?.0);
+    }
+    let Some(&origin) = bottom.first() else { return Ok(None) };
+    let size = bottom.iter().chain(&top).map(|q| (*q - origin).length()).fold(0.0, f64::max);
+    if !(size > 0.0) {
+        return Ok(None);
+    }
+    // Every side flat: its fourth corner in the plane of the other three, and no side degenerate.
+    for i in 0..n0 {
+        let j = (i + 1) % n0;
+        let (Some(&a0), Some(&a1), Some(&b0), Some(&b1)) = (bottom.get(i), bottom.get(j), top.get(i), top.get(j)) else {
+            return Ok(None);
+        };
+        if (a1 - a0).length() <= 1e-9 * size || (b1 - b0).length() <= 1e-9 * size {
+            return Ok(None);
+        }
+        let normal = (a1 - a0).cross(b1 - a0);
+        if normal.length() <= 1e-12 * size * size || (b0 - a0).dot(normal).abs() > 1e-9 * size * normal.length() {
+            return Ok(None);
+        }
+    }
+    let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    let region = b.infinite_region();
+    let tol = 1e-6;
+    let made = build_faces(&mut b, |b, fenv| -> Out<()> {
+        let mut face = |b: &mut Brep, fenv: &mut FaceBuildEnv<'_, '_>, pts: &[Point3]| -> Out<()> {
+            let mut edges = Vec::with_capacity(pts.len());
+            for (i, &p) in pts.iter().enumerate() {
+                let q = pts.get((i + 1) % pts.len()).copied().unwrap_or(p);
+                edges.push(Curve::from(called(Line::create_line_segment(3, p, q, None))?));
+            }
+            called(create_planar_face_with_3d_curves(k, b, region, &edges, tol, fenv)).map(|_| ())
+        };
+        if cap {
+            face(b, fenv, &bottom)?;
+            face(b, fenv, &top)?;
+        }
+        for i in 0..n0 {
+            let j = (i + 1) % n0;
+            let (Some(&a0), Some(&a1), Some(&b0), Some(&b1)) = (bottom.get(i), bottom.get(j), top.get(i), top.get(j)) else {
+                return Err(Error::Argument);
+            };
+            face(b, fenv, &[a0, a1, b1, b0])?;
+        }
+        Ok(())
+    });
+    if let Err(e) = made {
+        return Ok(Some(Err(e)));
+    }
+    if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
+        return Ok(Some(Err(status(e))));
+    }
+    b.refresh_cached_topology();
+    finish(b, cap).map(Some)
 }
 
 /// Each face's identity, for the face builders: their arena identity.

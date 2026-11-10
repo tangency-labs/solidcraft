@@ -153,9 +153,10 @@ fn joined(bodies: &[Body]) -> Result<(Body, part::Part)> {
 }
 
 /// Affine transform by a column-major 4x4 matrix (rotations, translations, reflections,
-/// scalings). A rigid motion moves the record itself, every parameter and index as it was; any
-/// other matrix goes through SMLib's transform. Either way the result's faces and edges are
-/// the body's, in its history.
+/// scalings). A rigid motion moves the record itself, every parameter and index as it was, and
+/// so does a scaling or shear of a body of planes, splines, lines and conics (its planes stay
+/// planes, a circle becomes an ellipse); any other matrix or body goes through SMLib's transform.
+/// Either way the result's faces and edges are the body's, in its history.
 pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "transform_matrix");
     if m.iter().flatten().any(|x| !x.is_finite()) {
@@ -166,9 +167,13 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
         return placed.with_history(history, &[body]);
     }
     let sources = body.transformed_sources(m)?;
-    let (placed, sources, paint) = match Rigid::of_matrix(&m) {
-        Some(motion) => {
-            let moved = Body::from_record(solidcraft_geom::brep::placement::moved(body.record(), &motion))?;
+    let exact = match Rigid::of_matrix(&m) {
+        Some(motion) => Some(solidcraft_geom::brep::placement::moved(body.record(), &motion)),
+        None => solidcraft_geom::brep::placement::mapped(body.record(), &m),
+    };
+    let (placed, sources, paint) = match exact {
+        Some(record) => {
+            let moved = Body::from_record(record)?;
             let history = History::identity(&moved);
             (moved.with_history(history, &[body])?, sources, body.paint().cloned())
         }

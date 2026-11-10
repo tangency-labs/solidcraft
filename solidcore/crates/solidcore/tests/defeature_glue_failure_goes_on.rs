@@ -22,7 +22,8 @@
 )] // test helpers
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
-use solidcore::error::SM_ERR;
+use solidcore::error::defeature::DefeatureFailure;
+use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
@@ -85,17 +86,22 @@ fn defeature_goes_on_past_a_failing_glue() {
     // (ValidatePatch), so the base patch is not built and the hole would stay open: refused,
     // as WR-656 (the executive drops its features, so the patch's faces are not read back)
     let r = ex.do_defeature(&mut k);
-    assert!(
-        matches!(
-            r,
-            Err(SolidError::Upstream {
-                code: SM_ERR,
-                entity: Some(EntityRef::Edge(_)),
-                ..
-            })
-        ),
-        "{r:?}"
-    );
+    // refused at the open loop's edge, naming the limit: the faces along it, extended, do
+    // not enclose it (#3218); the status is still SM_ERR
+    match &r {
+        Err(e @ SolidError::Failed(f)) => {
+            assert!(
+                matches!(
+                    f.reason,
+                    Reason::Defeature(DefeatureFailure::NotEnclosed { .. })
+                ),
+                "{r:?}"
+            );
+            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
+        }
+        other => panic!("{other:?}"),
+    }
     assert!(ex.features().is_empty());
     assert!(
         !k.upstream_ub_passed.contains(&"UB-242"),

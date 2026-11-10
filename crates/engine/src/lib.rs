@@ -20,6 +20,7 @@ pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
+mod mesh_lines;
 pub mod occurrences;
 pub mod panels;
 pub mod params;
@@ -2419,6 +2420,8 @@ mod hole_matrix_tests;
 mod hole_reference_tests;
 #[cfg(test)]
 mod large_assembly_tests;
+#[cfg(test)]
+mod loft_sheet_tests;
 #[cfg(test)]
 mod measure_centre_tests;
 #[cfg(test)]

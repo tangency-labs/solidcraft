@@ -157,7 +157,11 @@ use crate::SolveApp;
 /// The Browser's rows on screen: (label, row rect, fold arrow area, open).
 /// Other presentations expose their geometry through `semantic_content::output`.
 pub fn drawn_rows() -> Vec<crate::semantic_content::DrawnRow> {
-    crate::semantic_content::output(crate::semantic_content::ContentOwner::BROWSER).rows
+    use crate::semantic_content::{ContentOwner, output};
+    // The design tree over the view (`dialog_tree`) shows these rows while the browser makes way.
+    let mut rows = output(ContentOwner::BROWSER).rows;
+    rows.extend(output(ContentOwner::DESIGN_TREE).rows);
+    rows
 }
 
 pub fn drawn_occurrences() -> Vec<crate::semantic_content::DrawnOccurrence> {
@@ -447,13 +451,17 @@ enum Take {
 /// ([`pick_from_browser`]). Returns false when that input does not take bodies, so the click
 /// keeps its ordinary meaning. A Shift range only adds; a group or component toggles.
 fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
-    if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
-        return false;
-    }
     let world = crate::open_meshing::session_world(&app.session);
     let picked: Vec<Sel> =
         names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
     if picked.is_empty() {
+        return false;
+    }
+    // The chat's picker takes them into Bodies whichever list is active (#11318).
+    if let Some(d) = app.dialog.as_mut() {
+        d.activate_input_taking(crate::selection::BODIES);
+    }
+    if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
         return false;
     }
     let Some(mut d) = app.dialog.take() else { return false };
@@ -534,9 +542,11 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
     v
 }
 
-/// Move Sketches to Their Parts (`component.move_sketches.to_parts`) for `sketches` (ids).
+/// Move Sketches to Their Parts (`component.move_sketches.to_parts`) for `sketches` (ids). They
+/// go as numbers: a string is a name first, and a sketch may be named like another one's id.
 pub(crate) fn sketches_to_parts_item(sketches: Vec<String>) -> Item {
-    Item::action("component.move_sketches.to_parts", "Move Sketches to Their Parts", "move").with(json!({ "sketches": sketches }))
+    let ids: Vec<u64> = sketches.iter().filter_map(|k| k.parse().ok()).collect();
+    Item::action("component.move_sketches.to_parts", "Move Sketches to Their Parts", "move").with(json!({ "sketches": ids }))
 }
 
 /// The menu of a folder row (Bodies, Sketches, Construction).
@@ -953,6 +963,9 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
+    /// The feature row under the pointer: lit as hovering its timeline item lights it.
+    pub(crate) hover_feature: Option<u64>,
+    pub(crate) hover_joint: Option<u64>,
     drop: Option<(crate::semantic_content::ContentSource, DropAction)>,
     /// What the selection and the 3D view's pointer light in the tree.
     lit: Lit,
@@ -1036,7 +1049,11 @@ impl Lit {
         let hovered = match &app.viewport.hover {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
             Some(
-                Hit::SketchPoint { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchCurve { sketch, .. } | Hit::Profile { sketch, .. },
+                Hit::SketchPoint { sketch, .. }
+                | Hit::SketchPoint3d { sketch, .. }
+                | Hit::SketchMidpoint { sketch, .. }
+                | Hit::SketchCurve { sketch, .. }
+                | Hit::Profile { sketch, .. },
             ) => Some(Thing::Sketch(*sketch)),
             Some(Hit::Plane { name, .. }) => Some(Thing::Plane(name.clone())),
             Some(Hit::Axis { name }) => Some(Thing::Axis(name.clone())),
@@ -1342,6 +1359,7 @@ fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
             editor: false,
             enabled: true,
             header_actions: None,
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,
@@ -1596,6 +1614,25 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
     }
 }
 
+/// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
+/// for an open dialog as there), for the design tree over the view while a dialog holds the left
+/// column (`dialog_tree`, #6710).
+fn design_tree(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
+    prepare_model(app);
+    // The root's folders as the browser draws them (`browser_cache`).
+    let mut cache = app.tree.cache.take().unwrap_or_default();
+    cache.prepare(app);
+    let folders = ["bodies", "construction"].map(|folder| cache.folder(app, 0, None, folder));
+    app.tree.cache = Some(cache);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        origin_rows(app, ui, 0, acts);
+        for (folder, data) in ["bodies", "construction"].into_iter().zip(&folders) {
+            folder_rows_at(app, ui, 0, None, folder, 0, acts, data);
+        }
+    });
+}
+
 fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::semantic_content::show(
         app,
@@ -1649,6 +1686,7 @@ pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: cra
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
         crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
+        crate::semantic_content::ContentRequest::DesignTree => design_tree(app, ui, &mut acts),
     }
     acts
 }
@@ -1894,7 +1932,7 @@ fn component_rows_inner(
         features::rows(app, ui, id, &[], d, acts);
     }
     if id == 0 && !render {
-        crate::dialogs_assembly::browser_joints(app, ui, d);
+        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, ui, d);
     }
     for path in &root.children {
         occurrence_rows(app, ui, path, d, acts, cache);
@@ -2091,7 +2129,9 @@ fn occurrence_rows_inner(
     if !render {
         features::rows(app, ui, placement.component, path, depth + 1, acts);
         // The joints that attach this placement, as the root's Joints folder lists them (#9130).
-        crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1);
+        if let Some(joint) = crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1) {
+            acts.hover_joint = Some(joint);
+        }
     }
     if path.len() < 64 {
         for child in &placement.children {
@@ -2519,6 +2559,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
         Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
@@ -2529,19 +2570,29 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
-/// Editing a canvas (position, size, angle, opacity, flip) or calibrating it (two points on
-/// the image and their true distance). Live edits of one opening are one undo step.
+/// Editing a canvas (position, size, angle, opacity, flip), calibrating it (two points on
+/// the image and their true distance) or straightening it (two points along an edge of the
+/// image and the direction that edge should have, #11989). Live edits of one opening are one
+/// undo step.
 #[derive(Clone, Debug)]
 pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
+    pub straighten: bool,
     /// Undo depth when the panel opened.
     pub(crate) depth: usize,
     pub a: [f64; 2],
     pub b: [f64; 2],
     pub distance: f64,
+    /// Straighten: the line A–B becomes horizontal (`0`), vertical (`1`) or `angle` (`2`).
+    pub direction: usize,
+    /// Straighten: the direction for `direction == 2`, in degrees.
+    pub angle: f64,
     /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108).
     pub next: u8,
+    /// A click on the image has set Point B: Straighten's hint then asks for the direction and
+    /// the Straighten button rather than for Point A again (#11989).
+    pub picked_both: bool,
 }
 
 impl CanvasPanel {
@@ -2555,7 +2606,38 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0 }
+        CanvasPanel {
+            canvas,
+            calibrate,
+            straighten: false,
+            depth: app.session.undo.len(),
+            a,
+            b,
+            distance: d,
+            direction: 0,
+            angle: 0.0,
+            next: 0,
+            picked_both: false,
+        }
+    }
+
+    /// The Straighten card: pick two points along an edge of the image, then the direction.
+    pub fn straighten(app: &SolveApp, canvas: u64) -> Self {
+        CanvasPanel { straighten: true, ..CanvasPanel::new(app, canvas, false) }
+    }
+
+    /// Does a click on the image set Point A or B (Calibrate and Straighten)?
+    pub fn picks_points(&self) -> bool {
+        self.calibrate || self.straighten
+    }
+
+    /// The direction, in degrees, Straighten turns the line A–B to.
+    pub fn target_angle(&self) -> f64 {
+        match self.direction {
+            0 => 0.0,
+            1 => 90.0,
+            _ => self.angle,
+        }
     }
 }
 
@@ -2580,6 +2662,10 @@ pub(crate) fn pick_sketch_into_dialog(app: &mut SolveApp, id: u64) -> bool {
 /// Browser picks go only into compatible active dialog inputs. Outside a dialog, planes and
 /// axes become the selection; body rows use the ordinary Ctrl/Shift-aware selection path.
 fn pick_from_browser(app: &mut SolveApp, x: Sel) {
+    // The chat's picker takes a body into Bodies whichever list is active (#11318).
+    if let (Sel::Body { .. }, Some(d)) = (&x, app.dialog.as_mut()) {
+        d.activate_input_taking(crate::selection::BODIES);
+    }
     if let Sel::Body { name } = &x
         && dialog_takes_body(app)
         && let Some(mut d) = app.dialog.take()
@@ -2593,6 +2679,12 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
             d.pick(&app.session, pick);
         }
         app.dialog = Some(d);
+        return;
+    }
+    if let Sel::Axis { name } = &x
+        && app.dialog.is_none()
+        && crate::tools::pick_axis_from_browser(app, name)
+    {
         return;
     }
     let hit = match &x {
@@ -3575,7 +3667,11 @@ fn apply_drop(app: &mut SolveApp, d: DropAction) {
         DropAction::Component { to, folder, keys } => {
             let _ = match folder {
                 "bodies" => app.run("component.move_bodies", json!({ "bodies": keys, "component": to })),
-                "sketches" => app.run("component.move_sketches", json!({ "sketches": keys, "component": to })),
+                "sketches" => {
+                    // Ids, as numbers: a string is a sketch's name first, and a sketch may be named like another one's id.
+                    let ids: Vec<u64> = keys.iter().filter_map(|k| k.parse().ok()).collect();
+                    app.run("component.move_sketches", json!({ "sketches": ids, "component": to }))
+                }
                 _ => Ok(serde_json::Value::Null),
             };
         }

@@ -27,6 +27,7 @@ pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
+pub mod end_cap;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -87,6 +88,7 @@ pub mod sheet;
 pub mod sketch_equation;
 pub mod text_params;
 pub mod thread_forms;
+pub mod tolerance;
 
 pub use assembly::{
     BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement,
@@ -167,7 +169,11 @@ mod feature_walk_tests;
 #[cfg(test)]
 mod named_projection_tests;
 #[cfg(test)]
+mod old_cap_anchor_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tolerance_tests;
 
 mod anchor_frame;
 pub use anchor_frame::state_in_face_anchor_frame;

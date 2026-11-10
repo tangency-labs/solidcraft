@@ -19,7 +19,8 @@ use offset_fixture::volume;
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_difference;
-use solidcore::error::SM_ERR;
+use solidcore::error::defeature::DefeatureFailure;
+use solidcore::error::{Reason, SM_ERR};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p1;
@@ -109,13 +110,24 @@ fn defeature(make: Make, face: usize) -> (Shape, solidcore::Result<()>, Shape) {
 fn wr_656_defeature_refuses_and_keeps_the_box() {
     for face in 0..6 {
         let (before, r, after) = defeature(box_30_20_10, face);
-        match r {
-            Err(SolidError::Upstream {
-                code,
-                entity: Some(EntityRef::Edge(_)),
-                ..
-            }) => assert_eq!(code, SM_ERR),
-            other => panic!("face {face}: refused with SM_ERR at an edge, got {other:?}"),
+        // refused at an edge of the face's loop, naming the limit: a box face's neighbours,
+        // extended, run past it and do not enclose it (#3218); the status is still SM_ERR
+        match &r {
+            Err(e @ SolidError::Failed(f)) => {
+                assert!(
+                    matches!(
+                        f.reason,
+                        Reason::Defeature(DefeatureFailure::NotEnclosed { .. })
+                    ),
+                    "face {face}: {r:?}"
+                );
+                assert!(
+                    matches!(f.entity, Some(EntityRef::Edge(_))),
+                    "face {face}: {r:?}"
+                );
+                assert_eq!(e.sm_status(), Some(SM_ERR), "face {face}");
+            }
+            other => panic!("face {face}: refused naming its limit, got {other:?}"),
         }
         assert_eq!(after, before, "face {face}");
         assert_eq!(after.0, 6);

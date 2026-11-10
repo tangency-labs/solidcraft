@@ -138,13 +138,15 @@ fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Pa
         // `natural`'s face j is the record's `to_record[j]`; SMLib's body's face k is `natural`'s
         // `of_natural[k]`; the body turned back's face i is SMLib's `back[i]`.
         let (natural, to_record) = turn(&as_read, &|f| reversed.get(f).copied().unwrap_or(false)).map_err(failed)?;
-        let (smlib, of_natural) = smlib_body(natural.record())?;
+        // SMLib names a face it refuses by its index in the record it was given, `natural`'s.
+        let natural_origin: Vec<u64> = to_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<_>>().unwrap_or_default();
+        let (smlib, of_natural) = smlib_body(natural.record()).map_err(|f| Failure { msg: name_record_face(&f.msg, &natural_origin), ..f })?;
         let record_of = |k: usize| of_natural.get(k).and_then(|j| to_record.get(*j)).copied();
         let (back, from) = turn(&smlib, &|k| record_of(k).and_then(|f| reversed.get(f)).copied().unwrap_or(false)).map_err(failed)?;
         let of_record = from.iter().map(|k| record_of(*k)).collect::<Option<Vec<usize>>>().ok_or_else(renumbered)?;
         (back.without_history(), of_record)
     } else {
-        smlib_body(r)?
+        smlib_body(r).map_err(|f| Failure { msg: name_record_face(&f.msg, &solid.face_origin), ..f })?
     };
     let face_origin = of_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
     Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None })
@@ -278,7 +280,7 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
         let read =
             solidcraft_profile::scope("import", "step.read_without", || solidcore_step::topology::read_solid_without(ex, item, units, trims, &skip));
         match read.map_err(|msg| Failure { read: true, msg }).and_then(|solid| {
-            let part = solid_part(&solid).map_err(|f| Failure { msg: name_record_face(&f.msg, &solid.face_origin), ..f })?;
+            let part = solid_part(&solid)?;
             Ok((part, solid.notes.into_iter().map(Note::Repaired).collect::<Vec<_>>()))
         }) {
             Ok((mut part, mut notes)) => {

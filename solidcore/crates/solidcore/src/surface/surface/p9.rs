@@ -461,7 +461,7 @@ impl Surface {
                         1,
                         vec![0.0, 0.0, 1.0, 1.0],
                     )
-                    .map_err(SolidError::nl_ser(OP))?,
+                    .map_err(SolidError::nurbs_routine(OP))?,
                     2,
                     false,
                 ));

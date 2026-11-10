@@ -22,8 +22,7 @@
 //!   fork's in address order).
 //! - **Fit sizes.** The three refusals step 5 sizes (`NoteFitOnFace` after the tangent
 //!   edge and the extension, `NoteFitRadius` from `sm_CornerTakesPerRadius` after the
-//!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them with
-//!   `fixes.fillet_gn_section_generator` (WR-696, #2278).
+//!   whole edge; tangency-labs/smlib a3d6d81, 49f393d) note them (WR-696, #2278).
 //! - **Section ends (not the fork's).** A round with WR-674's section ends is trimmed here
 //!   only with `fixes.fillet_section_end_trim_at_creases` (WR-706, #2223): each such end is
 //!   cut by its section's plane and closed by the section's flat face, and a side of that
@@ -661,10 +660,10 @@ impl FilletSession<'_> {
             for (slot, f) in entry.iter_mut().zip(faces) {
                 slot.1 = f;
             }
-            // not the fork's (#2401; with `fixes.fillet_gn_section_generator`, WR-696): an
-            // open end the end face does not cut is an overflow's, absent below the size at
-            // which the end's blend stays on its faces: that size (open)
-            if note.is_some() && cut.is_err() && k.fixes.fillet_gn_section_generator {
+            // not the fork's (#2401, WR-696): an open end the end face does not cut is an
+            // overflow's, absent below the size at which the end's blend stays on its
+            // faces: that size (open)
+            if note.is_some() && cut.is_err() {
                 self.executive
                     .note_fit_on_its_faces(k, &mut self.objects, end.solver)?;
             }
@@ -750,9 +749,7 @@ impl FilletSession<'_> {
         // Not the fork's (#2404): the strip a blend leaves on an edge of the body, thinner than
         // the part resolves, has no topology to build
         if self.strip_below_resolution(k, &sheet, blended_edges, tol)? {
-            if k.fixes.fillet_gn_section_generator {
-                self.note_fit_of_the_strip(solvers, blended_edges)?;
-            }
+            self.note_fit_of_the_strip(solvers, blended_edges)?;
             return refuse(
                 note,
                 refusal(
@@ -905,16 +902,11 @@ impl FilletSession<'_> {
                                 && rolled_on.contains(&g)
                                 && is_tangent_edge(k, self.objects.target, e, tangency)?
                             {
-                                // the fork's NoteFitOnFace(g) (49f393d; with
-                                // `fixes.fillet_gn_section_generator`, WR-696)
-                                if k.fixes.fillet_gn_section_generator {
-                                    let face = FilletObject::Topology(
-                                        FilletBody::Target,
-                                        EntityRef::Face(g),
-                                    );
-                                    self.executive
-                                        .note_fit_on_face(k, &mut self.objects, face)?;
-                                }
+                                // the fork's NoteFitOnFace(g) (49f393d, WR-696)
+                                let face =
+                                    FilletObject::Topology(FilletBody::Target, EntityRef::Face(g));
+                                self.executive
+                                    .note_fit_on_face(k, &mut self.objects, face)?;
                                 return refuse(
                                     note,
                                     refusal(
@@ -995,12 +987,10 @@ impl FilletSession<'_> {
             if has && !kept_rounds.contains(&i) {
                 // the largest radius that keeps a length of the edge: its corners take
                 // r <u, e> at each end (sm_CornerTakesPerRadius), the edge's length L in all
-                // at r = L / (s0 + s1); open, so less the fit margin (the fork's a3d6d81;
-                // with `fixes.fillet_gn_section_generator`, WR-696)
-                if k.fixes.fillet_gn_section_generator {
-                    if let Some(&solver) = solvers.get(i) {
-                        self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?;
-                    }
+                // at r = L / (s0 + s1); open, so less the fit margin (the fork's a3d6d81,
+                // WR-696)
+                if let Some(&solver) = solvers.get(i) {
+                    self.note_fit_of_corners_taking_the_edge(k, solver, solvers)?;
                 }
                 return refuse(
                     note,
@@ -1062,13 +1052,10 @@ impl FilletSession<'_> {
             let outcome = extend(k, self.objects.target, f, &rails, blended_edges, tol)?;
             match outcome {
                 ExtendOutcome::Refused(why) => {
-                    // the fork's NoteFitOnFace(f) (49f393d; with
-                    // `fixes.fillet_gn_section_generator`, WR-696)
-                    if k.fixes.fillet_gn_section_generator {
-                        let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
-                        self.executive
-                            .note_fit_on_face(k, &mut self.objects, face)?;
-                    }
+                    // the fork's NoteFitOnFace(f) (49f393d, WR-696)
+                    let face = FilletObject::Topology(FilletBody::Target, EntityRef::Face(f));
+                    self.executive
+                        .note_fit_on_face(k, &mut self.objects, face)?;
                     return refuse(
                         note,
                         refusal(
@@ -1096,6 +1083,23 @@ impl FilletSession<'_> {
             for &e in &lamina_edges {
                 if edge_on_surface(k, &sheet, e, self.objects.target, f, on_tol)? {
                     on.push(edge_curve(k, &sheet, e)?);
+                }
+            }
+            // an extension's runs from a chain's end to its foot lie on the walls beside it;
+            // with the sheet's section there they fence what the blend takes off that wall
+            // (else the section ends inside the wall and the material taken off reaches
+            // every face)
+            for ext in &extensions {
+                for run in &ext.foot_runs {
+                    if crate::blend::fillet_overflow::curve_on_surface(
+                        k,
+                        run,
+                        self.objects.target,
+                        f,
+                        on_tol,
+                    )? {
+                        on.push(run.copy(k)?);
+                    }
                 }
             }
             // an open G1 setback corner's spring curves on this face: with the rails they

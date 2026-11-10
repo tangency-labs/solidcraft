@@ -324,14 +324,17 @@ fn an_oblique_plane_and_cylinder_round_is_the_exact_rational_ball_sweep() {
     );
 }
 
+/// Without the fix the round is traced: a skin through its stations' sections (the ball's
+/// exact circles, so rational too), off the ball between them where the exact sweep is on it
+/// to 1e-12.
 #[test]
 fn upstream_traces_the_oblique_plane_and_cylinder_round() {
-    let (_, _, _, rounds) = plate_and_peg(false);
+    let (spine, _, _) = plate_and_peg_round(30f64.to_radians());
+    let (k, _, _, rounds) = plate_and_peg(false);
     assert_eq!(rounds.len(), 2);
-    assert!(
-        rounds.iter().all(|(_, rational)| !*rational),
-        "the traced fit"
-    );
+    let off = off_spine(&k, &rounds, &spine);
+    eprintln!("the traced fit is off the ball by {off:e}");
+    assert!(off > 1e-9, "the traced fit is off the ball by only {off:e}");
 }
 
 /// The r3 pole up z from -12 to 8 and the 45 degree cone tilted 15 degrees, its apex
@@ -370,8 +373,10 @@ fn pole_and_cone_kept(exact: bool, definition: bool) -> (Kernel, Brep, f64, Vec<
     (k, b, before, rounds)
 }
 
-#[test]
-fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
+/// The pole and the tilted cone's round: its spine (the conic where the offsets of the
+/// cylinder of radius R about z and of the cone tangent to the same ball meet) and the volume
+/// it adds and its area by the divergence theorem about the cone's apex.
+fn pole_and_cone_round() -> (impl Fn(f64) -> Point3, f64, f64) {
     let (alpha, tau) = (45f64.to_radians(), 15f64.to_radians());
     let (e1, e2, a) = (
         Vec3::new(1.0, 0.0, 0.0),
@@ -385,11 +390,11 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     // about the origin meet where (x.a) cos(alpha) = +-(x.uc - rho sin(alpha)); the cone
     // leaves the pole on x.(a cos(alpha) + uc) = rho sin(alpha): on the cylinder at angle
     // t, the height
-    let w = |rho: f64, t: f64| {
+    let w = move |rho: f64, t: f64| {
         rho * (alpha.sin() - radial(e1, e2, t).dot(uc)) / (alpha.cos() + tau.cos())
     };
     let rho = R + FILLET;
-    let spine = |t: f64| radial(e1, e2, t) * rho + a * w(rho, t);
+    let spine = move |t: f64| radial(e1, e2, t) * rho + a * w(rho, t);
     let ball = |t: f64| {
         let c = spine(t);
         let across = (c - uc * c.dot(uc)).unitize().unwrap();
@@ -403,6 +408,12 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     let (flux, area) = round_flux(&ball, apex);
     let added = flux + cylinder_flux(e1, e2, apex, &|t| w(rho, t), &|t| w(R, t));
 
+    (spine, added, area)
+}
+
+#[test]
+fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
+    let (spine, added, area) = pole_and_cone_round();
     let (k, mut b, before, rounds) = pole_and_cone(true);
     assert_eq!(rounds.len(), 2);
     assert!(
@@ -424,14 +435,15 @@ fn two_quadrics_touching_one_ball_round_exactly_on_their_conic() {
     );
 }
 
+/// Without the fix the round is traced, off the ball between its stations (as for the peg).
 #[test]
 fn upstream_traces_the_round_between_two_quadrics_touching_one_ball() {
-    let (_, _, _, rounds) = pole_and_cone(false);
+    let (spine, _, _) = pole_and_cone_round();
+    let (k, _, _, rounds) = pole_and_cone(false);
     assert_eq!(rounds.len(), 2);
-    assert!(
-        rounds.iter().all(|(_, rational)| !*rational),
-        "the traced fit"
-    );
+    let off = off_spine(&k, &rounds, &spine);
+    eprintln!("the traced fit is off the ball by {off:e}");
+    assert!(off > 1e-9, "the traced fit is off the ball by only {off:e}");
 }
 
 // ---- #2485: an exact round is a blend by its definition, its net the exact surface ----

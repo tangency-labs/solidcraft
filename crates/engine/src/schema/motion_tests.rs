@@ -12,7 +12,10 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<FindLimitsParams>(), &["against", "contact_sets", "index", "joint", "occurrences", "refine", "step"]);
+    assert_keys(
+        input_schema_for::<FindLimitsParams>(),
+        &["against", "contact_sets", "exclude_pairs", "index", "joint", "occurrences", "refine", "step"],
+    );
     assert_keys(input_schema_for::<ContactEnableParams>(), &["enabled"]);
     assert_keys(input_schema_for::<ContactNoParams>(), &[]);
     assert_keys(input_schema_for::<ContactCreateParams>(), &["name", "occurrences"]);

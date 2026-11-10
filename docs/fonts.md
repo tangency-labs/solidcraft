@@ -7,8 +7,8 @@ and the primary OK action use bold. Selection fields and status messages use
 medium. Numeric fields and sketch dimensions use IBM Plex Mono Regular.
 
 Both fonts are licensed under the SIL Open Font License 1.1. Their licence texts
-are in `assets/fonts/ibm-plex-sans/OFL.txt` and
-`assets/fonts/ibm-plex-mono/OFL.txt`; provenance is recorded in
+are in `crates/look/fonts/ibm-plex-sans/OFL.txt` and
+`crates/look/fonts/ibm-plex-mono/OFL.txt`; provenance is recorded in
 [ATTRIBUTION.md](../ATTRIBUTION.md).
 
 The `ui_font` preference puts the chosen font first in every sans family,
