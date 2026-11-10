@@ -79,7 +79,7 @@ impl BackendTarget {
 pub enum KernelOp {
     /// Batched `f32` bicubic NURBS / Bezier surface position & normal evaluation.
     SurfaceEvalF32,
-    /// Batched `f32` single-precision bicubic patch & derivative tensor contraction (Ampere MMA).
+    /// Batched `f32` bicubic patch & derivative tensor contraction (Ampere MMA Tensor Core).
     TensorPatchEvalF32,
     /// Batched watertight 3-ray majority-vote point-in-solid classification (`Mesh::contains`).
     PointInSolid,
@@ -588,6 +588,9 @@ fn candidate_backends_for_op(op: KernelOp, vk: Option<&VulkanAccel>, cuda: Optio
             }
         }
         KernelOp::TensorPatchEvalF32 => {
+            if vk.is_some() {
+                cands.push(BackendTarget::VulkanCompute);
+            }
             if let Some(c) = cuda {
                 cands.push(BackendTarget::CudaGeneric);
                 if c.has_f32_tensor_core() {
@@ -659,6 +662,7 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..max_n], false);
         if c.has_ampere_ptx() {
             let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..16], true);
+            let _ = c.eval_bicubic_tensor_f32(&patch_f32, &queries_f32[..16], true);
         }
     }
 
@@ -700,6 +704,27 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                         (KernelOp::SurfaceEvalF32, BackendTarget::AmperePtx) => time_ns(|| {
                             if let Some(c) = cuda {
                                 std::hint::black_box(c.eval_bicubic_f32(&patch_f32, &queries_f32[..n], true));
+                            }
+                        }),
+                        (KernelOp::TensorPatchEvalF32, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_eval_bicubic_f32_scalar(&patch_f32, &queries_f32[..n]));
+                        }),
+                        (KernelOp::TensorPatchEvalF32, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_eval_bicubic_f32_rayon(&patch_f32, &queries_f32[..n]));
+                        }),
+                        (KernelOp::TensorPatchEvalF32, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.eval_bicubic_f32(&patch_f32, &queries_f32[..n]));
+                            }
+                        }),
+                        (KernelOp::TensorPatchEvalF32, BackendTarget::CudaGeneric) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.eval_bicubic_tensor_f32(&patch_f32, &queries_f32[..n], false));
+                            }
+                        }),
+                        (KernelOp::TensorPatchEvalF32, BackendTarget::AmpereTensorCore) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.eval_bicubic_tensor_f32(&patch_f32, &queries_f32[..n], true));
                             }
                         }),
                         _ => 1,
@@ -834,7 +859,15 @@ impl Dispatcher {
     pub fn eval_bicubic_f32(&self, patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> (BackendTarget, Vec<PatchEvalOutF32>) {
         let target = self.select_backend(KernelOp::SurfaceEvalF32, queries.len());
         match target {
-            BackendTarget::AmperePtx | BackendTarget::AmpereTensorCore | BackendTarget::RtCoreBvh => {
+            BackendTarget::AmpereTensorCore => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.eval_bicubic_tensor_f32(patch_cpts, queries, true)
+                {
+                    return (BackendTarget::AmpereTensorCore, out);
+                }
+            }
+            BackendTarget::AmperePtx | BackendTarget::RtCoreBvh => {
                 #[cfg(not(target_arch = "wasm32"))]
                 if let Some(c) = CudaBackend::global()
                     && let Some(out) = c.eval_bicubic_f32(patch_cpts, queries, true)
@@ -846,6 +879,43 @@ impl Dispatcher {
                 #[cfg(not(target_arch = "wasm32"))]
                 if let Some(c) = CudaBackend::global()
                     && let Some(out) = c.eval_bicubic_f32(patch_cpts, queries, false)
+                {
+                    return (BackendTarget::CudaGeneric, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.eval_bicubic_f32(patch_cpts, queries)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_eval_bicubic_f32_rayon(patch_cpts, queries));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_eval_bicubic_f32_scalar(patch_cpts, queries));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_eval_bicubic_f32_scalar(patch_cpts, queries))
+    }
+
+    /// Dispatches batched `f32` bicubic tensor patch evaluation (using Ampere `m16n8k8` F32 Tensor Cores when selected).
+    pub fn eval_bicubic_tensor_f32(&self, patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> (BackendTarget, Vec<PatchEvalOutF32>) {
+        let target = self.select_backend(KernelOp::TensorPatchEvalF32, queries.len());
+        match target {
+            BackendTarget::AmpereTensorCore | BackendTarget::AmperePtx | BackendTarget::RtCoreBvh => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.eval_bicubic_tensor_f32(patch_cpts, queries, true)
+                {
+                    return (BackendTarget::AmpereTensorCore, out);
+                }
+            }
+            BackendTarget::CudaGeneric => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.eval_bicubic_tensor_f32(patch_cpts, queries, false)
                 {
                     return (BackendTarget::CudaGeneric, out);
                 }

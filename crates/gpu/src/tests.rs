@@ -487,13 +487,15 @@ fn a_plan_with_pole_nodes_is_refused_by_name() {
     assert!(matches!(gpu.evaluate(&plan), Err(GpuError::PoleNodes { face: 1 })));
 }
 
-/// Verifies numerical parity of `f32` bicubic Bézier tensor-product patch evaluation across CPU, Vulkan, and CUDA PTX backends.
+/// Verifies numerical parity of `f32` bicubic Bézier tensor-product patch evaluation across CPU, Vulkan, CUDA PTX, and Ampere MMA Tensor Cores.
 #[test]
 fn multi_backend_bicubic_patch_f32_and_tensor_mma_parity() {
     use crate::cuda::{CudaBackend, PatchUvQueryF32};
-    use crate::dispatch::{Dispatcher, VulkanAccel, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, synthetic_bicubic_patch_f32};
+    use crate::dispatch::{VulkanAccel, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, synthetic_bicubic_patch_f32};
 
     let patch_f32 = synthetic_bicubic_patch_f32();
+
+    // Use 259 queries (non-multiple of 4 and 64) to exercise tail handling in Tensor Core MMA and workgroups.
     let n = 259usize;
     let queries_f32: Vec<PatchUvQueryF32> = (0..n)
         .map(|i| {
@@ -534,11 +536,35 @@ fn multi_backend_bicubic_patch_f32_and_tensor_mma_parity() {
                 }
             }
         }
-    }
 
-    let disp = Dispatcher::global();
-    let (_, d_out) = disp.eval_bicubic_f32(&patch_f32, &queries_f32);
-    assert_eq!(d_out.len(), n);
+        let cu_tensor_gen = cuda.eval_bicubic_tensor_f32(&patch_f32, &queries_f32, false).expect("cuda generic tensor f32");
+        for (i, (a, b)) in ref_f32.iter().zip(&cu_tensor_gen).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm70 tensor f32 pos mismatch at {i}[{c}]: {} vs {}", a.pos[c], b.pos[c]);
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm70 tensor f32 norm mismatch at {i}[{c}]: {} vs {}", a.norm[c], b.norm[c]);
+            }
+        }
+
+        if cuda.has_f32_tensor_core() {
+            let cu_f32_mma = cuda.eval_bicubic_tensor_f32(&patch_f32, &queries_f32, true).expect("cuda sm86 MMA tensor core f32");
+            for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_mma).enumerate() {
+                for c in 0..3 {
+                    assert!(
+                        (a.pos[c] - b.pos[c]).abs() < 1e-5,
+                        "Ampere MMA f32 pos mismatch at query {i} comp {c}: cpu={} mma={}",
+                        a.pos[c],
+                        b.pos[c]
+                    );
+                    assert!(
+                        (a.norm[c] - b.norm[c]).abs() < 1e-5,
+                        "Ampere MMA f32 norm mismatch at query {i} comp {c}: cpu={} mma={}",
+                        a.norm[c],
+                        b.norm[c]
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Verifies that CUDA device info enables hardware F32 tensor cores (`mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32`)
@@ -731,4 +757,220 @@ fn gpu_cargo_toml_lints_match_workspace() {
         vec![("unsafe_code".to_string(), "\"deny\"".to_string())],
         "crates/gpu/Cargo.toml [lints.rust] must match [workspace.lints.rust] except for unsafe_code = \"deny\""
     );
+}
+
+/// Backend targets that implement bicubic patch evaluation (`f32` and `f64`).
+#[cfg(not(target_arch = "wasm32"))]
+const PATCH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::AmpereTensorCore,
+];
+#[test]
+fn bicubic_patch_common_and_edge_cases() {
+    use crate::cuda::{CudaBackend, PatchUvQueryF32};
+    use crate::dispatch::{Dispatcher, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, synthetic_bicubic_patch_f32};
+
+    let disp = Dispatcher::global();
+    let cuda = CudaBackend::global();
+
+    // 1. Exact corner interpolation on synthetic rational bicubic patch:
+    // At (u, v) in {(0,0), (1,0), (0,1), (1,1)}, S(u, v) = P_{3u, 3v} / w_{3u, 3v}.
+    let cpts_f32 = synthetic_bicubic_patch_f32();
+    let corners = [(0.0f32, 0.0f32, 0usize, 0usize), (1.0, 0.0, 3, 0), (0.0, 1.0, 0, 3), (1.0, 1.0, 3, 3)];
+    let corner_queries_f32: Vec<PatchUvQueryF32> = corners.iter().map(|&(u, v, _, _)| PatchUvQueryF32 { u, v, patch_idx: 0, pad: 0 }).collect();
+
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, evals_tensor) = d.eval_bicubic_tensor_f32(&cpts_f32, &corner_queries_f32);
+        let (_, evals_f32) = d.eval_bicubic_f32(&cpts_f32, &corner_queries_f32);
+        for (idx, &(_, _, i, j)) in corners.iter().enumerate() {
+            let cpt = cpts_f32[i * 4 + j];
+            let expected = [cpt[0] / cpt[3], cpt[1] / cpt[3], cpt[2] / cpt[3]];
+            for (k, &exp) in expected.iter().enumerate() {
+                assert!(
+                    (evals_tensor[idx].pos[k] - exp).abs() < 1e-5,
+                    "tensor f32 corner {idx} axis {k} mismatch on {target:?}: got {}, expected {exp}",
+                    evals_tensor[idx].pos[k],
+                );
+                assert!(
+                    (evals_f32[idx].pos[k] - exp).abs() < 1e-5,
+                    "f32 corner {idx} axis {k} mismatch on {target:?}: got {}, expected {exp}",
+                    evals_f32[idx].pos[k],
+                );
+            }
+            let n_len = (evals_tensor[idx].norm[0].powi(2) + evals_tensor[idx].norm[1].powi(2) + evals_tensor[idx].norm[2].powi(2)).sqrt();
+            assert!((n_len - 1.0).abs() < 1e-5, "unit normal required at corner {idx} on {target:?}");
+            assert!(evals_tensor[idx].norm[3] > 0.0, "positive |Su x Sv| required at corner {idx} on {target:?}");
+        }
+    }
+
+    // 2. Analytical planar patch S(u, v) = (2u + 1, 3v - 2, 5):
+    // Control points at (i/3, j/3) with weight 1 -> dS/du = (2, 0, 0), dS/dv = (0, 3, 0),
+    // Su x Sv = (0, 0, 6) -> unit normal = (0, 0, 1), |Su x Sv| = 6.0 everywhere.
+    let mut planar_f32 = Vec::with_capacity(16);
+    for i in 0..4 {
+        for j in 0..4 {
+            let u = (i as f32) / 3.0;
+            let v = (j as f32) / 3.0;
+            let x = 2.0 * u + 1.0;
+            let y = 3.0 * v - 2.0;
+            let z = 5.0;
+            planar_f32.push([x, y, z, 1.0]);
+        }
+    }
+    let sample_uvs = [(0.0f32, 0.0f32), (0.5, 0.0), (0.0, 0.5), (0.3, 0.7), (0.5, 0.5), (1.0, 1.0)];
+    let planar_q32: Vec<PatchUvQueryF32> = sample_uvs.iter().map(|&(u, v)| PatchUvQueryF32 { u, v, patch_idx: 0, pad: 0 }).collect();
+
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, out_tc) = d.eval_bicubic_tensor_f32(&planar_f32, &planar_q32);
+        let (_, out32) = d.eval_bicubic_f32(&planar_f32, &planar_q32);
+        for (idx, &(u, v)) in sample_uvs.iter().enumerate() {
+            let exp_x = 2.0 * u + 1.0;
+            let exp_y = 3.0 * v - 2.0;
+            assert!((out_tc[idx].pos[0] - exp_x).abs() < 1e-5);
+            assert!((out_tc[idx].pos[1] - exp_y).abs() < 1e-5);
+            assert!((out_tc[idx].pos[2] - 5.0).abs() < 1e-5);
+            assert!(out_tc[idx].norm[0].abs() < 1e-5);
+            assert!(out_tc[idx].norm[1].abs() < 1e-5);
+            assert!((out_tc[idx].norm[2] - 1.0).abs() < 1e-5);
+            assert!((out_tc[idx].norm[3] - 6.0).abs() < 1e-4);
+
+            assert!((out32[idx].pos[0] - exp_x).abs() < 1e-5);
+            assert!((out32[idx].pos[1] - exp_y).abs() < 1e-5);
+            assert!((out32[idx].pos[2] - 5.0).abs() < 1e-5);
+            assert!((out32[idx].norm[2] - 1.0).abs() < 1e-5);
+            assert!((out32[idx].norm[3] - 6.0).abs() < 1e-4);
+        }
+    }
+
+    // 3. Multi-patch batching (patch_idx = 0, 1, 2) and out-of-bounds patch_idx clamping (patch_idx = 999 -> 2):
+    let mut multi_f32 = Vec::with_capacity(48);
+    for p_idx in 0..3 {
+        let z_offset = (p_idx as f32) * 10.0;
+        for cpt in &cpts_f32 {
+            let w = cpt[3];
+            multi_f32.push([cpt[0], cpt[1], cpt[2] + z_offset * w, w]);
+        }
+    }
+    let multi_q32 = vec![
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 0, pad: 0 },
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 1, pad: 0 },
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 2, pad: 0 },
+        PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 999, pad: 0 },
+    ];
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, mtc) = d.eval_bicubic_tensor_f32(&multi_f32, &multi_q32);
+        let (_, m32) = d.eval_bicubic_f32(&multi_f32, &multi_q32);
+        assert!((mtc[1].pos[2] - (mtc[0].pos[2] + 10.0)).abs() < 1e-4, "tensor patch 1 z shift failed on {target:?}");
+        assert!((mtc[2].pos[2] - (mtc[0].pos[2] + 20.0)).abs() < 1e-4, "tensor patch 2 z shift failed on {target:?}");
+        assert!((mtc[3].pos[2] - mtc[2].pos[2]).abs() < 1e-5, "out-of-bounds patch_idx must clamp to last patch on {target:?}");
+        assert!((m32[1].pos[2] - (m32[0].pos[2] + 10.0)).abs() < 1e-4, "f32 patch 1 z shift failed on {target:?}");
+        assert!((m32[2].pos[2] - (m32[0].pos[2] + 20.0)).abs() < 1e-4, "f32 patch 2 z shift failed on {target:?}");
+        assert!((m32[3].pos[2] - m32[2].pos[2]).abs() < 1e-5, "f32 out-of-bounds patch_idx must clamp on {target:?}");
+    }
+
+    // 4. Degenerate singular patch (all 16 control points collapsed to a single point (3, -4, 7, 1)):
+    // Derivatives Su and Sv are zero, so Su x Sv = 0. Must not produce NaN; fallback normal is [0, 0, 1, 0].
+    let singular_f32 = vec![[3.0f32, -4.0, 7.0, 1.0]; 16];
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, stc) = d.eval_bicubic_tensor_f32(&singular_f32, &[PatchUvQueryF32 { u: 0.5, v: 0.5, patch_idx: 0, pad: 0 }]);
+        let (_, s32) = d.eval_bicubic_f32(&singular_f32, &[PatchUvQueryF32 { u: 0.5, v: 0.5, patch_idx: 0, pad: 0 }]);
+        assert!((stc[0].pos[0] - 3.0).abs() < 1e-5 && (stc[0].pos[1] + 4.0).abs() < 1e-5 && (stc[0].pos[2] - 7.0).abs() < 1e-5);
+        assert_eq!(stc[0].norm, [0.0, 0.0, 1.0, 0.0], "singular patch fallback normal mismatch on {target:?}");
+        assert!((s32[0].pos[0] - 3.0).abs() < 1e-5 && (s32[0].pos[1] + 4.0).abs() < 1e-5 && (s32[0].pos[2] - 7.0).abs() < 1e-5);
+        assert_eq!(s32[0].norm, [0.0, 0.0, 1.0, 0.0], "f32 singular patch fallback normal mismatch on {target:?}");
+    }
+
+    // 4b. Zero homogeneous weight (`w = 0` across all 16 control points):
+    // `h[3] == 0.0` triggers the `inv_w = 1.0` guard (`|h[3]| <= 1e-12` in f32)
+    // and must never divide by zero or emit NaN across CPU, Vulkan, CUDA, or MMA Tensor Core backends.
+    let zero_w_f32: Vec<[f32; 4]> = cpts_f32.iter().map(|&[x, y, z, _]| [x, y, z, 0.0]).collect();
+    let ref_zw32 = cpu_eval_bicubic_f32_scalar(&zero_w_f32, &[PatchUvQueryF32 { u: 0.3, v: 0.7, patch_idx: 0, pad: 0 }]);
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, zwtc) = d.eval_bicubic_tensor_f32(&zero_w_f32, &[PatchUvQueryF32 { u: 0.3, v: 0.7, patch_idx: 0, pad: 0 }]);
+        let (_, zw32) = d.eval_bicubic_f32(&zero_w_f32, &[PatchUvQueryF32 { u: 0.3, v: 0.7, patch_idx: 0, pad: 0 }]);
+        for k in 0..4 {
+            assert!(zwtc[0].pos[k].is_finite() && zwtc[0].norm[k].is_finite(), "tensor f32 zero-weight patch produced NaN/Inf on {target:?}");
+            assert!(zw32[0].pos[k].is_finite() && zw32[0].norm[k].is_finite(), "f32 zero-weight patch produced NaN/Inf on {target:?}");
+        }
+        for k in 0..3 {
+            assert!((zwtc[0].pos[k] - ref_zw32[0].pos[k]).abs() < 1e-4, "tensor f32 zero-weight pos[{k}] mismatch on {target:?}");
+            assert!((zw32[0].pos[k] - ref_zw32[0].pos[k]).abs() < 1e-5, "f32 zero-weight pos[{k}] mismatch on {target:?}");
+        }
+    }
+
+    // 4c. Strongly non-unit rational weights (`w` varying from 0.25 to 8.0) verifying the full
+    // rational quotient rule `(dhu - P * dhw) / w` and `(dhv - P * dhw) / w` across all backends:
+    let rational_curved_f32: Vec<[f32; 4]> = cpts_f32
+        .iter()
+        .enumerate()
+        .map(|(idx, &[x, y, z, _])| {
+            let w = 0.5 + ((idx * 7) % 11) as f32 * 0.35;
+            [x, y, z + (idx as f32) * 0.2, w]
+        })
+        .collect();
+    let rat_q32 = vec![
+        PatchUvQueryF32 { u: 0.2, v: 0.8, patch_idx: 0, pad: 0 },
+        PatchUvQueryF32 { u: 0.65, v: 0.35, patch_idx: 0, pad: 0 },
+        PatchUvQueryF32 { u: 0.9, v: 0.1, patch_idx: 0, pad: 0 },
+    ];
+    let ref_rat32 = cpu_eval_bicubic_f32_scalar(&rational_curved_f32, &rat_q32);
+    for target in PATCH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, gottc) = d.eval_bicubic_tensor_f32(&rational_curved_f32, &rat_q32);
+        let (_, got32) = d.eval_bicubic_f32(&rational_curved_f32, &rat_q32);
+        for i in 0..rat_q32.len() {
+            for k in 0..3 {
+                assert!((gottc[i].pos[k] - ref_rat32[i].pos[k]).abs() < 1e-4, "rational tensor f32 pos mismatch on {target:?}");
+                assert!((gottc[i].norm[k] - ref_rat32[i].norm[k]).abs() < 1e-4, "rational tensor f32 norm mismatch on {target:?}");
+                assert!((got32[i].pos[k] - ref_rat32[i].pos[k]).abs() < 1e-4, "rational f32 pos mismatch on {target:?}");
+                assert!((got32[i].norm[k] - ref_rat32[i].norm[k]).abs() < 1e-4, "rational f32 norm mismatch on {target:?}");
+            }
+        }
+    }
+
+    // 5. Empty and insufficient control points + warp/tile boundary sizes (1, 3, 4, 15, 16, 17, 31, 32, 33, 63, 64, 65, 129):
+    assert!(cpu_eval_bicubic_f32_scalar(&cpts_f32[..15], &corner_queries_f32).is_empty());
+    assert!(cpu_eval_bicubic_f32_rayon(&cpts_f32[..15], &corner_queries_f32).is_empty());
+    assert!(cpu_eval_bicubic_f32_scalar(&cpts_f32, &[]).is_empty());
+
+    for n in [1usize, 3, 4, 15, 16, 17, 31, 32, 33, 63, 64, 65, 129] {
+        let q32: Vec<PatchUvQueryF32> = (0..n)
+            .map(|i| PatchUvQueryF32 { u: (i as f32 + 0.5) / (n as f32 + 1.0), v: ((n - i) as f32 + 0.25) / (n as f32 + 1.0), patch_idx: 0, pad: 0 })
+            .collect();
+        let ref32 = cpu_eval_bicubic_f32_scalar(&cpts_f32, &q32);
+        assert_eq!(ref32.len(), n);
+        if let Some(dev) = cuda {
+            let gen32 = dev.eval_bicubic_tensor_f32(&cpts_f32, &q32, false).expect("cuda gen32");
+            for i in 0..n {
+                for k in 0..3 {
+                    assert!((gen32[i].pos[k] - ref32[i].pos[k]).abs() < 1e-5, "gen32 boundary n={n} i={i} mismatch");
+                }
+            }
+            if dev.has_ampere_ptx() {
+                let sm86_32 = dev.eval_bicubic_f32(&cpts_f32, &q32, true).expect("cuda sm86_32");
+                for i in 0..n {
+                    for k in 0..3 {
+                        assert!((sm86_32[i].pos[k] - ref32[i].pos[k]).abs() < 1e-5, "sm86_32 boundary n={n} i={i} mismatch");
+                    }
+                }
+            }
+            if dev.has_f32_tensor_core() {
+                let mma = dev.eval_bicubic_tensor_f32(&cpts_f32, &q32, true).expect("cuda mma");
+                for i in 0..n {
+                    for k in 0..3 {
+                        assert!((mma[i].pos[k] - ref32[i].pos[k]).abs() < 1e-5, "MMA boundary n={n} i={i} mismatch");
+                    }
+                }
+            }
+        }
+    }
 }

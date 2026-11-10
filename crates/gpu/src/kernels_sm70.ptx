@@ -470,3 +470,4 @@ $L__BB0_6:
 	ret;
 
 }
+	// .globl	classify_points_generic

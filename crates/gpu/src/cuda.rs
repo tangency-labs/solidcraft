@@ -238,6 +238,7 @@ struct GenericFunctions {
 
 struct AmpereFunctions {
     eval_patch_f32_sm86: CudaFunction,
+    eval_patch_tensor_f32_sm86: CudaFunction,
 }
 
 /// Multi-tier `cudarc` CUDA backend holding both Generic (`sm_70`) and Handcrafted Ampere (`sm_86`) modules.
@@ -334,7 +335,10 @@ impl CudaBackend {
         let (mod_ampere, ampere) = if best.supports_ampere_ptx {
             if let Ok(m86) = ctx.load_module(Ptx::from_src(PTX_SM86)) {
                 let funcs = (|| -> Option<AmpereFunctions> {
-                    Some(AmpereFunctions { eval_patch_f32_sm86: m86.load_function("eval_bicubic_patch_f32_sm86").ok()? })
+                    Some(AmpereFunctions {
+                        eval_patch_f32_sm86: m86.load_function("eval_bicubic_patch_f32_sm86").ok()?,
+                        eval_patch_tensor_f32_sm86: m86.load_function("eval_bicubic_patch_tensor_f32_sm86").ok()?,
+                    })
                 })();
                 (Some(m86), funcs)
             } else {
@@ -404,6 +408,41 @@ impl CudaBackend {
 
         let block_x = 128u32;
         let cfg = LaunchConfig { grid_dim: (num_evals.div_ceil(block_x), 1, 1), block_dim: (block_x, 1, 1), shared_mem_bytes: 0 };
+
+        // SAFETY: Kernel signature takes `(const float4*, const PatchUvQueryF32*, PatchEvalOutF32*, u32, u32)`.
+        unsafe {
+            self.stream.launch_builder(func).arg(&d_cpts).arg(&d_q).arg(&mut d_out).arg(&num_evals).arg(&num_patches).launch(cfg).ok()?;
+        }
+
+        self.stream.clone_dtoh(&d_out).ok()
+    }
+
+    /// Evaluates a batch of `f32` bicubic patches using either:
+    /// - `use_tensor_core_mma = true`: Handcrafted Ampere `mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32` Tensor Core PTX
+    /// - `use_tensor_core_mma = false`: Generic `sm_70` FP32 FMA PTX
+    pub fn eval_bicubic_tensor_f32(
+        &self,
+        patch_cpts: &[[f32; 4]],
+        queries: &[PatchUvQueryF32],
+        use_tensor_core_mma: bool,
+    ) -> Option<Vec<PatchEvalOutF32>> {
+        if queries.is_empty() || patch_cpts.len() < 16 {
+            return Some(Vec::new());
+        }
+        let func = if use_tensor_core_mma { &self.ampere.as_ref()?.eval_patch_tensor_f32_sm86 } else { &self.generic.eval_patch_f32 };
+
+        let num_patches = u32::try_from(patch_cpts.len() / 16).ok()?;
+        let num_evals = u32::try_from(queries.len()).ok()?;
+
+        let _guard = self.lock_and_bind()?;
+        let d_cpts = self.stream.clone_htod(patch_cpts).ok()?;
+        let d_q = self.stream.clone_htod(queries).ok()?;
+        let mut d_out = self.stream.alloc_zeros::<PatchEvalOutF32>(queries.len()).ok()?;
+
+        // In Tensor Core MMA mode, each warp of 32 threads evaluates 4 queries simultaneously (128 threads = 16 queries/block).
+        let block_x = 128u32;
+        let grid_x = if use_tensor_core_mma { num_evals.div_ceil(16) } else { num_evals.div_ceil(block_x) };
+        let cfg = LaunchConfig { grid_dim: (grid_x, 1, 1), block_dim: (block_x, 1, 1), shared_mem_bytes: 0 };
 
         // SAFETY: Kernel signature takes `(const float4*, const PatchUvQueryF32*, PatchEvalOutF32*, u32, u32)`.
         unsafe {
