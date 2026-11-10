@@ -28,7 +28,7 @@ use wgpu::util::DeviceExt;
 use crate::collision::{CollisionGpu, GpuPod, decode_pod_slice, encode_pod, encode_pod_slice};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::cuda::CudaBackend;
-use crate::cuda::{PatchEvalOutF32, PatchUvQueryF32};
+use crate::cuda::{GpuBvhNode, GpuTri, PatchEvalOutF32, PatchUvQueryF32};
 
 const ACCEL_SHADER: &str = include_str!("accel.wgsl");
 
@@ -142,6 +142,27 @@ impl GpuPod for PatchEvalParams {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+struct MeshQueryParams {
+    num_queries: u32,
+    num_tris: u32,
+    num_bvh_nodes: u32,
+    pad: u32,
+}
+
+impl GpuPod for MeshQueryParams {
+    const WORDS: usize = 4;
+    /// Appends the 4 `u32` words of [`MeshQueryParams`] to `out`.
+    fn push_words(&self, out: &mut Vec<u32>) {
+        out.extend_from_slice(&[self.num_queries, self.num_tris, self.num_bvh_nodes, self.pad]);
+    }
+    /// Decodes [`MeshQueryParams`] from a 4-word `u32` slice.
+    fn from_words(w: &[u32]) -> Option<Self> {
+        Some(Self { num_queries: *w.first()?, num_tris: *w.get(1)?, num_bvh_nodes: *w.get(2)?, pad: *w.get(3)? })
+    }
+}
+
 /// Shared Vulkan / `wgpu` compute pipelines for geometric kernel classes.
 pub struct VulkanAccel {
     device: wgpu::Device,
@@ -150,6 +171,9 @@ pub struct VulkanAccel {
     collision: CollisionGpu,
     patch_pipeline: wgpu::ComputePipeline,
     patch_bgl: wgpu::BindGroupLayout,
+    classify_tiled_pipeline: wgpu::ComputePipeline,
+    classify_bvh_pipeline: wgpu::ComputePipeline,
+    bvh_query_bgl: wgpu::BindGroupLayout,
 }
 
 static GLOBAL_VULKAN: OnceLock<Option<VulkanAccel>> = OnceLock::new();
@@ -206,7 +230,30 @@ impl VulkanAccel {
         });
         let patch_pipeline = make_pipeline(&patch_pl, "eval_bicubic_patches");
 
-        Some(Self { device, queue, adapter_name, collision, patch_pipeline, patch_bgl })
+        // 2. Classify with BVH (bindings 0..=4)
+        let bvh_query_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("accel-bvh-query-bgl"),
+            entries: &[entry(0, true), entry(1, true), entry(2, true), entry(3, true), entry(4, false)],
+        });
+        let bvh_query_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("accel-bvh-query-pl"),
+            bind_group_layouts: &[Some(&bvh_query_bgl)],
+            immediate_size: 0,
+        });
+        let classify_tiled_pipeline = make_pipeline(&bvh_query_pl, "classify_points_mesh");
+        let classify_bvh_pipeline = make_pipeline(&bvh_query_pl, "classify_points_bvh");
+
+        Some(Self {
+            device,
+            queue,
+            adapter_name,
+            collision,
+            patch_pipeline,
+            patch_bgl,
+            classify_tiled_pipeline,
+            classify_bvh_pipeline,
+            bvh_query_bgl,
+        })
     }
 
     /// Name of the underlying Vulkan / `wgpu` adapter.
@@ -282,6 +329,90 @@ impl VulkanAccel {
         self.read_mapped_vec(&read_buf)
     }
 
+    /// Classifies points (`[x, y, z, 0.0]`) against a closed mesh (either tiled or BVH traversal).
+    /// Returns `None` when `use_bvh` is requested for non-empty `tris` with an empty `bvh_nodes` slice.
+    pub fn classify_points(&self, points: &[[f32; 4]], tris: &[GpuTri], bvh_nodes: &[GpuBvhNode], use_bvh: bool) -> Option<Vec<bool>> {
+        if points.is_empty() {
+            return Some(Vec::new());
+        }
+        if tris.is_empty() {
+            return Some(vec![false; points.len()]);
+        }
+        if use_bvh && bvh_nodes.is_empty() {
+            return None;
+        }
+        let effective_use_bvh = use_bvh && bvh_fits_traversal_stack(bvh_nodes, tris.len());
+        let num_queries = u32::try_from(points.len()).ok()?;
+        let num_tris = u32::try_from(tris.len()).ok()?;
+        let num_bvh_nodes = if effective_use_bvh { u32::try_from(bvh_nodes.len()).ok()? } else { 0 };
+        let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes, pad: 0 };
+
+        let dummy_bvh = [GpuBvhNode::default()];
+        let bvh_slice = if effective_use_bvh { bvh_nodes } else { &dummy_bvh[..] };
+
+        let _guard = self.collision.lock_device();
+        let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-cls-params"),
+            contents: &encode_pod(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let pts_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-cls-pts"),
+            contents: &encode_pod_slice(points),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let tris_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-cls-tris"),
+            contents: &encode_pod_slice(tris),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let bvh_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-cls-bvh"),
+            contents: &encode_pod_slice(bvh_slice),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let out_size = (points.len() * std::mem::size_of::<u32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-cls-out"),
+            size: out_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let read_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-cls-read"),
+            size: out_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vk-cls-bg"),
+            layout: &self.bvh_query_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: u_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: pts_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: tris_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bvh_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: out_buf.as_entire_binding() },
+            ],
+        });
+
+        let pipeline = if effective_use_bvh { &self.classify_bvh_pipeline } else { &self.classify_tiled_pipeline };
+
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vk-cls-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vk-cls-pass"), timestamp_writes: None });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(num_queries.div_ceil(128), 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&out_buf, 0, &read_buf, 0, out_size);
+        self.queue.submit(Some(enc.finish()));
+
+        let raw: Vec<u32> = self.read_mapped_vec(&read_buf)?;
+        Some(raw.into_iter().map(|v| v != 0).collect())
+    }
+
     /// Maps a staging readback buffer synchronously and decodes its contents into a `Vec<T>`.
     fn read_mapped_vec<T: GpuPod>(&self, read_buf: &wgpu::Buffer) -> Option<Vec<T>> {
         let slice = read_buf.slice(..);
@@ -297,6 +428,164 @@ impl VulkanAccel {
         read_buf.unmap();
         Some(vec)
     }
+}
+
+// ── GPU BVH Builder for Raycast & Point-in-Solid ──────────────────────────
+
+/// Converts a [`Mesh`] into packed [`GpuTri`]s and a flattened [`GpuBvhNode`] hierarchy.
+pub fn build_gpu_bvh_from_mesh(mesh: &Mesh) -> (Vec<GpuTri>, Vec<GpuBvhNode>) {
+    let mut raw_tris = Vec::with_capacity(mesh.triangles.len());
+    for (idx, t) in mesh.triangles.iter().enumerate() {
+        let Some([a, b, c]) = mesh.tri(t) else { continue };
+        raw_tris.push(GpuTri {
+            v0: [a.x as f32, a.y as f32, a.z as f32, f32::from_bits(idx as u32)],
+            v1: [b.x as f32, b.y as f32, b.z as f32, 0.0],
+            v2: [c.x as f32, c.y as f32, c.z as f32, 0.0],
+        });
+    }
+    build_gpu_bvh(&raw_tris)
+}
+
+/// Fixed traversal stack capacity in the WGSL, CUDA PTX, and CPU BVH ray/classification kernels.
+pub const BVH_STACK_CAP: usize = 64;
+
+/// Validates that `bvh_nodes` forms a well-formed, acyclic tree whose worst-case traversal stack usage fits in [`BVH_STACK_CAP`].
+pub fn bvh_fits_traversal_stack(bvh_nodes: &[GpuBvhNode], num_tris: usize) -> bool {
+    if bvh_nodes.is_empty() {
+        return false;
+    }
+    let mut stack = Vec::with_capacity(BVH_STACK_CAP);
+    stack.push((0usize, 1usize));
+    let mut visited = 0usize;
+    while let Some((idx, needed)) = stack.pop() {
+        let Some(node) = bvh_nodes.get(idx) else {
+            return false;
+        };
+        visited += 1;
+        if visited > bvh_nodes.len() {
+            return false;
+        }
+        if (node.right_or_count & 0x8000_0000) != 0 {
+            let first = node.left_or_prim as usize;
+            let count = (node.right_or_count & 0x7FFF_FFFF) as usize;
+            if first.checked_add(count).is_none_or(|end| end > num_tris) {
+                return false;
+            }
+        } else {
+            if needed + 1 > BVH_STACK_CAP {
+                return false;
+            }
+            let left = node.left_or_prim as usize;
+            let right = node.right_or_count as usize;
+            if left >= bvh_nodes.len() || right >= bvh_nodes.len() {
+                return false;
+            }
+            stack.push((right, needed + 1));
+            stack.push((left, needed + 1));
+        }
+    }
+    true
+}
+
+/// Builds a flattened top-down median-split BVH over `tris`, returning `(ordered_tris, nodes)`.
+pub fn build_gpu_bvh(tris: &[GpuTri]) -> (Vec<GpuTri>, Vec<GpuBvhNode>) {
+    if tris.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let mut order: Vec<usize> = (0..tris.len()).collect();
+    let mut ordered_tris = Vec::with_capacity(tris.len());
+    let mut nodes = Vec::with_capacity(tris.len() * 2);
+    build_bvh_node(tris, &mut order, 0, &mut ordered_tris, &mut nodes);
+    (ordered_tris, nodes)
+}
+
+/// Returns the padded `(min, max, centroid)` bounding box of a single [`GpuTri`].
+fn tri_bounds_center(t: &GpuTri) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let min_x = t.v0[0].min(t.v1[0]).min(t.v2[0]) - 1e-6;
+    let min_y = t.v0[1].min(t.v1[1]).min(t.v2[1]) - 1e-6;
+    let min_z = t.v0[2].min(t.v1[2]).min(t.v2[2]) - 1e-6;
+    let max_x = t.v0[0].max(t.v1[0]).max(t.v2[0]) + 1e-6;
+    let max_y = t.v0[1].max(t.v1[1]).max(t.v2[1]) + 1e-6;
+    let max_z = t.v0[2].max(t.v1[2]).max(t.v2[2]) + 1e-6;
+    let cx = (min_x + max_x) * 0.5;
+    let cy = (min_y + max_y) * 0.5;
+    let cz = (min_z + max_z) * 0.5;
+    ([min_x, min_y, min_z], [max_x, max_y, max_z], [cx, cy, cz])
+}
+
+/// Recursively partitions `span` along its longest centroid extent to populate `nodes` and `ordered_tris`.
+fn build_bvh_node(tris: &[GpuTri], span: &mut [usize], depth: usize, ordered_tris: &mut Vec<GpuTri>, nodes: &mut Vec<GpuBvhNode>) -> u32 {
+    let node_idx = nodes.len() as u32;
+    nodes.push(GpuBvhNode::default());
+
+    let (mut bmin, mut bmax) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    let (mut cmin, mut cmax) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+    for &idx in span.iter() {
+        let Some(t) = tris.get(idx) else { continue };
+        let (mn, mx, c) = tri_bounds_center(t);
+        for k in 0..3 {
+            bmin[k] = bmin[k].min(mn[k]);
+            bmax[k] = bmax[k].max(mx[k]);
+            cmin[k] = cmin[k].min(c[k]);
+            cmax[k] = cmax[k].max(c[k]);
+        }
+    }
+
+    let extent = [cmax[0] - cmin[0], cmax[1] - cmin[1], cmax[2] - cmin[2]];
+    let axis = if extent[0] >= extent[1] && extent[0] >= extent[2] {
+        0
+    } else if extent[1] >= extent[2] {
+        1
+    } else {
+        2
+    };
+
+    if span.len() <= 4 || extent[axis] <= 1e-7 || depth + 2 > BVH_STACK_CAP {
+        let first = ordered_tris.len() as u32;
+        for &idx in span.iter() {
+            if let Some(t) = tris.get(idx) {
+                ordered_tris.push(*t);
+            }
+        }
+        let count = (ordered_tris.len() as u32).saturating_sub(first);
+        if let Some(slot) = nodes.get_mut(node_idx as usize) {
+            *slot = GpuBvhNode {
+                min_x: bmin[0],
+                min_y: bmin[1],
+                min_z: bmin[2],
+                left_or_prim: first,
+                max_x: bmax[0],
+                max_y: bmax[1],
+                max_z: bmax[2],
+                right_or_count: 0x8000_0000 | count,
+            };
+        }
+        return node_idx;
+    }
+
+    let mid = span.len() / 2;
+    span.select_nth_unstable_by(mid, |&a, &b| {
+        let ca = tris.get(a).map_or(0.0, |t| tri_bounds_center(t).2[axis]);
+        let cb = tris.get(b).map_or(0.0, |t| tri_bounds_center(t).2[axis]);
+        ca.total_cmp(&cb)
+    });
+    let (left_span, right_span) = span.split_at_mut(mid);
+    let left_child = build_bvh_node(tris, left_span, depth + 1, ordered_tris, nodes);
+    let right_child = build_bvh_node(tris, right_span, depth + 1, ordered_tris, nodes);
+
+    if let Some(slot) = nodes.get_mut(node_idx as usize) {
+        *slot = GpuBvhNode {
+            min_x: bmin[0],
+            min_y: bmin[1],
+            min_z: bmin[2],
+            left_or_prim: left_child,
+            max_x: bmax[0],
+            max_y: bmax[1],
+            max_z: bmax[2],
+            right_or_count: right_child,
+        };
+    }
+    node_idx
 }
 
 // ── CPU Scalar & Rayon Reference Implementations ──────────────────────────
@@ -371,6 +660,124 @@ pub fn cpu_eval_bicubic_f32_rayon(patch_cpts: &[[f32; 4]], queries: &[PatchUvQue
     {
         cpu_eval_bicubic_f32_scalar(patch_cpts, queries)
     }
+}
+
+/// Watertight Plucker-style ray-triangle crossing predicate in `f32` with lexicographic edge tie-breaking.
+fn ray_crosses_f32(a: [f32; 3], b: [f32; 3], c: [f32; 3], o: [f32; 3], d: [f32; 3]) -> bool {
+    let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    let along = d[0] * n[0] + d[1] * n[1] + d[2] * n[2];
+    if along == 0.0 {
+        return false;
+    }
+    let pa = [a[0] - o[0], a[1] - o[1], a[2] - o[2]];
+    let pb = [b[0] - o[0], b[1] - o[1], b[2] - o[2]];
+    let pc = [c[0] - o[0], c[1] - o[1], c[2] - o[2]];
+    let signed_vol = |p: [f32; 3], q: [f32; 3], vp: [f32; 3], vq: [f32; 3]| -> bool {
+        let cr = [vp[1] * vq[2] - vp[2] * vq[1], vp[2] * vq[0] - vp[0] * vq[2], vp[0] * vq[1] - vp[1] * vq[0]];
+        let v = d[0] * cr[0] + d[1] * cr[1] + d[2] * cr[2];
+        if v != 0.0 { v > 0.0 } else { (p[0], p[1], p[2]) < (q[0], q[1], q[2]) }
+    };
+    let s_ab = signed_vol(a, b, pa, pb);
+    let s_bc = signed_vol(b, c, pb, pc);
+    let s_ca = signed_vol(c, a, pc, pa);
+    if s_ab != s_bc || s_ab != s_ca {
+        return false;
+    }
+    ((pa[0] * n[0] + pa[1] * n[1] + pa[2] * n[2]) / along) > 0.0
+}
+
+/// Classifies a single 3D point `p` against `tris` (using `bvh` when non-empty) via 3-ray majority vote.
+fn classify_one_point(p: [f32; 3], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> bool {
+    let dirs: &[[f32; 3]] = &[[0.5773, 0.5774, 0.5776], [-0.6123, 0.3141, 0.7254], [0.2718, -0.8414, 0.4673]];
+    let mut votes = 0u32;
+    if !bvh.is_empty() {
+        for &d in dirs {
+            let inv_d = [1.0 / d[0], 1.0 / d[1], 1.0 / d[2]];
+            let mut crossings = 0u32;
+            let mut stack = [0u32; 64];
+            let mut sp = 1usize;
+            while sp > 0 {
+                sp -= 1;
+                let Some(node) = bvh.get(stack[sp] as usize) else { continue };
+                if ray_aabb_f32(p, inv_d, node) < 0.0 {
+                    continue;
+                }
+                if (node.right_or_count & 0x8000_0000) != 0 {
+                    let first = node.left_or_prim as usize;
+                    let count = (node.right_or_count & 0x7FFF_FFFF) as usize;
+                    for t in tris.get(first..first + count).unwrap_or(&[]) {
+                        let a = [t.v0[0], t.v0[1], t.v0[2]];
+                        let b = [t.v1[0], t.v1[1], t.v1[2]];
+                        let c = [t.v2[0], t.v2[1], t.v2[2]];
+                        if ray_crosses_f32(a, b, c, p, d) {
+                            crossings += 1;
+                        }
+                    }
+                } else if sp + 2 <= 64 {
+                    stack[sp] = node.right_or_count;
+                    stack[sp + 1] = node.left_or_prim;
+                    sp += 2;
+                }
+            }
+            votes += crossings & 1;
+        }
+    } else {
+        for &d in dirs {
+            let mut crossings = 0u32;
+            for t in tris {
+                let a = [t.v0[0], t.v0[1], t.v0[2]];
+                let b = [t.v1[0], t.v1[1], t.v1[2]];
+                let c = [t.v2[0], t.v2[1], t.v2[2]];
+                if ray_crosses_f32(a, b, c, p, d) {
+                    crossings += 1;
+                }
+            }
+            votes += crossings & 1;
+        }
+    }
+    votes >= 2
+}
+
+/// CPU scalar point-in-solid classification.
+pub fn cpu_classify_points_scalar(points: &[[f32; 4]], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<bool> {
+    let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+    points.iter().map(|p| classify_one_point([p[0], p[1], p[2]], tris, valid_bvh)).collect()
+}
+
+/// CPU `rayon` parallel point-in-solid classification.
+pub fn cpu_classify_points_rayon(points: &[[f32; 4]], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<bool> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+        points.par_iter().map(|p| classify_one_point([p[0], p[1], p[2]], tris, valid_bvh)).collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        cpu_classify_points_scalar(points, tris, bvh)
+    }
+}
+
+/// Slab test returning the non-negative entry distance of a ray `(o, inv_d)` into BVH node `n`, or `-1.0` on miss.
+fn ray_aabb_f32(o: [f32; 3], inv_d: [f32; 3], n: &GpuBvhNode) -> f32 {
+    let tx1 = (n.min_x - o[0]) * inv_d[0];
+    let tx2 = (n.max_x - o[0]) * inv_d[0];
+    let mut tmin = tx1.min(tx2);
+    let mut tmax = tx1.max(tx2);
+
+    let ty1 = (n.min_y - o[1]) * inv_d[1];
+    let ty2 = (n.max_y - o[1]) * inv_d[1];
+    tmin = tmin.max(ty1.min(ty2));
+    tmax = tmax.min(ty1.max(ty2));
+
+    let tz1 = (n.min_z - o[2]) * inv_d[2];
+    let tz2 = (n.max_z - o[2]) * inv_d[2];
+    tmin = tmin.max(tz1.min(tz2));
+    tmax = tmax.min(tz1.max(tz2));
+
+    let t_enter = tmin.max(0.0);
+    if tmax >= t_enter { t_enter } else { -1.0 }
 }
 
 // ── Calibration Data Structures & Scaling Microbenchmark ──────────────────
@@ -655,8 +1062,21 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         })
         .collect();
 
+    // Closed sphere mesh with 128 triangles for PointInSolid
+    let sphere_mesh = synthetic_closed_sphere_mesh(10.0, 8, 8);
+    let (sphere_tris, sphere_bvh) = build_gpu_bvh_from_mesh(&sphere_mesh);
+
+    let query_pts: Vec<[f32; 4]> = (0..max_n)
+        .map(|i| {
+            let f = (i as f32) / (max_n as f32);
+            let r = 15.0 * (f - 0.5);
+            [r, r * 0.7, r * -0.4, 0.0]
+        })
+        .collect();
+
     if let Some(v) = vk {
         let _ = v.eval_bicubic_f32(&patch_f32, &queries_f32[..16]);
+        let _ = v.classify_points(&query_pts[..16], &sphere_tris, &sphere_bvh, true);
     }
     if let Some(c) = cuda {
         let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..max_n], false);
@@ -664,6 +1084,8 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
             let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..16], true);
             let _ = c.eval_bicubic_tensor_f32(&patch_f32, &queries_f32[..16], true);
         }
+        let _ = c.classify_points(&query_pts[..16], &sphere_tris, false);
+        let _ = c.classify_points_rt_bvh(&query_pts[..16], &sphere_tris, &sphere_bvh);
     }
 
     let mut kernels = Vec::with_capacity(KernelOp::ALL.len());
@@ -725,6 +1147,34 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                         (KernelOp::TensorPatchEvalF32, BackendTarget::AmpereTensorCore) => time_ns(|| {
                             if let Some(c) = cuda {
                                 std::hint::black_box(c.eval_bicubic_tensor_f32(&patch_f32, &queries_f32[..n], true));
+                            }
+                        }),
+                        (KernelOp::PointInSolid, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_classify_points_scalar(&query_pts[..n], &sphere_tris, &[]));
+                        }),
+                        (KernelOp::PointInSolid, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_classify_points_rayon(&query_pts[..n], &sphere_tris, &[]));
+                        }),
+                        (KernelOp::PointInSolid, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.classify_points(&query_pts[..n], &sphere_tris, &sphere_bvh, false));
+                            }
+                        }),
+                        (KernelOp::PointInSolid, BackendTarget::CudaGeneric) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.classify_points(&query_pts[..n], &sphere_tris, false));
+                            }
+                        }),
+                        (KernelOp::PointInSolid, BackendTarget::AmperePtx) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.classify_points(&query_pts[..n], &sphere_tris, true));
+                            }
+                        }),
+                        (KernelOp::PointInSolid, BackendTarget::RtCoreBvh) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.classify_points_rt_bvh(&query_pts[..n], &sphere_tris, &sphere_bvh));
+                            } else if let Some(v) = vk {
+                                std::hint::black_box(v.classify_points(&query_pts[..n], &sphere_tris, &sphere_bvh, true));
                             }
                         }),
                         _ => 1,
@@ -935,6 +1385,63 @@ impl Dispatcher {
             }
         }
         (BackendTarget::CpuScalar, cpu_eval_bicubic_f32_scalar(patch_cpts, queries))
+    }
+
+    /// Dispatches batched 3-ray watertight point-in-solid classification (`Mesh::contains`).
+    pub fn classify_points(&self, points: &[[f32; 4]], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> (BackendTarget, Vec<bool>) {
+        let target = self.select_backend(KernelOp::PointInSolid, points.len());
+        match target {
+            BackendTarget::RtCoreBvh => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global() {
+                    if let Some(out) = c.classify_points_rt_bvh(points, tris, bvh) {
+                        return (BackendTarget::RtCoreBvh, out);
+                    }
+                    let use_amp = c.has_ampere_ptx();
+                    if let Some(out) = c.classify_points(points, tris, use_amp) {
+                        return (if use_amp { BackendTarget::AmperePtx } else { BackendTarget::CudaGeneric }, out);
+                    }
+                }
+                if let Some(v) = VulkanAccel::global() {
+                    if let Some(out) = v.classify_points(points, tris, bvh, true) {
+                        return (BackendTarget::RtCoreBvh, out);
+                    }
+                    if let Some(out) = v.classify_points(points, tris, bvh, false) {
+                        return (BackendTarget::VulkanCompute, out);
+                    }
+                }
+            }
+            BackendTarget::AmperePtx | BackendTarget::AmpereTensorCore => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.classify_points(points, tris, true)
+                {
+                    return (BackendTarget::AmperePtx, out);
+                }
+            }
+            BackendTarget::CudaGeneric => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.classify_points(points, tris, false)
+                {
+                    return (BackendTarget::CudaGeneric, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.classify_points(points, tris, bvh, false)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_classify_points_rayon(points, tris, bvh));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_classify_points_scalar(points, tris, bvh));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_classify_points_scalar(points, tris, bvh))
     }
 
     /// Evaluates a [`TessPlan`] using either CPU scalar or parallel `rayon` across faces.

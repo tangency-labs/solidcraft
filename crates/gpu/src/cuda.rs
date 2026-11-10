@@ -234,11 +234,15 @@ impl GpuPod for PatchEvalOutF32 {
 
 struct GenericFunctions {
     eval_patch_f32: CudaFunction,
+    classify_points: CudaFunction,
+    classify_points_rt_bvh: CudaFunction,
 }
 
 struct AmpereFunctions {
     eval_patch_f32_sm86: CudaFunction,
     eval_patch_tensor_f32_sm86: CudaFunction,
+    classify_points_sm86: CudaFunction,
+    classify_points_rt_bvh_sm86: CudaFunction,
 }
 
 /// Multi-tier `cudarc` CUDA backend holding both Generic (`sm_70`) and Handcrafted Ampere (`sm_86`) modules.
@@ -330,7 +334,11 @@ impl CudaBackend {
         let stream = ctx.default_stream();
 
         let mod_generic = ctx.load_module(Ptx::from_src(PTX_SM70)).ok()?;
-        let generic = GenericFunctions { eval_patch_f32: mod_generic.load_function("eval_bicubic_patch_f32_generic").ok()? };
+        let generic = GenericFunctions {
+            eval_patch_f32: mod_generic.load_function("eval_bicubic_patch_f32_generic").ok()?,
+            classify_points: mod_generic.load_function("classify_points_generic").ok()?,
+            classify_points_rt_bvh: mod_generic.load_function("classify_points_rt_bvh").ok()?,
+        };
 
         let (mod_ampere, ampere) = if best.supports_ampere_ptx {
             if let Ok(m86) = ctx.load_module(Ptx::from_src(PTX_SM86)) {
@@ -338,6 +346,8 @@ impl CudaBackend {
                     Some(AmpereFunctions {
                         eval_patch_f32_sm86: m86.load_function("eval_bicubic_patch_f32_sm86").ok()?,
                         eval_patch_tensor_f32_sm86: m86.load_function("eval_bicubic_patch_tensor_f32_sm86").ok()?,
+                        classify_points_sm86: m86.load_function("classify_points_sm86").ok()?,
+                        classify_points_rt_bvh_sm86: m86.load_function("classify_points_rt_bvh").ok()?,
                     })
                 })();
                 (Some(m86), funcs)
@@ -450,5 +460,81 @@ impl CudaBackend {
         }
 
         self.stream.clone_dtoh(&d_out).ok()
+    }
+
+    /// Classifies query points (`[x, y, z, 0.0]`) against a closed triangle mesh using 3-ray majority vote.
+    pub fn classify_points(&self, points: &[[f32; 4]], tris: &[GpuTri], use_ampere_sm86: bool) -> Option<Vec<bool>> {
+        if points.is_empty() {
+            return Some(Vec::new());
+        }
+        if tris.is_empty() {
+            return Some(vec![false; points.len()]);
+        }
+        let func = if use_ampere_sm86 { &self.ampere.as_ref()?.classify_points_sm86 } else { &self.generic.classify_points };
+
+        let num_queries = u32::try_from(points.len()).ok()?;
+        let num_tris = u32::try_from(tris.len()).ok()?;
+
+        let _guard = self.lock_and_bind()?;
+        let d_pts = self.stream.clone_htod(points).ok()?;
+        let d_tris = self.stream.clone_htod(tris).ok()?;
+        let mut d_out = self.stream.alloc_zeros::<u32>(points.len()).ok()?;
+
+        let block_x = 128u32;
+        let cfg = LaunchConfig { grid_dim: (num_queries.div_ceil(block_x), 1, 1), block_dim: (block_x, 1, 1), shared_mem_bytes: 0 };
+
+        // SAFETY: Kernel signature takes `(const float4*, const GpuTri*, u32*, u32, u32)` with 128 threads/block.
+        unsafe {
+            self.stream.launch_builder(func).arg(&d_pts).arg(&d_tris).arg(&mut d_out).arg(&num_queries).arg(&num_tris).launch(cfg).ok()?;
+        }
+
+        let raw = self.stream.clone_dtoh(&d_out).ok()?;
+        Some(raw.into_iter().map(|v| v != 0).collect())
+    }
+
+    /// Classifies query points using hardware-aligned GPU BVH ray traversal ($O(\log M)$ per ray).
+    /// Returns `None` if `tris` is non-empty and `bvh_nodes` is empty or invalid so the dispatcher can fall back.
+    pub fn classify_points_rt_bvh(&self, points: &[[f32; 4]], tris: &[GpuTri], bvh_nodes: &[GpuBvhNode]) -> Option<Vec<bool>> {
+        if points.is_empty() {
+            return Some(Vec::new());
+        }
+        if tris.is_empty() {
+            return Some(vec![false; points.len()]);
+        }
+        if !crate::dispatch::bvh_fits_traversal_stack(bvh_nodes, tris.len()) {
+            return None;
+        }
+        let func = self.ampere.as_ref().map_or(&self.generic.classify_points_rt_bvh, |a| &a.classify_points_rt_bvh_sm86);
+
+        let num_queries = u32::try_from(points.len()).ok()?;
+        let num_tris = u32::try_from(tris.len()).ok()?;
+        let num_nodes = u32::try_from(bvh_nodes.len()).ok()?;
+
+        let _guard = self.lock_and_bind()?;
+        let d_pts = self.stream.clone_htod(points).ok()?;
+        let d_tris = self.stream.clone_htod(tris).ok()?;
+        let d_bvh = self.stream.clone_htod(bvh_nodes).ok()?;
+        let mut d_out = self.stream.alloc_zeros::<u32>(points.len()).ok()?;
+
+        let block_x = 128u32;
+        let cfg = LaunchConfig { grid_dim: (num_queries.div_ceil(block_x), 1, 1), block_dim: (block_x, 1, 1), shared_mem_bytes: 0 };
+
+        // SAFETY: Kernel signature takes `(const float4*, const GpuTri*, const GpuBvhNode*, u32*, u32, u32, u32)`.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(&d_pts)
+                .arg(&d_tris)
+                .arg(&d_bvh)
+                .arg(&mut d_out)
+                .arg(&num_queries)
+                .arg(&num_tris)
+                .arg(&num_nodes)
+                .launch(cfg)
+                .ok()?;
+        }
+
+        let raw = self.stream.clone_dtoh(&d_out).ok()?;
+        Some(raw.into_iter().map(|v| v != 0).collect())
     }
 }

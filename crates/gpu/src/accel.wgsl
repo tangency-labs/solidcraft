@@ -125,3 +125,204 @@ fn eval_bicubic_patches(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 // ── Watertight Ray-Triangle Crossing & Hit Helpers ────────────────────────
 
+// Exact signed-volume ray crossing matching `solidcraft_geom::mesh::ray_crosses`.
+fn ray_crosses_tri(a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, o: vec3<f32>, dir: vec3<f32>) -> bool {
+    let normal = cross(b - a, c - a);
+    let along = dot(dir, normal);
+    if along == 0.0 {
+        return false;
+    }
+    let pa = a - o;
+    let pb = b - o;
+    let pc = c - o;
+    let v_ab = dot(dir, cross(pa, pb));
+    let v_bc = dot(dir, cross(pb, pc));
+    let v_ca = dot(dir, cross(pc, pa));
+
+    let s_ab = select(
+        (a.x < b.x) || (a.x == b.x && (a.y < b.y || (a.y == b.y && a.z < b.z))),
+        v_ab > 0.0,
+        v_ab != 0.0,
+    );
+    let s_bc = select(
+        (b.x < c.x) || (b.x == c.x && (b.y < c.y || (b.y == c.y && b.z < c.z))),
+        v_bc > 0.0,
+        v_bc != 0.0,
+    );
+    let s_ca = select(
+        (c.x < a.x) || (c.x == a.x && (c.y < a.y || (c.y == a.y && c.z < a.z))),
+        v_ca > 0.0,
+        v_ca != 0.0,
+    );
+
+    if (s_ab != s_bc) || (s_ab != s_ca) {
+        return false;
+    }
+    return (dot(pa, normal) / along) > 0.0;
+}
+
+// Ray-triangle intersection distance (> 1e-7) or -1.0 if missed.
+fn ray_hit_tri(a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, o: vec3<f32>, dir: vec3<f32>) -> f32 {
+    let e1 = b - a;
+    let e2 = c - a;
+    let h = cross(dir, e2);
+    let det = dot(e1, h);
+    if abs(det) < 1e-12 {
+        return -1.0;
+    }
+    let inv_det = 1.0 / det;
+    let s = o - a;
+    let u = inv_det * dot(s, h);
+    if u < 0.0 || u > 1.0 {
+        return -1.0;
+    }
+    let q = cross(s, e1);
+    let v = inv_det * dot(dir, q);
+    if v < 0.0 || (u + v) > 1.0 {
+        return -1.0;
+    }
+    let t = inv_det * dot(e2, q);
+    return select(-1.0, t, t > 1e-7);
+}
+
+fn ray_aabb_dist(o: vec3<f32>, inv_d: vec3<f32>, n: BvhNode) -> f32 {
+    let tx1 = (n.min_x - o.x) * inv_d.x;
+    let tx2 = (n.max_x - o.x) * inv_d.x;
+    var tmin = min(tx1, tx2);
+    var tmax = max(tx1, tx2);
+
+    let ty1 = (n.min_y - o.y) * inv_d.y;
+    let ty2 = (n.max_y - o.y) * inv_d.y;
+    tmin = max(tmin, min(ty1, ty2));
+    tmax = min(tmax, max(ty1, ty2));
+
+    let tz1 = (n.min_z - o.z) * inv_d.z;
+    let tz2 = (n.max_z - o.z) * inv_d.z;
+    tmin = max(tmin, min(tz1, tz2));
+    tmax = min(tmax, max(tz1, tz2));
+
+    if tmax >= max(tmin, 0.0) {
+        return max(tmin, 0.0);
+    }
+    return -1.0;
+}
+
+// ── Kernel 2: Tiled Point-in-Solid Classification ─────────────────────────
+
+struct MeshQueryParams {
+    num_queries: u32,
+    num_tris: u32,
+    num_bvh_nodes: u32,
+    pad: u32,
+}
+
+@group(0) @binding(0) var<uniform> mq_params: MeshQueryParams;
+@group(0) @binding(1) var<storage, read> mq_points: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> mq_tris: array<GpuTri>;
+@group(0) @binding(3) var<storage, read> mq_bvh: array<BvhNode>;
+@group(0) @binding(4) var<storage, read_write> mq_out_u32: array<u32>;
+
+var<workgroup> shared_tris: array<GpuTri, 128>;
+
+@compute @workgroup_size(128)
+fn classify_points_mesh(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let q_idx = gid.x;
+    let tid = lid.x;
+    let is_active = q_idx < mq_params.num_queries;
+    let p = select(vec3<f32>(0.0), mq_points[min(q_idx, max(mq_params.num_queries, 1u) - 1u)].xyz, is_active);
+
+    // Three skewed ray directions matching `solidcraft_geom::mesh::RAY_DIRS`.
+    let d0 = vec3<f32>(0.5773, 0.5774, 0.5776);
+    let d1 = vec3<f32>(-0.6123, 0.3141, 0.7254);
+    let d2 = vec3<f32>(0.2718, -0.8414, 0.4673);
+
+    var c0: u32 = 0u;
+    var c1: u32 = 0u;
+    var c2: u32 = 0u;
+
+    let num_tiles = (mq_params.num_tris + 127u) / 128u;
+    for (var tile: u32 = 0u; tile < num_tiles; tile = tile + 1u) {
+        let tri_idx = tile * 128u + tid;
+        if tri_idx < mq_params.num_tris {
+            shared_tris[tid] = mq_tris[tri_idx];
+        }
+        workgroupBarrier();
+
+        if is_active {
+            let count = min(128u, mq_params.num_tris - tile * 128u);
+            for (var k: u32 = 0u; k < count; k = k + 1u) {
+                let tri = shared_tris[k];
+                let a = tri.v0.xyz;
+                let b = tri.v1.xyz;
+                let c = tri.v2.xyz;
+                if ray_crosses_tri(a, b, c, p, d0) { c0 += 1u; }
+                if ray_crosses_tri(a, b, c, p, d1) { c1 += 1u; }
+                if ray_crosses_tri(a, b, c, p, d2) { c2 += 1u; }
+            }
+        }
+        workgroupBarrier();
+    }
+
+    if is_active {
+        let votes = (c0 & 1u) + (c1 & 1u) + (c2 & 1u);
+        mq_out_u32[q_idx] = select(0u, 1u, votes >= 2u);
+    }
+}
+
+// ── Kernel 3: BVH-Accelerated Point-in-Solid Classification (RT/BVH Tier) ──
+
+fn bvh_ray_crossings(p: vec3<f32>, dir: vec3<f32>) -> u32 {
+    if mq_params.num_bvh_nodes == 0u {
+        return 0u;
+    }
+    let inv_d = vec3<f32>(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+    var crossings: u32 = 0u;
+    var stack: array<u32, 64>;
+    var sp: u32 = 1u;
+    stack[0] = 0u;
+
+    while sp > 0u {
+        sp -= 1u;
+        let node = mq_bvh[stack[sp]];
+        if ray_aabb_dist(p, inv_d, node) < 0.0 {
+            continue;
+        }
+        if (node.right_or_count & 0x80000000u) != 0u {
+            let first = node.left_or_prim;
+            let count = node.right_or_count & 0x7FFFFFFFu;
+            for (var i: u32 = 0u; i < count; i = i + 1u) {
+                let tri = mq_tris[first + i];
+                if ray_crosses_tri(tri.v0.xyz, tri.v1.xyz, tri.v2.xyz, p, dir) {
+                    crossings += 1u;
+                }
+            }
+        } else if sp + 2u <= 64u {
+            stack[sp] = node.right_or_count;
+            stack[sp + 1u] = node.left_or_prim;
+            sp += 2u;
+        }
+    }
+    return crossings;
+}
+
+@compute @workgroup_size(128)
+fn classify_points_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let q_idx = gid.x;
+    if q_idx >= mq_params.num_queries {
+        return;
+    }
+    let p = mq_points[q_idx].xyz;
+    let d0 = vec3<f32>(0.5773, 0.5774, 0.5776);
+    let d1 = vec3<f32>(-0.6123, 0.3141, 0.7254);
+    let d2 = vec3<f32>(0.2718, -0.8414, 0.4673);
+
+    let c0 = bvh_ray_crossings(p, d0);
+    let c1 = bvh_ray_crossings(p, d1);
+    let c2 = bvh_ray_crossings(p, d2);
+    let votes = (c0 & 1u) + (c1 & 1u) + (c2 & 1u);
+    mq_out_u32[q_idx] = select(0u, 1u, votes >= 2u);
+}
+

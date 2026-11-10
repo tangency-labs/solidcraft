@@ -769,6 +769,27 @@ const PATCH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
     crate::dispatch::BackendTarget::AmperePtx,
     crate::dispatch::BackendTarget::AmpereTensorCore,
 ];
+
+/// Backend targets that implement BVH queries (point-in-solid, raycast, AABB overlap).
+#[cfg(not(target_arch = "wasm32"))]
+const BVH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::RtCoreBvh,
+];
+
+/// Backend targets that implement general compute kernels (point-mesh distance, mass properties, non-BVH queries).
+#[cfg(not(target_arch = "wasm32"))]
+const COMPUTE_TARGETS: [crate::dispatch::BackendTarget; 5] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+];
 #[test]
 fn bicubic_patch_common_and_edge_cases() {
     use crate::cuda::{CudaBackend, PatchUvQueryF32};
@@ -972,5 +993,148 @@ fn bicubic_patch_common_and_edge_cases() {
                 }
             }
         }
+    }
+}
+
+/// Verifies 3-ray watertight point-in-solid classification parity across CPU, Vulkan, CUDA PTX, and RT/BVH backends, including empty-BVH fallback.
+#[test]
+fn multi_backend_point_in_solid_and_rt_bvh_parity() {
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{
+        VulkanAccel, build_gpu_bvh_from_mesh, cpu_classify_points_rayon, cpu_classify_points_scalar, synthetic_closed_sphere_mesh,
+    };
+
+    let mesh = synthetic_closed_sphere_mesh(10.0, 10, 10);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&mesh);
+
+    let mut pts = Vec::new();
+    for ix in -6..=6 {
+        for iy in -6..=6 {
+            for iz in -4..=4 {
+                let p = [ix as f32 * 2.1 + 0.13, iy as f32 * 2.1 - 0.17, iz as f32 * 2.9 + 0.07, 0.0];
+                pts.push(p);
+            }
+        }
+    }
+
+    let ref_scalar = cpu_classify_points_scalar(&pts, &tris, &[]);
+    let ref_bvh = cpu_classify_points_scalar(&pts, &tris, &bvh);
+    let ref_rayon = cpu_classify_points_rayon(&pts, &tris, &bvh);
+    assert_eq!(ref_scalar, ref_bvh, "CPU brute-force vs CPU BVH point classification");
+    assert_eq!(ref_scalar, ref_rayon, "CPU scalar vs CPU rayon point classification");
+
+    // Verify agreement with SolidCraft's authoritative Mesh::contains
+    for (i, p) in pts.iter().enumerate() {
+        let v = Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+        assert_eq!(ref_scalar[i], mesh.contains(v), "mismatch with Mesh::contains at {i}: {v:?}");
+    }
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_tiled = vk.classify_points(&pts, &tris, &bvh, false).expect("vk classify tiled");
+        let vk_bvh = vk.classify_points(&pts, &tris, &bvh, true).expect("vk classify bvh");
+        assert_eq!(ref_scalar, vk_tiled, "Vulkan tiled classify_points parity");
+        assert_eq!(ref_scalar, vk_bvh, "Vulkan BVH classify_points parity");
+        // Empty-BVH with non-empty tris must return None on BVH path so callers fall back to brute-force
+        assert!(vk.classify_points(&pts, &tris, &[], true).is_none());
+        assert_eq!(vk.classify_points(&pts, &[], &[], true), Some(vec![false; pts.len()]));
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.classify_points(&pts, &tris, false).expect("cuda sm70 classify_points");
+        assert_eq!(ref_scalar, cu_gen, "CUDA sm_70 classify_points parity");
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.classify_points(&pts, &tris, true).expect("cuda sm86 classify_points");
+            assert_eq!(ref_scalar, cu_amp, "CUDA sm_86 cp.async classify_points parity");
+        }
+        let cu_rt_bvh = cuda.classify_points_rt_bvh(&pts, &tris, &bvh).expect("cuda rt_bvh classify_points");
+        assert_eq!(ref_scalar, cu_rt_bvh, "CUDA RT/BVH classify_points parity");
+        // Empty-BVH with non-empty tris must return None so the dispatcher falls back
+        assert!(cuda.classify_points_rt_bvh(&pts, &tris, &[]).is_none());
+        assert_eq!(cuda.classify_points_rt_bvh(&pts, &[], &[]), Some(vec![false; pts.len()]));
+    }
+}
+
+#[test]
+fn point_in_solid_common_and_edge_cases() {
+    use crate::cuda::GpuTri;
+    use crate::dispatch::{Dispatcher, build_gpu_bvh_from_mesh, cpu_classify_points_scalar};
+
+    let disp = Dispatcher::global();
+
+    // 1. Non-convex Genus-1 Torus (major_r = 10.0, minor_r = 3.0, centered at origin around Z):
+    // Central hole (r < 7.0) is outside; tube interior ((sqrt(x^2+y^2) - 10)^2 + z^2 < 9) is inside.
+    let torus_solid = ok(solidcraft_kernel::torus(Vec3::ZERO, 10.0, 3.0));
+    let torus_mesh = ok(torus_solid.mesh(&solidcraft_kernel::MeshTolerance::chord(0.15)));
+    let (torus_tris, torus_bvh) = build_gpu_bvh_from_mesh(&torus_mesh);
+
+    let torus_cases: &[([f32; 4], bool, &str)] = &[
+        ([0.0, 0.0, 0.0, 0.0], false, "origin in central torus hole"),
+        ([4.0, 0.0, 0.0, 0.0], false, "off-center in central torus hole"),
+        ([10.0, 0.0, 0.0, 0.0], true, "center of torus tube +X"),
+        ([-10.0, 0.0, 1.0, 0.0], true, "inside torus tube -X/+Z"),
+        ([0.0, 10.0, -1.5, 0.0], true, "inside torus tube +Y/-Z"),
+        ([7.071, 7.071, 0.0, 0.0], true, "inside torus tube 45 deg"),
+        ([10.0, 0.0, 4.5, 0.0], false, "above torus tube"),
+        ([15.0, 0.0, 0.0, 0.0], false, "outside outer torus radius"),
+    ];
+    let torus_pts: Vec<[f32; 4]> = torus_cases.iter().map(|&(p, _, _)| p).collect();
+
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, cls_bvh) = d.classify_points(&torus_pts, &torus_tris, &torus_bvh);
+        let (_, cls_raw) = d.classify_points(&torus_pts, &torus_tris, &[]);
+        for (i, &(_, exp, label)) in torus_cases.iter().enumerate() {
+            assert_eq!(cls_bvh[i], exp, "torus BVH classify mismatch for '{label}' on {target:?}");
+            assert_eq!(cls_raw[i], exp, "torus raw classify mismatch for '{label}' on {target:?}");
+        }
+    }
+
+    // 2. Boolean Cut: 10x10x10 box with a vertical through-hole cylinder of radius 2.5 at (5, 5, z):
+    let outer_box = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)));
+    let hole_cyl = ok(solidcraft_kernel::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.5, 12.0));
+    let hollow_box = ok(solidcraft_kernel::boolean(&outer_box, &hole_cyl, BoolOp::Cut)).expect("boolean cut");
+    let hollow_mesh = ok(hollow_box.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    let (hollow_tris, hollow_bvh) = build_gpu_bvh_from_mesh(&hollow_mesh);
+
+    let hollow_cases: &[([f32; 4], bool, &str)] = &[
+        ([5.0, 5.0, 5.0, 0.0], false, "center of cylindrical through-hole"),
+        ([6.0, 5.0, 2.0, 0.0], false, "inside cylindrical through-hole r=1"),
+        ([1.5, 1.5, 5.0, 0.0], true, "inside solid corner wall"),
+        ([8.5, 5.0, 5.0, 0.0], true, "inside solid wall at r=3.5"),
+        ([-1.0, 5.0, 5.0, 0.0], false, "outside box -X"),
+        ([5.0, 5.0, 11.0, 0.0], false, "above box +Z"),
+    ];
+    let hollow_pts: Vec<[f32; 4]> = hollow_cases.iter().map(|&(p, _, _)| p).collect();
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, cls) = d.classify_points(&hollow_pts, &hollow_tris, &hollow_bvh);
+        for (i, &(_, exp, label)) in hollow_cases.iter().enumerate() {
+            assert_eq!(cls[i], exp, "hollow box classify mismatch for '{label}' on {target:?}");
+        }
+    }
+
+    // 3. Degenerate (zero-area collinear/coincident) triangles mixed into a closed mesh + shared-edge ray alignment:
+    let mut tris_with_degen = hollow_tris.clone();
+    tris_with_degen.push(GpuTri { v0: [5.0, 5.0, 5.0, 0.0], v1: [5.0, 5.0, 5.0, 0.0], v2: [5.0, 5.0, 5.0, 0.0] });
+    tris_with_degen.push(GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [1.0, 1.0, 1.0, 0.0], v2: [2.0, 2.0, 2.0, 0.0] });
+
+    // Also include points aligned with box vertices/edges (0,0,0), (5,0,5) and tile-boundary batch sizes (129 points)
+    let mut edge_pts = hollow_pts.clone();
+    while edge_pts.len() < 129 {
+        let idx = edge_pts.len();
+        let t = idx as f32 / 129.0;
+        edge_pts.push([1.0 + t * 0.5, 1.0 + t * 0.5, 1.0 + t * 8.0, 0.0]);
+    }
+    let ref_edge = cpu_classify_points_scalar(&edge_pts, &tris_with_degen, &[]);
+    for target in COMPUTE_TARGETS {
+        let (_, got) = disp.with_forced_backend(Some(target)).classify_points(&edge_pts, &tris_with_degen, &[]);
+        assert_eq!(got, ref_edge, "degenerate-tri + 129-point classify parity failed on {target:?}");
+    }
+
+    // 4. Empty points / empty triangles edge cases:
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        assert!(d.classify_points(&[], &hollow_tris, &hollow_bvh).1.is_empty());
+        assert_eq!(d.classify_points(&hollow_pts, &[], &[]).1, vec![false; hollow_pts.len()]);
     }
 }
