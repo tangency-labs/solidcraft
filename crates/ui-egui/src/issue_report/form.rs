@@ -46,7 +46,8 @@ pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
         let (url, copy_needed) = draft_url(&title, &paste_body);
         if !copy_needed {
             copy_screenshot(draft, ctx);
-            draft.note = solidcraft_ui_text::tr(key).to_string();
+            // The window's note names the GitHub form; the issue's own wording says "this box".
+            draft.note = solidcraft_ui_text::tr("ui.report_screenshot_copied").to_string();
             ctx.open_url(egui::OpenUrl::new_tab(url));
             draft.opened_github = true;
             return;
@@ -78,7 +79,8 @@ pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
     draft.opened_github = true;
 }
 
-const ALL_GUIDANCE: [&str; 5] = [
+const ALL_GUIDANCE: [&str; 6] = [
+    "ui.report_screenshot_copied",
     "ui.report_screenshot_open",
     "Report text copied. Paste it into GitHub and submit your report there.",
     "Review your report on GitHub and click Submit new issue to publish it.",
@@ -224,6 +226,8 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                         let guidance = if draft.opened_github {
                             if copy_needed {
                                 "Report text copied. Paste it into GitHub and submit your report there."
+                            } else if draft.image.is_some() {
+                                "ui.report_screenshot_copied"
                             } else {
                                 "Review your report on GitHub and click Submit new issue to publish it."
                             }
