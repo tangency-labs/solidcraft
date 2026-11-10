@@ -3904,6 +3904,7 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
                 seed: 1977,
                 tone_map: ToneMap::AcesFitted,
                 denoise: true,
+                clamp_indirect: Some(8.0),
                 denoise_settings: Default::default(),
                 denoise_diagnostics: false,
                 supersampling: 1,
