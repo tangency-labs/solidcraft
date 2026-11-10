@@ -2293,6 +2293,8 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.app.start("component.insert_design");
     assert!(!menu_open(&h.app));
     h.frames(3);
+    // The picked file is read beside the window (#11593); `run` refuses until that is done (#14390).
+    h.settle();
     context_menu::close(&mut h.app);
 
     let dir = h.dir.clone();
