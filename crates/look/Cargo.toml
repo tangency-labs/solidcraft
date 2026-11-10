@@ -3,7 +3,7 @@ name = "solidcraft-look"
 description = "SolidCraft's look, ready to install into the UI kit: its icon masters and colour roles, code-drawn glyphs, IBM Plex interface faces and built-in themes"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file = "LICENSE"
 
 [lints]
 workspace = true

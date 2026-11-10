@@ -23,3 +23,9 @@ The workspace tab table is the app's, not the look's. The accent ramps are in `s
 Licences: the code and artwork are MIT OR Apache-2.0; the IBM Plex faces are SIL OFL 1.1, with the
 licence text beside each (`fonts/*/OFL.txt`). Every file has a row in the repository's
 ATTRIBUTION.md. Read `icons/AGENTS.md` and `icons/STYLE_GUIDE.md` before icon work.
+
+## Licence
+
+This crate is part of SolidCraft's brand and interface, under the SolidCraft Brand and Interface
+Licence ([LICENSE](LICENSE)). Use it as part of SolidCraft; using it in another program or product
+needs the maintainers' written permission first.

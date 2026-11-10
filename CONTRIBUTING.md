@@ -518,4 +518,6 @@ about 250 KB and a clip under about 1 MB.
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).
+of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
+`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+[LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).
