@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use solidcore_record::Vec3;
 
 use crate::pbr;
-use wgpu::util::DeviceExt;
 
 mod ao;
 pub use ao::GroundAo;
@@ -1457,11 +1456,7 @@ fn class_gpu(
     let bytes: Vec<u8> = runs.iter().flat_map(|r| r.clone()).flat_map(|i| i.to_le_bytes()).collect();
     *uploaded += bytes.len() as u64;
     let count = u32::try_from(bytes.len() / 4).unwrap_or(u32::MAX);
-    let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("sc_block_indices"),
-        contents: &bytes,
-        usage: wgpu::BufferUsages::INDEX,
-    });
+    let indices = buffer_init(device, "sc_block_indices", &bytes, wgpu::BufferUsages::INDEX)?;
     Some(ClassGpu::Indexed { indices, count })
 }
 
@@ -1471,15 +1466,15 @@ impl BlockGpu {
         let same_vertices = old.as_ref().is_some_and(|o| Arc::ptr_eq(&o.bytes.vertices, &bytes.vertices));
         let vertices = if !fits || bytes.vertices.is_empty() {
             None
-        } else if same_vertices {
+        } else if same_vertices && old.as_ref().is_some_and(|o| o.vertices.is_some()) {
+            // Only reuse a buffer that exists: a previous upload the device refused stays `None`,
+            // so this retries it rather than leaving the block undrawn for good.
             old.as_ref().and_then(|o| o.vertices.clone())
         } else {
             *uploaded += bytes.vertices.len() as u64;
-            Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("sc_block_vertices"),
-                contents: &bytes.vertices,
-                usage: wgpu::BufferUsages::VERTEX,
-            }))
+            // A buffer the device refuses (the product preview's upload error scope reports it)
+            // leaves the block undrawn rather than panicking.
+            buffer_init(device, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
         };
         let mut class = |class: TriClass| {
             let old_pair = old.as_ref().and_then(|o| o.class(class).map(|c| (c, o.bytes.runs(class))));

@@ -872,6 +872,19 @@ fn render_lights_list_inspects_unsaved_ui_draft_without_applying_or_opening_anyt
     assert!(h.app.dialog.is_none() && h.app.tool.is_none());
 }
 
+/// The vertices of a product scene's `class` triangles: their runs in its blocks.
+fn class_vertices(gpu: &GpuScene, class: crate::gpu::TriClass) -> Vec<u8> {
+    let mut out = Vec::new();
+    for b in &gpu.blocks {
+        for r in b.bytes.runs(class).iter() {
+            out.extend_from_slice(
+                b.bytes.vertices.get(r.start as usize * crate::gpu::TRI_SIZE..r.end as usize * crate::gpu::TRI_SIZE).unwrap_or_default(),
+            );
+        }
+    }
+    out
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod async_path_host {
     use super::*;
@@ -1310,7 +1323,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         .unwrap();
         let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
         let (key, gpu) = gpu_scene(&scene).unwrap();
-        assert!(!gpu.pbr.is_empty() && gpu.tris.is_empty());
+        assert!(!gpu.pbr.is_empty() && class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
         assert_ne!(previous, Some(key));
         previous = Some(key);
         let mut camera = Camera { fov: 0.0, ..Default::default() };
@@ -1624,7 +1637,7 @@ fn render_preview_background_frame(h: &mut Harness, time: f64) -> [Color32; 4] {
 fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
     for base in ["dark", "light"] {
         let mut h = Harness::new();
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         crate::prefs::control(&mut h.app, &json!({"theme_import":crate::theme_files::export_file(&file)})).unwrap();
         let app = &mut h.app;
         h.ctx.run_ui(egui::RawInput { time: Some(1.0), ..Default::default() }, |ui| app.logic(ui.ctx())).textures_delta.clear();
@@ -1666,7 +1679,7 @@ fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
 fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides() {
     for base in ["dark", "light"] {
         let mut h = Harness::new();
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         crate::prefs::control(
             &mut h.app,
             &json!({
@@ -1849,7 +1862,9 @@ fn progressive_image_controls_route_to_the_registered_host() {
     assert_eq!(image_params(&h.app).unwrap(), checked);
     let started = h.app.run("render.start", checked).unwrap();
     let job = serde_json::from_value(started["job"].clone()).unwrap();
-    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(30)).unwrap();
+    // A wait that returns the moment the job ends; the budget only matters on a loaded runner, where a
+    // software-GPU render of even this small image can take over a minute.
+    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(180)).unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(h.app.session.undo.len(), undo);
@@ -1928,13 +1943,19 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     s.execute("appearance.assign", &json!({"bodies":["Glass"],"color":"#336699","opacity":0.4})).unwrap();
     let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
     let (key, gpu) = gpu_scene(&scene).unwrap();
-    assert!(gpu.tris.is_empty());
-    assert!(!gpu.glass.is_empty());
+    assert!(class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
+    assert!(!class_vertices(&gpu, crate::gpu::TriClass::Glass).is_empty());
     let color = |v: &[u8]| {
         let i = v.get(crate::gpu::TRI_SIZE - 4..).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
         gpu.palette.get(crate::gpu::PaletteIndex(i))
     };
-    assert!(gpu.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().all(|v| color(v) == Some([51, 102, 153, 102])));
+    assert!(
+        class_vertices(&gpu, crate::gpu::TriClass::Glass)
+            .as_chunks::<{ crate::gpu::TRI_SIZE }>()
+            .0
+            .iter()
+            .all(|v| color(v) == Some([51, 102, 153, 102]))
+    );
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
     s.section = Some((solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X));
@@ -1944,7 +1965,74 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     let invisible = solidcraft_engine::product_scene::extract(&s).unwrap();
     assert_eq!(invisible.meshes[0].opacity, 0.0);
     let (_, empty) = gpu_scene(&invisible).unwrap();
-    assert!(empty.tris.is_empty() && empty.glass.is_empty());
+    assert!(class_vertices(&empty, crate::gpu::TriClass::Opaque).is_empty() && class_vertices(&empty, crate::gpu::TriClass::Glass).is_empty());
+}
+
+/// The live preview keeps its blocks across scenes: a colour edit rewrites palette entries and
+/// keeps every vertex, an opacity class change keeps the vertices and moves the triangles to the
+/// see-through runs, and a geometry edit builds the block again.
+#[test]
+fn product_appearance_edits_keep_the_blocks_vertices() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Part"})).unwrap();
+    let mut cache = ProductCache::default();
+    let mut build =
+        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+    let (plain_key, plain) = build(&s);
+    let vertices = plain.blocks[0].bytes.vertices.clone();
+    let first_colour = |gpu: &GpuScene, class| {
+        let v = class_vertices(gpu, class);
+        let i = v.get(crate::gpu::TRI_SIZE - 4..crate::gpu::TRI_SIZE).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        gpu.palette.get(crate::gpu::PaletteIndex(i))
+    };
+    s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699"})).unwrap();
+    let (colour_key, colour) = build(&s);
+    assert_ne!(colour_key, plain_key, "the scene is taken again");
+    assert!(Arc::ptr_eq(&vertices, &colour.blocks[0].bytes.vertices), "a colour edit keeps every vertex");
+    assert_eq!(first_colour(&colour, crate::gpu::TriClass::Opaque), Some([51, 102, 153, 255]), "the palette carries the colour");
+    s.execute("appearance.assign", &json!({"bodies":["Part"],"color":"#336699","opacity":0.5})).unwrap();
+    let (_, glass) = build(&s);
+    assert!(Arc::ptr_eq(&vertices, &glass.blocks[0].bytes.vertices), "an opacity class change keeps every vertex");
+    assert!(class_vertices(&glass, crate::gpu::TriClass::Opaque).is_empty(), "no triangle is left opaque");
+    assert_eq!(first_colour(&glass, crate::gpu::TriClass::Glass), Some([51, 102, 153, 128]));
+    s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[3,3,10],"operation":"cut"})).unwrap();
+    let (_, cut) = build(&s);
+    assert!(!Arc::ptr_eq(&vertices, &cut.blocks[0].bytes.vertices), "a geometry edit builds the block again");
+}
+
+/// A body's face looks can be reordered with its mesh and draw classes unchanged (an authored face
+/// look is appended after the imported ones). The block's vertices carry each look's palette slot,
+/// so a new order must build the block again instead of showing the faces' old colours.
+#[test]
+fn reordered_face_looks_rebuild_the_block() {
+    use solidcraft_engine::render::{FaceAppearance, ProductMesh, ProductScene};
+    let mesh = Arc::new(solidcraft_engine::geom::Mesh {
+        positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+        normals: vec![solidcore_record::Vec3::Z; 3],
+        triangles: vec![[0, 1, 2]; 2],
+        tri_face: vec![0, 1],
+        ..Default::default()
+    });
+    let look = |face: u32, color: [u8; 3]| FaceAppearance { face, color, opacity: 1.0, surface: None, transmission: None };
+    let mut scene = ProductScene {
+        meshes: vec![ProductMesh {
+            name: "Part".into(),
+            mesh: mesh.clone(),
+            color: [128; 3],
+            opacity: 1.0,
+            surface: None,
+            transmission: None,
+            faces: vec![look(0, [255, 0, 0]), look(1, [0, 0, 255])],
+        }],
+        bounds: solidcraft_engine::geom::Aabb3::EMPTY,
+    };
+    let mut cache = ProductCache::default();
+    let build = |scene: &ProductScene, cache: &mut ProductCache| gpu_scene_cached(scene, MAX_GEOMETRY_BYTES as u64, cache).unwrap();
+    let (_, first) = build(&scene, &mut cache);
+    let vertices = first.blocks[0].bytes.vertices.clone();
+    scene.meshes[0].faces.swap(0, 1);
+    let (_, reordered) = build(&scene, &mut cache);
+    assert!(!Arc::ptr_eq(&vertices, &reordered.blocks[0].bytes.vertices), "the reordered face looks build the block again");
 }
 
 #[test]
@@ -1961,11 +2049,11 @@ fn transmission_uses_legacy_preview_buffers_and_invalidates_the_opaque_cache() {
     let (glass_key, glass) = gpu_scene(&scene).unwrap();
     assert_ne!(opaque_key, glass_key);
     assert!(glass.pbr.is_empty());
-    assert!(!glass.tris.is_empty());
+    assert!(!class_vertices(&glass, crate::gpu::TriClass::Opaque).is_empty());
     scene.meshes[0].opacity = 0.4;
     let (_, transparent) = gpu_scene(&scene).unwrap();
     assert!(transparent.pbr.is_empty());
-    assert!(!transparent.glass.is_empty());
+    assert!(!class_vertices(&transparent, crate::gpu::TriClass::Glass).is_empty());
 }
 
 #[test]
@@ -2844,7 +2932,7 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
     let handle = h.app.session.render_job_handle(id).unwrap();
     // The job owns the source bytes captured by Start, even if the file changes.
     std::fs::write(&hdr_path, b"changed after capture").unwrap();
-    let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let status = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(json!(status.environment), preflight["environment"]);
     assert_eq!(status.progress.phase, Phase::Completed);
     assert_eq!(status.request.integrator, Integrator::Raytrace);
@@ -3816,6 +3904,7 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
                 seed: 1977,
                 tone_map: ToneMap::AcesFitted,
                 denoise: true,
+                clamp_indirect: Some(8.0),
                 denoise_settings: Default::default(),
                 denoise_diagnostics: false,
                 supersampling: 1,
@@ -4567,7 +4656,10 @@ fn product_preview_exact_payload_preserves_mixed_surfaces_and_refuses_overflow()
     let scene = solidcraft_engine::product_scene::extract(&session).unwrap();
     let plan = preview_upload_plan(&scene, MAX_GEOMETRY_BYTES).unwrap();
     let (_, gpu) = gpu_scene(&scene).unwrap();
-    assert_eq!((plan.pbr, plan.tris, plan.glass), (gpu.pbr.len(), gpu.tris.len(), gpu.glass.len()));
+    assert_eq!(
+        (plan.pbr, plan.tris, plan.glass),
+        (gpu.pbr.len(), class_vertices(&gpu, crate::gpu::TriClass::Opaque).len(), class_vertices(&gpu, crate::gpu::TriClass::Glass).len())
+    );
     assert!(plan.pbr > 0 && plan.tris > 0 && plan.glass > 0);
     assert_eq!(plan.source_triangles, scene.meshes.iter().map(|b| b.mesh.triangles.len()).sum::<usize>());
     assert!(preview_upload_plan(&scene, plan.bytes().unwrap() - 1).is_err());
@@ -8149,7 +8241,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         }],
         bounds: Aabb3::EMPTY,
     };
-    let error = gpu_scene_with_budget(&scene, WEB_GEOMETRY_BYTES).err().unwrap();
+    let error = gpu_scene_cached(&scene, WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
     assert!(error.contains("144.0 MiB"), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
@@ -9485,7 +9577,7 @@ fn native_cpu_output_ui_capture_keeps_common_effects_and_exports_its_actual_raw_
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let job: JobId = h.app.render_workspace.view.job.expect("the real UI Render action must capture the CPU setup");
     let handle = h.app.session.render_job_handle(job).unwrap();
-    let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let status = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(status.request.raytrace.as_ref().unwrap().output.as_ref().unwrap().linear_exr);
     assert_eq!(json!(status.request.raytrace.as_ref().unwrap().output), checked["settings"]["job"]["options"]["output"]);
@@ -12483,7 +12575,7 @@ fn clicked_cpu_atmosphere_start_captures_saved_box_and_reopens_identical_png_and
     assert_eq!(checked["request"]["raytrace"]["volume"]["extinction_per_mm"], 0.001);
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let handle = h.app.session.render_job_handle(h.app.render_workspace.view.job.unwrap()).unwrap();
-    let terminal = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let terminal = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(terminal.progress.phase, Phase::Completed, "{:?}", terminal.error);
     let image = handle.frame().unwrap().unwrap();
     let png = image.png().to_vec();
@@ -12504,7 +12596,7 @@ fn clicked_cpu_atmosphere_start_captures_saved_box_and_reopens_identical_png_and
     let capture = h.app.session.execute("render.start", &request).unwrap();
     let id = serde_json::from_value(capture["job"].clone()).unwrap();
     let again = h.app.session.render_job_handle(id).unwrap();
-    assert_eq!(again.wait_timeout(std::time::Duration::from_secs(30)).unwrap().progress.phase, Phase::Completed);
+    assert_eq!(again.wait_timeout(std::time::Duration::from_secs(180)).unwrap().progress.phase, Phase::Completed);
     let image = again.frame().unwrap().unwrap();
     assert_eq!(image.png(), png);
     assert_eq!(image.linear_exr().unwrap(), exr);

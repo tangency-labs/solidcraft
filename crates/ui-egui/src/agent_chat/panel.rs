@@ -2077,7 +2077,7 @@ fn agent_list(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             if ui_kit::button(ui, tr("ui.agent_chat_refresh"), ui_kit::Button::Enabled(!refreshing)).clicked() {
                 chat.actions.push(PanelAction::Refresh);
             }
-            if ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Small).clicked() {
+            if ui_kit::button(ui, tr("ui.ai_add_agent"), ui_kit::Button::Enabled(true)).clicked() {
                 chat.actions.push(PanelAction::AddAgent);
             }
         });

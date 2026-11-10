@@ -20,7 +20,8 @@
 //!   walls' 2 mm round between their sections as at them (they were the trace's skinned
 //!   B-splines, two of them off 2 mm by up to 1.9e-3, so the disc's top round R2 was
 //!   refused as wide as the ball along part of the edge only). Its top round R2 is the
-//!   ball's piece over each side round.
+//!   ball's piece over each side round, and its round at the fit that refusal named,
+//!   1.9586 (#13773), builds.
 //! - **Nowhere.** The B-spline block at R1.5 rounds as the exact cylinder's box does.
 #![allow(
     clippy::unwrap_used,
@@ -442,6 +443,25 @@ fn the_twisted_disc_s_top_round_below_its_side_rounds_radius_is_clean() {
         assert!(lines.is_empty(), "r = {r}: {lines:?}");
         assert!(is_manifold_solid(&b).unwrap(), "r = {r}");
     }
+}
+
+/// #13773: the disc's top round at 1.95861259706246, the fit the refusal at R2 named while
+/// the side rounds were skinned nets (above). It ran 877 s and failed with a bare 1001 from
+/// the crossing-rails refusal (WR-460, since retired), as 1.9 did. With the side rounds
+/// their definitions it builds, `check_brep` L2 clean and manifold.
+#[test]
+fn the_twisted_disc_s_top_round_at_its_old_named_fit_builds() {
+    let mut k = kernel();
+    let mut b = side_rounded_disc(&mut k, 2);
+    let top = top_edges(&b);
+    assert_eq!(top.len(), 12);
+    fillet_edges(&mut k, &mut b, &top, 1.958_612_597_062_46, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
 }
 
 /// The disc's side rounds, each with the two walls of the edge it rounds.

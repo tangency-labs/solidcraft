@@ -3221,6 +3221,33 @@ fn the_agent_list_keeps_the_panels_side_margin() {
     }
 }
 
+/// #14385: Add agent and Refresh, side by side on the Agent row, are buttons of one size.
+#[test]
+fn add_agent_and_refresh_are_the_same_size() {
+    let mut h = narrow_chat();
+    h.frames(3);
+    h.frame();
+    let panel = solidcraft_ui_registry::rect_of("agent_chat:panel").expect("the panel");
+    let (mut texts, mut boxes) = (Vec::new(), Vec::new());
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |s| match s {
+            egui::Shape::Text(t) => texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.rect.size()))),
+            egui::Shape::Rect(r) => boxes.push(r.rect),
+            _ => {}
+        });
+    }
+    // A button is the smallest box around its label.
+    let button = |label: &str| {
+        let text = texts.iter().find(|(t, r)| t == label && panel.contains(r.center())).map(|(_, r)| *r).expect(label);
+        let frame = boxes.iter().filter(|b| b.contains_rect(text)).min_by(|a, b| a.area().total_cmp(&b.area())).copied();
+        (text, frame.expect(label))
+    };
+    let (add_text, add) = button(tr("ui.ai_add_agent"));
+    let (refresh_text, refresh) = button(tr("ui.agent_chat_refresh"));
+    assert!((add.height() - refresh.height()).abs() < 0.5, "Add agent {add:?}, Refresh {refresh:?}");
+    assert!((add_text.height() - refresh_text.height()).abs() < 0.5, "labels: Add agent {add_text:?}, Refresh {refresh_text:?}");
+}
+
 /// Every chip and the text box sit inside the panel.
 fn assert_inside_the_panel(chips: usize) {
     use solidcraft_ui_registry::rect_of;

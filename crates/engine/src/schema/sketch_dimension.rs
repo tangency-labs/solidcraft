@@ -9,7 +9,8 @@
 //!
 //! The handler reads some keys only in some cases, and so does the contract: a driven dimension
 //! (`driven: true`) measures and has no value, so its `value` (apart from a definition, which
-//! the handler refuses by itself), `scale_sketch` and `if_redundant` are not read and not checked.
+//! the handler refuses by itself), `scale_sketch`, `scale_about_origin` and `if_redundant` are not
+//! read and not checked.
 //! `if_redundant` is read only once the dimension turns out to be determined by the sketch.
 //!
 //! The handler reads a few keys more leniently than a type can (a `type` that is not text counts
@@ -138,11 +139,17 @@ pub struct SketchDimensionParams {
     pub driven: Option<bool>,
     /// When this is the sketch's first length dimension and nothing in the sketch fixes a size
     /// (no other driving length dimension, nothing fixed or projected), scale the whole sketch
-    /// about its origin to the value instead of distorting it (the reply's `scaled` is the factor).
+    /// to the value instead of distorting it (the reply's `scaled` is the factor). A free
+    /// drawing uses its own centre. A drawing tied to the origin scales about the origin.
     /// Default: false. Not read for a driven dimension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub scale_sketch: Option<bool>,
+    /// Scale about the sketch origin even when the drawing is free. Default: false. Not read
+    /// for a driven dimension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub scale_about_origin: Option<bool>,
     /// For an ellipse with type auto: `major` or `minor`, the half-axis an earlier placement
     /// chose, kept while `text_at` is near the boundary between them (any case; other text is
     /// ignored).
@@ -212,12 +219,13 @@ impl SketchDimensionParams {
         // The sketch is read after the entities; a model reference among them is left to the
         // handler, which looks the sketch up first (see `DimensionEntities::read`).
         let sketch = typed::<SketchTarget>(o, "sketch")?;
-        let (mut value, mut scale_sketch, mut if_redundant) = (None, None, None);
+        let (mut value, mut scale_sketch, mut scale_about_origin, mut if_redundant) = (None, None, None, None);
         // A driven dimension measures: it has no value to read, nothing to scale and nothing it
         // could be redundant with.
         if driven != Some(true) {
             value = typed::<LengthExpr>(o, "value")?;
             scale_sketch = flag(o, "scale_sketch", None)?;
+            scale_about_origin = flag(o, "scale_about_origin", None)?;
             if_redundant = text(o, "if_redundant")?;
         }
         Ok(SketchDimensionParams {
@@ -229,6 +237,7 @@ impl SketchDimensionParams {
             text_at,
             driven,
             scale_sketch,
+            scale_about_origin,
             previous_axis,
             half_axes,
             if_redundant,

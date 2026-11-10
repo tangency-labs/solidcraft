@@ -32,6 +32,7 @@
 //!   returns the same `SM_ERR` without allocating or calling it.
 //! - **Recursion.** None.
 
+use crate::error::nurbs::BSplineFailure;
 use crate::error::{Result, SolidError};
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -79,17 +80,24 @@ impl BSplineSurface {
             grid.push(row.to_vec());
         }
 
-        let p = usize::try_from(u_degree).map_err(|_| SolidError::sm_err(OP))?;
-        let q = usize::try_from(v_degree).map_err(|_| SolidError::sm_err(OP))?;
+        let p = usize::try_from(u_degree).map_err(|_| {
+            SolidError::b_spline(OP, BSplineFailure::Failed("a degree is negative"))
+        })?;
+        let q = usize::try_from(v_degree).map_err(|_| {
+            SolidError::b_spline(OP, BSplineFailure::Failed("a degree is negative"))
+        })?;
 
         // Least-squares NURBS approximation for a sampled grid of points: one control point
         // per sample, chord-length parameters. No rows or columns is a highest index of -1,
         // which N_FitSrfLstSqApprox rejects (NL_SER: SM_ERR).
         let (Some(n), Some(m)) = (rows.checked_sub(1), cols.checked_sub(1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::b_spline(
+                OP,
+                BSplineFailure::Failed("the grid has no rows or no columns"),
+            ));
         };
         let surface = lst_sq_approx(&grid, n, m, p, q, ParamMethod::ChordLength)
-            .map_err(SolidError::nl_ser(OP))?;
+            .map_err(SolidError::nurbs_routine(OP))?;
 
         // set output
         Ok(Self::from_gw_nurb(&surface))
@@ -99,6 +107,7 @@ impl BSplineSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::nurbs::NurbsFailure;
 
     fn grid(rows: usize, cols: usize) -> Vec<Point3> {
         let mut v = Vec::new();
@@ -127,11 +136,17 @@ mod tests {
         ));
         assert!(matches!(
             BSplineSurface::approximate_points(&[], 0, 4, 3, 3),
-            Err(SolidError::Upstream { .. })
+            Err(e) if e.nurbs_failure()
+                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
+                    "the grid has no rows or no columns"
+                )))
+                && e.sm_status() == Some(crate::error::SM_ERR)
         ));
         assert!(matches!(
             BSplineSurface::approximate_points(&grid(3, 7), 3, 7, 3, 3),
-            Err(SolidError::Upstream { .. })
+            Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)
+                && e.nurbs_failure() == Some(&NurbsFailure::BSpline(BSplineFailure::RoutineFailed))
+                && e.cause().is_some_and(SolidError::is_nurbs_failure)
         ));
     }
 }

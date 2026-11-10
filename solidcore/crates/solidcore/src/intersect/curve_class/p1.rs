@@ -2330,7 +2330,7 @@ fn apply_point_solution_impl<O, S: Copy>(
         None => return Ok(out),
         Some(Ok(p)) => out.sss_point = p,
         Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
-        Some(Err(SolidError::Upstream { code, .. })) if code == SM_ERR => return Ok(out),
+        Some(Err(e)) if e.upstream_status() == Some(SM_ERR) => return Ok(out),
         Some(Err(_)) => {}
     }
 

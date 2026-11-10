@@ -225,7 +225,7 @@ pub fn create_skin_from_faces(
     if !(1..=MAX_DEGREE).contains(&degree) {
         return Err(SolidError::invalid_input(
             OP_SKIN_FROM_FACES,
-            "loft degree outside 1..=NL_MAXDEG",
+            "loft degree outside 1 to the largest degree the NURBS routines handle",
         ));
     }
     let (brep, new_faces) = PrimitiveModel::build_new(k, |pc, model| {

@@ -578,19 +578,43 @@ pub struct FlangeEdge {
     pub angle: Option<Expr>,
     #[walk(length = "Edge height")]
     pub height: Option<Expr>,
+    /// The edge's segments (`sheet.flange`'s `segments`): one stretch of the edge each, with its
+    /// own angle, height and side. Empty: the whole edge, one bend.
+    pub segments: Vec<FlangeSegment>,
 }
 
 impl FlangeEdge {
     /// An edge that takes the feature's angle and height.
     pub fn at(point: Vec3) -> Self {
-        Self { point: Position(point), angle: None, height: None }
+        Self { point: Position(point), angle: None, height: None, segments: Vec::new() }
     }
+}
+
+/// One segment of an edge flange's edge: a stretch of the edge as fractions of the stretch the
+/// sheet still has (`from`, `to`, 0…1), with its own angle, height and side where given (the
+/// edge's, then the feature's, where left out). See `sheet::SheetBody::add_flanges_each`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(deny_unknown_fields)]
+pub struct FlangeSegment {
+    pub from: f64,
+    pub to: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Segment angle")]
+    pub angle: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Segment height")]
+    pub height: Option<Expr>,
+    /// This segment's side, where it has one of its own: it replaces the feature's `flip` outright
+    /// for this stretch rather than turning relative to it, so `Some(false)` is the default
+    /// direction and `Some(true)` the other one, whatever the feature's `flip` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flip: Option<bool>,
 }
 
 impl Serialize for FlangeEdge {
     fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
-        if self.angle.is_none() && self.height.is_none() {
+        if self.angle.is_none() && self.height.is_none() && self.segments.is_empty() {
             return self.point.serialize(s);
         }
         let mut m = s.serialize_map(None)?;
@@ -600,6 +624,9 @@ impl Serialize for FlangeEdge {
         }
         if let Some(h) = &self.height {
             m.serialize_entry("height", h)?;
+        }
+        if !self.segments.is_empty() {
+            m.serialize_entry("segments", &self.segments)?;
         }
         m.end()
     }
@@ -617,19 +644,21 @@ impl<'de> Deserialize<'de> for FlangeEdge {
             angle: Option<Expr>,
             #[serde(default)]
             height: Option<Expr>,
+            #[serde(default)]
+            segments: Vec<FlangeSegment>,
         }
         struct Edge;
         impl<'de> serde::de::Visitor<'de> for Edge {
             type Value = FlangeEdge;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("a point [x, y, z] or an edge {point, angle?, height?}")
+                f.write_str("a point [x, y, z] or an edge {point, angle?, height?, segments?}")
             }
             fn visit_seq<A: serde::de::SeqAccess<'de>>(self, seq: A) -> std::result::Result<FlangeEdge, A::Error> {
                 Vec3::deserialize(SeqAccessDeserializer::new(seq)).map(FlangeEdge::at)
             }
             fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> std::result::Result<FlangeEdge, A::Error> {
                 let o = Own::deserialize(MapAccessDeserializer::new(map))?;
-                Ok(FlangeEdge { point: Position(o.point), angle: o.angle, height: o.height })
+                Ok(FlangeEdge { point: Position(o.point), angle: o.angle, height: o.height, segments: o.segments })
             }
         }
         d.deserialize_any(Edge)
@@ -1160,6 +1189,25 @@ pub enum FeatureKind {
         operation: Operation,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
+    },
+    /// Plates closing open ends of frame members (#4003), one body per end, each the outside of
+    /// the member's profile, optionally set in from its edge.
+    FrameEndCap {
+        ends: Vec<crate::end_cap::End>,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        /// The inset from the outline's edge as a length, or `ratio` of the thickness; neither:
+        /// flush with the outside of the profile.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Inset")]
+        offset: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Inset Ratio")]
+        ratio: Option<Expr>,
+        #[walk(length = "Corner Chamfer")]
+        chamfer: Expr,
+        #[serde(default)]
+        direction: crate::end_cap::Direction,
     },
     /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
     /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
@@ -2704,6 +2752,7 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
+            FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -2786,6 +2835,7 @@ impl FeatureKind {
             FeatureKind::DeleteFace { .. } => "delete_face",
             FeatureKind::BoundingSolid { .. } => "bounding_solid",
             FeatureKind::Pipe { .. } => "pipe",
+            FeatureKind::FrameEndCap { .. } => "frame_end_cap",
             FeatureKind::FrameMember { .. } => "frame_member",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
@@ -2870,6 +2920,7 @@ impl FeatureKind {
             "OffsetSurfaceFeature" => "surface_offset",
             "BoundingSolidFeature" => "bounding_solid",
             "PipeFeature" => "pipe",
+            "EndCapFeature" => "frame_end_cap",
             "FrameMemberFeature" => "frame_member",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
@@ -2953,6 +3004,7 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
+            FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",

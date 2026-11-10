@@ -13,6 +13,8 @@ const ALLOWED: &[(&str, usize, &str)] = &[];
 struct Guard {
     found: Vec<String>,
     aliases: Vec<String>,
+    /// A kit component's source, where `crate::` is the kit.
+    kit: bool,
 }
 
 impl<'ast> Visit<'ast> for Guard {
@@ -53,7 +55,7 @@ impl<'ast> Visit<'ast> for Guard {
             let names: Vec<_> = path.path.segments.iter().map(|s| s.ident.to_string()).collect();
             // Loading an editor's cursor/focus state does not create a raw widget.
             let state_access = names.last().is_some_and(|n| matches!(n.as_str(), "load_state" | "store_state"));
-            let kit_options = names.iter().any(|n| n == "ui_kit");
+            let kit_options = names.iter().any(|n| n == "ui_kit") || (self.kit && names.first().is_some_and(|n| n == "crate"));
             if !state_access
                 && !kit_options
                 && names.iter().any(|n| {
@@ -69,6 +71,11 @@ impl<'ast> Visit<'ast> for Guard {
 }
 
 fn violations(source: &str) -> Vec<String> {
+    violations_in(source, false)
+}
+
+/// [`violations`] in a source; `kit` for a kit component, whose `crate::` paths are the kit's.
+fn violations_in(source: &str, kit: bool) -> Vec<String> {
     fn aliases(tree: &syn::UseTree, out: &mut Vec<String>) {
         match tree {
             syn::UseTree::Path(p) => aliases(&p.tree, out),
@@ -89,7 +96,7 @@ fn violations(source: &str) -> Vec<String> {
         }
     }
     let ast = syn::parse_file(source).unwrap();
-    let mut guard = Guard::default();
+    let mut guard = Guard { kit, ..Guard::default() };
     for item in &ast.items {
         if let syn::Item::Use(u) = item {
             aliases(&u.tree, &mut guard.aliases);
@@ -114,19 +121,28 @@ fn all_ui_and_apps_use_ui_kit_controls() {
                 }
                 continue;
             }
-            if path.extension().is_none_or(|e| e != "rs") || name.ends_with("_tests.rs") {
-                continue;
-            }
-            let source = std::fs::read_to_string(&path).unwrap();
-            // Scan every feature module, including ones that have not imported the kit yet.
-            let found = violations(&source);
-            let allowed = ALLOWED.iter().find(|(file, _, _)| *file == relative).map_or(0, |(_, count, _)| *count);
-            if found.len() > allowed {
-                failures.push(format!("{relative}: {} raw widgets, at most {allowed} allowed: {found:?}", found.len()));
-            }
+            check(&path, &relative, failures);
+        }
+    }
+    fn check(path: &Path, relative: &str, failures: &mut Vec<String>) {
+        if path.extension().is_none_or(|e| e != "rs") || relative.ends_with("_tests.rs") {
+            return;
+        }
+        let source = std::fs::read_to_string(path).unwrap();
+        // Scan every feature module, including ones that have not imported the kit yet.
+        let found = violations_in(&source, path.starts_with(crate::test_support::kit_src()));
+        let allowed = ALLOWED.iter().find(|(file, _, _)| *file == relative).map_or(0, |(_, count, _)| *count);
+        if found.len() > allowed {
+            failures.push(format!("{relative}: {} raw widgets, at most {allowed} allowed: {found:?}", found.len()));
         }
     }
     scan(&root, "", &mut failures);
+    // The kit's components are held to the same rule; the kit itself draws the controls.
+    for (path, name) in crate::test_support::kit_files() {
+        if !crate::test_support::in_kit(&path) {
+            check(&path, &name, &mut failures);
+        }
+    }
     scan(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps"), "apps/", &mut failures);
     failures.sort();
     assert!(failures.is_empty(), "Use crate::ui_kit controls:\n{}", failures.join("\n"));
@@ -187,7 +203,6 @@ fn legacy_declarations(source: &str, removed: &[&str]) -> Vec<String> {
 
 #[test]
 fn removed_legacy_helpers_stay_removed() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let files: &[(&str, &[&str])] = &[
         ("ui_kit/container.rs", &["report"]),
         ("icons.rs", &["paint"]),
@@ -209,7 +224,7 @@ fn removed_legacy_helpers_stay_removed() {
         ("ui_kit/table.rs", &["cell_text"]),
     ];
     for (file, removed) in files {
-        let source = std::fs::read_to_string(root.join(file)).unwrap();
+        let source = std::fs::read_to_string(crate::test_support::guard_file(file)).unwrap();
         assert!(legacy_declarations(&source, removed).is_empty(), "{file}: removed helper reintroduced");
     }
     assert!(ALLOWED.is_empty(), "raw-control allowance table must stay empty");
@@ -358,15 +373,15 @@ fn slider_guard(source: &str) -> SliderGuard {
 
 #[test]
 fn all_ui_and_apps_use_the_one_kit_slider_and_numeric_fields() {
-    fn scan(dir: &Path, kit: &Path, failures: &mut Vec<String>, constructors: &mut usize) {
+    fn scan(dir: &Path, failures: &mut Vec<String>, constructors: &mut usize) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                scan(&path, kit, failures, constructors);
+                scan(&path, failures, constructors);
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let source = std::fs::read_to_string(&path).unwrap();
                 let guard = slider_guard(&source);
-                if path.starts_with(kit) {
+                if crate::test_support::in_kit(&path) {
                     // One native slider constructor inside the kit, too: another kit helper must
                     // not quietly introduce a different appearance. Numeric field constructors
                     // are legitimate here and are counted separately below.
@@ -378,11 +393,12 @@ fn all_ui_and_apps_use_the_one_kit_slider_and_numeric_fields() {
         }
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let kit = root.join("src/ui_kit");
+    let kit = crate::test_support::kit_src();
     let mut failures = Vec::new();
     let mut constructors = 0;
-    scan(&root.join("src"), &kit, &mut failures, &mut constructors);
-    scan(&root.join("../../apps"), &kit, &mut failures, &mut constructors);
+    scan(&root.join("src"), &mut failures, &mut constructors);
+    scan(&kit, &mut failures, &mut constructors);
+    scan(&root.join("../../apps"), &mut failures, &mut constructors);
     failures.sort();
     assert!(failures.is_empty(), "Sliders only via ui_kit::slider; numeric fields via the kit:\n{}", failures.join("\n"));
     assert_eq!(constructors, 1, "The kit must define exactly one native slider");
@@ -535,7 +551,7 @@ fn all_ui_and_apps_use_kit_checkboxes_and_the_single_check_glyph() {
     fn scan(dir: &Path, kit: &Path, failures: &mut Vec<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            if path == kit {
+            if path.starts_with(kit) && crate::test_support::in_kit(&path) {
                 continue;
             }
             if path.is_dir() {
@@ -549,9 +565,10 @@ fn all_ui_and_apps_use_kit_checkboxes_and_the_single_check_glyph() {
         }
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let kit = root.join("src/ui_kit");
+    let kit = crate::test_support::kit_src();
     let mut failures = Vec::new();
     scan(&root.join("src"), &kit, &mut failures);
+    scan(&kit, &kit, &mut failures);
     scan(&root.join("../../apps"), &kit, &mut failures);
     failures.sort();
     assert!(failures.is_empty(), "Checkboxes only via ui_kit::checkbox; no caller allowances:\n{}", failures.join("\n"));
@@ -761,17 +778,18 @@ fn all_disclosures_use_the_one_kit_chevron_without_allowances() {
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let guard = disclosure_guard(&std::fs::read_to_string(&path).unwrap());
                 *definitions += guard.definitions;
-                if !path.starts_with(kit) && !guard.found.is_empty() {
+                if !(path.starts_with(kit) && crate::test_support::in_kit(&path)) && !guard.found.is_empty() {
                     failures.push(format!("{}: {:?}", path.display(), guard.found));
                 }
             }
         }
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let kit = root.join("src/ui_kit");
+    let kit = crate::test_support::kit_src();
     let mut failures = Vec::new();
     let mut definitions = 0;
     scan(&root.join("src"), &kit, &mut failures, &mut definitions);
+    scan(&kit, &kit, &mut failures, &mut definitions);
     scan(&root.join("../../apps"), &kit, &mut failures, &mut definitions);
     scan(&root.join("../../assets/icons/ui/source"), &kit, &mut failures, &mut definitions);
     assert!(failures.is_empty(), "Disclosures only through ui_kit::disclosure:\n{}", failures.join("\n"));
@@ -1394,29 +1412,10 @@ fn shared_code_holds_no_host_tab_names_or_command_ids() {
             failures.push(format!("{relative}: {found:?}"));
         }
     }
-    let src = manifest.join("src");
     scan(&manifest.join("../theme/src"), "crates/theme/src", &names, &mut failures);
-    scan(&src.join("ui_kit"), "ui_kit", &names, &mut failures);
-    for component in [
-        "app_bar.rs",
-        "blur.rs",
-        "blur_native.rs",
-        "frame.rs",
-        "history_bar.rs",
-        "navigation_bar.rs",
-        "prefs_window.rs",
-        "ribbon.rs",
-        "start_page.rs",
-        "theme_files.rs",
-        "theme_options.rs",
-        "view_compass.rs",
-        "window_chrome.rs",
-        "window_chrome",
-    ] {
-        scan(&src.join(component), component, &names, &mut failures);
-    }
+    scan(&crate::test_support::kit_src(), "crates/ui-kit/src", &names, &mut failures);
     for (file, pending) in PENDING_HOST_NAMES {
-        let held = host_names_in(&std::fs::read_to_string(src.join(file)).unwrap(), &names);
+        let held = host_names_in(&std::fs::read_to_string(manifest.join("..").join(file)).unwrap(), &names);
         for name in *pending {
             if !held.iter().any(|found| found == name) {
                 failures.push(format!("{file}: {name} is gone; drop it from PENDING_HOST_NAMES"));
@@ -1451,18 +1450,7 @@ const KIT_MESSAGE_PREFIXES: &[&str] = &["color.", "navbar.custom.", "search.", "
 /// The message ids (`area.thing`) of SolidCraft's English catalog outside the kit's vocabulary:
 /// labels the kit must take from the host as data.
 fn host_message_ids() -> std::collections::BTreeSet<String> {
-    let english = crate::i18n::LOCALES.first().expect("the English catalog");
-    english
-        .messages()
-        .keys()
-        .filter(|key| {
-            let mut parts = key.split('.');
-            let dotted = key.contains('.')
-                && parts.all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
-            dotted && !KIT_MESSAGE_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
-        })
-        .map(|key| key.to_string())
-        .collect()
+    all_message_ids().into_iter().filter(|key| !KIT_MESSAGE_PREFIXES.iter().any(|prefix| key.starts_with(prefix))).collect()
 }
 
 #[test]
@@ -1486,11 +1474,11 @@ fn kit_code_names_no_host_message_ids() {
             failures.push(format!("{relative}: {found:?}"));
         }
     }
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    scan(&src.join("ui_kit"), "ui_kit", &names, &mut failures);
-    // The components that move with the kit: the theme options and the navigation bar.
-    for component in ["navigation_bar.rs", "theme_files.rs", "theme_options.rs"] {
-        scan(&src.join(component), component, &names, &mut failures);
+    // The kit, and of its components the theme files, their options and the navigation bar.
+    for (path, name) in crate::test_support::kit_files() {
+        if crate::test_support::in_kit(&path) || ["navigation_bar.rs", "theme_files.rs", "theme_options.rs"].contains(&name.as_str()) {
+            scan(&path, &name, &names, &mut failures);
+        }
     }
     failures.sort();
     assert!(failures.is_empty(), "kit code names the host's messages; take the text from the host as data:\n{}", failures.join("\n"));
@@ -1508,4 +1496,111 @@ fn message_id_guard_finds_host_ids_but_skips_kit_vocabulary_and_tests() {
         mod tests { fn sample() -> &'static str { "sketch_text.bold" } }
     "#;
     assert_eq!(host_names_in(source, &names), ["prefs.blur_off", "ai.prefs.pointer_preview_hidden"]);
+}
+
+/// English-label keys of SolidCraft's English catalog (`Bends`, `Collapse`): older tables read
+/// them through the label adapter. Everything else in the catalog is a message id.
+fn english_label_keys() -> std::collections::BTreeSet<String> {
+    let english = crate::i18n::LOCALES.first().expect("the English catalog");
+    let ids = all_message_ids();
+    english.messages().keys().filter(|key| !ids.contains(*key)).map(|key| key.to_string()).collect()
+}
+
+/// Every dotted message id (`area.thing`) of SolidCraft's English catalog, the kit's included.
+fn all_message_ids() -> std::collections::BTreeSet<String> {
+    let english = crate::i18n::LOCALES.first().expect("the English catalog");
+    english
+        .messages()
+        .keys()
+        .filter(|key| {
+            key.contains('.')
+                && key.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'))
+        })
+        .map(|key| key.to_string())
+        .collect()
+}
+
+/// A list of string literals (`[..]`) in non-test code that holds message ids and also an
+/// English-label key: a bare label among ids, read with `tr` as if it were one.
+struct MixedIdLists<'n> {
+    ids: &'n std::collections::BTreeSet<String>,
+    labels: &'n std::collections::BTreeSet<String>,
+    found: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for MixedIdLists<'_> {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let attrs = match item {
+            syn::Item::Mod(i) => &i.attrs,
+            syn::Item::Fn(i) => &i.attrs,
+            syn::Item::Impl(i) => &i.attrs,
+            syn::Item::Const(i) => &i.attrs,
+            syn::Item::Static(i) => &i.attrs,
+            _ => return visit::visit_item(self, item),
+        };
+        if !test_only(attrs) {
+            visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_expr_array(&mut self, array: &'ast syn::ExprArray) {
+        let literals: Vec<String> = array
+            .elems
+            .iter()
+            .filter_map(|e| match e {
+                syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => Some(s.value()),
+                _ => None,
+            })
+            .collect();
+        if literals.iter().any(|l| self.ids.contains(l)) {
+            self.found.extend(literals.into_iter().filter(|l| self.labels.contains(l)));
+        }
+        visit::visit_expr_array(self, array);
+    }
+}
+
+fn mixed_id_lists_in(source: &str, ids: &std::collections::BTreeSet<String>, labels: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let mut guard = MixedIdLists { ids, labels, found: Vec::new() };
+    guard.visit_file(&syn::parse_file(source).unwrap());
+    guard.found
+}
+
+#[test]
+fn message_id_lists_hold_only_message_ids() {
+    let (ids, labels) = (all_message_ids(), english_label_keys());
+    let mut failures = Vec::new();
+    fn scan(dir: &Path, prefix: &str, out: &mut Vec<(std::path::PathBuf, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = format!("{prefix}{}", path.file_name().unwrap().to_str().unwrap());
+            if path.is_dir() { scan(&path, &format!("{name}/"), out) } else { out.push((path, name)) }
+        }
+    }
+    // The kit and its components, and the host's own screens.
+    let mut files = crate::test_support::kit_files();
+    scan(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), "", &mut files);
+    for (path, name) in files {
+        if name.ends_with("_tests.rs") || path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let found = mixed_id_lists_in(&std::fs::read_to_string(&path).unwrap(), &ids, &labels);
+        if !found.is_empty() {
+            failures.push(format!("{name}: {found:?}"));
+        }
+    }
+    failures.sort();
+    assert!(failures.is_empty(), "a list of message ids holds a bare English label; give it a message id:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn message_id_list_guard_finds_a_bare_label_among_ids_but_skips_tests() {
+    let (ids, labels) = (all_message_ids(), english_label_keys());
+    assert!(labels.contains("Bends") && ids.contains("ui.axes") && !labels.contains("ui.axes"));
+    let source = r#"
+        pub const SAMPLE: [&str; 3] = ["ui.axes", "Bends", "ui.draft"];
+        const LABELS: [&str; 2] = ["Bends", "Collapse"];
+        #[cfg(test)]
+        mod tests { const SAMPLE: [&str; 2] = ["ui.axes", "Bends"]; }
+    "#;
+    assert_eq!(mixed_id_lists_in(source, &ids, &labels), ["Bends"]);
 }

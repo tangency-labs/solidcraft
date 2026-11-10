@@ -271,6 +271,40 @@ pub struct FaceInfo {
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 
+/// Whether a control net is small enough to test for flatness ([`flat_net`]): the work is one
+/// pass over its points, at most 65,536 of them (a face of an imported design can carry a large
+/// net, and [`Body::planar_face`] is asked of every face a pick passes).
+fn net_fits<T>(net: &[Vec<T>]) -> bool {
+    net.iter().try_fold(0usize, |count, row| count.checked_add(row.len()).filter(|count| *count <= 1 << 16)).is_some()
+}
+
+/// A B-spline control net (`net[i][j]`, i along u) lying on one plane within `tolerance`: a point
+/// of the plane and two directions on it whose cross product runs along the surface's natural
+/// normal (`∂S/∂u × ∂S/∂v`), as a plane surface's axes do. `None` for a net off every plane, or
+/// one too degenerate to have a normal (#14346).
+fn flat_net(net: &[Vec<Vec3>], tolerance: f64) -> Option<(Vec3, Vec3, Vec3)> {
+    let columns = net.first()?.len();
+    if net.len() < 2 || columns < 2 || net.iter().any(|row| row.len() != columns) || !(tolerance.is_finite() && tolerance > 0.0) {
+        return None;
+    }
+    // The net's oriented area, Σ (P[i+1][j] − P[i][j]) × (P[i][j+1] − P[i][j]), runs along the
+    // natural normal of a flat surface that doesn't fold over itself; the u steps give its u way.
+    let (mut area, mut along_u) = (Vec3::ZERO, Vec3::ZERO);
+    for (row, next) in net.iter().zip(net.iter().skip(1)) {
+        for ((p, q), r) in row.iter().zip(row.iter().skip(1)).zip(next) {
+            area += (*r - *p).cross(*q - *p);
+            along_u += *r - *p;
+        }
+    }
+    let normal = area.normalized()?;
+    let origin = *net.first()?.first()?;
+    if net.iter().flatten().any(|p| !p.is_finite() || (*p - origin).dot(normal).abs() > tolerance) {
+        return None;
+    }
+    let u = (along_u - normal * along_u.dot(normal)).normalized()?;
+    Some((origin, u, normal.cross(u)))
+}
+
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
@@ -681,7 +715,10 @@ impl Body {
     }
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
-    /// face's plane as the face faces (out of the material in a closed shell).
+    /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
+    /// or a B-spline whose control points all lie on one plane within the body's tolerance (a
+    /// loft's side between parallel straight edges, #14346): a B-spline surface lies in the
+    /// convex hull of its control points, so the whole face is on that plane.
     pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
@@ -689,6 +726,17 @@ impl Body {
             Surface::PlaneThrough { origin, u_point, v_point } => {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
+            }
+            Surface::Spline { points, .. } if net_fits(points) => {
+                flat_net(&points.iter().map(|row| row.iter().map(|p| v3(*p)).collect()).collect::<Vec<Vec<_>>>(), self.record.tolerance)?
+            }
+            // With positive weights a rational patch stays in its points' convex hull too.
+            Surface::RationalSpline { homogeneous, .. } if net_fits(homogeneous) => {
+                let net = homogeneous
+                    .iter()
+                    .map(|row| row.iter().map(|&[x, y, z, w]| (w.is_finite() && w > 0.0).then(|| Vec3::new(x / w, y / w, z / w))).collect())
+                    .collect::<Option<Vec<Vec<_>>>>()?;
+                flat_net(&net, self.record.tolerance)?
             }
             _ => return None,
         };

@@ -1,5 +1,5 @@
-//! The #2252 pipe-on-plate G2 round (r 2, order 2, w 0) by WR-685's G^n section
-//! (`fillet_gn_section_generator`) on SolidCraft's flag profile (tangency-labs/solidcraft#8526
+//! The #2252 pipe-on-plate G2 round (r 2, order 2, w 0) by WR-685's G^n section on
+//! SolidCraft's flag profile (tangency-labs/solidcraft#8526
 //! at c494a18, `crates/smlib/src/core.rs` `fixes()`, 292 flags), reported on #2260.
 //!
 //! With `query_statuses_pass_on` (tangency-labs/smlib 8311f8e) `sm_RefineCCSolutions`
@@ -95,7 +95,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "curve_loop_normal_from_area",
     "curve_loop_start_after_previous_end",
     "curve_property_gs_branch_bounds",
-    "curve_sweep_caps_at_sweep_ends",
     "curve_sweep_closed_path_joins_ends",
     "curve_tight_box_interval_knots",
     "cylinder_plane_section_trims_exact",
@@ -121,7 +120,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "face_tight_box_searches_trim",
     "fillet_3x2_mixed_concave_side_edge",
     "fillet_3x2_tangent_side_edge_roles",
-    "fillet_blend_curve_revolved_on_arc",
     "fillet_chamfer_cone_on_arc",
     "fillet_chamfer_cone_stored_as_cone",
     "fillet_cleanup_keeps_target_faces",
@@ -129,7 +127,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_cliff_overflow",
     "fillet_corner_ball_center_from_axes",
     "fillet_corner_ball_patch",
-    "fillet_corner_face_curve_halves",
     "fillet_corner_per_vertex_fan",
     "fillet_corner_sphere_from_four_arcs",
     "fillet_corner_variable_radius_rail_on_opposite_fillet",
@@ -148,8 +145,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_rail_rim_on_face",
     "fillet_rails_meet_at_one_end_point",
     "fillet_rail_trim_at_near_knot",
-    "fillet_refuse_ball_not_fitting",
-    "fillet_refuse_crossing_rails",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_non_manifold_result",
     "fillet_refuse_overlapping_bands",
@@ -195,7 +190,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "keep_operand_uv_trims",
     "knot_vector_valid_requires_span",
     "linear_sweep_arc_is_cylinder",
-    "linear_sweep_arc_to_cylinder_zero",
     "local_operation_box_holds_new_surfaces",
     "local_operation_closes_walls_to_nothing",
     "local_operation_refuses_loose_tangent_edges",
@@ -228,10 +222,8 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "oscillating_skips_failed_guesses",
     "periodic_extent_add_empty_interval",
     "perspective_sphere_offsets",
-    "planar_path_profile_in_path_frame",
     "planar_path_profile_placement_statuses",
     "planar_path_sweep_statuses",
-    "planar_path_uncapped_open_profiles",
     "plane_recognition_origin_after_axes",
     "plane_reparameterize_moves_origin",
     "point_class_gap_3d_propagates_no_drop_error",
@@ -252,8 +244,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "revolution_offset_axis_both_sides",
     "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",
-    "revolve_arc_centre_near_axis_is_sphere",
-    "revolve_arc_touching_axis_is_horn_torus",
     "revolve_holed_profile_void",
     "revolve_nested_shells_as_cavities",
     "revolve_splits_curves_on_axis",
@@ -279,9 +269,7 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "surface_point_solver_propagates_bbox_failure",
     "sweep_frame_on_planar_path_normal",
     "sweep_statuses_pass_on",
-    "taper_pivot_nearest_corner",
     "taper_tangent_corner_planes",
-    "taper_wall_closes_at_apex",
     "temporary_radius_setup_errors",
     "thicken_planar_side_walls",
     "topology_failed_evaluations_propagate",
@@ -294,7 +282,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "transform_aligned_bbox_image",
     "transform_model_size_from_body_box",
     "transform_scales_each_tolerance",
-    "translation_sweep_regularize",
     "trim_boundary_seam_wrap",
     "twist_simple_duw_sign",
     "uv_trim_checks_on_surface",
@@ -318,8 +305,6 @@ fn kernel(names: &[&str]) -> Kernel {
             .flag_mut(name)
             .unwrap_or_else(|| panic!("no flag {name}")) = true;
     }
-    k.fixes.fillet_gn_section_generator = true;
-    k.fixes.fillet_surface_plane_curve_on_plane_equation = true;
     k
 }
 

@@ -948,6 +948,9 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
+    /// Off: it does nothing there, as before (#6159).
+    right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
@@ -1373,6 +1376,11 @@ preference_settings! {
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
     remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    /// A new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's
+    /// unit ("0.07874 in" in an inch design): a radius is bound by the faces beside its edges, and
+    /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
+    /// opens at the number 2 read in the design's unit, as before.
+    fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
@@ -1444,6 +1452,9 @@ preference_settings! {
     send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
     slicer_single_instance: bool = true, 0;
+    /// Export STL, Export 3MF and Send to Slicer start with the design's body in Bodies when it
+    /// has just one (#13098). Off: the list starts empty, as before.
+    export_selects_only_body: bool = true, 0;
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
     print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
@@ -1524,6 +1535,9 @@ preference_settings! {
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
     sketch_align_points: bool = false, PAGE_SKETCH;
+    /// A point snaps to the crossings of the lines the grid draws, and to the finer lattice
+    /// between them. Off: the point snaps to the finer lattice only.
+    sketch_snap_to_visible_grid: bool = true, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
@@ -1592,6 +1606,10 @@ preference_settings! {
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;
+    /// With `first_dimension_scales`: the drawing scales about the sketch origin even when nothing
+    /// ties it there, so a shape drawn away from the origin moves as it grows (the behaviour
+    /// before #11043). Off (the default): such a shape scales about its own middle and stays put.
+    first_dimension_scales_about_origin: bool = false, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -1610,6 +1628,9 @@ preference_settings! {
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
     ellipse_axes: bool = true, PAGE_SKETCH;
+    /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
+    /// Off: only a sketch tool shows them, while it places a point, as before.
+    sketch_cursor_coordinates: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -6360,8 +6381,10 @@ mod tests {
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
+            ("sketch_snap_to_visible_grid", json!(false), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
+            ("sketch_cursor_coordinates", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];
@@ -7819,6 +7842,7 @@ mod tests {
                 ("sketch_tracking_guides", "prefs.sketch.tracking_guides"),
                 ("sketch_recent_snap", "prefs.sketch.recent_snap"),
                 ("sketch_align_points", "prefs.sketch.align_points"),
+                ("sketch_snap_to_visible_grid", "prefs.sketch.snap_to_visible_grid"),
                 ("line_drag_draws_one", "prefs.line_drag_draws_one"),
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
@@ -7828,6 +7852,7 @@ mod tests {
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
+                ("sketch_cursor_coordinates", "prefs.sketch.cursor_coordinates"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
                 ("escape_twice_finishes_sketch", "prefs.sketch.escape_twice_finishes"),
@@ -8023,7 +8048,7 @@ mod tests {
     fn tabs_preferences_validate_atomically_restore_safely_and_preserve_export_defaults() {
         crate::test_support::host_data();
         for base in ["dark", "light"] {
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             let source = serde_json::to_value(&file).unwrap();
             let mut h = crate::scenario::Harness::new();
             for invalid in [json!(false), json!({"sketch":{}}), json!({"SKETCH":{"error":"#ffffff"}}), json!({"SKETCH":{"panel":"bad"}})] {
@@ -8056,7 +8081,7 @@ mod tests {
     #[test]
     fn tabs_followed_reload_updates_surfaces_without_losing_saved_options() {
         let mut h = crate::scenario::Harness::new();
-        let mut source = crate::theme_files::export_file(&crate::theme_files::tab_fixture("dark"));
+        let mut source = crate::theme_files::export_file(&crate::test_support::tab_fixture("dark"));
         let path = h.dir.join("tabs.json");
         std::fs::write(&path, source.to_string()).unwrap();
         control(&mut h.app, &json!({"theme_follow":path,"theme_options":{"file-tabs-dark":{"tab_fade_ms":0}}})).unwrap();
@@ -12638,16 +12663,40 @@ mod settings_search_tests {
             let command = solidcraft_engine::command_specs().last().unwrap().id;
             let original = crate::toolbar_custom::export(&h.app);
             h.app.prefs_window.shell.filter = command.into();
-            h.frames(4);
-            let (_, _, hits) = nav(&h.ctx);
-            let matches: Vec<_> =
-                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command)).collect();
+            let find = |h: &crate::scenario::Harness| {
+                let (_, _, hits) = nav(&h.ctx);
+                hits.iter()
+                    .enumerate()
+                    .filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command))
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>()
+            };
+            // Wait for the results to appear rather than assuming four frames on a loaded machine.
+            for _ in 0..600 {
+                h.frames(1);
+                if !find(&h).is_empty() {
+                    break;
+                }
+            }
+            let matches: Vec<_> = find(&h).into_iter().map(|i| (i, ())).collect();
             assert_eq!(matches.len(), 1, "a collapsed result owns one real keyboard target");
             set_cursor(&h.ctx, matches[0].0);
             h.frames(2);
             h.step(&json!({"key":"Enter"})).unwrap();
             keep_reveal_visible(&mut h);
             h.frames(30);
+            // The reveal scrolls over later frames; wait until the target is in view.
+            for _ in 0..600 {
+                let in_view = match (crate::scenario::rect_of(&format!("keymap:capture:{command}")), crate::scenario::rect_of("dialog:page_body")) {
+                    (Some(target), Some(body)) => body.contains_rect(target),
+                    _ => false,
+                };
+                if h.app.prefs_window.shell.filter.is_empty() && in_view {
+                    break;
+                }
+                keep_reveal_visible(&mut h);
+                h.frames(1);
+            }
             assert!(h.app.prefs_window.shell.filter.is_empty());
             assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
             let target = crate::scenario::rect_of(&format!("keymap:capture:{command}")).unwrap();

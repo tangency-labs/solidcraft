@@ -94,14 +94,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
-    f.planar_path_uncapped_open_profiles = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
-    f.taper_pivot_nearest_corner = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
-    f.curve_sweep_caps_at_sweep_ends = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;
     f.offset_resolve_crossing_loops = true;
@@ -156,7 +152,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
@@ -182,11 +177,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
-    f.revolve_arc_touching_axis_is_horn_torus = true;
     f.thicken_planar_side_walls = true;
     f.fillet_torus_span_from_start_section = true;
     f.fillet_knife_edge_rounds = true;
-    f.taper_wall_closes_at_apex = true;
     f.revolution_round_offset_collapses = true;
     f.fillet_chamfer_cone_stored_as_cone = true;
     f.offset_point_vertex_caps = true;
@@ -194,7 +187,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_splits_at_captured_vertices = true;
     f.stitch_solid_nests_cavities = true;
     f.local_operation_closes_walls_to_nothing = true;
-    f.linear_sweep_arc_to_cylinder_zero = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
@@ -241,7 +233,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_trim_status = true;
     f.perspective_sphere_offsets = true;
     f.plane_recognition_origin_after_axes = true;
-    f.fillet_corner_face_curve_halves = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
     f.query_statuses_pass_on = true;
@@ -254,7 +245,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_keep_cavity_regions = true;
     f.gap_samples_non_bspline_v_stride = true;
     f.imprint_skips_collapsed_definition = true;
-    f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
@@ -268,17 +258,14 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.sphere_from_arcs_common_centre = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.extent3d_contains_both_segment_endpoints = true;
-    f.translation_sweep_regularize = true;
     f.gap_samples_use_trimmed_spans = true;
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.circumscribe_axis_map_by_basis = true;
-    f.planar_path_profile_in_path_frame = true;
     f.validation_does_not_make_uv_trims = true;
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
     f.analytic_corner_failure_is_false = true;
-    f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
@@ -332,8 +319,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
-    f.fillet_surface_plane_curve_on_plane_equation = true;
-    f.fillet_gn_section_generator = true;
     f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.boolean_coincident_strip_drops_crossing = true;

@@ -54,7 +54,8 @@
 //!   not all share the rationality of `Pw[0][0]`, so no surface they build holds such a
 //!   net. A net mixed later (through [`Surface::cpt_mut`], [`Surface::set_cpts_and_knots`]
 //!   or [`Surface::set_size_indices`] over storage of the other kind) is not refused;
-//!   [`Surface::counts_are_valid`] reports it.
+//!   [`Surface::counts_are_valid`] reports it, and [`crate::nurbs::srf_tool::p3::join`]
+//!   and [`crate::nurbs::srf_tool::p3::make_compatible`] refuse it.
 //! - The NULL surface of `N_SrfInitArrays` (null pointers, degrees `-1`) is `None`
 //!   in an `Option<Surface>`; partly NULL surfaces cannot be expressed. Storage that
 //!   upstream allocates uninitialised (`malloc`) is zero-filled.
@@ -741,6 +742,17 @@ impl Surface {
     }
 
     // ---- predicates -----------------------------------------------------------------
+
+    /// The check of [`Surface::new`] on the net in use, for a net mixed later through
+    /// a mutator: `InvalidInput` from `operation` when the control points do not all
+    /// share the rationality of `Pw[0][0]`.
+    pub(crate) fn refuse_mixed_rationality(&self, operation: &'static str) -> Result<()> {
+        if rationality_is_uniform(&self.net, self.n, self.m) {
+            Ok(())
+        } else {
+            Err(invalid(operation, MIXED_RATIONALITY))
+        }
+    }
 
     /// `true` when `Pw[0][0]` carries a weight (`N_IsSrfRat`).
     #[must_use]

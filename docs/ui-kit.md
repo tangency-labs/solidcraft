@@ -161,7 +161,7 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 | `method_section` | Section with a GPU/CPU tag; unsupported contents stay faded with a readable reason. |
 | `read_only_text` | Bounded, selectable code box for read-only diagnostic JSON. |
 
-`crates/ui-egui/src/ui_kit/` contains the tokenised controls used by feature dialogs,
+`crates/ui-kit/src/` (the shared crate `solidcraft-ui-kit`, which `ui-egui` uses as `ui_kit`) contains the tokenised controls used by feature dialogs,
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
@@ -507,7 +507,7 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 3 | Hover / press and open / latched; focus outline 2 with offset 1 | `navigation_visual`, `navigation_fill`, `NAV_FOCUS_WIDTH/OFFSET`; `nav_hover`, `nav_press`, `selected_bg`, `form_primary` |
 | Bar 5 | Width 244, padding 5, radius 10; shared menu shadow (0,14), blur 36; row 30, radius 6, inset 8, icon 17, gap 9; heading 22, text 11, tracking .07em | `NAV_POPUP_*`, `NAV_MENU_*`, `NAV_ROW_GAP`, `NAV_HEADING_*`, `navigation_popup_frame`, `Container::menu_frame` |
 | Bar 6 | Left / Centre / Right, 12 edge inset | `Position`, `NAV_EDGE`; legacy bottom / bottom_left / bottom_right deserialize as centre / left / right |
-| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `navigation_bar_view::measure` |
+| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |
@@ -1063,9 +1063,9 @@ search and reveal their own bounds. Labelled rows retain ownership of their sear
 
 ### Figures
 
-`ui_kit/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
+`crates/ui-kit/src/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
 each comes from its SVG in `docs/design/preferences/figures/`: `tools/preferences-figures/generate.py`
-compiles those files into `ui_kit/preferences_figure_data.rs`, one constant and one painter per
+compiles those files into `crates/ui-kit/src/preferences_figure_data.rs`, one constant and one painter per
 figure (`paint_tess_normal`, `paint_orbit_origin`, ...; `FIGURES` lists them all), and
 `preferences_figure_ops.rs` paints the operations with egui shapes. A figure is a list of rectangles,
 circles, polygons, soft shadows and tiny captions in the figure's own coordinates. Nothing is
@@ -1080,8 +1080,9 @@ of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `f
 `figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
 `control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
 and dark values, are in `crates/theme/src/palettes.rs`; theme files cannot override them yet and keep
-the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
-and `bend_down`, so they follow the colour vision mode.
+the built-in values. The colour vision figures (`paint_colour_vision`) read `axis_z`,
+`sketch_projected`, `axis_x`, `bend_up` and `bend_down`, so they follow the colour vision mode; the
+host composes them into its own sample with its own names.
 
 Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSample` (12 colours,
 `ThemeSample::from_tokens(&tokens)`), not the dialog's tokens, because a card shows its own theme.

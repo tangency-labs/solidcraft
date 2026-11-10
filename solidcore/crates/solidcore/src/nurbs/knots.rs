@@ -122,7 +122,7 @@ fn out_of_range(operation: &'static str) -> SolidError {
 fn degree_too_high(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
         operation,
-        reason: "degree above NL_MAXDEG + 1 (upstream scratch array size)",
+        reason: "degree above one more than the largest degree the NURBS routines handle",
     }
 }
 

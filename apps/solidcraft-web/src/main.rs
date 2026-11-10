@@ -1249,6 +1249,7 @@ mod web {
         solidcraft_ui_egui::icon_svg::install();
         solidcraft_ui_egui::workspace::install_tabs();
         solidcraft_ui_egui::navigation_slots::install();
+        solidcraft_ui_egui::theme::install_builtin_themes();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());
