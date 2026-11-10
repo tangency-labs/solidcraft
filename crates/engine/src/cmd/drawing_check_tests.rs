@@ -676,3 +676,15 @@ fn a_dimension_an_exploded_view_holds_back_says_why() {
     let why = "its view draws an exploded view: not supported yet, so it isn't drawn".to_string();
     assert_eq!(whys(&reply, "out_of_date"), [("dimension".to_string(), width.as_str().unwrap().to_string(), why)], "{reply}");
 }
+
+/// A dimension that a view drawing an exploded view holds back covers no feature: the plate, which it
+/// would cover, is not covered. Drawn assembled again, the view's dimension covers it.
+#[test]
+fn a_dimension_an_exploded_view_holds_back_covers_nothing() {
+    let mut width = Value::Null;
+    let (mut s, view, plate) = exploded(|s, view| width = length(s, view, [50.0, 0.0, 0.0]));
+    assert_eq!(coverage_of(&checked(&mut s, json!({})), plate)["state"], json!("not_covered"));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"exploded": "assembled"}}));
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "dimension", "id": width}]), "{reply}");
+}

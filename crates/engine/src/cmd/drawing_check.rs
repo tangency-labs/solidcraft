@@ -219,10 +219,14 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
 }
 
 /// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
-/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`).
+/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`). One that a
+/// view drawing an exploded view holds back covers nothing: it isn't on paper, and the findings name it
+/// out of date.
 fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::Drawn) -> Vec<Coverage> {
     let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
-    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view)).map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
+    let held = crate::drawing_scene::held_by_exploded(d, d.views.iter().filter(|v| sheets.contains(&v.sheet)).map(|v| v.id));
+    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view) && !held.contains(&dim.id));
+    let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
     let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
     let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.anchor.reference().into_iter().collect()));
     let state = |state: coverage::State| match state {
