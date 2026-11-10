@@ -448,14 +448,14 @@ fn menu(app: &SolveApp, id: &str) -> Menu {
 
 /// Visual style: the four styles, then Translucent (later); a pick closes the menu.
 fn style_menu(app: &SolveApp) -> Menu {
-    let mut entries: Vec<MenuEntry> = navigation_bar::VISUAL_STYLES
+    let mut entries: Vec<MenuEntry> = crate::navigation_slots::VISUAL_STYLES
         .iter()
         .enumerate()
         .map(|(index, (style, _))| {
             let mut row = MenuRow::new(
                 *style,
                 app.tr(&format!("navbar.style.{style}")),
-                navigation_bar::visual_style_icon(index as u8),
+                crate::navigation_slots::visual_style_icon(index as u8),
                 format!("nav:style:{style}"),
             );
             row.selected = app.ui.visual_style == index as u8;
@@ -565,6 +565,7 @@ mod tests {
 
     #[test]
     fn default_slots_and_canvas_availability_preserve_navigation() {
+        crate::navigation_slots::install();
         let bar = NavigationBar::default();
         assert_eq!(bar.slots, ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"]);
         let flat = NavCaps { orbit: false, pick: false };

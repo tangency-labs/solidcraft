@@ -410,13 +410,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect();
             if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
         }
-        Target::VisualStyle => crate::navigation_bar::VISUAL_STYLES
+        Target::VisualStyle => crate::navigation_slots::VISUAL_STYLES
             .iter()
             .enumerate()
             .map(|(index, (style, label))| {
                 let current = usize::from(app.ui.visual_style) == index;
                 let mut item = cmd(app, "view.visual_style", label).with(json!({"style": style})).key(if current { "current" } else { "" });
-                item.icon = crate::navigation_bar::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
+                item.icon = crate::navigation_slots::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
                 item
             })
             .collect(),

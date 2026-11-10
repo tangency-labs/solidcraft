@@ -205,7 +205,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
                 ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
-                    let options = crate::navigation_bar::VISUAL_STYLES.map(|(_, label)| solidcraft_ui_text::tr_label(label));
+                    let options = crate::navigation_slots::VISUAL_STYLES.map(|(_, label)| solidcraft_ui_text::tr_label(label));
                     let choices: Vec<_> =
                         options.into_iter().zip(["style_shaded_edges", "style_shaded", "style_wireframe", "style_hidden_edges"]).collect();
                     let mut selected = usize::from(app.ui.visual_style.min(3));
@@ -219,7 +219,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         .inner;
                     crate::scenario::publish_target("prefs:visual_style", response.rect);
                     if selected != before
-                        && let Some((style, _)) = crate::navigation_bar::VISUAL_STYLES.get(selected)
+                        && let Some((style, _)) = crate::navigation_slots::VISUAL_STYLES.get(selected)
                     {
                         let _ = app.run("view.visual_style", json!({"style":style}));
                     }

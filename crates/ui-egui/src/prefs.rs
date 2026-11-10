@@ -11469,12 +11469,12 @@ mod graphics_preset_tests {
             let mut h = crate::scenario::Harness::new();
             h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
             h.call("ui.prefs", json!({"open":"Graphics"}));
-            for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
                 click_graphics(&mut h, "Visual style", "prefs:visual_style");
                 h.step(&json!({"click":{"handle":format!("dialog:Visual style:{label}")}})).unwrap();
                 h.frames(3);
                 assert_eq!(h.app.ui.visual_style, index as u8);
-                let icon = crate::navigation_bar::visual_style_icon(index as u8);
+                let icon = crate::navigation_slots::visual_style_icon(index as u8);
                 let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
                 assert!(crate::scenario::rect_of("prefs:visual_style").unwrap().contains_rect(painted));
             }

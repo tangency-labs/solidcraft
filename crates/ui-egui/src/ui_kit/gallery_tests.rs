@@ -1842,10 +1842,10 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("dropdown_icons", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
         row(ui, "Visual style", |ui| {
-            let options: Vec<_> = crate::navigation_bar::VISUAL_STYLES
+            let options: Vec<_> = crate::navigation_slots::VISUAL_STYLES
                 .iter()
                 .enumerate()
-                .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                .map(|(index, (_, label))| (*label, crate::navigation_slots::visual_style_icon(index as u8)))
                 .collect();
             dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
         });
@@ -2227,14 +2227,14 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
         for _ in 0..3 {
             super::test_support::frame(&ctx, vec![], &mut draw);
         }
-        for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+        for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
             let trigger = solidcraft_ui_registry::handle_at("dialog:Visual style").unwrap();
             super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
             super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
             super::test_support::frame(&ctx, vec![], &mut draw);
-            for (option, (_, name)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            for (option, (_, name)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
                 let rect = solidcraft_ui_registry::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
-                let icon = crate::navigation_bar::visual_style_icon(option as u8);
+                let icon = crate::navigation_slots::visual_style_icon(option as u8);
                 let painted = solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
                 let owner =
                     if option == sample.borrow().selected { solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
@@ -2245,7 +2245,7 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
             super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
             super::test_support::frame(&ctx, vec![], &mut draw);
             assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
-            let icon = crate::navigation_bar::visual_style_icon(index as u8);
+            let icon = crate::navigation_slots::visual_style_icon(index as u8);
             let trigger = solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap();
             assert!(trigger.contains_rect(solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
             assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");

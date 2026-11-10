@@ -7,34 +7,6 @@ use serde_json::Value;
 pub const MAX_SLOTS: usize = 16;
 pub const MAX_SEPARATORS: usize = 4;
 
-// Reserved for the selection-mode slot in #6326; no runtime consumer yet.
-#[cfg(test)]
-pub(crate) const SELECTION_MODE_ICONS: &[(&str, &str)] = &[
-    ("faces_edges", "select_faces_edges"),
-    ("bodies", "select_bodies"),
-    ("features", "select_features"),
-    ("parts", "select_parts"),
-    ("components", "select_components"),
-    ("sketch", "select_sketch"),
-];
-
-/// The engine's style ids in index order (`ui.visual_style` 0..3), with the English menu label.
-pub(crate) const VISUAL_STYLES: [(&str, &str); 4] = [
-    ("shaded_with_edges", "Shaded with edges"),
-    ("shaded", "Shaded"),
-    ("wireframe", "Wireframe"),
-    ("shaded_with_hidden_edges", "Shaded with hidden edges"),
-];
-
-pub(crate) fn visual_style_icon(style: u8) -> &'static str {
-    match style {
-        1 => "style_shaded",
-        2 => "style_wireframe",
-        3 => "style_hidden_edges",
-        _ => "style_shaded_edges",
-    }
-}
-
 /// One slot the bar can hold, as the host's catalogue describes it.
 #[derive(Debug, PartialEq)]
 pub(crate) struct Slot {
@@ -50,21 +22,41 @@ pub(crate) struct Slot {
     pub needs_orbit: bool,
     /// The slot works only where what is under the pointer can be picked.
     pub needs_pick: bool,
+    /// The icons a menu slot shows by its current value (`value_icons[value]`); `icon` for a
+    /// value past the end and for a slot without any.
+    pub value_icons: &'static [&'static str],
 }
 
-/// The host's slot catalogue, installed once per process ([`install_catalogue`]).
-static CATALOGUE: std::sync::OnceLock<&'static [Slot]> = std::sync::OnceLock::new();
+/// The host's navigation bar: the slots a bar may hold and how a new bar looks.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Catalogue {
+    /// The slots, in the order the customiser lists them.
+    pub slots: &'static [Slot],
+    /// The slot ids a new bar holds, in order.
+    pub default_bar: &'static [&'static str],
+    /// Menu slots that show their value beside the icon until the user chooses otherwise.
+    pub value_menus: &'static [&'static str],
+    /// Menu slots that show only their icon, whatever the stored options say.
+    pub icon_menus: &'static [&'static str],
+}
 
-/// Installs the host's slot catalogue: the slots a bar may hold, in the order the customiser
-/// lists them. The first call installs it; a later call with the same table does nothing and one
-/// with another table is ignored. Returns whether `catalogue` is the installed one.
-pub(crate) fn install_catalogue(catalogue: &'static [Slot]) -> bool {
+/// The host's catalogue, installed once per process ([`install_catalogue`]).
+static CATALOGUE: std::sync::OnceLock<&'static Catalogue> = std::sync::OnceLock::new();
+
+/// Installs the host's catalogue. The first call installs it; a later call with the same table
+/// does nothing and one with another table is ignored. Returns whether `catalogue` is the
+/// installed one.
+pub(crate) fn install_catalogue(catalogue: &'static Catalogue) -> bool {
     *CATALOGUE.get_or_init(|| catalogue) == catalogue
 }
 
-/// The installed slot catalogue, or none before [`install_catalogue`].
+fn installed() -> Option<&'static Catalogue> {
+    CATALOGUE.get().copied()
+}
+
+/// The installed slots, or none before [`install_catalogue`].
 pub(crate) fn catalogue() -> &'static [Slot] {
-    CATALOGUE.get().copied().unwrap_or_default()
+    installed().map_or(&[], |catalogue| catalogue.slots)
 }
 
 pub(crate) fn find(id: &str) -> Option<&'static Slot> {
@@ -72,8 +64,9 @@ pub(crate) fn find(id: &str) -> Option<&'static Slot> {
 }
 
 impl Slot {
-    pub(crate) fn current_icon(&self, visual_style: u8) -> &'static str {
-        if self.id == "visual_style" { visual_style_icon(visual_style) } else { self.icon }
+    /// The icon the slot shows while its menu's current value is `value`.
+    pub(crate) fn current_icon(&self, value: u8) -> &'static str {
+        self.value_icons.get(usize::from(value)).copied().unwrap_or(self.icon)
     }
 
     /// Whether the slot works on the current canvas: `orbit` when its camera may orbit, `pick`
@@ -130,10 +123,7 @@ pub struct NavigationBar {
 impl Default for NavigationBar {
     fn default() -> Self {
         Self {
-            slots: ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
+            slots: installed().map_or(&[][..], |catalogue| catalogue.default_bar).iter().map(|id| (*id).to_owned()).collect(),
             slot_options: Default::default(),
             position: Position::default(),
             edge: NavigationEdge::default(),
@@ -226,14 +216,16 @@ pub(crate) fn validate(value: &Value) -> Result<(), String> {
 }
 
 impl NavigationBar {
+    /// What the menu slot `id` shows: the stored choice, else the host's default for it.
     pub(crate) fn menu_display(&self, id: &str) -> MenuDisplay {
-        if id == "display" {
+        let listed = |menus: fn(&Catalogue) -> &'static [&'static str]| installed().is_some_and(|catalogue| menus(catalogue).contains(&id));
+        if listed(|catalogue| catalogue.icon_menus) {
             return MenuDisplay::IconOnly;
         }
         self.slot_options
             .get(id)
             .map(|option| option.shows)
-            .unwrap_or_else(|| if matches!(id, "selection_mode" | "render_mode") { MenuDisplay::IconAndValue } else { MenuDisplay::IconOnly })
+            .unwrap_or_else(|| if listed(|catalogue| catalogue.value_menus) { MenuDisplay::IconAndValue } else { MenuDisplay::IconOnly })
     }
 
     /// Apply a drag only to the list it began on, including repeated separator occurrences.

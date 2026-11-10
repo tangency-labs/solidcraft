@@ -1,7 +1,7 @@
 use super::*;
 use crate::navigation::NavCaps;
 use crate::navigation_bar_view::measure;
-use crate::navigation_slots::CATALOGUE;
+use crate::navigation_slots::{CATALOGUE, SELECTION_MODE_ICONS};
 use egui::{Rect, pos2, vec2};
 use serde_json::json;
 
