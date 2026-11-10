@@ -3290,6 +3290,11 @@ fn batch_too_large_for_one_control_line_goes_per_step() {
 /// A fake app on a loopback port: counts connections and `engine.batch` lines, never replies to
 /// them (`close_first`: close a connection as soon as it is accepted).
 fn silent_app(close_first: bool) -> (String, std::sync::Arc<std::sync::Mutex<(usize, usize)>>) {
+    silent_method_app(close_first, "engine.batch")
+}
+
+/// Count deliveries of one non-idempotent method while dropping its reply.
+fn silent_method_app(close_first: bool, method: &'static str) -> (String, std::sync::Arc<std::sync::Mutex<(usize, usize)>>) {
     use std::io::BufRead;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap().to_string();
@@ -3306,7 +3311,7 @@ fn silent_app(close_first: bool) -> (String, std::sync::Arc<std::sync::Mutex<(us
                 let mut r = std::io::BufReader::new(stream);
                 let mut line = String::new();
                 while r.read_line(&mut line).is_ok_and(|n| n > 0) {
-                    if line.contains("engine.batch") {
+                    if line.contains(method) {
                         counts.lock().unwrap().1 += 1;
                         return;
                     }
@@ -3466,8 +3471,10 @@ fn tool_annotations_tell_the_whole_truth() {
     {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
-    assert_eq!(hints("new_design"), (false, true, false));
-    for name in ["set_parameter", "check_parameters", "undo", "redo"] {
+    for name in ["new_design", "documents", "quit_app"] {
+        assert_eq!(hints(name), (false, true, false), "{name}");
+    }
+    for name in ["set_parameter", "check_parameters", "undo", "redo", "preferences", "agent_cursor"] {
         assert_eq!(hints(name), (false, false, false), "{name}");
     }
     assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"].is_boolean()), "every tool is annotated");
@@ -4443,8 +4450,6 @@ fn compact_output_follows_the_apps_preference() {
     assert!(inspect_design_is_compact(&mut s));
 }
 
-}
-
 /// #3704: a fake desktop app that records the app-management methods it is asked.
 struct AppTools {
     calls: Vec<(String, Value)>,
@@ -4469,6 +4474,7 @@ impl crate::backend::Backend for AppTools {
     }
 }
 
+/// Dispatch one tool call to the recording desktop backend.
 fn app_tool(name: &str, args: Value) -> (AppTools, Value, bool) {
     let mut b = AppTools { calls: Vec::new() };
     let r = crate::tools::call_tool(&mut b, name, &args);
@@ -4476,6 +4482,7 @@ fn app_tool(name: &str, args: Value) -> (AppTools, Value, bool) {
     (b, r, is_error)
 }
 
+/// Method names reached by a tool, in call order.
 fn app_methods(b: &AppTools) -> Vec<&str> {
     b.calls.iter().map(|(m, _)| m.as_str()).collect()
 }
@@ -4507,7 +4514,7 @@ fn documents_bridges_to_ui_documents() {
 
     let (b, r, is_err) = app_tool("documents", json!({"action": "close", "force": true}));
     assert!(!is_err, "{r}");
-    assert_eq!(b.calls[0].1, json!({"action": "close", "force": true}));
+    assert_eq!(b.calls[0].1, json!({"action": "close", "force": true, "ask": false}));
 
     let (b, _r, is_err) = app_tool("documents", json!({"action": "new"}));
     assert!(!is_err);
@@ -4520,11 +4527,11 @@ fn quit_app_bridges_to_app_quit() {
     let (b, r, is_err) = app_tool("quit_app", json!({}));
     assert!(!is_err, "{r}");
     assert_eq!(app_methods(&b), ["app.quit"]);
-    assert_eq!(b.calls[0].1, json!({}));
+    assert_eq!(b.calls[0].1, json!({"ask": false}));
 
     let (b, _r, is_err) = app_tool("quit_app", json!({"force": true}));
     assert!(!is_err);
-    assert_eq!(b.calls[0].1, json!({"force": true}));
+    assert_eq!(b.calls[0].1, json!({"force": true, "ask": false}));
 }
 
 /// #3704: `preferences` reads with no arguments and passes the named ones straight to ui.prefs;
@@ -4569,8 +4576,8 @@ fn app_tools_are_not_batch_steps_and_check_arguments() {
         let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": name}]}));
         assert_eq!(r["result"]["isError"], json!(true), "{name}: {r}");
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("`{name}` is a tool")), "{name}: {text}");
         // `execute` wrapping them is answered with the MCP-tool hint (#10680).
-        // `execute` wrapping them is refused too, with the same direction.
         let r = raw_tool(&mut s, "execute", json!({"command": name}));
         assert_eq!(r["result"]["isError"], json!(true), "execute {name}: {r}");
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
@@ -4627,4 +4634,20 @@ fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
         assert!(text.contains(names), "{text}");
     }
     assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
+}
+
+/// A lost app-management reply must not close the next tab or create a duplicate tab.
+#[test]
+fn app_management_is_not_resent_after_a_lost_reply() {
+    use crate::backend::Backend;
+    for (method, params) in [
+        ("ui.documents", json!({"action": "close", "force": true, "ask": false})),
+        ("ui.documents", json!({"action": "new"})),
+        ("app.quit", json!({"ask": false})),
+    ] {
+        let (addr, seen) = silent_method_app(false, method);
+        let mut remote = crate::Remote::connect(&addr).unwrap();
+        assert!(remote.call(method, params).is_err());
+        assert_eq!(*seen.lock().unwrap(), (2, 1), "{method}: one initial connection and one delivery");
+    }
 }

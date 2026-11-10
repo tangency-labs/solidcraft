@@ -3479,6 +3479,13 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
                 return Err(FOLLOW_UNAVAILABLE.into());
             }
             let path = value.as_str().ok_or("`theme_follow` must be a theme file's path, or an empty string to stop following")?;
+            if !path.trim().is_empty() {
+                solidcraft_engine::io::vfs::check(path.trim()).map_err(|e| e.to_string())?;
+                // Following persists beyond this request's scope and reads on later UI frames.
+                if solidcraft_engine::io::vfs::current_scope().is_some() {
+                    return Err("`theme_follow` cannot start while file access is confined; use theme_import instead".into());
+                }
+            }
             staged.theme_follow = crate::theme_files::follow_path(path)?;
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
@@ -7598,6 +7605,57 @@ mod tests {
                 assert!(h.app.preferences.custom_themes.is_empty(), "nothing imported");
             }
         }
+    }
+
+    /// MCP scopes end with the call, but a followed theme keeps reading on later frames.
+    #[test]
+    fn scoped_theme_follow_cannot_persist_reads_beyond_the_request() {
+        use serde_json::json;
+        use solidcraft_engine::io::vfs;
+        let mut h = crate::scenario::Harness::new();
+        let root = h.dir.join("allowed-themes");
+        let outside = h.dir.join("private-themes");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let inside = root.join("theme.json");
+        let private = outside.join("theme.json");
+        let theme = json!({"format": "solidcraft-theme/1", "name": "Scoped", "base": "light", "colors": {"panel": "#fffdf0"}});
+        for path in [&inside, &private] {
+            std::fs::write(path, theme.to_string()).unwrap();
+        }
+        let before = h.app.prefs();
+        let refused = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+            h.call("ui.prefs", json!({"theme_follow": private.to_string_lossy(), "theme": "dark", "open": "Appearance"}))
+        });
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("outside the folders this agent may use"), "{refused}");
+        assert_eq!(h.app.prefs(), before, "a refused follow changes no preferences");
+        assert!(h.call("ui.prefs", json!({}))["result"]["dialog"].is_null());
+        #[cfg(unix)]
+        {
+            let link = root.join("escape.json");
+            std::os::unix::fs::symlink(&private, &link).unwrap();
+            let refused =
+                vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", json!({"theme_follow": link.to_string_lossy()})));
+            assert_eq!(refused["ok"], false, "{refused}");
+            assert!(refused["error"].as_str().unwrap().contains("outside the folders this agent may use"), "{refused}");
+            assert_eq!(h.app.prefs(), before);
+        }
+        let refused =
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || h.call("ui.prefs", json!({"theme_follow": inside.to_string_lossy()})));
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("use theme_import instead"), "{refused}");
+        assert_eq!(h.app.prefs(), before);
+        assert!(h.app.preferences.theme_follow.is_empty());
+        // Unconfined desktop callers can still follow a valid file.
+        let followed = h.call("ui.prefs", json!({"theme_follow": inside.to_string_lossy()}));
+        assert_eq!(followed["ok"], true, "{followed}");
+        assert!(followed["result"]["theme_follow_error"].is_null(), "{followed}");
+        // Stopping an existing follow remains possible in a confined request.
+        let stopped = vfs::scoped(Some(vfs::PathScope::new([root])), || h.call("ui.prefs", json!({"theme_follow": ""})));
+        assert_eq!(stopped["ok"], true, "{stopped}");
+        assert!(h.app.preferences.theme_follow.is_empty());
+        assert!(stopped["result"]["theme_followed"].is_null());
     }
 
     #[test]

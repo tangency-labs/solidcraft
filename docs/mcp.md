@@ -188,13 +188,29 @@ solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
 SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+### Desktop app management
+
+External MCP clients connected to the desktop app can also use:
+
+- `documents {}` lists tabs. `action: "switch"` selects `index`; `"close"` closes it
+  (the active tab if omitted); `"new"` opens an empty design.
+- `quit_app {}` exits cleanly, avoiding crash recovery on the next launch.
+- `preferences {}` reads preferences. Named keys, such as `theme`, set them and return the updated values.
+- `agent_cursor {}` reads cursor settings; `show`, `speed` (1–5 or `"instant"`), and `follow_camera` change them.
+
+Closing or quitting with unsaved changes is refused and names the designs unless `force: true`
+explicitly discards them. These calls never open dialogs. Headless servers return an error
+saying they need the desktop app. Confined clients cannot start persistent `theme_follow` reads; use inline `theme_import` instead. These tools cannot be used as `batch` steps or wrapped in
+`execute`. The in-app Assistant does not offer them: its permission gate excludes app management.
+
 ### Tool annotations
 
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on
 these hints). `list_commands`, `describe_command`, `inspect_design`, `measure`, `body_topology`,
 `skill_reference`, `crash_reports`, `pending` and `running` are read-only. `set_parameter`, `undo` and `redo`
 change the design undoably, and so does `check_parameters` (it changes the design and puts it back:
-not read-only, not destructive). `new_design` replaces it (destructive). `execute`, `batch`, `open`, `save`, `export`,
+not read-only, not destructive). `new_design` replaces it (destructive). `documents` and `quit_app` are also destructive because forced closes can discard unsaved work.
+`preferences` and `agent_cursor` change app settings (not read-only, not destructive). `execute`, `batch`, `open`, `save`, `export`,
 `screenshot` (whose `path` writes a file) and `compare_picture` (which reads the reference picture) can read,
 write, overwrite or delete files: they are
 not read-only, `destructiveHint` and `openWorldHint` are true.

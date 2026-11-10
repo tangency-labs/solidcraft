@@ -360,7 +360,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "The desktop app's open design tabs: their names, which is active, which have unsaved changes, and any prompt waiting on a person. \
              With no action, lists them. `action` `switch` and `index` turn to that tab; `close` closes the tab at `index` (the active one when \
              omitted); `new` opens a new empty design. Closing a tab that has unsaved changes is refused, naming the design, unless `force: true` \
-             says to discard them. Programmatic calls never open a \"save changes?\" dialog. Needs the desktop app: headless returns an error.",
+             says to discard them. Programmatic calls never open a \"save changes?\" dialog. External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
             object(
                 json!({
                     "action": {"type": "string", "enum": ["new", "switch", "close"], "description": "new, switch or close (default: just list the tabs)"},
@@ -369,14 +369,14 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 }),
                 &[],
             ),
-            Effect::Edits,
+            Effect::Replaces,
         ),
         tool(
             "quit_app",
             "Quit the app",
             "Quit the desktop app cleanly (so the next start does not offer crash recovery). `force: true` quits even with unsaved designs; \
              otherwise a design with unsaved changes is refused and named. Programmatic calls never open a \"save changes?\" dialog. Needs the \
-             desktop app: headless returns an error.",
+             desktop app: headless returns an error. External MCP clients only; not available in the in-app Assistant.",
             object(json!({"force": {"type": "boolean", "description": "Quit even with unsaved designs (refused otherwise, naming them)"}}), &[]),
             Effect::Replaces,
         ),
@@ -386,7 +386,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "The desktop app's preferences. With no arguments, reads them all back. With arguments, sets the named ones and returns all of them. \
              Any preference the app's ui.prefs accepts may be set (docs/control-protocol.md), such as default_units, theme, language, up_axis, \
              msaa, ui_scale, zoom_to_cursor, smooth_wheel_zoom, show_frame_rate. Kept between runs. Needs the desktop app: headless returns \
-             an error.",
+             an error. External MCP clients only; not available in the in-app Assistant.",
             json!({
                 "type": "object",
                 "properties": {},
@@ -400,7 +400,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "The desktop app's agent cursor, where commands the agent runs visibly glide and land. `show` turns it on or off; `speed` is a \
              multiplier from 1 to 5 (5 is fastest) or \"instant\" (no animation: each command runs at once and the pointer jumps to where it \
              acted); `follow_camera` keeps the cursor with the camera as it moves. All are optional; with none, reads the current settings. \
-             Needs the desktop app: headless returns an error.",
+             External MCP clients only; not available in the in-app Assistant. Needs the desktop app: headless returns an error.",
             object(
                 json!({
                     "show": {"type": "boolean", "description": "Show (true) or hide (false) the cursor"},
@@ -1045,6 +1045,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             if let Some(force) = a.get("force") {
                 params["force"] = force.clone();
             }
+            if str_arg(a, "action") == Some("close") {
+                params["ask"] = json!(false);
+            }
             b.call("ui.documents", params)
         }
         "quit_app" => {
@@ -1055,6 +1058,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             if let Some(force) = a.get("force") {
                 params["force"] = force.clone();
             }
+            params["ask"] = json!(false);
             b.call("app.quit", params)
         }
         "preferences" => {
