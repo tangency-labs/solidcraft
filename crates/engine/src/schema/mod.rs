@@ -133,6 +133,7 @@ pub mod slicers;
 pub mod split;
 pub mod surface;
 pub mod surface_analysis;
+pub mod surface_blend;
 pub mod surface_boundary;
 pub mod surface_match;
 pub mod timeline_clipboard;

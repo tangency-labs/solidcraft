@@ -534,6 +534,8 @@ pub struct Dialog {
     /// The note (a message id) a click that the waiting pick field does not take leaves under
     /// the form: what that field is for (#10428).
     pub(crate) pick_refused: Option<&'static str>,
+    /// A right-click in the viewport asked for OK ([`right_click`]); taken on the next frame.
+    pub(crate) confirm: bool,
     /// Folded to its header (the shared disclosure chevron).
     pub collapsed: bool,
     reset_scroll: bool,
@@ -819,6 +821,7 @@ impl Dialog {
             restore_value_focus: false,
             awaiting_pick: false,
             pick_refused: None,
+            confirm: false,
             collapsed: false,
             reset_scroll: true,
             preview_enabled: true,
@@ -922,7 +925,7 @@ impl Dialog {
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
-            "solid.fillet" => Dialog::new(fillet_kind(&length_default(s, "2"), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
@@ -3225,11 +3228,22 @@ fn missing_pick(error: &str) -> bool {
     awaiting_selection(error) || error.get(..5).is_some_and(|start| start.eq_ignore_ascii_case("pick "))
 }
 
+/// A refusal that is guidance, not a failure of the design, so the dialog offers nothing to
+/// report (#10181): the command is not available here, or the pick is in the sketch already.
+fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+    already_linked(error) || command_disabled(app, d, error)
+}
+
+/// Project's or Intersect's refusal of a pick the sketch already holds ("already intersected into
+/// this sketch: sketch curve l1"): guidance too, the pick is in the sketch already.
+fn already_linked(error: &str) -> bool {
+    ["already projected into this sketch", "already intersected into this sketch"].iter().any(|k| error.contains(k))
+}
+
 /// A refusal that says the command is not available in this context ("`sketch.project` is not
 /// available right now: no sketch is being edited"): the engine's own `Disabled` refusal for the
-/// command this dialog runs, so the sketch ended or the mode changed under it. Guidance, not a
-/// failure of the design: there is nothing to report (#10181).
-fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+/// command this dialog runs, so the sketch ended or the mode changed under it.
+fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     let Some(id) = d.command() else { return false };
     let Some(spec) = solidcraft_engine::find_command(id) else { return false };
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
@@ -4054,12 +4068,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (enter_free, esc) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
     let nothing_focused = ctx.memory(|m| m.focused().is_none());
     let canvas_enter = enter_free && ctx.memory(|m| m.had_focus_last_frame(egui::Id::unique("sc_canvas_value")));
-    // Tables (configurations, a study's keys) take Enter for their cells.
-    let enter_applies = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
-        && !matches!(&d.kind, Kind::Motion(k) if k.wide())
-        && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
+    let enter_applies = enter_applies(&d);
     let report_active = app.issue_report.draft.is_some();
-    if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
+    let confirm = std::mem::take(&mut d.confirm);
+    if !preset_prompt
+        && !report_active
+        && enter_applies
+        && app.applying.is_none()
+        && (enter || canvas_enter || (enter_free && nothing_focused) || confirm)
+    {
         ok = true;
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled && escape_routed_here {
@@ -4420,6 +4437,50 @@ fn mode_inputs_key(kind: &Kind) -> Option<usize> {
     }
 }
 
+/// Whether Enter (and a right-click in the viewport) runs OK: not where there is no OK, a
+/// deletion's confirmation, a table that takes Enter for its cells (configurations, a study's
+/// keys), or a material being edited.
+fn enter_applies(d: &Dialog) -> bool {
+    !matches!(d.kind, Kind::Sketch | Kind::Measure { .. } | Kind::ConfirmDelete { .. })
+        && !matches!(&d.kind, Kind::Motion(k) if k.wide())
+        && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing())
+}
+
+/// A right-click in the viewport with a dialog open confirms its active input (#6159): it goes
+/// on to the next input that is still empty, and once every input holds something, runs OK as
+/// Enter does. An empty input the dialog can't make its feature without stays active, and the
+/// status line says what to pick.
+pub(crate) fn right_click(app: &mut SolveApp) {
+    let Some(mut d) = app.dialog.take() else { return };
+    if enter_applies(&d) && app.applying.is_none() {
+        let empty = |i: &usize| d.inputs.get(*i).is_some_and(|input| input.items.is_empty());
+        let next = (d.active.saturating_add(1)..d.inputs.len()).chain(0..d.active.min(d.inputs.len())).find(empty);
+        match d.active_input().filter(|input| input.items.is_empty()) {
+            // An empty input is optional when the dialog makes its feature without it.
+            Some(input) if apply_commands(app, &d).is_err() => app.set_status(pick_first(input), false),
+            _ => {
+                // Moving on, the hint about an input before is out of date.
+                if app.status.as_ref().is_some_and(|(text, _, error)| !error && d.inputs.iter().any(|i| *text == pick_first(i))) {
+                    app.status = None;
+                }
+                match next {
+                    Some(i) => {
+                        d.active = i;
+                        d.error = None;
+                    }
+                    None => d.confirm = true,
+                }
+            }
+        }
+    }
+    app.dialog = Some(d);
+}
+
+/// The hint a right-click shows while `input` is empty and needed.
+fn pick_first(input: &SelInput) -> String {
+    solidcraft_ui_text::format("dialog.right_click_pick", &[("input", tr(input.label))])
+}
+
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
     app.session.feature_edit_sketch = None;
@@ -4654,11 +4715,33 @@ pub(crate) fn length_default(s: &Session, number: &str) -> String {
     crate::length_input::default(&s.doc, number)
 }
 
+/// A new Solid Fillet's radius: the size the tool ships with (2 mm), shown in the design's unit
+/// ("0.07874 in" in an inch design). A radius is bound by the faces beside its edges, and the
+/// number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). The
+/// preference keeps the old default.
+fn fillet_radius_default(app: &SolveApp) -> String {
+    if app.preferences.fillet_legacy_radius { length_default(&app.session, "2") } else { crate::length_input::shown(&app.session.doc, 2.0) }
+}
+
 /// A feature's length as its edit field shows it. A bare number is kept in millimetres: where the
 /// design reads bare numbers in another unit, the field says "mm" (as the configuration table
 /// does), so OK keeps the size. Anything else shows as stored.
 pub(crate) fn stored_length(s: &Session, e: &str) -> String {
     if s.doc.with_design_unit(e, ValueKind::Length) == e { e.to_string() } else { format!("{} mm", e.trim()) }
+}
+
+/// A Cylinder's or Sphere's size as its edit field shows it (#6609): a radius worked out from a
+/// diameter, `(D) / 2`, shows as the diameter it was made with, so OK sends that diameter and
+/// keeps the radius. A bare number in `D` (kept before #779) is in the design's units, as any
+/// bare number inside an expression is, so it shows with that unit written out. Any other radius
+/// shows as stored, on Radius.
+fn round_size(s: &Session, radius: &str) -> (&'static str, String) {
+    use solidcraft_engine::doc::expr::is_bare_number;
+    match crate::length_input::diameter_of(radius) {
+        Some(diameter) if is_bare_number(diameter) => ("diameter", crate::length_input::default(&s.doc, diameter)),
+        Some(diameter) => ("diameter", diameter.to_string()),
+        None => ("radius", stored_length(s, radius)),
+    }
 }
 
 /// A stored value as its edit field shows it (#1936): a bare number is written with the unit the
@@ -4933,6 +5016,11 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
                 {
                     app.set_status(why, false);
                 }
+                if matches!(cmd.as_str(), "sketch.intersect" | "sketch.project")
+                    && let Some(what) = link_status(app, &cmd, &reply)
+                {
+                    app.set_status(what, false);
+                }
             }
             Err(error) => {
                 if let Some((id, _)) = d.editing {
@@ -4955,6 +5043,54 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
         };
     }
     Ok(())
+}
+
+/// What an Intersect or Project added to the sketch, for the status line, and that it is hidden
+/// when the sketch's Projected Geometries option is off: such a result showed nothing and said
+/// nothing, so it looked as if the click had done nothing.
+fn link_status(app: &SolveApp, cmd: &str, reply: &Value) -> Option<String> {
+    let links = reply.get("links").and_then(Value::as_array)?;
+    let ids = |key: &str| -> Vec<&str> {
+        links.iter().flat_map(|l| l.get(key).and_then(Value::as_array).into_iter().flatten()).filter_map(Value::as_str).collect()
+    };
+    let (curves, points) = (ids("curves"), ids("points"));
+    let world = app.session.world_state().ok();
+    let sketch = app.session.active_sketch.and_then(|id| world.as_ref()?.sketch(id)).map(|s| &s.sketch);
+    // A curve's ends and centre are points of its link too: a point counts on its own only when
+    // no curve uses it (a projected vertex beside a projected edge).
+    let lone = match sketch {
+        Some(sk) => {
+            // Once over the sketch, not once per point: a large outline returns many points.
+            let on_curves: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
+            let index: std::collections::HashMap<&str, usize> = sk.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+            points.iter().filter(|id| index.get(**id).is_some_and(|i| !on_curves.contains(i))).count()
+        }
+        None if curves.is_empty() => points.len(),
+        None => 0,
+    };
+    let command = solidcraft_ui_text::tr(if cmd == "sketch.intersect" { "ui.intersect" } else { "ui.project" });
+    let counted = |id: &str, n: usize| solidcraft_ui_text::format(id, &[("command", command), ("count", &n.to_string())]);
+    let mut text = match (curves.len(), lone) {
+        (0, 0) => return None,
+        (1, 0) => counted("ui.sketch_links_added_curve", 1),
+        (n, 0) => counted("ui.sketch_links_added_curves", n),
+        (0, 1) => counted("ui.sketch_links_added_point", 1),
+        (0, n) => counted("ui.sketch_links_added_points", n),
+        (c, p) => solidcraft_ui_text::format(
+            "ui.sketch_links_added_curves_and_points",
+            &[
+                ("command", command),
+                ("curves", &counted(if c == 1 { "ui.sketch_links_curve_count_one" } else { "ui.sketch_links_curve_count" }, c)),
+                ("points", &counted(if p == 1 { "ui.sketch_links_point_count_one" } else { "ui.sketch_links_point_count" }, p)),
+            ],
+        ),
+    };
+    let linked = links.iter().any(|l| l.get("link").is_some_and(|l| !l.is_null()));
+    if linked && sketch.is_some_and(|sk| sk.view.hide_projected) {
+        text.push(' ');
+        text.push_str(&solidcraft_ui_text::format("ui.sketch_links_hidden", &[("option", solidcraft_ui_text::tr("ui.show_projected_geometries"))]));
+    }
+    Some(text)
 }
 
 /// Edit Section Analysis: its dialog, where the dialog that made the section shown (or hidden)
@@ -7114,7 +7250,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.cylinder")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.cylinder",
-                fields: vec![("radius", stored_length(s, radius)), ("height", stored_length(s, height))],
+                fields: vec![round_size(s, radius), ("height", stored_length(s, height))],
                 operation: op_index(operation),
                 at: None,
                 refs: Default::default(),
@@ -7144,7 +7280,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.sphere")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.sphere",
-                fields: vec![("radius", stored_length(s, radius))],
+                fields: vec![round_size(s, radius)],
                 operation: op_index(operation),
                 at: None,
                 refs: Default::default(),
@@ -8166,6 +8302,167 @@ fn same_face(a: &Sel, b: &Sel) -> bool {
 /// Where a face was picked.
 fn face_point(x: &Sel) -> Option<Value> {
     if let Sel::Face { point, .. } = x { Some(pt(*point)) } else { None }
+}
+
+#[cfg(test)]
+mod right_click_tests {
+    //! A right-click in the viewport confirms a dialog's input, and on the last one runs OK (#6159).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A box in the iso view, and Mirror (Objects, then Mirror Plane) open with nothing picked.
+    fn mirror() -> Harness {
+        let mut h = Harness::new();
+        h.app.preferences.right_click_confirms = true;
+        for s in [
+            json!({"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 50, "width": 30, "height": 20}}}),
+            json!({"call": "ui.view", "params": {"view": "iso"}}),
+            json!({"start": "solid.mirror"}),
+        ] {
+            h.step(&s).unwrap();
+        }
+        assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Mirror) && d.active == 0));
+        h
+    }
+
+    fn right_click(h: &mut Harness, at: Value) {
+        h.step(&json!({"click": at, "button": "right"})).unwrap();
+        h.frames(2);
+    }
+
+    fn active(h: &Harness) -> Option<usize> {
+        h.app.dialog.as_ref().map(|d| d.active)
+    }
+
+    fn hint(h: &Harness) -> Option<String> {
+        h.app.status.as_ref().filter(|s| !s.2).map(|s| s.0.clone())
+    }
+
+    /// A right drag in empty space of the viewport.
+    fn right_drag(h: &mut Harness) {
+        let r = h.app.viewport.rect.unwrap();
+        let (a, b) = (r.left_top() + egui::vec2(40.0, 40.0), r.left_top() + egui::vec2(140.0, 90.0));
+        h.call("ui.drag", json!({"x0": a.x, "y0": a.y, "x1": b.x, "y1": b.y, "button": "right", "steps": 8}));
+        h.frames(2);
+    }
+
+    #[test]
+    fn a_right_click_goes_on_to_the_next_input_then_runs_ok() {
+        let mut h = mirror();
+        let features = h.app.session.doc.features.len();
+        // Nothing picked: it stays, and says what to pick.
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(0));
+        assert_eq!(hint(&h).as_deref(), Some("Select Objects first"));
+        // The body picked (a list: picking doesn't move on): the right-click does.
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs[0].items.len()), Some(1));
+        assert_eq!(active(&h), Some(0));
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(1), "on to Mirror Plane");
+        assert!(hint(&h).is_none(), "the hint about Objects is gone");
+        // The plane is needed: no OK without it.
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(1));
+        assert_eq!(hint(&h).as_deref(), Some("Select Mirror Plane first"));
+        assert_eq!(h.app.session.doc.features.len(), features);
+        // The last input filled: OK.
+        h.step(&json!({"click": {"world": [50, 15, 10]}})).unwrap();
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            h.frames(1);
+        }
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "the mirror is made");
+        assert!(hint(&h).is_none(), "and the hint about the plane is gone");
+        assert!(h.app.viewport.context_menu.is_none());
+    }
+
+    #[test]
+    fn with_every_input_filled_a_right_click_runs_ok() {
+        let mut h = mirror();
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        // The plane picked into the second input, then the first made active again.
+        h.app.dialog.as_mut().unwrap().active = 1;
+        h.step(&json!({"click": {"world": [50, 15, 10]}})).unwrap();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.active = 0;
+        assert!(!d.inputs[0].items.is_empty() && !d.inputs[1].items.is_empty());
+        // Both filled, from the first: OK straight away (no empty input to go to).
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish");
+            h.frames(1);
+        }
+    }
+
+    #[test]
+    fn a_typed_value_is_taken_by_the_right_click_ok() {
+        // Extrude a rectangle: the value box has the keyboard, "25 mm" is typed without Enter,
+        // and a right-click in the view runs OK with it.
+        let mut h = Harness::new();
+        h.app.preferences.right_click_confirms = true;
+        for s in [
+            json!({"call": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}}),
+            json!({"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 20]}}}),
+            json!({"call": "engine.execute", "params": {"command": "sketch.finish", "params": {}}}),
+            json!({"call": "ui.view", "params": {"view": "iso"}}),
+            json!({"start": "solid.extrude"}),
+        ] {
+            h.step(&s).unwrap();
+        }
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.inputs.first().is_some_and(|i| !i.items.is_empty())), "the profile is picked");
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "25 mm"})).unwrap();
+        right_click(&mut h, json!({"world": [-30, -30, 0]}));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.app.dialog.is_some() {
+            assert!(std::time::Instant::now() < deadline, "OK did not finish: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            h.frames(1);
+        }
+        let bounds = h.app.session.world_state().unwrap().bodies.first().map(|b| b.mesh().bounds());
+        assert_eq!(bounds.map(|b| b.max.z - b.min.z), Some(25.0), "extruded by the typed value");
+    }
+
+    #[test]
+    fn with_the_preference_off_a_right_click_leaves_the_dialog_alone() {
+        let mut h = mirror();
+        h.app.preferences.right_click_confirms = false;
+        h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert_eq!(active(&h), Some(0));
+        assert!(hint(&h).is_none());
+        assert!(h.app.viewport.context_menu.is_none(), "no menu over a dialog");
+    }
+
+    #[test]
+    fn a_right_drag_is_not_a_confirmation() {
+        for gestures in [false, true] {
+            let mut h = mirror();
+            if gestures {
+                h.app.preferences.nav = crate::mouse_gesture::MOUSE_MODE.into();
+                h.app.preferences.mouse_gestures.enabled = true;
+            }
+            h.step(&json!({"click": {"world": [25, 15, 20]}})).unwrap();
+            right_drag(&mut h);
+            assert_eq!(active(&h), Some(0), "gestures {gestures}");
+            assert!(h.app.dialog.as_ref().is_some_and(|d| !d.confirm));
+        }
+    }
+
+    #[test]
+    fn without_a_dialog_a_right_click_opens_the_menu() {
+        let mut h = mirror();
+        cancel(&mut h.app);
+        h.frames(2);
+        right_click(&mut h, json!({"world": [25, 15, 20]}));
+        assert!(h.app.viewport.context_menu.is_some());
+        assert!(hint(&h).is_none());
+    }
 }
 
 #[cfg(test)]

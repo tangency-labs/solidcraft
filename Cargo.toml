@@ -29,6 +29,7 @@ solidcraft-doc = { path = "crates/doc" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
+solidcraft-ui-kit = { path = "crates/ui-kit" }
 solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
 solidcraft-ui-text = { path = "crates/ui-text" }

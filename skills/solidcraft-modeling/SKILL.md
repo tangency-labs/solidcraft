@@ -50,6 +50,7 @@ Work the part out as numbers first. Then build it in a few large `batch` calls, 
 - **Each stage:** run `measure {}` (about 0.9 KB per body; `{"summary":true}` keeps only name, volume, bbox, face count and `closed` per body) and compare the volume, bbox and face count with your numbers. A cut or hole that leaves the volume unchanged has missed, even though it reported success.
 - **Timeline health:** `inspect_design {"measure":false,"sketches":false}` shows each feature's `error` and `warning`.
 - **Parameter test:** run `set_parameter`. Expect `errors: []`, then `measure` again; the COM and bbox should move by the amounts you computed. To try values without keeping them, `check_parameters {"set": {"L": "140 mm"}}` reports the volume, errors and cylinder axes and puts the design back.
+- **Compare proposals:** call `inspect.parameter_variants` through `execute` with named sets of values when several parameters change together. Compare the baseline and each result's volume, mass and regressions before applying a choice. Every variant starts from the open design and leaves it unchanged.
 - **Positions:** `measure` does not say where a feature sits.
   - On an asymmetric part, check the COM shift you computed.
   - On a symmetric part (a mirrored or patterned layout) the COM does not move, so take a top-view screenshot and compare distances in pixels against a known size.

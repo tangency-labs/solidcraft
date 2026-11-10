@@ -694,9 +694,8 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 
         // while there are boundaryCurve/Surface xsect startPoints, use them to trace
         // out intersection curves (each pass pops one; none adds any)
-        // (not upstream, opt-in: one bound on the trace steps of all the start points, HANG-52)
-        self.base
-            .set_trace_budget(k.fixes.ssi_start_loop_trace_budget);
+        // (not upstream: one bound on the trace steps of all the start points, HANG-52)
+        self.base.set_trace_budget(true);
         while let Some(&start) = self.base.start_points.last() {
             k.check_cancelled(OP_DI)?;
             // keep a copy of the start point (operator= into a fresh element)
@@ -1077,23 +1076,18 @@ mod tests {
         }
     }
 
-    /// HANG-52 through `DoIntersection`: the start-point loop's traces are bounded only
-    /// with `fixes.ssi_start_loop_trace_budget`, the bound's refusal fails the
-    /// intersection with the too-many error, and the real bound changes no curve.
+    /// HANG-52 through `DoIntersection`: the start-point loop's traces are bounded, the
+    /// bound's refusal fails the intersection with the too-many error, and the real
+    /// bound changes no curve.
     #[test]
-    fn do_intersection_bounds_its_start_point_loop_traces_when_opted_in() {
-        let mut k = Kernel::default();
-        let off = sphere_cut_with_trace_steps(&k, 1).unwrap();
-        assert!(!off.curves_3d.is_empty());
+    fn do_intersection_bounds_its_start_point_loop_traces() {
+        let k = Kernel::default();
+        let on = sphere_cut_with_trace_steps(&k, MAX_START_LOOP_TRACE_STEPS).unwrap();
+        assert!(!on.curves_3d.is_empty());
 
-        k.fixes.ssi_start_loop_trace_budget = true;
         assert!(matches!(
             sphere_cut_with_trace_steps(&k, 1),
             Err(SolidError::InvalidInput { .. })
         ));
-        let on = sphere_cut_with_trace_steps(&k, MAX_START_LOOP_TRACE_STEPS).unwrap();
-        assert_eq!(on.curves_3d.len(), off.curves_3d.len());
-        assert_eq!(on.curve_types, off.curve_types);
-        assert_eq!(on.deviations, off.deviations);
     }
 }

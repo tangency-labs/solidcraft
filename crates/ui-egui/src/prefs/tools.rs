@@ -69,6 +69,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {
             setting::remember_dialog_values(app, ui);
+            setting::fillet_legacy_radius(app, ui);
         });
         ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
             tool_group(ui, "", ui_kit::paint_assembly_move, |ui| {

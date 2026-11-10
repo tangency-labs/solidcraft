@@ -12,7 +12,7 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::SolveApp;
 use crate::ui_kit;
 
-pub(crate) const DRAG_ZOOM: &str = "view.tool.zoom";
+pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
 
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
@@ -48,6 +48,13 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+Up",
     "Ctrl+Down",
     "Ctrl+8",
+    // Keyboard zoom (`navigation::view_key`, #717).
+    "PageUp",
+    "PageDown",
+    "Plus",
+    "Shift+Plus",
+    "Minus",
+    "Equals",
 ];
 
 /// The most keys one command keeps; more from a settings file are dropped.
@@ -108,8 +115,8 @@ impl Recorder {
 
     fn preview(&self) -> Option<String> {
         match self.key {
-            Some(key) => Some(format!("{}…", display(&key_name(key, self.modifiers)))),
-            None if !self.modifiers.is_none() => Some(format!("{}…", display(&modifier_prefix(self.modifiers, None)))),
+            Some(key) => Some(format!("{}…", crate::ui_kit::chord_label(&key_name(key, self.modifiers)))),
+            None if !self.modifiers.is_none() => Some(format!("{}…", crate::ui_kit::chord_label(&modifier_prefix(self.modifiers, None)))),
             None => None,
         }
     }
@@ -394,26 +401,8 @@ fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     }
 }
 
-/// Presentation only: stored Ctrl bindings retain their historical primary-modifier alias.
-/// A recorded macOS Control+Command chord includes both names explicitly.
-pub fn display(key: &str) -> String {
-    display_for_platform(key, cfg!(target_os = "macos"))
-}
-
-fn display_for_platform(key: &str, mac: bool) -> String {
-    let both = key.starts_with("Ctrl+Cmd+");
-    key.split('+')
-        .map(|part| match (mac, part) {
-            (true, "Ctrl") if !both => "Cmd",
-            (true, "Alt") => "Option",
-            _ => part,
-        })
-        .collect::<Vec<_>>()
-        .join("+")
-}
-
 pub fn display_for(app: &SolveApp, id: &str) -> Option<String> {
-    effective(app, id).map(|key| display(&key))
+    effective(app, id).map(|key| crate::ui_kit::chord_label(&key))
 }
 
 /// Commands bound to `key` now.
@@ -737,7 +726,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             .into_iter()
             .filter_map(|c| {
                 let keys = keys_for_spec(app, c);
-                let displayed: Vec<_> = keys.iter().map(|key| display(key)).collect();
+                let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
                 let label = app.tr_label(c.label);
                 let group = shortcut_group(c);
                 let hit = if filtering {
@@ -883,7 +872,7 @@ fn shortcut_group(command: &CommandSpec) -> String {
 }
 
 fn shortcut_search_label(command: &CommandSpec, label: &str, keys: &[&str]) -> String {
-    let displayed: Vec<_> = keys.iter().map(|key| display(key)).collect();
+    let displayed: Vec<_> = keys.iter().map(|key| crate::ui_kit::chord_label(key)).collect();
     format!("{label} / {} ({}) · {} · {}", command.label, command.id, keys.join(", "), displayed.join(", "))
 }
 
@@ -899,7 +888,7 @@ fn shortcut_row(
     let t = solidcraft_theme::Tokens::get();
     let editing = !app.keymap.read_only;
     let capturing = app.keymap.capturing.as_deref() == Some(command.id);
-    let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, display(key), true)).collect();
+    let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, crate::ui_kit::chord_label(key), true)).collect();
     if slots.is_empty() || (editing && slots.len() < MAX_KEYS) {
         slots.push((slots.len(), String::new(), false));
     }
@@ -908,15 +897,16 @@ fn shortcut_row(
             *text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr("prefs.shortcuts_press").to_owned());
         }
     }
+    let unassigned = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
     let widths: Vec<f32> = slots
         .iter()
         .map(|(slot, text, assigned)| {
             if capturing && *slot == app.keymap.slot {
                 ui_kit::ContentWidth::button(ui, text)
             } else if *assigned {
-                ui_kit::shortcut_binding_width(ui, text)
+                ui_kit::shortcut_binding_width(ui, text, unassigned)
             } else if keys.is_empty() {
-                ui_kit::shortcut_binding_width(ui, "")
+                ui_kit::shortcut_binding_width(ui, "", unassigned)
             } else {
                 t.control_height
             }
@@ -980,9 +970,9 @@ fn shortcut_row(
                         let capture = if active {
                             ui_kit::button(ui, text, ui_kit::Button::Primary)
                         } else if *assigned {
-                            ui_kit::shortcut_binding(ui, text, editing)
+                            ui_kit::shortcut_binding(ui, text, unassigned, editing)
                         } else if keys.is_empty() {
-                            ui_kit::shortcut_binding(ui, "", editing)
+                            ui_kit::shortcut_binding(ui, "", unassigned, editing)
                         } else {
                             let (r, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
                             ui_kit::quiet_icon_button_at(ui, r, "plus", app.tr_label("Click, then press the new key"))
@@ -1049,7 +1039,11 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     }
     if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
         ui.horizontal_wrapped(|ui| {
-            let replace = ui_kit::button(ui, solidcraft_ui_text::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+            let replace = ui_kit::button(
+                ui,
+                solidcraft_ui_text::format("keymap.use_anyway", &[("key", &crate::ui_kit::chord_label(&key))]),
+                ui_kit::Button::Normal,
+            );
             crate::scenario::publish_target("keymap:replace", replace.rect);
             if replace.clicked() {
                 chosen = Some("replace");
@@ -1615,9 +1609,9 @@ mod tests {
 
     #[test]
     fn chord_display_and_legacy_primary_modifier_bindings_are_compatible() {
-        assert_eq!(display_for_platform("Ctrl+Alt+Shift+M", true), "Cmd+Option+Shift+M");
-        assert_eq!(display_for_platform("Ctrl+Cmd+Alt+Shift+M", true), "Ctrl+Cmd+Option+Shift+M");
-        assert_eq!(display_for_platform("Ctrl+Alt+Shift+M", false), "Ctrl+Alt+Shift+M");
+        assert_eq!(crate::ui_kit::chord_label_for_platform("Ctrl+Alt+Shift+M", true), "Cmd+Option+Shift+M");
+        assert_eq!(crate::ui_kit::chord_label_for_platform("Ctrl+Cmd+Alt+Shift+M", true), "Ctrl+Cmd+Option+Shift+M");
+        assert_eq!(crate::ui_kit::chord_label_for_platform("Ctrl+Alt+Shift+M", false), "Ctrl+Alt+Shift+M");
         let mut a = app();
         a.keymap.load(&json!({"solid.chamfer":"Shift+C", "solid.extrude":"Ctrl+Alt+E"}));
         assert_eq!(effective(&a, "solid.chamfer").as_deref(), Some("Shift+C"));
@@ -1828,7 +1822,7 @@ mod tests {
         let rectangle = h.app.tool.as_ref().map(|t| t.cmd.to_string()).unwrap_or_default();
         assert!(rectangle.starts_with("sketch.rectangle"), "R alone: {rectangle}");
         let repeat = crate::context_menu::radial_items(&h.app).into_iter().find(|i| i.id == "ui.repeat").unwrap();
-        assert_eq!(repeat.shortcut, display("Shift+R"));
+        assert_eq!(repeat.shortcut, crate::ui_kit::chord_label("Shift+R"));
     }
 
     /// #7077: Repeat Last Command is the command `edit.repeat`: Keyboard Shortcuts lists it and
@@ -1862,7 +1856,7 @@ mod tests {
         h.frames(2);
         assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "the new key repeats");
         let repeat = crate::context_menu::radial_items(&h.app).into_iter().find(|i| i.id == "ui.repeat").unwrap();
-        assert_eq!(repeat.shortcut, display("Alt+Shift+R"));
+        assert_eq!(repeat.shortcut, crate::ui_kit::chord_label("Alt+Shift+R"));
         crate::dialogs::cancel(&mut h.app);
         reset(&mut h.app, Some("edit.repeat"));
         // Command search lists it, and choosing it starts the last command again.

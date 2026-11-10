@@ -1071,9 +1071,7 @@ pub fn srf_srf_intersection_with_context(
     // analytic intersector gives exactly. Points off a surface, and an end where the surface
     // touches the plane, are met by the intersectors below. A round of touch circles needs it
     // (#2704): its end section leaves the end face's plane, so its side curve is this one.
-    if (k.fixes.fillet_surface_plane_curve_on_plane_equation || k.fixes.fillet_gn_section_generator)
-        && curves_3d.is_empty()
-    {
+    if curves_3d.is_empty() {
         let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
         if let (Some(start_pnt), Some(end_pnt), true) = (
             start,
@@ -1085,7 +1083,9 @@ pub fn srf_srf_intersection_with_context(
             } else {
                 (surf1, surf2)
             };
-            if !surface.is_planar(k, approx_tol)?.is_planar
+            // a curve between two points: ends that coincide are no such curve
+            if start_pnt.distance(end_pnt) > approx_tol
+                && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
                 let c = surface_plane_curve(
