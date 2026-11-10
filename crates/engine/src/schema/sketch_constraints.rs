@@ -464,6 +464,8 @@ pub struct GlyphsResult {
     pub glyphs: Vec<Glyph>,
     /// The degrees of freedom left.
     pub dof: usize,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// Whether nothing is left free.
     pub fully_constrained: bool,
     /// The ids of the constraints that fail.
