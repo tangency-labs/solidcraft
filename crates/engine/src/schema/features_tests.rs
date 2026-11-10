@@ -1118,6 +1118,7 @@ fn circular_pattern_replies_match_the_output_schema() {
     let warned = json!({"components": ["Part"], "axis": "Z", "count": 3, "colour": "red"});
     let r = ring_rig(ParamCheck::Warn).execute("solid.pattern.circular", &warned).unwrap_or_else(|e| panic!("{e}"));
     assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{r}");
+}
 
 /// A 40 x 30 x 20 block from the origin, `Block`, with its top front edge rounded (radius 2) when
 /// `rounded` is true.
