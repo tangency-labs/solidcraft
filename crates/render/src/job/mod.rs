@@ -39,7 +39,10 @@ pub mod looks;
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) mod output;
 pub mod photographic;
+pub mod photon_diagnostics;
+pub mod photon_receiver;
 pub mod photon_sources;
+pub mod photon_support;
 mod png;
 pub mod presentation;
 mod punctual;
@@ -72,6 +75,8 @@ pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MA
 pub use png::PngTask;
 pub use presentation::OutputOptions;
 pub use punctual::{MAX_PUNCTUAL_LIGHTS, MIN_GPU_SPOT_COSINE_GAP, PunctualDiagnostics, PunctualLightOptions, PunctualLights, SpotConeOptions};
+#[cfg(feature = "raytrace-cpu")]
+pub(crate) use quality::resolve_pixel;
 pub use quality::{
     DenoiseSettings, MAX_CPU_THREADS, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS, MAX_TRACE_DIMENSION, MAX_TRACE_PIXELS, MAX_UI_SAMPLES,
     resolve_supersampling, single_supersample, supersampled_dimensions,
@@ -101,6 +106,12 @@ pub struct JobOptions {
     /// Approximate the missing microfacet bounces of rough isotropic conductors.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub metal_energy_compensation: bool,
+    /// Reproducible camera sampling; older setups retain the independent stream.
+    #[serde(skip_serializing_if = "crate::sampling::Sampler::is_independent")]
+    pub sampler: crate::sampling::Sampler,
+    /// Retain exclusive scene-linear optical and caustic component statistics.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub radiance_components: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<CausticOptions>,
     #[serde(skip_serializing_if = "aging::AgingStack::is_empty")]
@@ -112,6 +123,10 @@ pub struct JobOptions {
     pub adaptive: Option<adaptive::AdaptiveSampling>,
     /// Conditional Fresnel strata per primary sample; one keeps the old stream.
     pub transmission_samples: u32,
+    /// Split the first bare smooth closed dielectric interface into two lanes.
+    /// Requires one transmission stratum; independent pilots remain unsplit.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub split_first_interface: bool,
 
     #[serde(default, skip_serializing_if = "finishing::Finishing::is_identity")]
     pub finishing: finishing::Finishing,
@@ -152,11 +167,14 @@ impl Default for JobOptions {
             texture_filtering: false,
             metal_energy_compensation: false,
             caustics: None,
+            sampler: Default::default(),
+            radiance_components: false,
             aging: Default::default(),
             nested_media: false,
             volume: None,
             adaptive: None,
             transmission_samples: 1,
+            split_first_interface: false,
             finishing: Default::default(),
             backdrop: None,
             linear_exr: false,
@@ -176,7 +194,24 @@ impl Default for JobOptions {
     }
 }
 
+/// Equal-weight lanes are an execution representation, not independent samples.
+pub(crate) const fn first_interface_lanes(strata: u32, split: bool) -> u32 {
+    if split { 2 } else { strata }
+}
+
+fn validate_first_interface_split(strata: u32, split: bool) -> Result<()> {
+    if split && strata != 1 {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "first-interface splitting requires transmission_samples:1"));
+    }
+    Ok(())
+}
+
 impl JobOptions {
+    /// Bounded complete paths per production camera observation.
+    pub const fn production_lanes(&self) -> u32 {
+        first_interface_lanes(self.transmission_samples, self.split_first_interface)
+    }
+
     /// Equality alone equates -0 and +0. Captured native option bits must survive
     /// work release, so the allocation-free sentinel also checks default-zero fields.
     pub fn is_structural_default(&self) -> bool {
@@ -219,6 +254,9 @@ impl JobOptions {
     }
     pub fn validate(&self) -> Result<()> {
         self.denoise_settings.validate()?;
+        if self.denoise_settings.component_filtering && !self.radiance_components {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "component filtering requires captured radiance components"));
+        }
         if !matches!(self.supersampling, 1 | 2) {
             return Err(JobError::new(ErrorCode::InvalidRequest, "supersampling must be 1 or 2"));
         }
@@ -228,10 +266,10 @@ impl JobOptions {
         self.aging.validate()?;
         if let Some(volume) = self.volume {
             volume.validate()?;
-            if volume.active() && self.transmission_samples != 1 {
+            if volume.active() && self.production_lanes() != 1 {
                 return Err(JobError::new(
                     ErrorCode::InvalidRequest,
-                    "volume transport requires one transmission stratum; glass combinations are not supported",
+                    "volume transport requires one production camera lane; transmission strata and first-interface splitting are not supported",
                 ));
             }
             if volume.active() && self.denoise {
@@ -243,10 +281,12 @@ impl JobOptions {
         }
         if let Some(adaptive) = self.adaptive {
             adaptive.validate(self.samples)?;
+            adaptive.validate_caustics(self.caustics)?;
         }
         if !matches!(self.transmission_samples, 1 | 2 | 4) {
             return Err(JobError::new(ErrorCode::InvalidRequest, "transmission_samples must be 1, 2 or 4"));
         }
+        validate_first_interface_split(self.transmission_samples, self.split_first_interface)?;
         self.finishing.validate()?;
         if let Some(backdrop) = self.backdrop {
             backdrop.validate()?;
@@ -261,6 +301,15 @@ impl JobOptions {
             return Err(JobError::new(
                 ErrorCode::InvalidRequest,
                 "clamp_indirect must be a finite radiance from 0.000001 to 1000000; omit it to keep every contribution",
+            ));
+        }
+        if self.clamp_indirect.is_some() && self.caustics.is_some_and(|caustics| caustics.probe_pixel.is_some()) {
+            // A clamp scales the complete contribution after its photon events
+            // have been ranked. The bounded event report cannot reconstruct that
+            // ranking afterward, so refuse instead of reporting unclamped shares.
+            return Err(JobError::new(
+                ErrorCode::InvalidRequest,
+                "photon contribution probes require clamp_indirect to be omitted; per-event diagnostics do not support clamped contributions",
             ));
         }
         if !(1..=MAX_SAMPLES_PER_PIXEL).contains(&self.samples)
@@ -304,6 +353,12 @@ pub trait ImageWork: Send {
     fn take_preview(&mut self) -> Option<ImageWorkPreview> {
         None
     }
+    fn photon_diagnostics(&self) -> Option<photon_diagnostics::PhotonDiagnostics> {
+        None
+    }
+    fn radiance_report(&self) -> Option<crate::radiance_film::RadianceReport> {
+        None
+    }
     fn sampling_report(&self) -> Option<adaptive::SamplingReport> {
         None
     }
@@ -336,6 +391,12 @@ pub trait ImageExecutor: Send + Sync {
     fn supports_glass_models(&self) -> bool {
         false
     }
+    fn supports_sampling_controls(&self) -> bool {
+        false
+    }
+    fn supports_radiance_statistics(&self) -> bool {
+        false
+    }
     fn supports_caustics(&self) -> bool {
         false
     }
@@ -366,6 +427,9 @@ pub trait ImageExecutor: Send + Sync {
         false
     }
     fn supports_transmission_sampling(&self) -> bool {
+        false
+    }
+    fn supports_first_interface_splitting(&self) -> bool {
         false
     }
     fn supports_bloom(&self) -> bool {
@@ -910,6 +974,12 @@ pub struct RaytraceOptions {
     /// Approximate the missing microfacet bounces of rough isotropic conductors.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub metal_energy_compensation: bool,
+    /// Reproducible camera sampling; older setups retain the independent stream.
+    #[serde(skip_serializing_if = "crate::sampling::Sampler::is_independent")]
+    pub sampler: crate::sampling::Sampler,
+    /// Retain exclusive scene-linear optical and caustic component statistics.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub radiance_components: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<CausticOptions>,
     /// One bounded world-space participating medium, available with explicit Path.
@@ -981,6 +1051,8 @@ impl Default for RaytraceOptions {
             texture_filtering: false,
             metal_energy_compensation: false,
             caustics: None,
+            sampler: Default::default(),
+            radiance_components: false,
             volume: None,
             sun: None,
             sky: None,
@@ -1115,6 +1187,17 @@ impl RaytraceOptions {
     pub fn camera_sampling(&self) -> Result<Option<CpuProgressiveOptions>> {
         cpu_camera_sampling(self.progressive, self.adaptive.as_deref().copied(), self.budget)
     }
+    pub fn validate_camera_work(&self, width: u32, height: u32) -> Result<()> {
+        if let (Some(path), Some(production)) = (self.path, self.progressive) {
+            path.validate_camera_budget(
+                u64::from(width) * u64::from(height),
+                production.samples_per_pixel,
+                self.adaptive.as_deref().map_or(0, |adaptive| adaptive.pilot_samples),
+                self.budget,
+            )?;
+        }
+        Ok(())
+    }
     pub fn preview_target(&self) -> Result<u32> {
         Ok(self.camera_sampling()?.map_or(0, |options| options.samples_per_pixel))
     }
@@ -1241,6 +1324,15 @@ impl RaytraceOptions {
         Ok(())
     }
     pub fn validate(&self) -> Result<()> {
+        if (!self.sampler.is_independent() || self.radiance_components || self.denoise_settings.variance_guided) && self.progressive.is_none() {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "camera sampling and radiance statistics require progressive CPU sampling"));
+        }
+        if self.denoise_settings.component_filtering && !self.radiance_components {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "component filtering requires captured radiance components"));
+        }
+        if self.radiance_components && self.path.is_none() {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "CPU radiance components require the path integrator"));
+        }
         self.denoise_settings.validate()?;
         if self.threads > MAX_CPU_THREADS || !matches!(self.supersampling, 1 | 2) {
             return Err(JobError::new(ErrorCode::InvalidRequest, "CPU threads must be 0..64 and supersampling 1 or 2"));
@@ -1286,8 +1378,12 @@ impl RaytraceOptions {
             }
         }
 
-        if self.adaptive.is_some() {
+        if let Some(adaptive) = self.adaptive.as_ref() {
             self.camera_sampling()?;
+            adaptive.validate_caustics(self.caustics)?;
+            if adaptive.evidence_enabled() && self.path.is_none() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "component or map pilot evidence requires the CPU path integrator"));
+            }
         }
         if let Some(path) = self.path {
             path.validate()?;
@@ -1641,6 +1737,34 @@ mod runtime_request_roundtrip_tests {
             assert!(error.message.contains("clamp_indirect"), "{limit}: {}", error.message);
         }
         assert!(serde_json::from_value::<JobOptions>(json!({"clamp_indirect":"8"})).is_err());
+    }
+
+    #[test]
+    fn indirect_clamp_refuses_photon_probes_without_disabling_component_statistics() {
+        let caustics = CausticOptions { refresh_per_pass: true, progressive_radius: true, ..Default::default() };
+        let mut options = JobOptions {
+            samples: 64,
+            clamp_indirect: Some(8.0),
+            caustics: Some(caustics),
+            radiance_components: true,
+            adaptive: Some(adaptive::AdaptiveSampling { component_uncertainty: true, map_validation_batches: 2, ..Default::default() }),
+            denoise: true,
+            denoise_settings: DenoiseSettings { component_filtering: true, variance_guided: true, ..Default::default() },
+            ..Default::default()
+        };
+        options.validate().unwrap();
+        let unclamped = JobOptions { clamp_indirect: None, caustics: Some(CausticOptions { probe_pixel: Some([0, 0]), ..caustics }), ..options };
+        unclamped.validate().unwrap();
+        options.caustics = unclamped.caustics;
+        let authored = options;
+        let error = options.validate().unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+        assert!(error.message.contains("photon contribution probes require clamp_indirect to be omitted"));
+        assert_eq!(options, authored, "refusal must preserve both authored controls");
+        assert!(options.retained_bytes().is_err(), "invalid probe accounting cannot enter retained admission");
+        assert!(options.preview_target().is_err());
+        options.clamp_indirect = None;
+        options.validate().unwrap();
     }
 
     #[test]

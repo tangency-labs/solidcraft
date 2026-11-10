@@ -122,6 +122,9 @@ fn adaptive_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,
         "properties":{"pilot_samples":{"type":"integer","minimum":0,"maximum":4294967295u64},
         "min_samples":{"type":"integer","minimum":0,"maximum":4294967295u64},
+        "optical_min_samples":{"type":"integer","minimum":0,"maximum":4294967295u64},
+        "component_uncertainty":{"type":"boolean"},
+        "map_validation_batches":{"type":"integer","minimum":0,"maximum":4294967295u64},
         "relative_error":{"type":"number"},"absolute_error":{"type":"number"},"coverage_error":{"type":"number"}}}]})
 }
 

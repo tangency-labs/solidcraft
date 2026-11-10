@@ -19,11 +19,25 @@ pub struct DenoiseSettings {
     pub firefly_suppression: bool,
     /// Filter supported mirror and glass guides; false retains legacy opaque-only denoising.
     pub optical_filter: bool,
+    /// Use camera-conditional sample scatter to limit display reconstruction.
+    pub variance_guided: bool,
+    /// Admit clear-optical endpoints and bounded total internal reflections.
+    pub extended_optical_guides: bool,
+    /// Reconstruct exclusive optical/caustic components with their own guides.
+    pub component_filtering: bool,
 }
 
 impl Default for DenoiseSettings {
     fn default() -> Self {
-        Self { passes: 3, strength: 1.0, firefly_suppression: false, optical_filter: true }
+        Self {
+            passes: 3,
+            strength: 1.0,
+            firefly_suppression: false,
+            optical_filter: true,
+            variance_guided: false,
+            extended_optical_guides: false,
+            component_filtering: false,
+        }
     }
 }
 

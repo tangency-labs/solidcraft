@@ -5,7 +5,7 @@ use super::prepared::{PreparedScene, SharedHit};
 use super::{Hit, Ray, WorkBudget, dielectric, glass_mesh, reflection};
 use crate::job::{
     CancelToken, DenoiseGuideClass as GuideClass, DielectricBoundary, DielectricOptions, ImageRequest, RaytraceOptions, ReflectionMode, Result,
-    denoise::{Guide, SurfaceGuide},
+    denoise::{Guide, OPTICAL_ROUTE_MAX, SurfaceGuide},
 };
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
@@ -88,6 +88,72 @@ struct Forward {
     launch: Launch,
     segment: Segment,
 }
+const MAX_TIR_REFLECTIONS: u8 = 4;
+const MAX_TOPOLOGY_TRIANGLES: usize = 2047;
+
+/// A collision-free radix string: entry, each TIR face, then exit. The prefix
+/// sentinel makes different lengths distinct. The GPU stores its final value
+/// as an exactly representable numeric f32 in the redundant reflected-body lane.
+#[derive(Clone, Copy)]
+struct OpticalRoute {
+    first: usize,
+    count: u32,
+    value: u32,
+    unambiguous: bool,
+}
+impl OpticalRoute {
+    fn entry(
+        scene: &PreparedScene<'_>,
+        boundary: CertifiedBoundary,
+        hit: SharedHit<'_>,
+        work: &mut WorkBudget,
+        cancel: &CancelToken,
+    ) -> Result<Option<Self>> {
+        let Some(body) = scene.source.meshes.get(hit.body_index) else { return Ok(None) };
+        let count = body.mesh.triangles.len();
+        if count == 0 || count > MAX_TOPOLOGY_TRIANGLES || hit.body_index >= 511 {
+            return Ok(None);
+        }
+        let first = match boundary {
+            CertifiedBoundary::Path(region) => {
+                if region.primitive_end.checked_sub(region.primitive_begin) != Some(count) {
+                    return Ok(None);
+                }
+                region.primitive_begin
+            }
+            CertifiedBoundary::Legacy(_) => {
+                // Legacy certificates lack a primitive range. At most 510
+                // captured body rows are visited; each owns a cancellation/work debit.
+                let mut first = 0usize;
+                for previous in &scene.source.meshes[..hit.body_index] {
+                    work.tick(cancel).map_err(error)?;
+                    first = first.checked_add(previous.mesh.triangles.len()).ok_or_else(|| invalid("CPU optical guide identity overflow"))?;
+                }
+                first
+            }
+        };
+        let mut route = Self { first, count: count as u32, value: 1, unambiguous: hit.barycentric.into_iter().all(|weight| weight > 0.0) };
+        if !route.push(hit) {
+            return Ok(None);
+        }
+        Ok(Some(route))
+    }
+
+    fn push(&mut self, hit: SharedHit<'_>) -> bool {
+        let Some(local) = hit.primitive_index.checked_sub(self.first).and_then(|value| u32::try_from(value).ok()) else { return false };
+        if local >= self.count {
+            return false;
+        }
+        let Some(value) =
+            self.value.checked_mul(self.count + 1).and_then(|value| value.checked_add(local + 1)).filter(|value| *value <= OPTICAL_ROUTE_MAX)
+        else {
+            return false;
+        };
+        self.value = value;
+        true
+    }
+}
+
 #[derive(Clone, Copy)]
 struct OpticalWalk {
     primary: u32,
@@ -95,6 +161,8 @@ struct OpticalWalk {
     footprint: f64,
     segment: Segment,
     forward: Option<Forward>,
+    route: Option<OpticalRoute>,
+    tir_count: u8,
 }
 
 fn body_id(hit: SharedHit<'_>) -> Result<u32> {
@@ -111,6 +179,19 @@ fn guide_geometry(request: &ImageRequest, position: Vec3) -> (Vec3, f64, f64) {
 fn is_emitter(options: &RaytraceOptions, hit: SharedHit<'_>) -> bool {
     options.emissions.iter().flatten().any(|value| value.body_index == hit.body_index && value.strength > 0.0 && value.color.iter().any(|v| *v > 0.0))
 }
+fn environment_endpoint(request: &ImageRequest, direction: Vec3) -> Guide {
+    let angular =
+        if request.camera.fov > 0.0 { 2.0 * request.camera.half_height() / (f64::from(request.height) * request.camera.distance) } else { 0.000001 };
+    Guide::from_surface(SurfaceGuide {
+        albedo: [0.0; 3],
+        body: 511,
+        normal: [direction.x as f32, direction.y as f32, direction.z as f32],
+        depth: 0.0,
+        position: [0.0; 3],
+        footprint: -(angular.max(0.000001) as f32),
+    })
+}
+
 fn lens_active(options: &RaytraceOptions) -> bool {
     options.lens.is_some_and(|lens| lens.aperture_radius_mm > 0.0)
 }
@@ -191,20 +272,25 @@ fn glass_exit(
     certification: Option<GlassCertification<'_>>,
     ray: Ray,
     hit: SharedHit<'_>,
-) -> std::result::Result<Launch, GuideClass> {
+) -> std::result::Result<(Launch, bool), GuideClass> {
     let input = options.dielectrics.get(index).ok_or(GuideClass::Unavailable)?;
     let boundary = certification.and_then(|value| value.boundary(index)).ok_or(GuideClass::Unavailable)?;
     if hit.body_index != input.body_index || hit.front_face || !boundary.unambiguous(hit) {
         return Err(GuideClass::IncompatibleExit);
     }
     let (interface, _) = glass_interface(options, ray, hit, input.ior, 1.0).ok_or(GuideClass::DegeneratePath)?;
-    let direction = interface.transmitted.ok_or(GuideClass::TotalInternalReflection)?;
-    if direction.dot(hit.oriented_geometric_normal()) >= 0.0
+    let reflected = interface.transmitted.is_none();
+    if reflected && !options.denoise_settings.extended_optical_guides {
+        return Err(GuideClass::TotalInternalReflection);
+    }
+    let direction = interface.transmitted.unwrap_or(interface.reflected);
+    let side = direction.dot(hit.oriented_geometric_normal());
+    if (if reflected { side <= 0.0 } else { side >= 0.0 })
         || dielectric::attenuation(input.absorption_per_mm, ray.origin().dist(hit.position)).map_err(|_| GuideClass::DegeneratePath)? == Vec3::ZERO
     {
         return Err(GuideClass::DegeneratePath);
     }
-    boundary.launch(hit, direction).ok_or(GuideClass::DegeneratePath)
+    Ok((boundary.launch(hit, direction).ok_or(GuideClass::DegeneratePath)?, reflected))
 }
 
 pub(super) struct Guides {
@@ -216,6 +302,7 @@ pub(super) struct Guides {
     hit: Option<Hit>,
     emitter_cursor: usize,
     analytic_emitter: bool,
+    emitter_endpoint: Option<(f64, SurfaceGuide)>,
     classified: bool,
     effect_cursor: usize,
     effect: Option<usize>,
@@ -262,6 +349,7 @@ impl Guides {
             hit: None,
             emitter_cursor: 0,
             analytic_emitter: false,
+            emitter_endpoint: None,
             classified: false,
             effect_cursor: 0,
             effect: None,
@@ -318,6 +406,7 @@ impl Guides {
         self.hit = None;
         self.emitter_cursor = 0;
         self.analytic_emitter = false;
+        self.emitter_endpoint = None;
         self.classified = false;
         self.effect_cursor = 0;
         self.effect = None;
@@ -335,16 +424,33 @@ impl Guides {
         self.hit = None;
         self.emitter_cursor = 0;
         self.analytic_emitter = false;
+        self.emitter_endpoint = None;
         self.classified = false;
         self.effect_cursor = 0;
         self.effect = None;
     }
     fn begin_optical(&mut self, primary: u32, footprint: f64, reflected: Option<Launch>, forward: Option<Forward>) {
         if let Some(launch) = reflected {
-            self.optical = Some(OpticalWalk { primary, reflected: SurfaceGuide::default(), footprint, segment: Segment::Reflected, forward });
+            self.optical = Some(OpticalWalk {
+                primary,
+                reflected: SurfaceGuide::default(),
+                footprint,
+                segment: Segment::Reflected,
+                forward,
+                route: None,
+                tir_count: 0,
+            });
             self.launch(launch);
         } else if let Some(forward) = forward {
-            self.optical = Some(OpticalWalk { primary, reflected: SurfaceGuide::default(), footprint, segment: forward.segment, forward: None });
+            self.optical = Some(OpticalWalk {
+                primary,
+                reflected: SurfaceGuide::default(),
+                footprint,
+                segment: forward.segment,
+                forward: None,
+                route: None,
+                tir_count: 0,
+            });
             self.launch(forward.launch);
         } else {
             self.bypass(GuideClass::DegeneratePath);
@@ -373,12 +479,22 @@ impl Guides {
                 guide.reflected = optical.reflected;
             }
             guide.body = identity;
+            if optical.tir_count > 0 {
+                let Some(value) = optical.route.and_then(|route| guide.with_optical_route(route.value)) else {
+                    self.bypass(GuideClass::OpticalRouteLimit);
+                    return;
+                };
+                guide = value;
+            }
         }
         let class = if self.optical.is_some() { GuideClass::Optical } else { GuideClass::Surface };
         self.pending = Some((guide, class));
     }
     /// A continuation creates one ray, visits one BVH node/triangle, scans one
-    /// bounded emitter/effect row, or resolves/stores one guide. The normal image budget is shared.
+    /// bounded emitter/effect row, or resolves/stores one guide. A legacy closed
+    /// entry additionally scans at most 510 source-body rows, each charged and
+    /// cancellation-checked; general path certificates already contain the range.
+    /// The normal image budget is shared.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn step(
         &mut self,
@@ -452,15 +568,54 @@ impl Guides {
                 && self.hit.is_none_or(|hit| distance < hit.geometry.distance)
             {
                 self.analytic_emitter = true;
+                if options.denoise_settings.extended_optical_guides
+                    && self.optical.is_some()
+                    && self.emitter_endpoint.is_none_or(|(old, _)| distance < old)
+                {
+                    let position = ray.at(distance).map_err(error)?;
+                    let light = super::area::RectangleLight::new(
+                        Vec3::new(input.center_mm[0], input.center_mm[1], input.center_mm[2]),
+                        Vec3::new(input.edge_u_mm[0], input.edge_u_mm[1], input.edge_u_mm[2]),
+                        Vec3::new(input.edge_v_mm[0], input.edge_v_mm[1], input.edge_v_mm[2]),
+                        Vec3::new(input.color[0], input.color[1], input.color[2]),
+                        input.intensity,
+                    )
+                    .map_err(error)?;
+                    let normal = light.normal();
+                    let (relative, _, footprint) = guide_geometry(request, position);
+                    let body = u32::try_from(self.emitter_cursor).ok().and_then(|value| value.checked_add(1)).unwrap_or(u32::MAX);
+                    let surface = SurfaceGuide {
+                        albedo: [0.0; 3],
+                        body,
+                        normal: [normal.x as f32, normal.y as f32, normal.z as f32],
+                        depth: body as f32,
+                        position: [relative.x as f32, relative.y as f32, relative.z as f32],
+                        footprint: -(footprint.max(0.000001) as f32),
+                    };
+                    self.emitter_endpoint = Some((distance, surface));
+                }
             }
             self.emitter_cursor += 1;
             return Ok(());
         }
         if self.analytic_emitter {
+            if options.denoise_settings.extended_optical_guides
+                && self.optical.is_some_and(|walk| !matches!(walk.segment, Segment::GlassExit(_)))
+                && let Some((_, surface)) = self.emitter_endpoint
+            {
+                work.tick(cancel).map_err(error)?;
+                self.endpoint(Guide::from_surface(surface));
+                return Ok(());
+            }
             let class = if self.optical.is_some() { GuideClass::Unavailable } else { GuideClass::Emitter };
             return self.append(Guide::default(), class, work, cancel);
         }
         let Some(hit) = self.hit else {
+            if options.denoise_settings.extended_optical_guides && self.optical.is_some_and(|walk| !matches!(walk.segment, Segment::GlassExit(_))) {
+                work.tick(cancel).map_err(error)?;
+                self.endpoint(environment_endpoint(request, ray.direction()));
+                return Ok(());
+            }
             let class = if self.optical.is_some() { GuideClass::Unavailable } else { GuideClass::Background };
             return self.append(Guide::default(), class, work, cancel);
         };
@@ -476,8 +631,36 @@ impl Guides {
                 && let Segment::GlassExit(index) = walk.segment
             {
                 match glass_exit(options, index, glass, ray, shared) {
-                    Ok(launch) => {
-                        walk.segment = Segment::Transmitted;
+                    Ok((launch, reflected)) => {
+                        if reflected || walk.tir_count > 0 {
+                            let Some(route) = &mut walk.route else {
+                                self.bypass(GuideClass::OpticalTopologyLimit);
+                                return Ok(());
+                            };
+                            if !route.unambiguous || shared.barycentric.into_iter().any(|weight| weight <= 0.0) {
+                                self.bypass(GuideClass::DegeneratePath);
+                                return Ok(());
+                            }
+                            if reflected {
+                                if walk.tir_count >= MAX_TIR_REFLECTIONS {
+                                    self.bypass(GuideClass::OpticalReflectionLimit);
+                                    return Ok(());
+                                }
+                                let count = walk.tir_count + 1;
+                                if options.path.is_some_and(|path| path.max_depth < count + 3) {
+                                    self.bypass(GuideClass::PathDepth);
+                                    return Ok(());
+                                }
+                                walk.tir_count = count;
+                            }
+                            if !route.push(shared) {
+                                self.bypass(GuideClass::OpticalRouteLimit);
+                                return Ok(());
+                            }
+                        }
+                        if !reflected {
+                            walk.segment = Segment::Transmitted;
+                        }
                         self.optical = Some(walk);
                         self.launch(launch);
                     }
@@ -504,6 +687,16 @@ impl Guides {
                     Ok((reflected, forward)) => {
                         let (_, _, footprint) = guide_geometry(request, shared.position);
                         self.begin_optical(body_id(shared)?, footprint, reflected, forward);
+                        if options.denoise_settings.extended_optical_guides && input.boundary != DielectricBoundary::ThinSheet {
+                            let route = if let Some(boundary) = glass.and_then(|glass| glass.boundary(index)) {
+                                OpticalRoute::entry(&scene, boundary, shared, work, cancel)?
+                            } else {
+                                None
+                            };
+                            if let Some(walk) = &mut self.optical {
+                                walk.route = route;
+                            }
+                        }
                     }
                     Err(reason) => self.bypass(reason),
                 }
@@ -665,7 +858,7 @@ mod tests {
 
     #[test]
     fn optical_branch_diagnostics_explain_actual_policy_bypasses() {
-        let mut options = RaytraceOptions { path: Some(crate::job::CpuPathOptions { max_depth: 3 }), ..Default::default() };
+        let mut options = RaytraceOptions { path: Some(crate::job::CpuPathOptions { max_depth: 3, ..Default::default() }), ..Default::default() };
         let mut input = dielectric::tests::input(DielectricBoundary::ThinSheet);
         let boundary = CertifiedBoundary::Legacy(dielectric::Certificate::ThinSheet);
         let ray = Ray::new(Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0), 0.0, 10.0).unwrap();
@@ -700,54 +893,60 @@ mod tests {
             textures: None,
         };
         let ray = Ray::new(Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0), 0.0, 10.0).unwrap();
-        for optical in [false, true] {
-            for emitter in [false, true] {
-                let mut options = RaytraceOptions { path: Some(crate::job::CpuPathOptions { max_depth: 3 }), ..Default::default() };
-                if emitter {
-                    options.area_lights = Some(vec![crate::job::RectangleLightOptions {
-                        center_mm: [0.0; 3],
-                        edge_u_mm: [2.0, 0.0, 0.0],
-                        edge_v_mm: [0.0, 2.0, 0.0],
-                        color: [1.0; 3],
-                        intensity: 1.0,
-                    }]);
-                }
-                let mut guides = Guides::new_with_diagnostics(1, 1, true).unwrap();
-                if optical {
-                    guides.begin_optical(1, 1.0, Some(Launch::ordinary(ray)), None);
-                } else {
-                    guides.launch(Launch::ordinary(ray));
-                }
-                let mut work = WorkBudget::new(100).unwrap();
-                for _ in 0..16 {
-                    if guides.ready() {
-                        break;
+        for extended in [false, true] {
+            for optical in [false, true] {
+                for emitter in [false, true] {
+                    let mut options =
+                        RaytraceOptions { path: Some(crate::job::CpuPathOptions { max_depth: 3, ..Default::default() }), ..Default::default() };
+                    options.denoise_settings.extended_optical_guides = extended;
+                    if emitter {
+                        options.area_lights = Some(vec![crate::job::RectangleLightOptions {
+                            center_mm: [0.0; 3],
+                            edge_u_mm: [2.0, 0.0, 0.0],
+                            edge_v_mm: [0.0, 2.0, 0.0],
+                            color: [1.0; 3],
+                            intensity: 1.0,
+                        }]);
                     }
-                    guides
-                        .step(
-                            PreparedScene { bvh: &bvh, primitives: &[], source: &source },
-                            &request,
-                            &options,
-                            None,
-                            (0.0, 10.0),
-                            &[],
-                            None,
-                            None,
-                            &mut work,
-                            &cancel,
-                        )
-                        .unwrap();
+                    let mut guides = Guides::new_with_diagnostics(1, 1, true).unwrap();
+                    if optical {
+                        guides.begin_optical(1, 1.0, Some(Launch::ordinary(ray)), None);
+                    } else {
+                        guides.launch(Launch::ordinary(ray));
+                    }
+                    let mut work = WorkBudget::new(100).unwrap();
+                    for _ in 0..16 {
+                        if guides.ready() {
+                            break;
+                        }
+                        guides
+                            .step(
+                                PreparedScene { bvh: &bvh, primitives: &[], source: &source },
+                                &request,
+                                &options,
+                                None,
+                                (0.0, 10.0),
+                                &[],
+                                None,
+                                None,
+                                &mut work,
+                                &cancel,
+                            )
+                            .unwrap();
+                    }
+                    assert!(guides.ready(), "optical={optical} emitter={emitter}");
+                    let expected = if optical && extended {
+                        GuideClass::Optical
+                    } else if optical {
+                        GuideClass::Unavailable
+                    } else if emitter {
+                        GuideClass::Emitter
+                    } else {
+                        GuideClass::Background
+                    };
+                    assert_eq!(guides.classes().unwrap(), &[expected], "optical={optical} emitter={emitter}");
+                    assert_eq!(guides.pixels().unwrap()[0].body != 0, optical && extended);
                 }
-                assert!(guides.ready(), "optical={optical} emitter={emitter}");
-                let expected = if optical {
-                    GuideClass::Unavailable
-                } else if emitter {
-                    GuideClass::Emitter
-                } else {
-                    GuideClass::Background
-                };
-                assert_eq!(guides.classes().unwrap(), &[expected], "optical={optical} emitter={emitter}");
-                assert_eq!(guides.pixels().unwrap()[0].body, 0);
             }
         }
     }
@@ -775,5 +974,34 @@ mod tests {
         assert!(interrupted.append(Guide::default(), GuideClass::Emitter, &mut work, &cancel).is_err());
         assert!(interrupted.pixels.is_empty());
         assert!(interrupted.classes.as_ref().unwrap().is_empty());
+    }
+    #[test]
+    fn exact_optical_route_keeps_boundary_order_length_and_overflow_atomic() {
+        use std::collections::BTreeSet;
+        let mut keys = BTreeSet::new();
+        for length in 1..=6 {
+            for mut selector in 0..3usize.pow(length) {
+                let mut route = OpticalRoute { first: 100, count: 12, value: 1, unambiguous: true };
+                for _ in 0..length {
+                    let local = [0, 1, 11][selector % 3];
+                    selector /= 3;
+                    let mut boundary = hit();
+                    boundary.primitive_index = route.first + local;
+                    assert!(route.push(boundary));
+                }
+                assert!(keys.insert(route.value), "entry/TIR/exit order and route length must be exact");
+                assert_eq!(route.value as f32 as u32, route.value, "the GPU lane must preserve every route bit");
+            }
+        }
+        let mut large = OpticalRoute { first: 0, count: 2047, value: 1, unambiguous: true };
+        assert!(large.push(hit()));
+        assert!(large.push(hit()));
+        let previous = large.value;
+        assert!(!large.push(hit()), "three boundaries on a large body cannot fit the 24-bit route");
+        assert_eq!(large.value, previous);
+        let mut outside = hit();
+        outside.primitive_index = 2047;
+        assert!(!large.push(outside));
+        assert_eq!(large.value, previous);
     }
 }

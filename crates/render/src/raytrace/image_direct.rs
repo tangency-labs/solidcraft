@@ -10,6 +10,8 @@ pub(super) struct Pixel {
     pub covered: u32,
     pub attempts: u32,
     pub rgba: Option<[u8; 4]>,
+    pub components: Option<crate::radiance::RadianceComponents>,
+    pub pilot_support: job::adaptive::PilotPhotonSupport,
 }
 
 struct Optical<'a> {
@@ -55,6 +57,13 @@ impl<'a> Context<'a> {
                 aging: &mut task.aging,
                 caustics: &task.caustics,
                 punctual_diagnostics: &mut task.punctual_diagnostics,
+                photon_diagnostics: &mut task.photon_diagnostics,
+                capture_components: transport::capture_components(&task.options, task.progressive.as_ref()),
+                completed_components: task.statistics.first_mut().and_then(|stats| stats.completed_components.take()),
+                completed_pilot_support: task
+                    .statistics
+                    .first_mut()
+                    .map_or_else(Default::default, |stats| std::mem::take(&mut stats.completed_pilot_support)),
                 progressive: task.progressive.as_ref(),
                 glass: &task.glass,
                 environment: task.environment.as_ref(),
@@ -72,6 +81,7 @@ impl<'a> Context<'a> {
                 bvh: task.bvh.as_ref(),
                 pixel: task.pixel,
                 spatial: task.spatial,
+                fresnel_stratum: 0,
                 primary_coverage: task.primary_coverage,
                 completed: None,
             },
@@ -141,7 +151,15 @@ impl<'a> Context<'a> {
         {
             return Err(invalid("CPU direct worker produced invalid radiance or coverage"));
         }
-        self.pixel_output = Some(Pixel { pixel: self.common.pixel, radiance, covered, attempts, rgba: None });
+        self.pixel_output = Some(Pixel {
+            pixel: self.common.pixel,
+            radiance,
+            covered,
+            attempts,
+            rgba: None,
+            components: self.common.completed_components.take(),
+            pilot_support: self.common.completed_pilot_support,
+        });
         Ok(())
     }
     fn preserves_display(&self) -> bool {
@@ -964,11 +982,20 @@ pub(super) fn publish(task: &mut ImageTask, pixel: Pixel) -> job::Result<()> {
             return Err(invalid("CPU direct progressive sample has invalid output metadata"));
         }
         let ordinal = progressive.film.samples();
+        let production = progressive
+            .film
+            .identity(pixel.pixel, progressive.options.seed)?
+            .is_some_and(|identity| identity.stage == job::adaptive::PreviewStage::Production);
+        if production && let Some(stats) = task.statistics.first_mut() {
+            stats.film.observe(pixel.pixel, [pixel.radiance.x, pixel.radiance.y, pixel.radiance.z], pixel.components.as_ref())?;
+        }
         progressive.film.add(
             pixel.pixel,
             ordinal,
             [pixel.radiance.x, pixel.radiance.y, pixel.radiance.z],
             pixel.covered == 1,
+            pixel.components.as_ref(),
+            pixel.pilot_support,
             &task.cancel,
             &mut || task.work.tick(&task.cancel).map_err(error),
         )?;

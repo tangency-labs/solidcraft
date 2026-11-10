@@ -17,6 +17,34 @@ const DENOISE_OPTICAL_POLICY: &str =
     "supported sharp reflections and smooth glass use separate reflected and transmitted endpoint geometry and material guides";
 const DENOISE_OPAQUE_ONLY_POLICY: &str = "legacy opaque-only filtering; mirror and glass radiance bypass display filtering";
 
+fn denoise_optical_policy(settings: solidcraft_render::job::DenoiseSettings) -> &'static str {
+    if !settings.optical_filter {
+        DENOISE_OPAQUE_ONLY_POLICY
+    } else if settings.extended_optical_guides {
+        "supported sharp reflections and clear glass use endpoint guides, including environment, analytic emitters and bounded total internal reflections"
+    } else {
+        DENOISE_OPTICAL_POLICY
+    }
+}
+
+fn denoise_bypass(settings: solidcraft_render::job::DenoiseSettings) -> &'static str {
+    if !settings.optical_filter {
+        "all optical paths, emitter, background and partial coverage"
+    } else if settings.extended_optical_guides {
+        "rough, nested, scattering or ambiguous optical paths, unsupported depth of field, direct emitter/background and partial coverage"
+    } else {
+        "unsupported or ambiguous optical paths, emitter, background and partial coverage"
+    }
+}
+
+fn denoise_limitation(settings: solidcraft_render::job::DenoiseSettings) -> &'static str {
+    if settings.component_filtering {
+        "biased spatial filtering of six exclusive linear components; observed camera scatter is not a convergence bound and depth-of-field correspondences are unsupported"
+    } else {
+        "biased spatial filter of combined radiance; endpoint guides do not separate reflected/transmitted energy or reconstruct depth-of-field correspondences"
+    }
+}
+
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Start {
@@ -71,6 +99,9 @@ struct ProgressiveStart {
     volume: Option<solidcraft_render::job::volume::HomogeneousVolume>,
     adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
     transmission_samples: Option<u32>,
+    split_first_interface: bool,
+    sampler: solidcraft_render::sampling::Sampler,
+    radiance_components: bool,
     finishing: solidcraft_render::job::finishing::Finishing,
     backdrop: Option<solidcraft_render::job::finishing::Backdrop>,
     linear_exr: bool,
@@ -203,7 +234,7 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
         }
         RenderJob::GpuPath { transparent_background, options } => {
             hdr = options.hdr.map(SavedHdr::Gpu);
-            json!({
+            let mut gpu = json!({
             "progressive":true,
             "transparent_background":transparent_background,
             "samples":options.samples,"max_depth":options.max_depth,"seed":options.seed,
@@ -211,8 +242,12 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
             "denoise":options.denoise,"clamp_indirect":options.clamp_indirect,"environment":options.environment,
             "supersampling":options.supersampling,"denoise_settings":options.denoise_settings,"denoise_diagnostics":options.denoise_diagnostics,
             "finishing":options.finishing,"backdrop":options.backdrop,"linear_exr":options.linear_exr,
-            "texture_filtering":options.texture_filtering,"metal_energy_compensation":options.metal_energy_compensation,"caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
-            })
+            "texture_filtering":options.texture_filtering,"metal_energy_compensation":options.metal_energy_compensation,"caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"sampler":options.sampler,"radiance_components":options.radiance_components,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
+            });
+            if options.split_first_interface {
+                gpu["split_first_interface"] = json!(true);
+            }
+            gpu
         }
     };
     lowered["settings"] = serde_json::to_value(settings).map_err(|e| bad(command, e.to_string()))?;
@@ -263,7 +298,19 @@ pub(crate) fn prepare_with_metadata(
         params.get("raytrace").and_then(Value::as_object).is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)));
     if gpu_raytrace
         || params.get("environment").is_some_and(|e| e.get("kind").is_some())
-        || ["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"].iter().any(|key| params.get(*key).is_some())
+        || [
+            "lens",
+            "lighting",
+            "tone_map",
+            "supersampling",
+            "denoise_settings",
+            "denoise_diagnostics",
+            "sampler",
+            "radiance_components",
+            "split_first_interface",
+        ]
+        .iter()
+        .any(|key| params.get(*key).is_some())
         || params.get("denoise").is_some_and(|value| value != &json!(false))
         || params.get("clamp_indirect").is_some_and(|value| !value.is_null())
     {
@@ -377,6 +424,7 @@ pub(crate) fn prepare_with_metadata(
             solidcraft_render::job::supersampled_dimensions(dimensions.0, dimensions.1, options.supersampling).map_err(job_error)?
         };
         options.budget.validate_image(trace_dimensions.0, trace_dimensions.1, options.camera_sampling().map_err(job_error)?).map_err(job_error)?;
+        options.validate_camera_work(trace_dimensions.0, trace_dimensions.1).map_err(job_error)?;
         if options.denoise || options.denoise_diagnostics {
             solidcraft_render::job::validate_cpu_denoise_image(trace_dimensions.0, trace_dimensions.1).map_err(job_error)?;
         }
@@ -635,14 +683,15 @@ pub(crate) fn prepare_with_metadata(
         reply["denoising"] = json!({
             "method":"edge_aware_atrous", "backend":"native_cpu", "passes":options.denoise_settings.passes,
             "steps":denoise_steps(options.denoise_settings.passes), "settings":options.denoise_settings,
+            "variance_guided":options.denoise_settings.variance_guided,"extended_optical_guides":options.denoise_settings.extended_optical_guides,"component_filtering":options.denoise_settings.component_filtering,
             "diagnostics_requested":options.denoise_diagnostics,
             "outlier_policy":if options.denoise_settings.firefly_suppression {DENOISE_OUTLIER_POLICY} else {"disabled"},
-            "optical_policy":if options.denoise_settings.optical_filter {DENOISE_OPTICAL_POLICY} else {DENOISE_OPAQUE_ONLY_POLICY},
+            "optical_policy":denoise_optical_policy(options.denoise_settings),
             "guides":"deterministic_center_ray_albedo_normal_camera_relative_position_depth",
-            "bypass":if options.denoise_settings.optical_filter {"unsupported or ambiguous optical paths, emitter, background and partial coverage"} else {"all optical paths, emitter, background and partial coverage"},
-            "limitation":"biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
+            "bypass":denoise_bypass(options.denoise_settings),
+            "limitation":denoise_limitation(options.denoise_settings),
             "raw_linear_accumulator_preserved":true,"raw_linear_exr_preserved":true,
-            "output_stage":"linear_before_tone_map", "work_units":"one pixel visit per pass, each with at most 25 taps",
+            "output_stage":"linear_before_tone_map", "work_units":if options.denoise_settings.component_filtering {"six component visits per pixel per pass, each with at most 25 taps"} else {"one pixel visit per pass, each with at most 25 taps"},
             "checkpoints":"every complete published pass uses the same filter"
         });
     }
@@ -782,6 +831,9 @@ fn prepare_progressive(
     options.caustics = input.caustics;
     options.adaptive = input.adaptive;
     options.transmission_samples = input.transmission_samples.unwrap_or(1);
+    options.split_first_interface = input.split_first_interface;
+    options.sampler = input.sampler;
+    options.radiance_components = input.radiance_components;
     options.validate().map_err(job_error)?;
     solidcraft_render::job::supersampled_dimensions(settings.width, settings.height, options.supersampling).map_err(job_error)?;
     if let Some(super::environment::Input::BuiltinHdr { id, .. }) = &input.environment
@@ -890,12 +942,13 @@ fn prepare_progressive(
         reply["denoising"] = json!({
             "method":"edge_aware_atrous", "passes":options.denoise_settings.passes,
             "steps":denoise_steps(options.denoise_settings.passes), "settings":options.denoise_settings,
+            "variance_guided":options.denoise_settings.variance_guided,"extended_optical_guides":options.denoise_settings.extended_optical_guides,"component_filtering":options.denoise_settings.component_filtering,
             "diagnostics_requested":options.denoise_diagnostics,
             "outlier_policy":if options.denoise_settings.firefly_suppression {DENOISE_OUTLIER_POLICY} else {"disabled"},
-            "optical_policy":if options.denoise_settings.optical_filter {DENOISE_OPTICAL_POLICY} else {DENOISE_OPAQUE_ONLY_POLICY},
+            "optical_policy":denoise_optical_policy(options.denoise_settings),
             "guides":"deterministic_center_ray_albedo_normal_position_depth",
-            "bypass":if options.denoise_settings.optical_filter {"unsupported or ambiguous optical paths, emitter, background and partial coverage"} else {"all optical paths, emitter, background and partial coverage"},
-            "limitation":"optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
+            "bypass":denoise_bypass(options.denoise_settings),
+            "limitation":denoise_limitation(options.denoise_settings),
             "raw_linear_accumulator_preserved":true, "output_stage":"linear_before_tone_map"
         });
     }

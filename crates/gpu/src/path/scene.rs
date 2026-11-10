@@ -19,6 +19,8 @@ pub(super) struct Triangle {
     pub transmission: Option<Transmission>,
     pub medium: u32,
     pub scalar_face: bool,
+    // Exact body-local guide identity; low two material flags remain separate.
+    pub guide_topology: u32,
 }
 type MediumEdge = (usize, usize, i32);
 // The material header word reserves the high two bits for model lanes and wavelength sampling.
@@ -50,6 +52,12 @@ pub(super) fn medium_preparation_bytes(scene: &ProductScene) -> u64 {
 pub(super) fn planar_preparation_bytes_per_triangle() -> usize {
     let common = std::mem::size_of::<Triangle>() + 2 * std::mem::size_of::<Node>();
     (common + planar_patches::temporary_bytes_per_triangle()).max(common + 100 + 80 + 4)
+}
+
+// Numeric f32 stores every packed value exactly: 11 count bits, 11 ordinal
+// bits, and the two existing flags. Zero topology means unavailable to TIR guides.
+fn guide_topology(count: usize, ordinal: usize) -> u32 {
+    if count == 0 || count > 2047 || ordinal >= count { 0 } else { ((count as u32) << 13) | ((ordinal as u32) << 2) }
 }
 
 impl Triangle {
@@ -208,6 +216,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 transmission,
                 medium: body_index as u32 + 1,
                 scalar_face: look.is_some(),
+                guide_topology: 0,
             });
         }
         if authored_optical && !triangles[body_start..].iter().any(|t| t.transmission.is_some()) {
@@ -217,12 +226,16 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
         // Prove the boundary actually sent to the shader as well as the source
         // seam topology. Rounding must not close an authored gap, collapse a
         // valid face, reverse its orientation or break its uploaded shell.
+        let body_triangle_count = triangles.len() - body_start;
         for (index, triangle) in triangles[body_start..].iter_mut().enumerate() {
             if index % 1024 == 0 {
                 cancel.check()?;
             }
             if triangle.transmission.is_some() {
                 triangle.p = uploaded_optical_positions(triangle.p)?;
+            }
+            if triangle.transmission.is_some_and(|value| value.thin_wall_thickness_mm().is_none()) {
+                triangle.guide_topology = guide_topology(body_triangle_count, index);
             }
         }
         validate_medium(&triangles[body_start..], cancel)?;
@@ -312,7 +325,8 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 scatter.map_or(0.0, |s| s.scattering_per_mm),
                 scatter.map_or(0.0, |s| s.anisotropy),
                 (u32::from(scene.meshes.get(t.medium.saturating_sub(1) as usize).is_some_and(|body| body.name.starts_with("__render_stage__/")))
-                    | (u32::from(t.scalar_face) << 1)) as f64,
+                    | (u32::from(t.scalar_face) << 1)
+                    | t.guide_topology) as f64,
             ),
             parent_triangle as f32,
         );

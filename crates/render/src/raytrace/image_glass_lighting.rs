@@ -53,6 +53,7 @@ pub(super) struct Context {
     after_shadow: Phase,
     light: usize,
     pending: Vec3,
+    pending_camera: CameraPath,
     medium: Option<usize>,
     from: Vec3,
     endpoint: Option<Vec3>,
@@ -90,13 +91,15 @@ pub(super) fn begin(task: &TransportContext<'_>, state: &mut State, event: Event
     {
         return false;
     }
-    state.caustic_gather = Default::default();
+    state.caustic_gather.reset();
+    state.caustic_gather.enable_support(pilot_evidence_active(task));
     state.glass_lighting = Some(Context {
         event,
         phase: if task.caustics.is_empty() { Phase::Directional } else { Phase::Gather },
         after_shadow: Phase::Directional,
         light: 0,
         pending: Vec3::ZERO,
+        pending_camera: state.camera_path,
         medium: None,
         from: event.position(),
         endpoint: None,
@@ -119,6 +122,7 @@ fn scattering(task: &TransportContext<'_>, index: usize) -> job::Result<crate::t
         .ok_or_else(|| invalid("CPU hard-source HG receiver lost its medium"))
 }
 fn gather(task: &TransportContext<'_>, state: &mut State, event: Event) -> job::Result<Option<Vec3>> {
+    state.set_probe_prefix(task)?;
     match event {
         Event::Interface(event) => {
             let input = task.options.dielectrics.get(event.index).ok_or_else(|| invalid("CPU rough photon receiver disappeared"))?;
@@ -205,6 +209,10 @@ fn queue(
 ) -> job::Result<()> {
     let (value, medium) = response(task, state, context.event, direction)?;
     context.pending = multiply(state.throughput, radiance) * value;
+    context.pending_camera = match context.event {
+        Event::Interface(event) => state.camera_event(direction.dot(event.normal) < 0.0),
+        Event::Medium { .. } => state.camera_path,
+    };
     super::super::super::lighting::validate_radiance(context.pending).map_err(error)?;
     context.after_shadow = next;
     if context.pending == Vec3::ZERO {
@@ -277,9 +285,16 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State, context: &mut Con
     match context.phase {
         Phase::Gather => {
             if let Some(value) = gather(task, state, context.event)? {
-                state.radiance += multiply(state.throughput, value);
-                super::super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
+                let camera = state.caustic_gather.last_transmitted().map_or(state.camera_path, |transmitted| state.camera_event(transmitted));
+                state.add_photon_radiance(task, multiply(state.throughput, value), camera)?;
             } else {
+                if let Some(report) = state.caustic_gather.take_diagnostics() {
+                    task.photon_diagnostics.merge(&report)?;
+                }
+                if pilot_evidence_active(task) {
+                    let (support, valid) = state.caustic_gather.take_support();
+                    state.pilot_support.observe_query(support, valid);
+                }
                 context.phase = Phase::Directional;
             }
         }
@@ -406,8 +421,8 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State, context: &mut Con
             }
         }
         Phase::Add => {
-            state.radiance += context.pending;
-            super::super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
+            let light = state.connection_class(matches!(context.event, Event::Interface(_)), context.interfaces > 0);
+            state.add_radiance(task, context.pending, light, context.pending_camera)?;
             state.shadow_ray = None;
             context.phase = context.after_shadow;
         }
@@ -428,4 +443,51 @@ pub(super) fn step(task: &mut TransportContext<'_>, state: &mut State) -> job::R
     }
     state.glass_lighting = Some(context);
     result
+}
+
+#[cfg(test)]
+mod component_classification_tests {
+    use super::*;
+
+    #[test]
+    fn optical_components_follow_physical_prefix_and_light_tail() {
+        let mut state = State::default();
+        assert_eq!(state.connection_class(true, false), LightPath::NonCaustic);
+        assert_eq!(state.camera_event(false), CameraPath::Reflected);
+        assert_eq!(state.camera_event(true), CameraPath::Transmitted);
+        state.optical_event(true, false);
+        state.optical_event(false, false);
+        assert_eq!(state.camera_path, CameraPath::Transmitted, "later interfaces cannot relabel the first branch");
+        assert_eq!(state.endpoint_class(), LightPath::NonCaustic, "eye-glass-light has no caustic receiver");
+        state.receiver();
+        assert_eq!(state.connection_class(true, false), LightPath::Caustic, "NEE includes its current rough or polished optical event");
+        state.optical_event(false, true);
+        assert_eq!(state.endpoint_class(), LightPath::Caustic, "BSDF endpoints classify the same optical light tail");
+        assert_eq!(state.camera_path, CameraPath::Transmitted);
+        state.receiver();
+        assert_eq!(state.endpoint_class(), LightPath::NonCaustic, "a new ordinary receiver ends the previous light-side tail");
+        assert_eq!(state.connection_class(false, false), LightPath::NonCaustic);
+        assert_eq!(state.connection_class(false, true), LightPath::Caustic, "an accepted optical visibility segment belongs to the light tail");
+    }
+
+    #[test]
+    fn opaque_or_medium_receiver_freezes_other_before_later_glass() {
+        let mut state = State::default();
+        state.receiver();
+        assert_eq!(state.camera_event(true), CameraPath::Other);
+        assert_eq!(state.camera_event(false), CameraPath::Other);
+        state.optical_event(true, false);
+        assert_eq!(state.camera_path, CameraPath::Other);
+        assert_eq!(state.endpoint_class(), LightPath::Caustic);
+        state.receiver();
+        assert_eq!(state.endpoint_class(), LightPath::NonCaustic);
+        // A rough first interface can be the receiver for a later optical event.
+        let mut rough = State::default();
+        rough.optical_event(false, true);
+        assert_eq!(rough.endpoint_class(), LightPath::NonCaustic);
+        assert_eq!(rough.connection_class(true, false), LightPath::Caustic);
+        rough.optical_event(true, false);
+        assert_eq!(rough.endpoint_class(), LightPath::Caustic);
+        assert_eq!(rough.camera_path, CameraPath::Reflected);
+    }
 }

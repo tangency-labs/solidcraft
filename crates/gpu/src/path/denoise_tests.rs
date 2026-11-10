@@ -458,6 +458,13 @@ fn gpu_denoise_optical_guides_track_branches_and_certified_snell_endpoints() {
     let mut mirror = base.clone();
     mirror.surface = Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 0.045, 1.5).unwrap());
     assert_eq!(probe(vec![mirror.clone()], options), bypass(DenoiseGuideClass::Unavailable));
+    let extended =
+        JobOptions { denoise_settings: solidcraft_render::job::DenoiseSettings { extended_optical_guides: true, ..Default::default() }, ..options };
+    let environment_guide = probe(vec![mirror.clone()], extended);
+    assert_eq!(environment_guide[0][3].to_bits(), tag(511, 0));
+    assert_eq!(environment_guide[1][3], 0.0);
+    assert!(environment_guide[2][3] < 0.0);
+
     assert_eq!(probe(Vec::new(), options), bypass(DenoiseGuideClass::Background));
     let direct_emitter = AreaLight { center: [0.0, 0.0, 2.0], u: [2.0, 0.0, 0.0], v: [0.0, 2.0, 0.0], radiance: [1.0; 3] };
     let direct_lighting = StudioLighting { area_lights: AreaLights::new(&[direct_emitter]).unwrap(), ..Default::default() };
@@ -488,6 +495,10 @@ fn gpu_denoise_optical_guides_track_branches_and_certified_snell_endpoints() {
     );
     let emitter = AreaLight { center: [0.0, 2.0, 5.0], u: [2.0, 0.0, 0.0], v: [0.0, 2.0, 0.0], radiance: [1.0; 3] };
     let blocked = StudioLighting { area_lights: AreaLights::new(&[emitter]).unwrap(), ..Default::default() };
+    let emitter_guide = probe(thin_scene.clone(), JobOptions { lighting: Some(blocked), ..extended });
+    assert_eq!(emitter_guide[0][3].to_bits(), tag(1, 3));
+    assert_eq!(emitter_guide[4][3], 1.0);
+    assert!(emitter_guide[5][3] < 0.0);
     assert_eq!(probe(thin_scene, JobOptions { lighting: Some(blocked), ..options }), bypass(DenoiseGuideClass::Unavailable));
     let film = GlassModel { roughness: 0.0, dispersion: None, thin_film: Some(ThinFilm { ior: 1.35, thickness_nm: 200.0 }) };
     let mut modeled = thin.clone();
@@ -631,7 +642,7 @@ fn gpu_denoise_controls_match_f64_keep_alpha_and_leave_raw_unchanged() {
     for (passes, strength, firefly_suppression) in [(1, 0.0, true), (1, 1.0, false), (1, 1.0, true), (2, 0.4, true), (3, 0.6, false)] {
         let mut enabled = Vec::new();
         for optical_filter in [true, false] {
-            task.options.denoise_settings = DenoiseSettings { passes, strength, firefly_suppression, optical_filter };
+            task.options.denoise_settings = DenoiseSettings { passes, strength, firefly_suppression, optical_filter, ..Default::default() };
             filter.run_filter(&task, false).unwrap();
             let actual = task.read_linear_buffer(filter.output(passes)).unwrap();
             let mut expected = input.clone();
@@ -787,7 +798,13 @@ fn gpu_filter_windows_keep_three_pass_halos_firefly_support_and_actual_frame_edg
     let dummy = make("unused filter geometry", &[0; 64]);
     let options = JobOptions {
         denoise: true,
-        denoise_settings: solidcraft_render::job::DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+        denoise_settings: solidcraft_render::job::DenoiseSettings {
+            passes: 3,
+            strength: 1.0,
+            firefly_suppression: true,
+            optical_filter: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let mut task = Task::new(context.clone(), plane(), request(40), JobOptions { denoise: false, ..options }, CancelToken::default()).unwrap();
@@ -924,7 +941,7 @@ fn gpu_paged_film_matches_raw_finished_png_diagnostic_masks_and_complete_adaptiv
             seed: 91,
             supersampling: 2,
             denoise: true,
-            denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+            denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
             denoise_diagnostics: true,
             linear_exr: true,
             adaptive: adaptive.then_some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
@@ -1019,4 +1036,480 @@ fn gpu_paged_partial_pass_cancellation_publishes_no_preview_or_final_artifact() 
     assert!(task.take_preview().is_none());
     assert!(task.take_linear_exr().is_none());
     assert!(task.take_denoise_mask().is_none());
+}
+
+#[test]
+fn gpu_uncertainty_filter_preserves_zero_scatter_detail_and_raw_film() {
+    use solidcraft_render::job::DenoiseSettings;
+    let Some(context) = context() else { return };
+    let mut input = vec![[0.5_f32, 0.25, 0.125, 1.0]; 25];
+    input[12] = [0.7, 0.35, 0.175, 1.0];
+    let bytes: Vec<_> = input.iter().flatten().flat_map(|value| value.to_le_bytes()).collect();
+    let raw = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("uncertainty raw fixture"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let dummy = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("uncertainty unused geometry"),
+        contents: &[0; 64],
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let mut task = Task::new(context.clone(), plane(), request(5), JobOptions::default(), CancelToken::default()).unwrap();
+    task.sample = 1;
+    task.options.denoise_settings = DenoiseSettings { passes: 1, variance_guided: true, ..Default::default() };
+    let filter =
+        Resources::build(&context, &task.uniform, [&dummy, &dummy, &dummy, &dummy, &dummy], &raw, bytes.len() as u64, false, None, true, false)
+            .unwrap();
+    let guides: Vec<_> = (0..25).map(|i| guide(i % 5, i / 5)).collect();
+    let packed: Vec<_> = guides.iter().flatten().flatten().flat_map(|value| (*value as f32).to_le_bytes()).collect();
+    context.queue.write_buffer(&filter._guides, 0, &packed);
+    assert!(filter.run_filter(&task, false).is_err());
+    filter.set_uncertainty_window(&context, &vec![UncertaintyPixel { variance_of_mean: [0.0; 3], count: 32 }; 25]).unwrap();
+    filter.run_filter(&task, false).unwrap();
+    assert_eq!(task.read_linear_buffer(filter.output(1)).unwrap(), input);
+    filter.set_uncertainty_window(&context, &vec![UncertaintyPixel { variance_of_mean: [0.04; 3], count: 32 }; 25]).unwrap();
+    filter.run_filter(&task, false).unwrap();
+    let filtered = task.read_linear_buffer(filter.output(1)).unwrap();
+    assert!(filtered[12][0] < 0.6);
+    assert_eq!(filtered[12][3], 1.0);
+    assert_eq!(task.read_linear_buffer(&raw).unwrap(), input);
+    assert!(filter.set_uncertainty_window(&context, &vec![UncertaintyPixel::default(); 26]).is_err());
+    assert!(filter.set_uncertainty_window(&context, &vec![UncertaintyPixel { variance_of_mean: [f32::NAN; 3], count: 32 }; 25]).is_err());
+}
+
+#[test]
+fn gpu_component_filter_separates_reflection_from_transmission_and_preserves_raw() {
+    use solidcraft_render::job::DenoiseSettings;
+    let Some(context) = context() else { return };
+    let options = JobOptions {
+        samples: 2,
+        denoise: true,
+        radiance_components: true,
+        denoise_settings: DenoiseSettings { passes: 1, component_filtering: true, ..Default::default() },
+        ..Default::default()
+    };
+    let mut task = Task::new(context.clone(), plane(), request(5), options, CancelToken::default()).unwrap();
+    task.sample = 2;
+    let filter = task.denoiser.as_ref().unwrap();
+    let tag = |transmitted: u32| f32::from_bits(0xa0000000u32 | (1 << 18) | (2 << 9) | transmitted);
+    let mut guides = Vec::new();
+    for pixel in 0..25 {
+        guides.extend_from_slice(&[
+            [0.5, 0.5, 0.5, tag(if pixel == 12 { 3 } else { 4 })],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.5, 0.5, 0.5, 2.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]);
+    }
+    let packed: Vec<_> = guides.iter().flatten().flat_map(|value| value.to_le_bytes()).collect();
+    context.queue.write_buffer(&filter._guides, 0, &packed);
+    filter.guides_ready.store(true, Ordering::Relaxed);
+    let mut center = None;
+    for neighbor_transmission in [0.8_f32, 8.0] {
+        let mut film = vec![[0.0_f32; 4]; 28 * 25];
+        for pixel in 0..25 {
+            let reflected = if pixel == 12 { 0.8 } else { 0.4 };
+            let transmitted = if pixel == 12 { 0.3 } else { neighbor_transmission };
+            let beauty = reflected + transmitted;
+            film[pixel] = [beauty * 2.0, beauty * 2.0, beauty * 2.0, 2.0];
+            film[25 + pixel] = [beauty, beauty, beauty, 2.0];
+            film[2 * 25 + pixel] = [0.08, 0.08, 0.08, 0.0];
+            film[6 * 25 + pixel] = [reflected, reflected, reflected, 0.0];
+            film[8 * 25 + pixel] = [transmitted, transmitted, transmitted, 0.0];
+            film[12 * 25 + pixel] = [0.08, 0.08, 0.08, 0.0];
+        }
+        let bytes: Vec<_> = film.iter().flatten().flat_map(|value| value.to_le_bytes()).collect();
+        context.queue.write_buffer(&task.accumulation, 0, &bytes);
+        let before = task.read_linear().unwrap();
+        let output = filter.read_filtered_components(&task, false).unwrap();
+        assert_eq!(task.read_linear().unwrap(), before);
+        assert!(output[12][0] > 0.7 && output[12][0] < 0.95, "{:?}", output[12]);
+        assert!(output.iter().all(|value| value[3] == 1.0));
+        if let Some(previous) = center {
+            assert_eq!(output[12], previous);
+        } else {
+            center = Some(output[12]);
+        }
+    }
+}
+
+#[test]
+fn component_filter_requires_captured_gpu_path_observations() {
+    let scene = plane();
+    let request = request(5);
+    let mut options = JobOptions {
+        denoise: true,
+        denoise_settings: solidcraft_render::job::DenoiseSettings { component_filtering: true, ..Default::default() },
+        ..Default::default()
+    };
+    let error = super::super::admission(&scene, &request, options).unwrap_err();
+    assert_eq!(error.code, solidcraft_render::job::ErrorCode::InvalidRequest);
+    assert!(error.message.contains("component filtering"));
+    options.radiance_components = true;
+    let components = super::super::admission(&scene, &request, options).unwrap();
+    options.denoise_settings.component_filtering = false;
+    let unfiltered_components = super::super::admission(&scene, &request, options).unwrap();
+    assert!(components.pixel_scratch_bytes > unfiltered_components.pixel_scratch_bytes);
+}
+
+#[test]
+fn component_statistics_do_not_expand_paged_display_input_bindings() {
+    let mut limits = wgpu::Limits::downlevel_defaults();
+    limits.max_storage_buffer_binding_size = 1024 * 1024;
+    limits.max_buffer_size = 2 * 1024 * 1024;
+    for adaptive in [false, true] {
+        let options = JobOptions {
+            denoise: true,
+            radiance_components: true,
+            adaptive: adaptive.then_some(solidcraft_render::job::adaptive::AdaptiveSampling::default()),
+            denoise_settings: solidcraft_render::job::DenoiseSettings { component_filtering: true, ..Default::default() },
+            ..Default::default()
+        };
+        let layout = super::super::image_pages::Layout::new(256, 128, options, 0, &limits).unwrap();
+        assert!(layout.is_paged());
+        assert_eq!(layout.filter_input_planes(), if adaptive { 3 } else { 1 });
+        assert!(layout.planes > layout.filter_input_planes());
+        let pixels = u64::from(layout.max_window_pixels());
+        let storage = limits.max_storage_buffer_binding_size;
+        assert!(pixels * GUIDE_BYTES_PER_PIXEL <= storage);
+        assert!(pixels * 16 * u64::from(layout.filter_input_planes()) <= storage);
+        assert!(pixels * 16 * u64::from(layout.planes) > storage, "copying every statistics plane would violate this device's binding limit");
+        let expected = pixels
+            * (BYTES_PER_PIXEL + 16 + COMPONENT_BYTES_PER_PIXEL + 16 * u64::from(layout.filter_input_planes()) + if adaptive { 16 } else { 0 });
+        assert_eq!(layout.filter_scratch_bytes().unwrap(), expected);
+    }
+}
+
+#[test]
+fn gpu_component_windows_match_full_filter_for_fixed_and_adaptive_previews() {
+    use solidcraft_render::job::{DenoiseSettings, adaptive::AdaptiveSampling};
+    let Some(context) = context() else { return };
+    for adaptive in [false, true] {
+        let options = JobOptions {
+            samples: 32,
+            denoise: true,
+            radiance_components: true,
+            adaptive: adaptive.then_some(AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() }),
+            denoise_settings: DenoiseSettings { passes: 3, component_filtering: true, ..Default::default() },
+            ..Default::default()
+        };
+        let mut image = ImageRequest { width: 8, height: 40, ..request(8) };
+        image.camera.distance = 1.0;
+        let render = |rows: Option<u32>| {
+            let mut task = Task::new_with_page_rows(context.clone(), plane(), image.clone(), options, CancelToken::default(), rows).unwrap();
+            task.sample = if adaptive { 32 } else { 16 };
+            let first = if adaptive { 3 } else { 1 };
+            for page in &task.pages {
+                let count = page.pixels as usize;
+                let mut film = vec![[0.0_f32; 4]; count * task.page_layout.planes as usize];
+                for local in 0..count {
+                    let pixel = page.start as usize + local;
+                    let mean = if pixel == 8 * 8 + 4 { 0.9 } else { 0.4 };
+                    film[local] = [mean * 16.0, mean * 8.0, mean * 4.0, 16.0];
+                    if adaptive {
+                        film[count + local] = [0.7, 0.35, 0.175, 1.0];
+                        film[2 * count + local] = [32.0, 0.0, 0.0, 0.0];
+                    }
+                    film[first * count + local] = [mean, mean * 0.5, mean * 0.25, 16.0];
+                    film[(first + 1) * count + local] = [9.6, 2.4, 0.6, 0.0];
+                    film[(first + 3) * count + local] = [mean, mean * 0.5, mean * 0.25, 0.0];
+                    film[(first + 9) * count + local] = [9.6, 2.4, 0.6, 0.0];
+                }
+                let bytes: Vec<_> = film.iter().flatten().flat_map(|value| value.to_le_bytes()).collect();
+                context.queue.write_buffer(&page.accumulation, 0, &bytes);
+            }
+            let raw = if adaptive { task.read_checkpoint() } else { task.read_linear() }.unwrap();
+            let filter = task.denoiser.as_ref().unwrap();
+            if let Some(input) = &filter.input {
+                assert_eq!(input.size(), u64::from(task.page_layout.max_window_pixels()) * 16 * if adaptive { 3 } else { 1 });
+            }
+            let result = filter.read_filtered_components(&task, adaptive).unwrap();
+            let after = if adaptive { task.read_checkpoint() } else { task.read_linear() }.unwrap();
+            assert_eq!(raw, after, "component windows cannot modify adaptive normalization or source film");
+            assert!(result[8 * 8 + 4][0] < raw[8 * 8 + 4][0] - 0.1, "the fixture must actually reconstruct across a core boundary");
+            assert!(result.iter().all(|pixel| pixel[3] == 1.0));
+            result
+        };
+        assert_eq!(render(None), render(Some(8)), "full dependency halos must preserve component reconstruction bit for bit");
+    }
+}
+
+fn tir_guide_scene(two_reflections: bool) -> (ProductScene, ImageRequest) {
+    use solidcraft_render::transmission::Transmission;
+    let mut body = optical_plane(0.0, Vec3::ZERO);
+    let mut mesh = optical_box();
+    for position in &mut mesh.positions {
+        position.x *= 10.0 / 3.0;
+        position.y *= 10.0 / 3.0;
+        position.z += 0.5;
+    }
+    body.mesh = Arc::new(mesh);
+    body.surface = Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.7, 1.5).unwrap());
+    body.transmission = Some(Transmission::new(Vec3::ZERO, None).unwrap());
+    let mut meshes = vec![body, optical_plane(4.0, Vec3::new(0.75, 0.5, 0.25)), optical_plane(-1.0, Vec3::new(0.25, 0.5, 0.75))];
+    for body in &mut meshes[1..] {
+        for position in &mut Arc::make_mut(&mut body.mesh).positions {
+            position.x *= 10.0;
+            position.y *= 10.0;
+        }
+    }
+    let bounds = meshes.iter().fold(solidcraft_geom::Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    let mut image = request(1);
+    image.camera.target = Vec3::new(-9.9, if two_reflections { -9.86 } else { 0.37 }, 1.0);
+    image.camera.yaw = if two_reflections { -3.0 * std::f64::consts::FRAC_PI_4 } else { -std::f64::consts::FRAC_PI_2 };
+    image.camera.pitch = std::f64::consts::FRAC_PI_2 - 0.4;
+    image.camera.distance = 3.0;
+    image.camera.fov = 0.02;
+    (ProductScene { meshes, bounds }, image)
+}
+
+#[test]
+fn gpu_tir_metadata_survives_bvh_reordering_and_coplanar_boundary_equivalence() {
+    let (scene, image) = tir_guide_scene(false);
+    let upload = super::super::scene::flatten(&scene, image.camera.target, &CancelToken::default()).unwrap();
+    let word = |index: usize| u32::from_le_bytes(upload.geometry[index * 4..index * 4 + 4].try_into().unwrap());
+    let material_base = (word(2) & 0x3fff_ffff) as usize;
+    let mut first = [None; 2];
+    let mut seen = [false; 12];
+    let mut reordered = false;
+    for triangle in 0..word(0) as usize {
+        let material = material_base + word(4 + triangle * 4 + 3) as usize * 20;
+        let body = f32::from_bits(word(material + 11)) as u32;
+        let packed = f32::from_bits(word(material + 18)) as u32;
+        if body == 1 {
+            assert_eq!(packed & 3, 0);
+            assert_eq!(packed >> 13, 12);
+            let local = ((packed >> 2) & 2047) as usize;
+            assert!(local < 12 && !seen[local]);
+            seen[local] = true;
+            reordered |= local != triangle;
+            let vertices = [word(4 + triangle * 4), word(5 + triangle * 4), word(6 + triangle * 4)];
+            assert_eq!(vertices, scene.meshes[0].mesh.triangles[local], "identity belongs to the captured triangle, not its BVH slot");
+            if local < 2 {
+                first[local] = Some(triangle);
+            }
+        } else {
+            assert_eq!(packed, 0, "opaque materials do not acquire topology metadata");
+        }
+    }
+    assert!(seen.into_iter().all(|value| value));
+    assert!(reordered, "the fixture must exercise a nonidentity BVH permutation");
+    let a = first[0].unwrap();
+    let b = first[1].unwrap();
+    assert_eq!(word(word(3) as usize + a), word(word(3) as usize + b));
+    let Some(context) = context() else { return };
+    let mut task = Task::new(context.clone(), scene, image, JobOptions::default(), CancelToken::default()).unwrap();
+    // The production predicate must ignore only topology. Existing low flags
+    // and medium-parent differences must still make the boundary incompatible.
+    let source = format!(
+        "{SHADER}\n@compute @workgroup_size(1) fn topology_equivalence() {{ let a=triangle({a}u);let b=triangle({b}u);let d=vec3<f32>(0.0,0.0,-1.0);var flagged=b;flagged.interior.z=f32(u32(b.interior.z)^1u);var parent=b;parent.interior.w=1.0;accumulation[0]=vec4<f32>(select(0.0,1.0,origin_internal_edge(a,{a}u,1u,b,{b}u,2u,d)),select(0.0,1.0,origin_internal_edge(a,{a}u,1u,flagged,{b}u,2u,d)),select(0.0,1.0,origin_internal_edge(a,{a}u,1u,parent,{b}u,2u,d)),1.0); }}"
+    );
+    let shader = context.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("topology material-equivalence regression"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    let pipeline = context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("topology_equivalence"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    dispatch(&context, &pipeline, &task.bind, 1).unwrap();
+    task.sample = 1;
+    assert_eq!(task.read_linear().unwrap()[0], [1.0, 0.0, 0.0, 1.0]);
+}
+
+#[test]
+fn gpu_denoise_tir_guides_match_independent_box_unfolding_and_depth_limits() {
+    use solidcraft_render::job::DenoiseSettings;
+    let Some(context) = context() else { return };
+    let probe = |scene, image, extended, depth| {
+        let options = JobOptions {
+            samples: 1,
+            max_depth: depth,
+            denoise: true,
+            denoise_settings: DenoiseSettings { extended_optical_guides: extended, ..Default::default() },
+            ..Default::default()
+        };
+        let task = Task::new(context.clone(), scene, image, options, CancelToken::default()).unwrap();
+        let filter = task.denoiser.as_ref().unwrap();
+        filter.generate_guides(&task).unwrap();
+        assert!(read_guides(&context, &task.failures).iter().all(|value| *value == [0.0; 4]));
+        read_guides(&context, &filter._guides)
+    };
+    for two in [false, true] {
+        let (scene, image) = tir_guide_scene(two);
+        let old = probe(scene.clone(), image.clone(), false, 8);
+        assert_eq!(old[0], [DenoiseGuideClass::TotalInternalReflection.code() as f32, 0.0, 0.0, 0.0]);
+        let guide = probe(scene.clone(), image.clone(), true, if two { 5 } else { 4 });
+        assert_eq!(guide[0][3].to_bits() & 0xf800_0000, 0xa800_0000);
+        assert_eq!(&guide[0][..3], &[0.25, 0.5, 0.75]);
+        let angle = 0.4_f64;
+        let lateral = angle.sin() / 1.5;
+        let tangent = lateral / (1.0 - lateral * lateral).sqrt();
+        let split = if two { 2.0_f64.sqrt() } else { 1.0 };
+        let target = image.camera.target;
+        let expected = Vec3::new(
+            -20.0 - target.x + tangent / split + angle.tan() / split,
+            if two { -20.0 - target.y + tangent / split + angle.tan() / split } else { target.y },
+            -1.0,
+        ) - target;
+        for (actual, expected) in guide[2][..3].iter().zip([expected.x, expected.y, expected.z]) {
+            assert!((f64::from(*actual) - expected).abs() < 5e-5, "two={two}: {guide:?} vs {expected}");
+        }
+        let mut route = guide[3][3] as u32;
+        assert_eq!(route as f32, guide[3][3]);
+        let mut boundaries = 0;
+        while route > 1 {
+            assert!((1..=12).contains(&(route % 13)));
+            route /= 13;
+            boundaries += 1;
+        }
+        assert_eq!(route, 1);
+        assert_eq!(boundaries, if two { 4 } else { 3 });
+        let insufficient = probe(scene, image, true, if two { 4 } else { 3 });
+        assert_eq!(insufficient[0], [DenoiseGuideClass::PathDepth.code() as f32, 0.0, 0.0, 0.0]);
+    }
+    for thickness in [1.5, 3.0] {
+        let (mut scene, mut image) = tir_guide_scene(false);
+        for position in &mut Arc::make_mut(&mut scene.meshes[0].mesh).positions {
+            position.x *= 0.005;
+            position.z *= thickness;
+        }
+        for position in &mut Arc::make_mut(&mut scene.meshes[1].mesh).positions {
+            position.z = thickness + 3.0;
+        }
+        image.camera.target = Vec3::new(0.017, 0.37, thickness);
+        scene.bounds = scene.meshes.iter().fold(solidcraft_geom::Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+        let guide = probe(scene.clone(), image.clone(), true, 7);
+        if thickness == 3.0 {
+            assert_eq!(guide[0], [DenoiseGuideClass::OpticalReflectionLimit.code() as f32, 0.0, 0.0, 0.0]);
+            continue;
+        }
+        assert_eq!(guide[0][3].to_bits() & 0xf800_0000, 0xa800_0000, "the seven-event loop admits exactly four TIRs");
+        let angle = 0.4_f64;
+        let lateral = angle.sin() / 1.5;
+        let tangent = lateral / (1.0 - lateral * lateral).sqrt();
+        let travel = thickness * tangent;
+        assert!(0.067 + 3.0 * 0.1 < travel && travel < 0.067 + 4.0 * 0.1);
+        let expected = Vec3::new(0.017 + 4.0 * 0.1 - travel - angle.tan(), 0.37, -1.0) - image.camera.target;
+        for (actual, expected) in guide[2][..3].iter().zip([expected.x, expected.y, expected.z]) {
+            assert!((f64::from(*actual) - expected).abs() < 5e-5, "four-TIR endpoint {guide:?} vs {expected}");
+        }
+        let mut route = guide[3][3] as u32;
+        assert_eq!(route as f32, guide[3][3]);
+        for _ in 0..6 {
+            assert!((1..=12).contains(&(route % 13)));
+            route /= 13;
+        }
+        assert_eq!(route, 1, "the six-boundary route fits without dropping entry or exit");
+        let insufficient = probe(scene, image, true, 6);
+        assert_eq!(insufficient[0], [DenoiseGuideClass::PathDepth.code() as f32, 0.0, 0.0, 0.0]);
+    }
+}
+
+#[test]
+fn gpu_tir_route_comparison_survives_component_projection_and_optical_opt_out() {
+    let Some(context) = context() else { return };
+    let mut input = vec![[0.4_f32, 0.4, 0.4, 1.0]; 25];
+    input[12] = [0.6, 0.6, 0.6, 1.0];
+    let bytes: Vec<_> = input.iter().flatten().flat_map(|value| value.to_le_bytes()).collect();
+    let raw = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("TIR route raw fixture"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let dummy =
+        context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: None, contents: &[0; 64], usage: wgpu::BufferUsages::STORAGE });
+    let mut task = Task::new(context.clone(), plane(), request(5), JobOptions::default(), CancelToken::default()).unwrap();
+    // The injected film contains one complete observation. Normalized readback
+    // must use the same sample count as the shader's f.work.y below.
+    task.sample = 1;
+    let filter = Resources::new(&context, &task.uniform, [&dummy; 5], &raw, bytes.len() as u64, false).unwrap();
+    let mut guides = Vec::new();
+    for pixel in 0..25 {
+        guides.extend_from_slice(&[
+            [0.5, 0.5, 0.5, f32::from_bits(0xa800_0000 | (1 << 18) | (2 << 9) | 3)],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.5, 0.5, 0.5, if pixel == 12 { 2939.0 } else { 2940.0 }],
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]);
+    }
+    let packed: Vec<_> = guides.iter().flatten().flat_map(|value| value.to_le_bytes()).collect();
+    context.queue.write_buffer(&filter._guides, 0, &packed);
+    for optical in [false, true] {
+        for selection in [0, 2, 3] {
+            let params = [5u32, 5, 1, 0, 25, 1, 1.0_f32.to_bits(), 0, 0, 25, u32::from(optical), selection];
+            let params: Vec<_> = params.into_iter().flat_map(u32::to_le_bytes).collect();
+            context.queue.write_buffer(&filter.filter_uniform, 0, &params);
+            dispatch(&context, &filter.filter_pipeline, &filter.filter_binds[0], 25).unwrap();
+            let output = task.read_linear_buffer(filter.output(1)).unwrap();
+            if optical && selection == 2 {
+                assert!(output[12][0] < 0.55, "reflection ignores only the transmitted route");
+            } else {
+                assert_eq!(output[12], input[12]);
+            }
+            if !optical {
+                assert_eq!(output, input);
+            }
+            assert_eq!(task.read_linear_buffer(&raw).unwrap(), input);
+        }
+    }
+}
+
+#[test]
+fn gpu_tir_component_reconstruction_preserves_raw_and_optical_preference() {
+    use solidcraft_render::job::DenoiseSettings;
+    let Some(context) = context() else { return };
+    let (scene, mut image) = tir_guide_scene(false);
+    image.width = 5;
+    image.height = 5;
+    let render = |extended, optical| {
+        let options = JobOptions {
+            samples: 8,
+            seed: 81,
+            max_depth: 8,
+            denoise: true,
+            denoise_diagnostics: true,
+            radiance_components: true,
+            denoise_settings: DenoiseSettings {
+                component_filtering: true,
+                extended_optical_guides: extended,
+                optical_filter: optical,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut task = Task::new(context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+        while task.sample < 8 {
+            task.complete_sample().unwrap();
+        }
+        let raw = task.read_linear().unwrap();
+        let filter = task.denoiser.as_ref().unwrap();
+        let output = filter.read_filtered_components(&task, false).unwrap();
+        let diagnostic = filter.diagnostics(&task).unwrap().0;
+        assert_eq!(task.read_linear().unwrap(), raw);
+        (raw, output, diagnostic)
+    };
+    let old = render(false, true);
+    let extended = render(true, true);
+    let opaque_only = render(true, false);
+    assert_eq!(old.0, extended.0);
+    assert_eq!(old.0, opaque_only.0);
+    assert_eq!(old.1, opaque_only.1);
+    assert_eq!(old.2.pixels(DenoiseGuideClass::TotalInternalReflection), 25);
+    assert!(extended.2.pixels(DenoiseGuideClass::Optical) > 0);
+    assert_eq!(extended.2, opaque_only.2);
 }

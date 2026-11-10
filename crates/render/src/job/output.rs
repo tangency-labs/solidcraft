@@ -1,9 +1,11 @@
 //! Bounded presentation of an owned scene-linear CPU pass. Transport and film remain separate.
 //! The caller supplies the cumulative work debit; every mutating stage checks it first.
-use super::denoise::{DenoiseTask, Guide};
+use super::denoise::{ComponentDenoiseTask, DenoiseTask, Guide};
 use super::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, DenoiseSettings, ErrorCode, JobError, Phase, Progress, Result, TaskPoll};
 use super::{bloom::BloomTask, encoding::PngEncoding, linear_exr::ExrTask, photographic::PhotographicTask, presentation::Presentation};
 use crate::film::adaptive::CountsPlane;
+use crate::radiance::UncertaintyPixel;
+use crate::radiance_film::ComponentFrame;
 
 fn invalid(message: &str) -> JobError {
     JobError::new(ErrorCode::InvalidRequest, message)
@@ -37,6 +39,7 @@ enum Stage {
     Resolve(Resolve),
     Exr(ExrTask),
     Denoise(DenoiseTask),
+    Components(ComponentDenoiseTask),
     Bloom(BloomTask),
     Display(usize),
     Photographic(PhotographicTask),
@@ -51,6 +54,8 @@ pub(crate) struct OutputTask {
     trace_height: u32,
     supersampling: u32,
     denoise_settings: DenoiseSettings,
+    uncertainty: Option<Vec<UncertaintyPixel>>,
+    components: Option<ComponentFrame>,
     retain_exr: bool,
     original: Option<Vec<[f32; 4]>>,
     resolved_alpha: Vec<u8>,
@@ -71,6 +76,7 @@ pub(crate) struct OutputTask {
     exr: Option<Vec<u8>>,
 }
 impl OutputTask {
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_quality(
         width: u32,
@@ -89,6 +95,85 @@ impl OutputTask {
         cancel: CancelToken,
         charge: &mut impl FnMut(u64) -> Result<()>,
     ) -> Result<Self> {
+        Self::new_with_uncertainty(
+            width,
+            height,
+            encoded_limit,
+            linear,
+            rgba,
+            presentation,
+            preserve_display,
+            retain_exr,
+            denoise,
+            denoise_settings,
+            supersampling,
+            diagnostics,
+            coverage_samples,
+            cancel,
+            charge,
+            None,
+        )
+    }
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_uncertainty(
+        width: u32,
+        height: u32,
+        encoded_limit: u64,
+        linear: Vec<[f32; 4]>,
+        rgba: Vec<u8>,
+        presentation: Presentation,
+        preserve_display: bool,
+        retain_exr: bool,
+        denoise: bool,
+        denoise_settings: DenoiseSettings,
+        supersampling: u32,
+        diagnostics: bool,
+        coverage_samples: u32,
+        cancel: CancelToken,
+        charge: &mut impl FnMut(u64) -> Result<()>,
+        uncertainty: Option<Vec<UncertaintyPixel>>,
+    ) -> Result<Self> {
+        Self::new_with_components(
+            width,
+            height,
+            encoded_limit,
+            linear,
+            rgba,
+            presentation,
+            preserve_display,
+            retain_exr,
+            denoise,
+            denoise_settings,
+            supersampling,
+            diagnostics,
+            coverage_samples,
+            cancel,
+            charge,
+            uncertainty,
+            None,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_components(
+        width: u32,
+        height: u32,
+        encoded_limit: u64,
+        linear: Vec<[f32; 4]>,
+        rgba: Vec<u8>,
+        presentation: Presentation,
+        preserve_display: bool,
+        retain_exr: bool,
+        denoise: bool,
+        denoise_settings: DenoiseSettings,
+        supersampling: u32,
+        diagnostics: bool,
+        coverage_samples: u32,
+        cancel: CancelToken,
+        charge: &mut impl FnMut(u64) -> Result<()>,
+        uncertainty: Option<Vec<UncertaintyPixel>>,
+        components: Option<ComponentFrame>,
+    ) -> Result<Self> {
         presentation.validate()?;
         cancel.check()?;
         denoise_settings.validate()?;
@@ -104,6 +189,16 @@ impl OutputTask {
         if linear.len() as u64 != count || (preserve_display && rgba.len() as u64 != count * 4) || (!preserve_display && !rgba.is_empty()) {
             return Err(invalid("CPU output storage does not match its complete pass"));
         }
+        if (denoise && denoise_settings.variance_guided && !denoise_settings.component_filtering) != uncertainty.is_some()
+            || uncertainty.as_ref().is_some_and(|values| values.len() as u64 != count || values.capacity() as u64 != count)
+        {
+            return Err(invalid("CPU output uncertainty must cover its admitted trace grid"));
+        }
+        if (denoise && denoise_settings.component_filtering) != components.is_some()
+            || components.as_ref().is_some_and(|frame| frame.len() as u64 != count)
+        {
+            return Err(invalid("component output needs a complete admitted component frame"));
+        }
         let mut task = Self {
             width,
             height,
@@ -111,6 +206,8 @@ impl OutputTask {
             trace_height,
             supersampling,
             denoise_settings,
+            uncertainty,
+            components,
             retain_exr,
             original: None,
             resolved_alpha: Vec::new(),
@@ -179,9 +276,17 @@ impl OutputTask {
         Ok(())
     }
     fn prepare_display(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
-        if self.denoise {
+        if self.denoise && self.denoise_settings.component_filtering {
+            charge(1)?;
+            let frame = self.components.take().ok_or_else(|| invalid("component frame disappeared before filtering"))?;
+            self.stage =
+                Some(Stage::Components(ComponentDenoiseTask::new(self.trace_width, self.trace_height, linear, frame, self.denoise_settings)?));
+            Ok(())
+        } else if self.denoise {
             charge(1)?; // one fallible, prepaid colour scratch reservation
-            let task = if self.denoise_settings.is_default() {
+            let task = if self.denoise_settings.variance_guided {
+                DenoiseTask::new_with_uncertainty(self.trace_width, self.trace_height, linear, self.denoise_settings, self.uncertainty.take())?
+            } else if self.denoise_settings.is_default() {
                 DenoiseTask::new(self.trace_width, self.trace_height, linear)?
             } else {
                 DenoiseTask::new_with_settings(self.trace_width, self.trace_height, linear, self.denoise_settings)?
@@ -326,6 +431,15 @@ impl OutputTask {
                     self.stage = Some(Stage::Exr(task));
                 }
             }
+            Stage::Components(mut task) => {
+                charge(task.next_pixels() as u64)?;
+                let guides = guides.ok_or_else(|| invalid("component output is missing its admitted geometry guides"))?;
+                if task.step(guides, &self.cancel)? {
+                    self.prepare_resolve(task.finish()?, charge)?;
+                } else {
+                    self.stage = Some(Stage::Components(task));
+                }
+            }
             Stage::Denoise(mut task) => {
                 charge(task.next_pixels() as u64)?;
                 let guides = guides.ok_or_else(|| invalid("CPU output is missing its admitted geometry guides"))?;
@@ -441,6 +555,7 @@ impl OutputTask {
             Some(Stage::Resolve(_)) => "resolve",
             Some(Stage::Exr(_)) => "exr",
             Some(Stage::Denoise(_)) => "denoise",
+            Some(Stage::Components(_)) => "denoise_components",
             Some(Stage::Bloom(_)) => "bloom",
             Some(Stage::Display(_)) => "display",
             Some(Stage::Photographic(_)) => "photographic",

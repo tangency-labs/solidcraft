@@ -1,5 +1,7 @@
 //! Original, headless CPU/GPU Glass evidence. This is not an application or image-quality acceptance test.
 //! Run with `--features solidcraft-render/raytrace-cpu`; output directory must not exist.
+//! Optional final reconstruction mode: off (default), capture, or filter.
+//! Compare raw EXRs within one backend; reconstruction changes display processing only.
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_geom::MeshGeom;
@@ -8,8 +10,8 @@ use solidcraft_render::{
     ProductMesh, ProductScene,
     glass_model::{Dispersion, GlassModel, ThinFilm},
     job::{
-        AreaLight, AreaLights, CausticOptions, CpuBudget, CpuHost, CpuPathOptions, CpuProgressiveOptions, DielectricBoundary, DielectricOptions,
-        DirectionalLightOptions, DirectionalLights, ImageHost, ImageRequest, Integrator, JobId, JobOptions, OutputOptions, Phase,
+        AreaLight, AreaLights, CausticOptions, CpuBudget, CpuHost, CpuPathOptions, CpuProgressiveOptions, DenoiseSettings, DielectricBoundary,
+        DielectricOptions, DirectionalLightOptions, DirectionalLights, ImageHost, ImageRequest, Integrator, JobId, JobOptions, OutputOptions, Phase,
         PunctualLightOptions, PunctualLights, RaytraceEnvironmentOptions, RaytraceOptions, RectangleLightOptions, SpotConeOptions, StudioLighting,
     },
     transmission::{Transmission, subsurface::Subsurface},
@@ -39,6 +41,44 @@ const CASES: &[&str] = &[
 ];
 const ENVIRONMENT: [f64; 3] = [0.7, 0.8, 1.0];
 const LIGHT: AreaLight = AreaLight { center: [-22.0, -30.0, 28.0], u: [9.0, 0.0, 0.0], v: [0.0, 0.0, -13.0], radiance: [4.0, 4.0, 4.0] };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reconstruction {
+    Off,
+    Capture,
+    Filter,
+}
+impl Reconstruction {
+    fn parse(value: &str) -> Result<Self> {
+        match value.strip_prefix("reconstruction=").unwrap_or(value) {
+            "off" => Ok(Self::Off),
+            "capture" => Ok(Self::Capture),
+            "filter" => Ok(Self::Filter),
+            _ => Err("reconstruction must be off, capture or filter".into()),
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Capture => "capture",
+            Self::Filter => "filter",
+        }
+    }
+    fn captures(self) -> bool {
+        self != Self::Off
+    }
+    fn filters(self) -> bool {
+        self == Self::Filter
+    }
+    fn settings(self) -> DenoiseSettings {
+        DenoiseSettings {
+            variance_guided: self.filters(),
+            component_filtering: self.filters(),
+            extended_optical_guides: self.filters(),
+            ..Default::default()
+        }
+    }
+}
 
 fn quad(mesh: &mut Mesh, vertices: [u32; 4]) {
     let [a, b, c, d] = vertices;
@@ -283,7 +323,7 @@ fn punctual(case: &str) -> Vec<PunctualLightOptions> {
         },
     ]
 }
-fn request(scene: &ProductScene, cpu: bool, case: &str, samples: u32, width: u32) -> Result<ImageRequest> {
+fn request(scene: &ProductScene, cpu: bool, case: &str, samples: u32, width: u32, reconstruction: Reconstruction) -> Result<ImageRequest> {
     let raytrace = if cpu {
         let mut dielectrics = Vec::new();
         for (body_index, body) in scene.meshes.iter().enumerate() {
@@ -305,10 +345,14 @@ fn request(scene: &ProductScene, cpu: bool, case: &str, samples: u32, width: u32
         }
         let areas = area_lights(case);
         Some(RaytraceOptions {
+            radiance_components: reconstruction.captures(),
+            denoise: reconstruction.filters(),
+            denoise_diagnostics: reconstruction.filters(),
+            denoise_settings: reconstruction.settings(),
             caustics: caustics(case),
             budget: CpuBudget::Studio,
             progressive: Some(CpuProgressiveOptions { samples_per_pixel: samples, seed: 81 }),
-            path: Some(CpuPathOptions { max_depth: 16 }),
+            path: Some(CpuPathOptions { max_depth: 16, ..Default::default() }),
             dielectrics,
             environment: Some(RaytraceEnvironmentOptions { color: environment(case), intensity: 1.0 }),
             lights: Some(directional(case)),
@@ -354,17 +398,22 @@ fn request(scene: &ProductScene, cpu: bool, case: &str, samples: u32, width: u32
 struct Evidence<'a> {
     samples: u32,
     width: u32,
+    reconstruction: Reconstruction,
     out: &'a Path,
 }
 
 fn render(host: &ImageHost, source: ProductScene, cpu: bool, case: &str, evidence: &Evidence<'_>, serial: u64) -> Result<()> {
-    let Evidence { samples, width, out } = *evidence;
+    let Evidence { samples, width, reconstruction, out } = *evidence;
     let backend = if cpu { "cpu" } else { "gpu" };
-    let request = request(&source, cpu, case, samples, width)?;
+    let request = request(&source, cpu, case, samples, width, reconstruction)?;
     let options = if cpu {
         JobOptions::default()
     } else {
         JobOptions {
+            radiance_components: reconstruction.captures(),
+            denoise: reconstruction.filters(),
+            denoise_diagnostics: reconstruction.filters(),
+            denoise_settings: reconstruction.settings(),
             caustics: caustics(case),
             samples,
             seed: 81,
@@ -432,35 +481,49 @@ fn render(host: &ImageHost, source: ProductScene, cpu: bool, case: &str, evidenc
     let exr = frame.linear_exr().ok_or("completed render has no raw EXR master")?;
     fs::write(out.join(format!("{backend}-{case}.png")), frame.png())?;
     fs::write(out.join(format!("{backend}-{case}.exr")), exr)?;
+    if let Some(mask) = frame.denoise_mask_png() {
+        fs::write(out.join(format!("{backend}-{case}-denoise-mask.png")), mask)?;
+    }
     let receipt = json!({
         "status":"PASS", "case":case,"backend":backend,"executor":descriptor,"request":recorded_request,"options":recorded_options,
         "frame":frame.info,"linear_master":frame.linear_master_info(),"original_geometry":geometry,
+        "reconstruction":reconstruction.label(),"radiance":status.radiance,"photon_diagnostics":status.photon_diagnostics,
+        "sampling":status.sampling,"denoise_diagnostics":status.denoise_diagnostics,
+        "raw_transport_settings_unchanged_by_reconstruction":true,
         "qualification":"headless completed image and retained same-frame raw master only",
         "application_ui_tested":false,"saved_design_tested":false,"image_quality_acceptance":false,
         "pixel_identity_between_backends_expected":false,
         "sampling_difference":"CPU uses four samples per enabled area connection; GPU uses its native estimator. Camera and branch sample streams differ."
     });
     fs::write(out.join(format!("{backend}-{case}.json")), serde_json::to_vec_pretty(&receipt)?)?;
-    println!("Completed {backend} {case}: {width}x{}, {samples} samples/pixel", width * 3 / 4);
+    println!("Completed {backend} {case}: {width}x{}, {samples} samples/pixel, reconstruction={}", width * 3 / 4, reconstruction.label());
     Ok(())
 }
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let out = args.next().ok_or("usage: glass_comparison NEW_OUTPUT_DIRECTORY [cpu|gpu|both] [SPP=32] [CASE=all] [WIDTH=256]")?;
+    let out = args
+        .next()
+        .ok_or("usage: glass_comparison NEW_OUTPUT_DIRECTORY [cpu|gpu|both] [SPP=32] [CASE=all] [WIDTH=256] [reconstruction=off|capture|filter]")?;
     let backend = args.next().unwrap_or_else(|| "both".into());
     let samples = args.next().map_or(Ok(32), |v| v.parse::<u32>())?;
     let case = args.next().unwrap_or_else(|| "all".into());
     let width = args.next().map_or(Ok(256), |v| v.parse::<u32>())?;
+    let reconstruction = Reconstruction::parse(&args.next().unwrap_or_else(|| "off".into()))?;
     if args.next().is_some() || !["cpu", "gpu", "both"].contains(&backend.as_str()) || !(1..=64).contains(&samples) || !(64..=1024).contains(&width) {
         return Err("expected cpu|gpu|both, 1..64 SPP and width 64..1024".into());
     }
     if case != "all" && !CASES.contains(&case.as_str()) {
         return Err(format!("case must be one of {} or all", CASES.join("|")).into());
     }
+    if reconstruction.filters() && ["all", "scattering_caustics"].contains(&case.as_str()) {
+        return Err(
+            "component filtering is unsupported for scattering_caustics; select an individual surface case or use reconstruction=off|capture".into(),
+        );
+    }
     let out = Path::new(&out);
     fs::create_dir(out)?;
-    let evidence = Evidence { samples, width, out };
+    let evidence = Evidence { samples, width, reconstruction, out };
     let cpu = (backend != "gpu").then(CpuHost::for_platform).transpose()?;
     let gpu = (backend != "cpu").then(solidcraft_gpu::path::host).transpose()?;
     for (index, selected) in CASES.iter().copied().enumerate().filter(|(_, selected)| case == "all" || case == *selected) {

@@ -313,3 +313,134 @@ fn authored_point_zero_two_base_and_coated_path_pdf_use_the_exact_unclamped_fini
         }
     }
 }
+
+#[test]
+fn camera_path_components_recombine_clear_and_rough_glass_without_changing_output() {
+    use crate::job::{CancelToken, CpuPathOptions, CpuProgressiveOptions, DielectricBoundary, RaytraceEnvironmentOptions, RaytraceOptions};
+    use crate::raytrace::{
+        dielectric,
+        image::{ImagePoll, ImageTask},
+    };
+    let mut observed_reflection = 0.0;
+    for roughness in [0.0, 0.2] {
+        for seed in [0, 9] {
+            let body = dielectric::tests::box_body(2.0);
+            let scene = dielectric::tests::scene(body);
+            let mut glass = dielectric::tests::input(DielectricBoundary::ClosedMesh);
+            if roughness > 0.0 {
+                glass.model = Some(crate::glass_model::GlassModel { roughness, ..Default::default() });
+            }
+            let options = RaytraceOptions {
+                budget: crate::job::CpuBudget::Studio,
+                threads: 1,
+                lights: Some(Vec::new()),
+                shadows: true,
+                path: Some(CpuPathOptions { max_depth: 6, ..Default::default() }),
+                progressive: Some(CpuProgressiveOptions { samples_per_pixel: 128, seed }),
+                dielectrics: vec![glass],
+                environment: Some(RaytraceEnvironmentOptions { color: [1.0, 0.5, 0.25], intensity: 1.0 }),
+                ..Default::default()
+            };
+            let mut request = dielectric::tests::request(options.clone());
+            request.camera.distance = 5.0;
+            let run = |capture: bool| {
+                let mut options = options.clone();
+                options.radiance_components = capture;
+                let mut request = request.clone();
+                request.raytrace = Some(options.clone());
+                let mut task = ImageTask::new(scene.clone(), request, CancelToken::default(), options).unwrap();
+                for _ in 0..100_000 {
+                    if let ImagePoll::Complete(png) = task.step_with_previews(16384).unwrap() {
+                        return (png, task.radiance_report());
+                    }
+                }
+                panic!("component fixture did not complete");
+            };
+            let baseline = run(false);
+            let (captured, report) = run(true);
+            assert_eq!(captured, baseline.0, "component instrumentation cannot alter a camera sample");
+            assert!(baseline.1.is_none());
+            let report = report.unwrap();
+            assert_eq!(report.observations, 128);
+            assert_eq!(report.minimum_samples, 128);
+            assert_eq!(report.maximum_samples, 128);
+            assert!(report.maximum_recombination_error < 1e-12);
+            let components = report.component_radiance_sum.unwrap();
+            let sum: [f64; 3] = std::array::from_fn(|channel| components.iter().map(|value| value[channel]).sum());
+            for (sum, raw) in sum.into_iter().zip(report.mean_radiance_sum) {
+                assert!((sum - raw).abs() < 1e-12);
+            }
+            assert_eq!(components[0], [0.0; 3]);
+            assert_eq!(components[1], [0.0; 3]);
+            assert!(components[4][0] + components[5][0] > 0.0, "transmission needs its own additive component");
+            observed_reflection += components[2][0] + components[3][0];
+            if roughness == 0.0 {
+                assert_eq!(components[3], [0.0; 3]);
+                assert_eq!(components[5], [0.0; 3], "a camera-to-light specular path has no caustic receiver");
+            }
+        }
+    }
+    assert!(observed_reflection > 0.0, "the seed set must exercise the reflected component");
+}
+
+#[test]
+fn component_reconstruction_preserves_cpu_raw_master_and_complete_preview_counts() {
+    use crate::job::{
+        CancelToken, CpuPathOptions, CpuProgressiveOptions, DenoiseSettings, DielectricBoundary, OutputOptions, RaytraceEnvironmentOptions,
+        RaytraceOptions,
+    };
+    use crate::raytrace::{
+        dielectric,
+        image::{ImagePoll, ImageTask},
+    };
+    let scene = dielectric::tests::scene(dielectric::tests::box_body(2.0));
+    let run = |filter: bool| {
+        let options = RaytraceOptions {
+            threads: 1,
+            lights: Some(Vec::new()),
+            shadows: true,
+            path: Some(CpuPathOptions { max_depth: 6, ..Default::default() }),
+            progressive: Some(CpuProgressiveOptions { samples_per_pixel: 16, seed: 9 }),
+            dielectrics: vec![dielectric::tests::input(DielectricBoundary::ClosedMesh)],
+            environment: Some(RaytraceEnvironmentOptions { color: [1.0, 0.5, 0.25], intensity: 1.0 }),
+            radiance_components: true,
+            denoise: filter,
+            denoise_settings: DenoiseSettings { component_filtering: filter, extended_optical_guides: true, ..Default::default() },
+            output: Some(Box::new(OutputOptions { linear_exr: true, ..Default::default() })),
+            ..Default::default()
+        };
+        let mut request = dielectric::tests::request(options.clone());
+        request.camera.distance = 5.0;
+        request.width = 3;
+        request.height = 3;
+        let mut task = ImageTask::new(scene.clone(), request, CancelToken::default(), options).unwrap();
+        let mut previews = Vec::new();
+        for _ in 0..200_000 {
+            match task.step_with_previews(16384).unwrap() {
+                ImagePoll::Pending(_) => {}
+                ImagePoll::Preview { png, samples_per_pixel } => {
+                    assert!(task.take_linear_exr().is_none(), "previews cannot publish a retained raw master");
+                    let image = ::image::load_from_memory(&png).unwrap().to_rgba8();
+                    assert_eq!(image.dimensions(), (3, 3));
+                    previews.push(samples_per_pixel);
+                }
+                ImagePoll::Complete(png) => {
+                    return (png, task.take_linear_exr().unwrap(), task.radiance_report().unwrap(), previews);
+                }
+            }
+        }
+        panic!("component output fixture did not complete");
+    };
+    let (plain, raw, reference, plain_previews) = run(false);
+    let (filtered, reconstructed_raw, report, filtered_previews) = run(true);
+    assert_eq!(raw, reconstructed_raw, "component reconstruction never edits the final raw EXR");
+    assert_eq!(report.observations, 9 * 16);
+    assert_eq!(report.minimum_samples, 16);
+    assert_eq!(report.maximum_samples, 16);
+    assert_eq!(report.mean_radiance_sum, reference.mean_radiance_sum);
+    assert_eq!(report.component_radiance_sum, reference.component_radiance_sum);
+    assert_eq!(filtered_previews, plain_previews, "reconstruction publishes the same complete camera prefixes");
+    assert!(!filtered_previews.is_empty());
+    let alpha = |png: &[u8]| ::image::load_from_memory(png).unwrap().to_rgba8().pixels().map(|pixel| pixel[3]).collect::<Vec<_>>();
+    assert_eq!(alpha(&plain), alpha(&filtered));
+}

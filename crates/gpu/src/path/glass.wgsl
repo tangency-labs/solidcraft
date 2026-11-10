@@ -143,15 +143,20 @@ fn glass_macro_normal(incident:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,ni
     return normal;
 }
 fn glass_interface(t:Triangle,incident:vec3<f32>,macro_normal:vec3<f32>,geometric:vec3<f32>,ni:f32,nt:f32,wavelength:f32,radiance:bool,stratum:u32,strata:u32,rng:ptr<function,u32>) -> GlassEvent {
+    return glass_interface_at(t,incident,macro_normal,geometric,ni,nt,wavelength,radiance,stratum,strata,0u,rng);
+}
+// A virtual sheet can visit several interfaces during one geometric bounce.
+// Explicit event ordinals prevent reusing one Sobol pair along that walk.
+fn glass_interface_at(t:Triangle,incident:vec3<f32>,macro_normal:vec3<f32>,geometric:vec3<f32>,ni:f32,nt:f32,wavelength:f32,radiance:bool,stratum:u32,strata:u32,event:u32,rng:ptr<function,u32>) -> GlassEvent {
     var normal=macro_normal;
     let rough=glass_rough_active(t,ni,nt);
     if rough && dot(macro_normal,-incident)<=0.0 {return GlassEvent(incident,vec3<f32>(0.0),false,false);}
-    if rough {normal=glass_visible_normal(macro_normal,-incident,t.glass.x*t.glass.x,vec2<f32>(random(rng),random(rng)));}
+    if rough {normal=glass_visible_normal(macro_normal,-incident,t.glass.x*t.glass.x,path_sample_pair(rng,0x4200u+event*2u));}
     let f=dielectric(clamp(dot(normal,-incident),0.0,1.0),ni,nt);
     let reflection=glass_reflection(t,clamp(dot(normal,-incident),0.0,1.0),ni,nt,wavelength);
     let probability=dot(reflection,vec3<f32>(1.0/3.0));
-    var branch=random(rng);
-    if strata>1u {branch=(f32(stratum)+branch)/f32(strata);*rng^=(stratum+1u)*0x85ebca6bu;}
+    var branch=path_sample_value(rng,0x4201u+event*2u,0u);
+    if strata>1u {branch=first_fresnel_variate(branch,stratum,strata);*rng^=(stratum+1u)*0x85ebca6bu;camera_sample_branch=stratum+1u;}
     let reflected=branch<probability;
     var outgoing=reflect(incident,normal);var weight=vec3<f32>(0.0);
     if reflected {
@@ -172,7 +177,7 @@ fn glass_rough_sheet(t:Triangle,incident:vec3<f32>,normal:vec3<f32>,outside:f32,
     for(var event=0u;event<remaining;event+=1u) {
         let macro_normal=select(-normal,normal,dot(direction,normal)<0.0);
         let ni=select(outside,inside,internal);let nt=select(inside,outside,internal);
-        let sampled=glass_interface(t,direction,macro_normal,macro_normal,ni,nt,wavelength,radiance,stratum,select(1u,strata,event==0u),rng);
+        let sampled=glass_interface_at(t,direction,macro_normal,macro_normal,ni,nt,wavelength,radiance,stratum,select(1u,strata,event==0u),event+1u,rng);
         if !sampled.valid {return GlassSheetWalk(sampled.direction,vec3<f32>(0.0),event+1u,false);}
         direction=sampled.direction;weight*=sampled.weight;
         if (!internal && !sampled.transmitted) || (internal && sampled.transmitted) {return GlassSheetWalk(direction,weight,event+1u,true);}

@@ -208,6 +208,7 @@ fn decide(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()>
         state.stage = Stage::Commit;
         return Ok(());
     }
+    state.receiver();
     state.light = 0;
     state.sample = 0;
     state.stage = Stage::Directional;

@@ -18,6 +18,7 @@ fn decades(count: usize) -> Vec<Triangle> {
                 transmission: None,
                 medium: 0,
                 scalar_face: false,
+                guide_topology: 0,
             }
         })
         .collect()
@@ -61,4 +62,25 @@ fn sah_tree_respects_the_shader_stack_depth_and_covers_every_triangle_once() {
     assert!(deepest <= MAX_BVH_DEPTH, "depth {deepest}");
     // Covering 2048 triangles in leaves of four needs at least nine levels.
     assert!(deepest >= 9, "depth {deepest}");
+}
+
+#[test]
+fn optical_topology_packing_preserves_flags_exactly_and_fails_closed() {
+    for count in [1, 12, 2047] {
+        for local in 0..count {
+            let topology = super::guide_topology(count, local);
+            assert_eq!(topology & 3, 0);
+            assert_eq!(topology >> 13, count as u32);
+            assert_eq!((topology >> 2) & 2047, local as u32);
+            for flags in 0..=3 {
+                let value = topology | flags;
+                assert!(value <= 0x00ff_ffff);
+                assert_eq!(value as f32 as u32, value);
+                assert_eq!(value & 3, flags);
+            }
+        }
+    }
+    for (count, local) in [(0, 0), (2048, 0), (12, 12), (usize::MAX, usize::MAX)] {
+        assert_eq!(super::guide_topology(count, local), 0);
+    }
 }

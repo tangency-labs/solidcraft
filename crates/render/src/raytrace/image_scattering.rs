@@ -119,6 +119,7 @@ fn scatter(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
         state.stage = Stage::Commit;
         return Ok(());
     }
+    state.receiver();
     let incoming = state.ray.ok_or_else(|| invalid("CPU subsurface incident ray missing"))?.direction();
     if glass_lighting::begin(task, state, glass_lighting::Event::Medium { index, position: event.position, incoming }) {
         return Ok(());

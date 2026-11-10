@@ -1,11 +1,11 @@
 // Bounded light tracing for delta sources and opt-in area and environment
 // sources. The latter two own only paths that encounter one or more smooth
 // closed-glass events before the first opaque receiver.
-// Header 16 words, hash heads, 16-word immutable photon records, then an
-// optional four-word optical guide slot, then an optional source count/CDF.
-// The guide slot is also reserved when only source weighting is enabled.
-// A mandatory six-word retained optical AABB follows the optional proposals.
-// Gathering uses the original layout.
+// Header 16 words, hash heads, 16-word immutable photon records (24 with a
+// selected-sample probe), then an optional four-word optical guide slot and
+// source count/CDF. The guide slot also exists for source weighting alone.
+// Optional surface radius, receiver-policy threshold and fixed probe tail precede
+// the mandatory six-word retained optical AABB. Default jobs retain their layout.
 @group(0) @binding(7) var<storage,read_write> photon_data:array<atomic<u32>>;
 fn photon_word(index:u32)->u32 {return atomicLoad(&photon_data[index]);}
 fn photon_float(index:u32)->f32 {return bitcast<f32>(photon_word(index));}
@@ -51,11 +51,26 @@ fn photon_origin_boundary(origin:vec3<f32>,origin_low:vec3<f32>,direction:vec3<f
 fn photon_cell(position:vec3<f32>)->vec3<i32> {
     return vec3<i32>(floor((position-photon_vector(6u))/photon_float(2u)));
 }
+// Surface and volume kernels have separate bandwidth schedules. The grid
+// cell is always the larger volume radius, so 27 neighboring cells suffice.
+fn photon_surface_radius()->f32 {
+    if (photon_word(14u)&8u)!=0u {
+        return photon_float(arrayLength(&photon_data)-7u-select(0u,PHOTON_PROBE_WORDS,photon_probe_enabled())-select(0u,1u,(photon_word(14u)&32u)!=0u));
+    }
+    return photon_float(2u);
+}
+// Mirror job::photon_receiver::continues_smooth_caustics at the actual mapped
+// and aged opaque receiver. Its validated threshold precedes the fixed tail.
+fn photon_continues_smooth_caustics(roughness:f32)->bool {
+    if (photon_word(14u)&32u)==0u {return false;}
+    let maximum=photon_float(arrayLength(&photon_data)-7u-select(0u,PHOTON_PROBE_WORDS,photon_probe_enabled()));
+    return roughness>=0.0 && roughness<=maximum;
+}
 fn photon_hash(cell:vec3<i32>)->u32 {
     let words=bitcast<vec3<u32>>(cell);
     return ((words.x*73856093u)^(words.y*19349663u)^(words.z*83492791u))&(photon_word(1u)-1u);
 }
-fn photon_record(index:u32)->u32 {return 16u+photon_word(1u)+index*16u;}
+fn photon_record(index:u32)->u32 {return 16u+photon_word(1u)+index*select(16u,24u,photon_probe_enabled());}
 fn photon_bad_medium() {atomicOr(&failures[7],4u);}
 fn photon_deposit(index:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32,source:u32,smooth_events:u32) {
     let record=photon_record(index);
@@ -74,6 +89,7 @@ fn photon_deposit(index:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>
 struct PhotonReservoir {
     visits:u32,rng:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32,
     source:vec3<f32>,source_low:vec3<f32>,minimum:f32,source_index:u32,smooth_events:u32,
+    global_source:u32,source_probability:f32,emission_density:f32,emission_measure:u32,depth:u32,selected_depth:u32,
 };
 fn photon_offer(reservoir:ptr<function,PhotonReservoir>,point:PrecisePoint,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32) {
     if (*reservoir).minimum>0.0 && length(precise_point_delta(point.hi,point.lo,(*reservoir).source,(*reservoir).source_low))<(*reservoir).minimum {punctual_count(0u);return;}
@@ -92,6 +108,7 @@ fn photon_offer(reservoir:ptr<function,PhotonReservoir>,point:PrecisePoint,incom
     if selected {
         (*reservoir).position=point.hi+point.lo;(*reservoir).incoming=incoming;(*reservoir).flux=flux;
         (*reservoir).normal=normal;(*reservoir).receiver=receiver;(*reservoir).kind=kind;(*reservoir).side=side;
+        (*reservoir).selected_depth=(*reservoir).depth;
     }
 }
 @compute @workgroup_size(32)
@@ -182,6 +199,7 @@ fn photon_emit(@builtin(global_invocation_id) invocation:vec3<u32>) {
         let flux=reservoir.flux*f32(reservoir.visits);
         if !all(flux>=vec3<f32>(0.0)) || !all(flux<=vec3<f32>(3.4e38)) {atomicOr(&failures[7],1u);return;}
         photon_deposit(index,reservoir.position,reservoir.incoming,flux,reservoir.normal,reservoir.receiver,reservoir.kind,reservoir.side,reservoir.source_index,reservoir.smooth_events);
+        photon_probe_deposit(index,reservoir);
     }
 }
 fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReservoir>) {
@@ -229,6 +247,8 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
             previous=end;
         }
     }
+    (*reservoir).global_source=selected;
+    (*reservoir).source_probability=1.0/inverse_source_probability;
     let area=selected>=hard_sources && selected<hard_sources+area_count;
     let continuous=selected>=hard_sources;
     let area_index=select(0xffffffffu,selected-hard_sources,area);
@@ -245,6 +265,7 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
         if projected.w<=0.0 {return;}
         origin=projected.xyz;
         flux=irradiance*(projected.w*inverse_source_probability/f32(count));
+        (*reservoir).emission_density=1.0/projected.w;(*reservoir).emission_measure=1u;
     } else if !continuous {
         let light=u.punctual_lights[min(selected-min(selected,directions),7u)];
         origin=light.position.xyz;origin_low=light.position_low.xyz;source_minimum=light.position_low.w;
@@ -268,6 +289,7 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
             density=photon_mixture_pdf(cone,direction,density,sampled_cone);
         }
         flux=light.color.xyz*(light.color.w*light.position.w*light.position.w*feather*inverse_source_probability/(density*f32(count)));
+        (*reservoir).emission_density=density;(*reservoir).emission_measure=2u;
     } else if area {
         let light=u.area_lights[min(area_index,3u)];
         origin=light.center.xyz;
@@ -288,6 +310,7 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
             angular_weight=cosine/photon_mixture_pdf(cone,direction,cosine/PI,sampled_cone);
         }
         flux=light.radiance.xyz*(angular_weight*light.center.w*inverse_source_probability/f32(count));
+        (*reservoir).emission_density=max(0.0,dot(normal,direction))/(angular_weight*light.center.w);(*reservoir).emission_measure=3u;
     } else {
         let sample=env_sample(&rng);
         if !(sample.pdf>0.0) || !any(sample.radiance>vec3<f32>(0.0)) {return;}
@@ -299,6 +322,7 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
         // toward the sampled sky, so test that part of the same line separately.
         if emitter_hit_precise(origin,origin_low,-direction,0.0).index!=0xffffffffu {return;}
         flux=sample.radiance*(projected.w*inverse_source_probability/(sample.pdf*f32(count)));
+        (*reservoir).emission_density=sample.pdf/projected.w;(*reservoir).emission_measure=4u;
     }
     if !any(flux>vec3<f32>(0.0)) {return;}
     var wavelength=0.0;
@@ -315,6 +339,7 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
     if first.hit.triangle!=0xffffffffu && !initialize_media_spectral(first.hit.triangle,direction,&media,&medium_count,wavelength) {photon_bad_medium();return;}
     var previous=origin;var previous_low=origin_low;var excluded=0xffffffffu;var minimum=0.0;var optical=false;
     for(var depth=0u;depth<maximum;depth+=1u) {
+        (*reservoir).depth=depth;
         let hit=trace_precise(origin,origin_low,direction,false,excluded,minimum,medium_count>0u);
         let emitter=emitter_hit_precise_except(origin,origin_low,direction,minimum,select(0xffffffffu,area_index,depth==0u));
         if medium_count>0u && media[medium_count-1u].scatter.x>0.0 {
@@ -422,21 +447,33 @@ fn photon_trace(index:u32,seed:u32,epoch:u32,reservoir:ptr<function,PhotonReserv
 }
 fn photon_gather(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,view:vec3<f32>,remaining:u32) -> vec3<f32> {
     let count=photon_word(0u);if count==0u || t.base.w>0.0 {return vec3<f32>(0.0);}
-    let radius=photon_float(2u);let center=photon_cell(position);var result=vec3<f32>(0.0);
+    photon_probe_gather_begin();adaptive_photon_begin();
+    let radius=photon_surface_radius();let center=photon_cell(position);var result=vec3<f32>(0.0);
+    let continuation=photon_continues_smooth_caustics(t.parameters.y);
     for(var z=-1;z<=1;z+=1) {for(var y=-1;y<=1;y+=1) {for(var x=-1;x<=1;x+=1) {
         let cell=center+vec3<i32>(x,y,z);var index=photon_word(16u+photon_hash(cell));var visited=0u;
         loop {
             if index==0xffffffffu || index>=count || visited>=count {break;}visited+=1u;
             let record=photon_record(index);let point=photon_vector(record);let delta=point-position;
+            if all(photon_cell(point)==cell) {photon_probe_visit();}
             let smooth_events=photon_word(record+15u)>>6u;
             // The camera needs one loop slot beyond the glass chain to see the emitter.
-            if photon_word(record+11u)==1u && (smooth_events==0u || smooth_events<remaining) && photon_receiver_allowed(record,position) && all(photon_cell(point)==cell) && dot(delta,delta)<=radius*radius && abs(dot(delta,geometric))<=radius*0.1 && dot(photon_vector(record+12u),geometric)>0.0 && triangle(min(photon_word(record+7u),max(geometry[0],1u)-1u)).optics.w==t.optics.w {
+            if photon_word(record+11u)==1u && (smooth_events==0u || !continuation) && (smooth_events==0u || smooth_events<remaining) && photon_receiver_allowed(record,position) && all(photon_cell(point)==cell) && dot(delta,delta)<=radius*radius && abs(dot(delta,geometric))<=radius*0.1 && dot(photon_vector(record+12u),geometric)>0.0 && triangle(min(photon_word(record+7u),max(geometry[0],1u)-1u)).optics.w==t.optics.w {
                 let incoming=photon_vector(record+4u);
-                if dot(incoming,normal)>0.0 && dot(incoming,geometric)>0.0 {result+=brdf(t,normal,view,incoming)*photon_vector(record+8u)*(dot(incoming,normal)/dot(incoming,geometric));}
+                if dot(incoming,normal)>0.0 && dot(incoming,geometric)>0.0 {
+                    let response=brdf(t,normal,view,incoming);
+                    let measure=dot(incoming,normal)/dot(incoming,geometric);
+                    let contribution=response*photon_vector(record+8u)*measure;
+                    result+=contribution;
+                    let local=contribution/(PI*radius*radius);
+                    photon_probe_contribution(index,record,response,measure,radius,local,false);
+                    adaptive_photon_contribution(local);
+                }
             }
             index=photon_word(record+3u);
         }
     }}}
+    photon_probe_gather_end();
     return result/(PI*radius*radius);
 }
 fn photon_enabled()->bool {return photon_word(0u)>0u;}
@@ -450,38 +487,67 @@ fn photon_receiver_allowed(record:u32,position:vec3<f32>)->bool {
     let light=u.punctual_lights[min(max(source,1u)-1u,7u)];
     return length(precise_point_delta(position,vec3<f32>(0.0),light.position.xyz,light.position_low.xyz))>=light.position_low.w;
 }
-fn photon_gather_glass(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,incident:vec3<f32>,ni:f32,nt:f32,wavelength:f32,side:i32)->vec3<f32> {
-    let count=photon_word(0u);if count==0u {return vec3<f32>(0.0);}
-    let radius=photon_float(2u);let center=photon_cell(position);var result=vec3<f32>(0.0);
+struct PhotonGlassGather {reflected:vec3<f32>,transmitted:vec3<f32>,total:vec3<f32>};
+fn photon_gather_glass_split(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,incident:vec3<f32>,ni:f32,nt:f32,wavelength:f32,side:i32)->PhotonGlassGather {
+    var result=PhotonGlassGather(vec3<f32>(0.0),vec3<f32>(0.0),vec3<f32>(0.0));
+    let count=photon_word(0u);if count==0u {return result;}
+    photon_probe_gather_begin();adaptive_photon_begin();
+    let radius=photon_surface_radius();let center=photon_cell(position);
     let outward=unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz));
     for(var z=-1;z<=1;z+=1) {for(var y=-1;y<=1;y+=1) {for(var x=-1;x<=1;x+=1) {
         let cell=center+vec3<i32>(x,y,z);var index=photon_word(16u+photon_hash(cell));var visited=0u;
         loop {
             if index==0xffffffffu || index>=count || visited>=count {break;}visited+=1u;
             let record=photon_record(index);let point=photon_vector(record);let delta=point-position;
+            if all(photon_cell(point)==cell) {photon_probe_visit();}
             let side_code=select(select(0u,1u,side>0),2u,side<0);
             if photon_word(record+11u)==2u && (photon_word(record+15u)&3u)==side_code && photon_receiver_allowed(record,position) && all(photon_cell(point)==cell) && dot(delta,delta)<=radius*radius && abs(dot(delta,outward))<=radius*0.1 && dot(photon_vector(record+12u),outward)>0.0 && triangle(min(photon_word(record+7u),max(geometry[0],1u)-1u)).optics.w==t.optics.w {
                 let incoming=photon_vector(record+4u);let projected=abs(dot(incoming,geometric));
-                if projected>0.0 {result+=glass_evaluate_cosine(t.glass,incident,incoming,normal,geometric,ni,nt,wavelength)*photon_vector(record+8u)/projected;}
+                if projected>0.0 {
+                    let projected_response=glass_evaluate_cosine(t.glass,incident,incoming,normal,geometric,ni,nt,wavelength);
+                    let contribution=projected_response*photon_vector(record+8u)/projected;
+                    result.total+=contribution;
+                    if dot(incoming,normal)<0.0 {result.transmitted+=contribution;} else {result.reflected+=contribution;}
+                    let cosine=abs(dot(incoming,normal));
+                    var response=vec3<f32>(0.0);if cosine>0.0 {response=projected_response/cosine;}
+                    let local=contribution/(PI*radius*radius);
+                    photon_probe_contribution(index,record,response,cosine/projected,radius,local,dot(incoming,normal)<0.0);
+                    adaptive_photon_contribution(local);
+                }
             }
             index=photon_word(record+3u);
         }
     }}}
-    return result/(PI*radius*radius);
+    photon_probe_gather_end();
+    result.reflected/=PI*radius*radius;result.transmitted/=PI*radius*radius;result.total/=PI*radius*radius;
+    return result;
+}
+fn photon_gather_glass(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,incident:vec3<f32>,ni:f32,nt:f32,wavelength:f32,side:i32)->vec3<f32> {
+    let result=photon_gather_glass_split(t,position,normal,geometric,incident,ni,nt,wavelength,side);
+    return result.total;
 }
 fn photon_gather_volume(position:vec3<f32>,incident:vec3<f32>,medium:Medium)->vec3<f32> {
     let count=photon_word(0u);if count==0u || medium.scatter.x<=0.0 {return vec3<f32>(0.0);}
+    photon_probe_gather_begin();adaptive_photon_begin();
     let radius=photon_float(2u);let center=photon_cell(position);var result=vec3<f32>(0.0);
     for(var z=-1;z<=1;z+=1) {for(var y=-1;y<=1;y+=1) {for(var x=-1;x<=1;x+=1) {
         let cell=center+vec3<i32>(x,y,z);var index=photon_word(16u+photon_hash(cell));var visited=0u;
         loop {
             if index==0xffffffffu || index>=count || visited>=count {break;}visited+=1u;
             let record=photon_record(index);let point=photon_vector(record);let delta=point-position;
+            if all(photon_cell(point)==cell) {photon_probe_visit();}
             if photon_word(record+11u)==3u && photon_word(record+7u)==bitcast<u32>(medium.id) && photon_receiver_allowed(record,position) && all(photon_cell(point)==cell) && dot(delta,delta)<=radius*radius {
-                result+=photon_vector(record+8u)*glass_hg_phase(dot(incident,photon_vector(record+4u)),medium.scatter.y);
+                let response=glass_hg_phase(dot(incident,photon_vector(record+4u)),medium.scatter.y);
+                let contribution=photon_vector(record+8u)*response;
+                result+=contribution;
+                let kernel=3.0/(4.0*PI*radius*radius*radius*medium.scatter.x);
+                let local=contribution*kernel;
+                photon_probe_contribution(index,record,vec3<f32>(response),1.0,radius,local,false);
+                adaptive_photon_contribution(local);
             }
             index=photon_word(record+3u);
         }
     }}}
+    photon_probe_gather_end();
     return result*(3.0/(4.0*PI*radius*radius*radius*medium.scatter.x));
 }

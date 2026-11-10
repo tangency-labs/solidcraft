@@ -1315,8 +1315,17 @@ fn independent_sampling_and_volume_intent_roundtrip_offline_without_silent_confl
     let mut h = fixture();
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     h.app.render_workspace.view.samples = 64;
-    h.app.render_workspace.view.studio.adaptive =
-        Some(AdaptiveSampling { pilot_samples: 16, min_samples: 32, relative_error: 0.03, absolute_error: 0.004, coverage_error: 0.02 });
+    h.app.render_workspace.view.studio.adaptive = Some(AdaptiveSampling {
+        pilot_samples: 16,
+        min_samples: 32,
+        optical_min_samples: 0,
+        relative_error: 0.03,
+        absolute_error: 0.004,
+        coverage_error: 0.02,
+
+        component_uncertainty: false,
+        map_validation_batches: 0,
+    });
     h.app.render_workspace.view.studio.volume = Some(HomogeneousVolume {
         min_mm: [-30.0, -20.0, -1.0],
         max_mm: [30.0, 20.0, 40.0],
@@ -1640,6 +1649,7 @@ fn output_effects_retains_ordered_looks_and_photographic_intent_across_save_and_
     }
     assert_eq!(h.app.render_workspace.view.studio.finishing.looks.len(), 2);
     assert_eq!(h.app.render_workspace.view.studio.finishing.looks.get(0).unwrap().kind, LookKind::Warm);
+    reveal_inspector_target(&mut h, "render:look-up");
     h.step(&json!({"click":{"handle":"render:look-up"}})).unwrap();
     h.frames(2);
     assert_eq!(h.app.render_workspace.view.studio.finishing.looks.get(0).unwrap().kind, LookKind::Faded);
@@ -3588,7 +3598,7 @@ fn composed_cpu_environment_and_output_alpha_edits_preserve_gi_filter_and_master
     h.call("ui.resize", json!({"width":1440,"height":1600}));
     h.app.render_workspace.view.live_paused = true;
     super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
-    h.app.render_workspace.view.raytrace.path = Some(CpuPathOptions { max_depth: 3 });
+    h.app.render_workspace.view.raytrace.path = Some(CpuPathOptions { max_depth: 3, ..Default::default() });
     h.app.render_workspace.view.studio.denoise = true;
     h.app.render_workspace.view.studio.linear_exr = true;
     setups::save(&mut h.app).unwrap();
@@ -3608,7 +3618,7 @@ fn composed_cpu_environment_and_output_alpha_edits_preserve_gi_filter_and_master
     };
     assert!(*transparent_background);
     assert!(options.denoise && options.output.as_ref().unwrap().linear_exr);
-    assert_eq!(options.path, Some(CpuPathOptions { max_depth: 3 }));
+    assert_eq!(options.path, Some(CpuPathOptions { max_depth: 3, ..Default::default() }));
     assert_eq!(h.app.session.undo.len(), undo + 1);
     h.app.run("view.render_select", json!({"kind":"output"})).unwrap();
     h.frames(3);
@@ -3620,7 +3630,7 @@ fn composed_cpu_environment_and_output_alpha_edits_preserve_gi_filter_and_master
     };
     assert!(!*transparent_background);
     assert!(options.denoise && options.output.as_ref().unwrap().linear_exr);
-    assert_eq!(options.path, Some(CpuPathOptions { max_depth: 3 }));
+    assert_eq!(options.path, Some(CpuPathOptions { max_depth: 3, ..Default::default() }));
     assert_eq!(h.app.session.undo.len(), undo + 2);
     assert_eq!(h.app.cam, camera);
     assert_eq!(h.app.session.doc.render.setups[&name].camera, camera);
@@ -4569,5 +4579,74 @@ fn output_children_focus_survives_clearing_an_object_pick() {
         assert_eq!(h.app.render_workspace.view.selection, selection);
         assert!(h.app.session.selection.is_empty());
         assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+    }
+}
+
+#[test]
+fn glass_path_controls_are_visible_accessible_and_read_only_until_opted_in() {
+    fn painted(shape: &egui::Shape, expected: &str, clip: egui::Rect) -> bool {
+        match shape {
+            egui::Shape::Text(value) if value.galley.text() == expected => {
+                let rect = value.galley.rect.translate(value.pos.to_vec2());
+                rect.is_positive() && !value.galley.elided && clip.contains_rect(rect)
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| painted(shape, expected, clip)),
+            _ => false,
+        }
+    }
+    for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width":1440,"height":3000}));
+        h.app.session.set_render_job_host(None).unwrap();
+        h.app.render_workspace.view.live_paused = true;
+        h.app.render_workspace.view.method = method;
+        h.app.render_workspace.view.raytrace.progressive = Some(Default::default());
+        h.app.render_workspace.view.raytrace.path = Some(Default::default());
+        h.app.render_workspace.view.studio.caustics =
+            Some(solidcraft_engine::render::job::CausticOptions { area_lights: true, ..Default::default() });
+        h.app.render_workspace.view.draft.width = 8;
+        h.app.render_workspace.view.draft.height = 8;
+        h.app.pending_fit = None;
+        h.app.cancel_view_animation();
+        h.app.run("view.render_select", json!({"kind":"sampling"})).unwrap();
+        h.frames(3);
+        let document = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let camera = h.app.cam;
+        let request = super::super::image_request(&h.app).unwrap();
+        let section = format!("dialog:section:{}", h.app.tr("render.children.glass"));
+        reveal_inspector_target(&mut h, &section);
+        h.step(&json!({"click":{"handle":section}})).unwrap();
+        h.frames(3);
+        for target in ["render:caustics:glossy-continuation", "render:convergence:split-first-interface"] {
+            let rect = reveal_inspector_target(&mut h, target);
+            assert!(rect.is_positive() && h.ctx.content_rect().contains_rect(rect));
+        }
+        for key in ["render.convergence.glossy_continuation_help", "render.convergence.split_first_interface_help"] {
+            reveal_inspector_target(&mut h, &format!("dialog:note:{key}"));
+            let value = h.app.tr(key);
+            assert!(
+                h.shapes.iter().any(|shape| painted(&shape.shape, value, shape.clip_rect.intersect(h.ctx.content_rect()))),
+                "the visible Glass panel must paint the complete {key} note"
+            );
+            assert!(
+                h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Label
+                        && node.value() == Some(value)
+                        && node.bounds().is_some_and(|bounds| bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0)
+                }),
+                "the same {key} note must be accessible"
+            );
+        }
+        assert!(!h.app.render_workspace.view.studio.split_first_interface);
+        assert!(!h.app.render_workspace.view.raytrace.path.unwrap().split_first_interface);
+        assert!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness.is_none());
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+        assert_eq!(history, (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()));
+        assert_eq!(h.app.cam, camera);
+        assert_eq!(super::super::image_request(&h.app).unwrap(), request);
+        assert!(h.app.render_workspace.view.job.is_none());
     }
 }

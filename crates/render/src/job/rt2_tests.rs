@@ -204,8 +204,8 @@ fn opus_quality_limits_are_explicit_finite_and_keep_transport_defaults() {
     options.validate().unwrap();
     assert!(JobOptions { samples: MAX_SAMPLES_PER_PIXEL + 1, ..options }.validate().is_err());
     assert!(JobOptions { max_depth: u32::from(MAX_PATH_DEPTH) + 1, ..options }.validate().is_err());
-    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH }.validate().is_ok());
-    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH + 1 }.validate().is_err());
+    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH, ..Default::default() }.validate().is_ok());
+    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH + 1, ..Default::default() }.validate().is_err());
     assert!(
         CpuBudget::Workstation.validate_image(3840, 2160, Some(CpuProgressiveOptions { samples_per_pixel: MAX_SAMPLES_PER_PIXEL, seed: 81 })).is_ok()
     );
@@ -306,4 +306,76 @@ fn diagnostic_masks_keep_exact_categories_and_reports_use_readable_keys() {
         assert_eq!(DenoiseGuideClass::from_code(class.code()), Some(*class));
         assert_eq!(class.color()[3], 255);
     }
+}
+
+#[test]
+fn cpu_fresnel_and_roulette_options_are_explicit_and_admit_every_path_evaluation() {
+    let old: CpuPathOptions = serde_json::from_str(r#"{"max_depth":8}"#).unwrap();
+    assert_eq!(old, CpuPathOptions::default());
+    assert_eq!(serde_json::to_value(old).unwrap(), serde_json::json!({"max_depth":8}));
+    for strata in [1, 2, 4] {
+        let options = CpuPathOptions { transmission_samples: strata, russian_roulette: true, ..Default::default() };
+        options.validate().unwrap();
+        assert_eq!(serde_json::from_value::<CpuPathOptions>(serde_json::to_value(options).unwrap()).unwrap(), options);
+        assert_eq!(options.camera_evaluations(13, 32, 16).unwrap(), 13 * (32 * u64::from(strata) + 16));
+        assert!(options.camera_evaluations(u64::MAX, u32::MAX, u32::MAX).is_err());
+    }
+    for strata in [0, 3, 5, u32::MAX] {
+        assert!(CpuPathOptions { transmission_samples: strata, ..Default::default() }.validate().is_err());
+    }
+    let options = CpuPathOptions { transmission_samples: 4, ..Default::default() };
+    let pixels = CpuBudget::Compact.limits().max_camera_samples / 80;
+    options.validate_camera_budget(pixels, 16, 16, CpuBudget::Compact).unwrap();
+    assert_eq!(options.validate_camera_budget(pixels + 1, 16, 16, CpuBudget::Compact).unwrap_err().code, ErrorCode::LimitExceeded);
+}
+
+#[cfg(feature = "raytrace-cpu")]
+#[test]
+fn cpu_fresnel_lane_budget_refuses_before_image_allocation() {
+    let mut request = request(Integrator::Raytrace);
+    request.width = 1024;
+    request.height = 256;
+    let mut options = RaytraceOptions {
+        shadows: true,
+        path: Some(CpuPathOptions { transmission_samples: 4, ..Default::default() }),
+        progressive: Some(CpuProgressiveOptions { samples_per_pixel: 16, seed: 0 }),
+        adaptive: Some(Box::new(adaptive::AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() })),
+        ..Default::default()
+    };
+    // The historical camera observation budget fits; four production paths
+    // plus unstratified pilots do not. Preflight must account for the real work.
+    options.budget.validate_image(request.width, request.height, options.camera_sampling().unwrap()).unwrap();
+    assert_eq!(options.validate_camera_work(request.width, request.height).unwrap_err().code, ErrorCode::LimitExceeded);
+    request.raytrace = Some(options.clone());
+    let scene = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+    assert_eq!(admit(&scene, &request).err().unwrap().code, ErrorCode::LimitExceeded);
+    options.path.as_mut().unwrap().transmission_samples = 1;
+    options.validate_camera_work(request.width, request.height).unwrap();
+}
+
+#[test]
+fn first_interface_split_options_preserve_defaults_and_admit_two_complete_lanes() {
+    let cpu = CpuPathOptions { split_first_interface: true, ..Default::default() };
+    let gpu = JobOptions { split_first_interface: true, ..Default::default() };
+    cpu.validate().unwrap();
+    gpu.validate().unwrap();
+    assert_eq!(cpu.production_lanes(), 2);
+    assert_eq!(gpu.production_lanes(), 2);
+    assert_eq!(cpu.camera_evaluations(13, 32, 16).unwrap(), 13 * (64 + 16));
+    assert!(cpu.camera_evaluations(u64::MAX, u32::MAX, u32::MAX).is_err());
+    for strata in [2, 4] {
+        assert!(CpuPathOptions { transmission_samples: strata, ..cpu }.validate().is_err());
+        assert!(JobOptions { transmission_samples: strata, ..gpu }.validate().is_err());
+    }
+    assert_eq!(serde_json::from_value::<CpuPathOptions>(serde_json::to_value(cpu).unwrap()).unwrap(), cpu);
+    assert_eq!(serde_json::from_value::<JobOptions>(serde_json::to_value(gpu).unwrap()).unwrap(), gpu);
+    assert!(serde_json::to_value(CpuPathOptions::default()).unwrap().get("split_first_interface").is_none());
+    assert!(serde_json::to_value(JobOptions::default()).unwrap().get("split_first_interface").is_none());
+    let pixels = CpuBudget::Compact.limits().max_camera_samples / 48;
+    cpu.validate_camera_budget(pixels, 16, 16, CpuBudget::Compact).unwrap();
+    assert_eq!(cpu.validate_camera_budget(pixels + 1, 16, 16, CpuBudget::Compact).unwrap_err().code, ErrorCode::LimitExceeded);
+    let volume =
+        volume::HomogeneousVolume { min_mm: [-1.0; 3], max_mm: [1.0; 3], extinction_per_mm: 0.1, scattering_albedo: [0.5; 3], anisotropy: 0.0 };
+    assert_eq!(JobOptions { volume: Some(volume), ..gpu }.validate().unwrap_err().code, ErrorCode::InvalidRequest);
+    JobOptions { volume: Some(volume::HomogeneousVolume { extinction_per_mm: 0.0, ..volume }), ..gpu }.validate().unwrap();
 }

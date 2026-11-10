@@ -563,7 +563,7 @@ fn actual_png_brewster_thin_sheet_matches_reflected_energy() {
 
 fn general_options() -> RaytraceOptions {
     RaytraceOptions {
-        path: Some(crate::job::CpuPathOptions { max_depth: 16 }),
+        path: Some(crate::job::CpuPathOptions { max_depth: 16, ..Default::default() }),
         progressive: Some(crate::job::CpuProgressiveOptions { samples_per_pixel: 4, seed: 9 }),
         dielectrics: vec![input(DielectricBoundary::ClosedMesh)],
         ..Default::default()
@@ -802,7 +802,7 @@ fn general_glass_origin_segment_contact_includes_complete_crossings_touches_and_
 fn cpu_subsurface_runtime_intent_is_bounded_closed_path_only_and_inactive_values_stay_authored() {
     use crate::transmission::subsurface::Subsurface;
     let mut options = RaytraceOptions {
-        path: Some(job::CpuPathOptions { max_depth: 4 }),
+        path: Some(job::CpuPathOptions { max_depth: 4, ..Default::default() }),
         progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: 4, seed: 9 }),
         dielectrics: vec![input(DielectricBoundary::ClosedMesh)],
         ..Default::default()
@@ -819,7 +819,7 @@ fn cpu_subsurface_runtime_intent_is_bounded_closed_path_only_and_inactive_values
     options.validate().unwrap();
     options.path = None;
     assert!(options.validate().unwrap_err().message.contains("subsurface"));
-    options.path = Some(job::CpuPathOptions { max_depth: 4 });
+    options.path = Some(job::CpuPathOptions { max_depth: 4, ..Default::default() });
     options.dielectrics[0].boundary = DielectricBoundary::ThinSheet;
     assert!(options.validate().unwrap_err().message.contains("closed"));
     options.dielectrics[0].boundary = DielectricBoundary::ClosedMesh;

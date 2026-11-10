@@ -53,8 +53,9 @@ fn hg_cosine(uniform: f32,g: f32) -> f32 {
 }
 fn volume_cosine(uniform: f32) -> f32 {return hg_cosine(uniform,u.volume_max.w);}
 fn sample_hg(direction: vec3<f32>,g:f32,rng: ptr<function,u32>) -> vec3<f32> {
-    let cosine=hg_cosine(random(rng),g);
-    let angle=2.0*PI*random(rng);
+    let pair=path_sample_pair(rng,0x5001u);
+    let cosine=hg_cosine(pair.x,g);
+    let angle=2.0*PI*pair.y;
     let radius=sqrt(max(0.0,1.0-cosine*cosine));
     return from_local(vec3<f32>(radius*cos(angle),radius*sin(angle),cosine),direction);
 }
@@ -83,7 +84,8 @@ fn volume_direct(position: vec3<f32>, physical: PrecisePoint, incoming: vec3<f32
         var punctual=false;
         if source<count {
             let light=u.area_lights[source];
-            let point=light.center.xyz+light.u.xyz*(2.0*random(rng)-1.0)+light.v.xyz*(2.0*random(rng)-1.0);
+            let pair=path_sample_pair(rng,0x1100u+source);
+            let point=light.center.xyz+light.u.xyz*(2.0*pair.x-1.0)+light.v.xyz*(2.0*pair.y-1.0);
             let delta=point-position;
             distance=length(delta);
             if distance<=u.lighting.x { continue; }

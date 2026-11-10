@@ -1,6 +1,8 @@
 //! Opt-in, prepaid GPU caustic photon storage and cancellable measured prepasses.
 //! Legacy jobs retain the original six-storage-buffer shader/layout unchanged.
 use super::*;
+#[path = "photon_probe.rs"]
+mod probe;
 use solidcraft_render::job::{
     CausticOptions,
     photon_sources::{self as power, MAX_PHOTON_SOURCES, PhotonSourceDistribution},
@@ -8,15 +10,35 @@ use solidcraft_render::job::{
 
 const HEADER_WORDS: u32 = 16;
 const RECORD_WORDS: u32 = 16;
+fn record_words(options: CausticOptions) -> u32 {
+    RECORD_WORDS + if options.probe_pixel.is_some() { 8 } else { 0 }
+}
+fn radius_tail_words(options: CausticOptions) -> u32 {
+    BOUNDS_WORDS
+        + if options.progressive_radius { RADIUS_WORDS } else { 0 }
+        + if options.glossy_continuation_max_roughness.is_some() { RECEIVER_POLICY_WORDS } else { 0 }
+        + if options.probe_pixel.is_some() { probe::WORDS } else { 0 }
+}
 const GUIDE_WORDS: u32 = 4;
 const BOUNDS_WORDS: u32 = 6;
+const RADIUS_WORDS: u32 = 1;
+const RECEIVER_POLICY_WORDS: u32 = 1;
 const SOURCE_WORDS: u32 = 1 + MAX_PHOTON_SOURCES as u32;
 fn extra_words(options: CausticOptions) -> u32 {
     (if options.guided_emission || options.power_weighted_sources { GUIDE_WORDS } else { 0 })
         + if options.power_weighted_sources { SOURCE_WORDS } else { 0 }
+        + if options.progressive_radius { RADIUS_WORDS } else { 0 }
+        + if options.glossy_continuation_max_roughness.is_some() { RECEIVER_POLICY_WORDS } else { 0 }
+        + if options.probe_pixel.is_some() { probe::WORDS } else { 0 }
 }
 const DISABLED: &str = include_str!("photons_disabled.wgsl");
 const PHOTONS: &str = include_str!("photons.wgsl");
+const PROBE: &str = include_str!("photon_probe.wgsl");
+
+#[cfg(test)]
+pub(super) fn test_decode_probe(bytes: &[u8]) -> Result<Option<solidcraft_render::job::photon_diagnostics::PhotonDiagnostics>> {
+    probe::decode(bytes)
+}
 
 pub(super) fn heads(options: CausticOptions) -> Result<u32> {
     options.validate()?;
@@ -25,13 +47,22 @@ pub(super) fn heads(options: CausticOptions) -> Result<u32> {
 pub(super) fn buffer_bytes(options: CausticOptions) -> Result<u64> {
     let words = u64::from(HEADER_WORDS + extra_words(options) + BOUNDS_WORDS)
         + u64::from(heads(options)?)
-        + u64::from(options.photons) * u64::from(RECORD_WORDS);
+        + u64::from(options.photons) * u64::from(record_words(options));
     words.checked_mul(4).ok_or_else(|| gpu("caustic buffer size overflow"))
 }
 pub(super) fn admission_bytes(options: Option<CausticOptions>) -> Result<u64> {
     options.map_or(Ok(0), |options| {
         let upload_words = HEADER_WORDS + extra_words(options) + BOUNDS_WORDS;
-        buffer_bytes(options)?.checked_add(u64::from(upload_words) * 4).ok_or_else(|| gpu("caustic header estimate overflow"))
+        buffer_bytes(options)?
+            .checked_add(u64::from(upload_words) * 4)
+            .and_then(|bytes| {
+                bytes.checked_add(if options.probe_pixel.is_some() {
+                    probe::BYTES + 8 + 3 * std::mem::size_of::<solidcraft_render::job::photon_diagnostics::PhotonDiagnostics>() as u64
+                } else {
+                    0
+                })
+            })
+            .ok_or_else(|| gpu("caustic header estimate overflow"))
     })
 }
 
@@ -283,10 +314,11 @@ pub(super) fn shader_source() -> Result<String> {
     let base = SHADER.strip_suffix(DISABLED).ok_or_else(|| gpu("legacy path shader has no photon-disabled suffix"))?;
     let mut source = String::new();
     source
-        .try_reserve_exact(base.len() + PHOTONS.len())
+        .try_reserve_exact(base.len() + PHOTONS.len() + PROBE.len())
         .map_err(|_| JobError::new(ErrorCode::AllocationFailed, "caustic shader source allocation failed"))?;
     source.push_str(base);
     source.push_str(PHOTONS);
+    source.push_str(PROBE);
     Ok(source)
 }
 
@@ -297,8 +329,12 @@ pub(super) struct Resources {
     clear: wgpu::ComputePipeline,
     emit: wgpu::ComputePipeline,
     photons: u32,
+    options: CausticOptions,
+    grid_span: f64,
     head_count: u32,
     pass: u32,
+    map_identity: solidcraft_render::job::adaptive::PhotonMapIdentity,
+    header_dirty: bool,
     cleared: u32,
     emitted: u32,
     budget: dispatch::Budget,
@@ -335,8 +371,10 @@ impl Resources {
             }
             header[at] = bits;
         }
+        let mut grid_span: f64 = 0.0;
         for (lo, hi) in [(6, 9), (7, 10), (8, 11)] {
             let span = f64::from(f32::from_bits(header[hi])) - f64::from(f32::from_bits(header[lo]));
+            grid_span = grid_span.max(span);
             if !(0.0..=1_048_576.0).contains(&(span / options.radius_mm)) {
                 return Err(JobError::new(
                     ErrorCode::InvalidRequest,
@@ -347,7 +385,12 @@ impl Resources {
         header[12] = u32::from(options.area_lights);
         header[13] = u32::from(options.environment);
         let guide = guide.filter(|_| options.guided_emission);
-        header[14] = u32::from(guide.is_some()) | (u32::from(sources.is_some()) << 1) | (u32::from(bounds.is_some()) << 2);
+        header[14] = u32::from(guide.is_some())
+            | (u32::from(sources.is_some()) << 1)
+            | (u32::from(bounds.is_some()) << 2)
+            | (u32::from(options.progressive_radius) << 3)
+            | (u32::from(options.probe_pixel.is_some()) << 4)
+            | (u32::from(options.glossy_continuation_max_roughness.is_some()) << 5);
         if let Some([_, _, _, radius]) = guide {
             let diameter_squared = [(6, 9), (7, 10), (8, 11)]
                 .into_iter()
@@ -368,7 +411,7 @@ impl Resources {
                 size,
                 usage: wgpu::BufferUsages::STORAGE
                     | wgpu::BufferUsages::COPY_DST
-                    | if cfg!(test) { wgpu::BufferUsages::COPY_SRC } else { wgpu::BufferUsages::empty() },
+                    | if cfg!(test) || options.probe_pixel.is_some() { wgpu::BufferUsages::COPY_SRC } else { wgpu::BufferUsages::empty() },
                 mapped_at_creation: false,
             });
             context.queue.write_buffer(&buffer, 0, &bytes);
@@ -389,8 +432,16 @@ impl Resources {
                 for (value, output) in words.into_iter().zip(packed.as_chunks_mut::<4>().0) {
                     output.copy_from_slice(&value.to_le_bytes());
                 }
-                context.queue.write_buffer(&buffer, size - u64::from(SOURCE_WORDS + BOUNDS_WORDS) * 4, &packed);
+                context.queue.write_buffer(&buffer, size - u64::from(SOURCE_WORDS + radius_tail_words(options)) * 4, &packed);
             }
+            if options.progressive_radius {
+                context.queue.write_buffer(&buffer, size - u64::from(radius_tail_words(options)) * 4, &(options.radius_mm as f32).to_le_bytes());
+            }
+            if let Some(maximum) = options.glossy_continuation_max_roughness {
+                let tail = BOUNDS_WORDS + RECEIVER_POLICY_WORDS + if options.probe_pixel.is_some() { probe::WORDS } else { 0 };
+                context.queue.write_buffer(&buffer, size - u64::from(tail) * 4, &(maximum as f32).to_le_bytes());
+            }
+            probe::upload(context, &buffer, options);
             if let Some(bounds) = bounds {
                 let mut bytes = [0u8; BOUNDS_WORDS as usize * 4];
                 for (value, output) in bounds.into_iter().zip(bytes.as_chunks_mut::<4>().0) {
@@ -407,8 +458,12 @@ impl Resources {
             clear: pipelines.clear.clone(),
             emit: pipelines.emit.clone(),
             photons: options.photons,
+            options,
+            grid_span,
             head_count,
             pass: 0,
+            map_identity: solidcraft_render::job::adaptive::PhotonMapIdentity::for_pass(options, None, 0)?,
+            header_dirty: false,
             cleared: 0,
             emitted: 0,
             budget: Default::default(),
@@ -436,18 +491,50 @@ impl Resources {
     pub(super) fn ready(&self) -> bool {
         self.emitted == self.photons
     }
+    pub(super) fn configure_probe(&self, context: &Context, scale: u32, samples: u32) -> Result<()> {
+        if self.cleared != 0 || self.emitted != 0 {
+            return Err(gpu("photon probe layout must be configured before transport"));
+        }
+        probe::configure(context, &self.buffer, self.options, scale, samples)
+    }
+    pub(super) fn diagnostics(
+        &self,
+        context: &Context,
+        cancel: &CancelToken,
+    ) -> Result<Option<solidcraft_render::job::photon_diagnostics::PhotonDiagnostics>> {
+        probe::read(context, &self.buffer, self.options, cancel)
+    }
+    #[cfg(test)]
+    pub(super) fn test_map_identity(&self) -> solidcraft_render::job::adaptive::PhotonMapIdentity {
+        self.map_identity
+    }
     #[cfg(test)]
     pub(super) fn test_epoch(&self) -> u32 {
         self.pass
     }
     pub(super) fn ensure_pass(&mut self, pass: u32) -> Result<()> {
-        if self.pass == pass {
+        self.ensure_camera_pass(pass, None)
+    }
+    pub(super) fn ensure_camera_pass(&mut self, pass: u32, adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>) -> Result<()> {
+        let identity = solidcraft_render::job::adaptive::PhotonMapIdentity::for_pass(self.options, adaptive, pass)?;
+        if self.pass == pass && self.map_identity == identity {
             return Ok(());
         }
-        if !self.ready() || self.pass.checked_add(1) != Some(pass) {
+        let untouched = self.pass == 0 && pass == 0 && self.cleared == 0 && self.emitted == 0;
+        if !untouched && (!self.ready() || self.pass.checked_add(1) != Some(pass)) {
             return Err(gpu("caustic refresh requires the next complete camera pass"));
         }
+        if self.map_identity == identity {
+            self.pass = pass;
+            return Ok(());
+        }
+        let radii = self.options.radii_mm(identity.radius_epoch)?;
+        if !(0.0..=1_048_576.0).contains(&(self.grid_span / radii[1])) {
+            return Err(JobError::new(ErrorCode::LimitExceeded, "progressive caustic grid exceeds its 2^20 cell precision domain"));
+        }
         self.pass = pass;
+        self.map_identity = identity;
+        self.header_dirty = true;
         self.cleared = 0;
         self.emitted = 0;
         self.budget = Default::default();
@@ -479,9 +566,19 @@ impl Resources {
         let count = self.count();
         let started = Instant::now();
         let scopes = scopes(&context.device);
-        if clearing && offset == 0 && self.pass != 0 {
-            context.queue.write_buffer(&self.buffer, 15 * 4, &self.pass.to_le_bytes());
+        if clearing && offset == 0 && self.header_dirty {
+            context.queue.write_buffer(&self.buffer, 15 * 4, &self.map_identity.epoch.to_le_bytes());
+            if self.options.progressive_radius {
+                let [surface, volume] = self.options.radii_mm(self.map_identity.radius_epoch)?;
+                context.queue.write_buffer(&self.buffer, 2 * 4, &(volume as f32).to_le_bytes());
+                context.queue.write_buffer(
+                    &self.buffer,
+                    self.buffer.size() - u64::from(radius_tail_words(self.options)) * 4,
+                    &(surface as f32).to_le_bytes(),
+                );
+            }
         }
+        self.header_dirty = false;
         context.queue.write_buffer(&self.buffer, 5 * 4, &offset.to_le_bytes());
         context.queue.write_buffer(uniform, 0, parameters);
         let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("caustic photon quantum") });
@@ -515,7 +612,7 @@ impl Resources {
     pub(super) fn test_records(&self, context: &Context) -> Vec<[u32; RECORD_WORDS as usize]> {
         assert!(self.ready());
         let offset = u64::from(HEADER_WORDS + self.head_count) * 4;
-        let bytes = u64::from(self.photons) * u64::from(RECORD_WORDS) * 4;
+        let bytes = u64::from(self.photons) * u64::from(record_words(self.options)) * 4;
         let staging = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("test photon records"),
             size: bytes,
@@ -532,9 +629,7 @@ impl Resources {
         rx.try_recv().unwrap().unwrap();
         let mapped = slice.get_mapped_range().unwrap();
         let records = mapped
-            .as_chunks::<64>()
-            .0
-            .iter()
+            .chunks_exact(record_words(self.options) as usize * 4)
             .map(|record| {
                 let mut words = std::array::from_fn(|i| u32::from_le_bytes(record[i * 4..i * 4 + 4].try_into().unwrap()));
                 if words[11] == 0 {
@@ -577,5 +672,26 @@ mod tests {
         assert!(caustic.contains("@binding(7)"));
         assert!(caustic.contains("fn photon_emit") && caustic.contains("fn photon_clear"));
         naga::front::wgsl::parse_str(&caustic).unwrap();
+    }
+
+    #[test]
+    fn glossy_receiver_policy_prepays_one_device_and_upload_word_in_every_layout() {
+        for flags in 0..16 {
+            let options = CausticOptions {
+                photons: 17,
+                guided_emission: flags & 1 != 0,
+                power_weighted_sources: flags & 2 != 0,
+                progressive_radius: flags & 4 != 0,
+                refresh_per_pass: flags & 4 != 0,
+                probe_pixel: (flags & 8 != 0).then_some([0, 0]),
+                ..Default::default()
+            };
+            let selected = CausticOptions { glossy_continuation_max_roughness: Some(0.35), ..options };
+            assert_eq!(buffer_bytes(selected).unwrap(), buffer_bytes(options).unwrap() + 4);
+            assert_eq!(admission_bytes(Some(selected)).unwrap(), admission_bytes(Some(options)).unwrap() + 8);
+            assert_eq!(record_words(selected), record_words(options));
+            assert_eq!(radius_tail_words(selected), radius_tail_words(options) + 1);
+            assert_eq!(extra_words(selected), extra_words(options) + 1);
+        }
     }
 }

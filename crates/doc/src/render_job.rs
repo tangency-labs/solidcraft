@@ -96,6 +96,10 @@ pub struct CpuJob {
     pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<solidcraft_render::job::CausticOptions>,
+    #[serde(skip_serializing_if = "solidcraft_render::sampling::Sampler::is_independent")]
+    pub sampler: solidcraft_render::sampling::Sampler,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub radiance_components: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<solidcraft_render::job::volume::HomogeneousVolume>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -153,6 +157,8 @@ impl Default for CpuJob {
             texture_filtering: false,
             metal_energy_compensation: false,
             caustics: None,
+            sampler: Default::default(),
+            radiance_components: false,
             volume: None,
             sun: None,
             sky: None,
@@ -231,6 +237,8 @@ impl CpuJob {
             texture_filtering: self.texture_filtering,
             metal_energy_compensation: self.metal_energy_compensation,
             caustics: self.caustics,
+            sampler: self.sampler,
+            radiance_components: self.radiance_components,
             volume: self.volume,
             sun: self.sun.map(Box::new),
             sky,
@@ -274,6 +282,10 @@ pub struct GpuJob {
     pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<solidcraft_render::job::CausticOptions>,
+    #[serde(skip_serializing_if = "solidcraft_render::sampling::Sampler::is_independent")]
+    pub sampler: solidcraft_render::sampling::Sampler,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub radiance_components: bool,
     #[serde(skip_serializing_if = "crate::render_aging::SavedAgingStack::is_empty")]
     pub aging: crate::render_aging::SavedAgingStack,
     pub nested_media: bool,
@@ -283,6 +295,9 @@ pub struct GpuJob {
     pub adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
     /// Conditional Fresnel strata per primary sample; one keeps the old stream.
     pub transmission_samples: u32,
+    /// Two physically weighted lanes at the first bare smooth closed interface.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub split_first_interface: bool,
 
     #[serde(skip_serializing_if = "solidcraft_render::job::finishing::Finishing::is_identity")]
     pub finishing: solidcraft_render::job::finishing::Finishing,
@@ -321,11 +336,14 @@ impl Default for GpuJob {
             texture_filtering: false,
             metal_energy_compensation: false,
             caustics: None,
+            sampler: Default::default(),
+            radiance_components: false,
             aging: Default::default(),
             nested_media: options.nested_media,
             volume: options.volume,
             adaptive: options.adaptive,
             transmission_samples: options.transmission_samples,
+            split_first_interface: options.split_first_interface,
             finishing: options.finishing,
             backdrop: options.backdrop,
             linear_exr: options.linear_exr,
@@ -375,11 +393,14 @@ impl GpuJob {
             texture_filtering: self.texture_filtering,
             metal_energy_compensation: self.metal_energy_compensation,
             caustics: self.caustics,
+            sampler: self.sampler,
+            radiance_components: self.radiance_components,
             aging: self.aging.parameters_only()?,
             nested_media: self.nested_media,
             volume: self.volume,
             adaptive: self.adaptive,
             transmission_samples: self.transmission_samples,
+            split_first_interface: self.split_first_interface,
             finishing: self.finishing,
             backdrop: self.backdrop,
             linear_exr: self.linear_exr,
@@ -514,7 +535,7 @@ mod cpu_volume_portable_tests {
         assert!(old.get("volume").is_none());
         let mut job = CpuJob {
             volume: Some(v),
-            path: Some(CpuPathOptions { max_depth: 8 }),
+            path: Some(CpuPathOptions { max_depth: 8, ..Default::default() }),
             progressive: Some(CpuProgressiveOptions { samples_per_pixel: 4, seed: 9 }),
             ..Default::default()
         };
@@ -562,7 +583,7 @@ fn portable_quality_controls_preserve_explicit_values_and_legacy_defaults() {
     ] {
         assert_eq!(wire["denoise_settings"]["optical_filter"], false);
     }
-    let filter = DenoiseSettings { passes: 2, strength: 0.35, firefly_suppression: false, optical_filter: false };
+    let filter = DenoiseSettings { passes: 2, strength: 0.35, firefly_suppression: false, optical_filter: false, ..Default::default() };
     let cpu = CpuJob { threads: 4, supersampling: 2, denoise: true, denoise_settings: filter, denoise_diagnostics: true, ..Default::default() };
     let gpu = GpuJob { samples: 128, supersampling: 2, denoise: true, denoise_settings: filter, denoise_diagnostics: true, ..Default::default() };
     let cpu_reopened: CpuJob = serde_json::from_value(serde_json::to_value(&cpu).unwrap()).unwrap();
@@ -581,4 +602,46 @@ fn portable_quality_controls_preserve_explicit_values_and_legacy_defaults() {
     assert!(GpuJob { supersampling: 3, ..gpu.clone() }.validate(0.0).is_err());
     assert!(CpuJob { denoise_settings: DenoiseSettings { strength: f64::NAN, ..filter }, ..cpu }.validate(0.0).is_err());
     assert!(GpuJob { denoise_settings: DenoiseSettings { passes: 4, ..filter }, ..gpu }.validate(0.0).is_err());
+}
+
+#[cfg(test)]
+#[test]
+fn portable_first_interface_split_preserves_authored_intent_and_legacy_defaults() {
+    use solidcraft_render::job::{CpuPathOptions, CpuProgressiveOptions};
+
+    let old_cpu: CpuJob = serde_json::from_str("{}").unwrap();
+    let old_gpu: GpuJob = serde_json::from_str("{}").unwrap();
+    assert!(old_cpu.path.is_none());
+    assert!(!old_gpu.split_first_interface);
+    assert!(serde_json::to_value(&old_gpu).unwrap().get("split_first_interface").is_none());
+    let mut cpu = CpuJob {
+        progressive: Some(CpuProgressiveOptions { samples_per_pixel: 8, seed: 11 }),
+        path: Some(CpuPathOptions { split_first_interface: true, ..Default::default() }),
+        ..Default::default()
+    };
+    let mut gpu = GpuJob { samples: 8, split_first_interface: true, ..Default::default() };
+    let cpu_wire = serde_json::to_value(&cpu).unwrap();
+    let gpu_wire = serde_json::to_value(&gpu).unwrap();
+    assert_eq!(cpu_wire["path"]["split_first_interface"], true);
+    assert_eq!(gpu_wire["split_first_interface"], true);
+    let reopened_cpu: CpuJob = serde_json::from_value(cpu_wire).unwrap();
+    let reopened_gpu: GpuJob = serde_json::from_value(gpu_wire).unwrap();
+    assert_eq!(reopened_cpu, cpu);
+    assert_eq!(reopened_gpu, gpu);
+    assert_eq!(reopened_cpu.to_runtime(0.0).unwrap().path.unwrap().production_lanes(), 2);
+    assert_eq!(reopened_gpu.to_runtime(0.0).unwrap().production_lanes(), 2);
+    for strata in [2, 4] {
+        cpu.path.as_mut().unwrap().transmission_samples = strata;
+        gpu.transmission_samples = strata;
+        let before = (cpu.clone(), gpu.clone());
+        assert!(cpu.validate(0.0).is_err());
+        assert!(gpu.validate(0.0).is_err());
+        assert_eq!((cpu.clone(), gpu.clone()), before, "invalid authored choices must not be silently repaired");
+    }
+    cpu.path.as_mut().unwrap().split_first_interface = false;
+    gpu.split_first_interface = false;
+    cpu.validate(0.0).unwrap();
+    gpu.validate(0.0).unwrap();
+    assert_eq!(cpu.to_runtime(0.0).unwrap().path.unwrap().production_lanes(), 4);
+    assert_eq!(gpu.to_runtime(0.0).unwrap().production_lanes(), 4);
 }

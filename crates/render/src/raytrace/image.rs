@@ -240,6 +240,7 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
     }
     let camera_sampling = options.camera_sampling()?;
     options.budget.validate_image(width, height, camera_sampling)?;
+    options.validate_camera_work(width, height)?;
     if let Some(lens) = options.lens {
         lens.validate_camera(&request.camera)?;
     }
@@ -251,7 +252,11 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
         request.textures.as_ref().map_or(Ok(0), |maps| job::textures::cpu_cache::CpuTextureCache::required_bytes(maps, scene, options))?;
     let mut a = job::image::admit_raytrace_source(scene, request, options.budget, (width, height))?;
     if let Some(caustics) = options.caustics {
-        a.caustic_work = caustics.refresh_work(camera_sampling.map_or(0, |sampling| sampling.samples_per_pixel))?;
+        caustics.validate_probe(width, height, options.progressive.map_or(1, |p| p.samples_per_pixel))?;
+        a.caustic_work = match options.adaptive.as_ref() {
+            Some(adaptive) => adaptive.photon_work(caustics, options.progressive.map_or(0, |sampling| sampling.samples_per_pixel))?,
+            None => caustics.refresh_work(camera_sampling.map_or(0, |sampling| sampling.samples_per_pixel))?,
+        };
         if a.caustic_work.is_some_and(|work| work.max_light_path_events > options.budget.limits().max_work_units) {
             return Err(JobError::new(ErrorCode::LimitExceeded, "CPU photon refresh light-path events exceed the selected profile work limit"));
         }
@@ -378,7 +383,13 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
     let adaptive_bytes = options
         .retained_adaptive_bytes()?
         .checked_add(request.raytrace.as_ref().map_or(Ok(0), RaytraceOptions::retained_adaptive_bytes)?)
-        .and_then(|v| v.checked_add(if options.adaptive.is_some() { std::mem::size_of::<job::adaptive::SamplingReport>() as u64 } else { 0 }))
+        .and_then(|v| {
+            v.checked_add(if options.adaptive.is_some() || options.path.is_some_and(|path| path.production_lanes() > 1) {
+                std::mem::size_of::<job::adaptive::SamplingReport>() as u64
+            } else {
+                0
+            })
+        })
         .ok_or_else(|| error(TraceError::MemoryLimit))?;
     let celestial_bytes = options
         .retained_celestial_bytes()?
@@ -428,14 +439,34 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
             .and_then(|n| n.checked_add(if output_already_paid { 0 } else { std::mem::size_of::<job::output::OutputTask>() as u64 }))
             .ok_or_else(|| error(TraceError::MemoryLimit))?;
     }
+    if options.denoise && options.denoise_settings.component_filtering {
+        denoise_bytes = denoise_bytes
+            .checked_add(plane_bytes(pixels, job::denoise::ComponentDenoiseTask::EXTRA_BYTES_PER_PIXEL)?)
+            .ok_or_else(|| error(TraceError::MemoryLimit))?;
+    }
     if options.denoise_diagnostics {
         denoise_bytes = denoise_bytes
             .checked_add(plane_bytes(output_pixels, 4)?)
             .and_then(|n| n.checked_add(a.encoded_limit))
+            .and_then(|n| n.checked_add(std::mem::size_of::<ImageDenoiseDiagnostics>() as u64))
             .ok_or_else(|| error(TraceError::MemoryLimit))?;
     }
     let general_glass_bytes = if options.path.is_some() && !options.dielectrics.is_empty() {
         certification_bytes(scene, options)?.checked_add(super::origin::Task::required_bytes()).ok_or_else(|| error(TraceError::MemoryLimit))?
+    } else {
+        0
+    };
+    let photon_diagnostic_bytes = job::photon_diagnostics::PhotonProbe::required_bytes(options.caustics) * (u64::from(workers) + 2);
+    let radiance_bytes = crate::radiance_film::RadianceFilm::required_bytes(
+        width,
+        height,
+        options.radiance_components,
+        options.radiance_components || options.denoise_settings.variance_guided,
+    )? + if options.radiance_components
+        || options.denoise_settings.variance_guided
+        || options.adaptive.as_ref().is_some_and(|a| a.evidence_enabled())
+    {
+        std::mem::size_of::<ImageStatistics>() as u64
     } else {
         0
     };
@@ -457,6 +488,8 @@ fn admit_layout_with_workers(scene: &ProductScene, request: &ImageRequest, optio
         .and_then(|v| v.checked_add(parallel_bytes))
         .and_then(|v| v.checked_add(if options.path.is_some() { std::mem::size_of::<indirect_image::State>() as u64 } else { 0 }))
         .and_then(|v| v.checked_add(film_bytes))
+        .and_then(|v| v.checked_add(radiance_bytes))
+        .and_then(|v| v.checked_add(photon_diagnostic_bytes))
         .and_then(|v| v.checked_add(adaptive_bytes))
         .and_then(|v| v.checked_add(celestial_bytes))
         .and_then(|v| v.checked_add(output_bytes))
@@ -688,11 +721,25 @@ mod direct;
 #[path = "image_parallel.rs"]
 mod parallel;
 
+#[derive(Default)]
+struct ImageDenoiseDiagnostics {
+    report: Option<job::DenoiseDiagnostics>,
+    mask: Option<Vec<u8>>,
+}
+
+struct ImageStatistics {
+    completed_components: Option<crate::radiance::RadianceComponents>,
+    completed_pilot_support: job::adaptive::PilotPhotonSupport,
+    film: crate::radiance_film::RadianceFilm,
+    report: Option<crate::radiance_film::RadianceReport>,
+}
+
 pub struct ImageTask {
+    photon_diagnostics: job::photon_diagnostics::PhotonProbe,
+    statistics: Vec<ImageStatistics>,
     #[cfg(not(target_arch = "wasm32"))]
     parallel: Vec<parallel::Pool>,
-    denoise_diagnostics: Option<job::DenoiseDiagnostics>,
-    denoise_mask: Option<Vec<u8>>,
+    denoise_result: Vec<ImageDenoiseDiagnostics>,
     output_width: u32,
     output_height: u32,
     maps: Vec<job::textures::cpu_cache::CpuTextureCache>,
@@ -758,10 +805,19 @@ pub enum ImagePoll {
 
 impl ImageTask {
     pub fn denoise_diagnostics(&self) -> Option<job::DenoiseDiagnostics> {
-        self.denoise_diagnostics
+        self.denoise_result.first().and_then(|diagnostics| diagnostics.report)
     }
     pub fn take_denoise_mask(&mut self) -> Option<Vec<u8>> {
-        self.denoise_mask.take()
+        self.denoise_result.first_mut().and_then(|diagnostics| diagnostics.mask.take())
+    }
+    pub fn photon_diagnostics(&self) -> Option<job::photon_diagnostics::PhotonDiagnostics> {
+        self.photon_diagnostics.report().map(|mut report| {
+            report.split_first_interface = self.options.path.is_some_and(|path| path.split_first_interface);
+            report
+        })
+    }
+    pub fn radiance_report(&self) -> Option<crate::radiance_film::RadianceReport> {
+        self.statistics.first().and_then(|stats| stats.report.clone())
     }
     pub fn sampling_report(&self) -> Option<job::adaptive::SamplingReport> {
         self.sampling.first().cloned()
@@ -980,21 +1036,25 @@ impl ImageTask {
         let pending = PendingPixelSlot::new(&cancel)?;
         let budget = options.budget;
         let mut sampling = Vec::new();
-        if options.adaptive.is_some() {
+        if options.adaptive.is_some() || options.path.is_some_and(|path| path.production_lanes() > 1) {
             cancel.check()?;
             sampling.try_reserve_exact(1).map_err(|_| error(TraceError::AllocationFailed))?;
             if sampling.capacity() != 1 {
                 return Err(error(TraceError::MemoryLimit));
             }
         }
-        let adaptive = options.adaptive.as_deref();
+        let resolved_adaptive = options.adaptive.as_deref().copied().map(|a| a.for_optical_scene(!options.dielectrics.is_empty()));
+        let adaptive = resolved_adaptive.as_ref();
+        let sampler = options.sampler;
         let target = options.preview_target()?;
+        let captured_caustics = options.caustics;
         let progressive = options
             .progressive
             .map(|options| -> job::Result<Progressive> {
                 let bytes = CameraFilm::required_bytes(request.width, request.height, options, adaptive, budget)?;
-                let film = CameraFilm::new(request.width, request.height, options, adaptive, budget, bytes, &cancel)?;
-                Ok(Progressive { film, options, target, resolving: false, resolve_pixel: 0 })
+                let mut film = CameraFilm::new(request.width, request.height, options, adaptive, budget, bytes, &cancel)?;
+                film.configure_caustics(captured_caustics)?;
+                Ok(Progressive { sampler, film, options, target, resolving: false, resolve_pixel: 0 })
             })
             .transpose()?;
         let mut caustics = Vec::new();
@@ -1003,13 +1063,45 @@ impl ImageTask {
             if caustics.capacity() != 1 {
                 return Err(error(TraceError::MemoryLimit));
             }
-            caustics.push(caustics::Task::new(options)?);
+            let mut map = caustics::Task::new(options)?;
+            map.configure_assessment(resolved_adaptive)?;
+            caustics.push(map);
+        }
+        let mut statistics = Vec::new();
+        if options.radiance_components || options.denoise_settings.variance_guided || options.adaptive.as_ref().is_some_and(|a| a.evidence_enabled())
+        {
+            statistics.try_reserve_exact(1).map_err(|_| error(TraceError::AllocationFailed))?;
+            if statistics.capacity() != 1 {
+                return Err(error(TraceError::MemoryLimit));
+            }
+            statistics.push(ImageStatistics {
+                completed_components: None,
+                completed_pilot_support: Default::default(),
+                report: None,
+                film: crate::radiance_film::RadianceFilm::new(
+                    request.width,
+                    request.height,
+                    options.radiance_components,
+                    options.radiance_components || options.denoise_settings.variance_guided,
+                    &cancel,
+                )?,
+            });
+        }
+        let mut denoise_result = Vec::new();
+        if options.denoise_diagnostics {
+            cancel.check()?;
+            denoise_result.try_reserve_exact(1).map_err(|_| error(TraceError::AllocationFailed))?;
+            if denoise_result.capacity() != 1 {
+                return Err(error(TraceError::MemoryLimit));
+            }
+            denoise_result.push(ImageDenoiseDiagnostics::default());
         }
         Ok(Self {
+            photon_diagnostics: job::photon_diagnostics::PhotonProbe::with_supersampling(options.caustics, options.supersampling)?,
+            statistics,
             #[cfg(not(target_arch = "wasm32"))]
             parallel: Vec::new(),
-            denoise_diagnostics: None,
-            denoise_mask: None,
+            denoise_result,
             output_width,
             output_height,
             maps,
@@ -1226,7 +1318,20 @@ impl ImageTask {
                 .ok_or_else(|| invalid("CPU spatial coverage sample count overflow"))?,
         };
         let presentation = settings.presentation(self.options.exposure_ev, self.request.background, self.request.transparent_background);
-        let task = job::output::OutputTask::new_with_quality(
+        let uncertainty =
+            if self.options.denoise && self.options.denoise_settings.variance_guided && !self.options.denoise_settings.component_filtering {
+                self.work.charge(u64::from(self.request.width) * u64::from(self.request.height), &self.cancel).map_err(error)?;
+                Some(self.statistics.first().ok_or_else(|| invalid("missing admitted camera statistics"))?.film.uncertainty(&self.cancel)?)
+            } else {
+                None
+            };
+        let components = if self.options.denoise && self.options.denoise_settings.component_filtering {
+            self.work.charge(u64::from(self.request.width) * u64::from(self.request.height), &self.cancel).map_err(error)?;
+            Some(self.statistics.first().ok_or_else(|| invalid("missing admitted component statistics"))?.film.component_frame(&self.cancel)?)
+        } else {
+            None
+        };
+        let task = job::output::OutputTask::new_with_components(
             self.output_width,
             self.output_height,
             self.admission.encoded_limit,
@@ -1242,9 +1347,35 @@ impl ImageTask {
             coverage_samples,
             self.cancel.clone(),
             &mut |units| self.work.charge(units, &self.cancel).map_err(error),
+            uncertainty,
+            components,
         )?;
         self.output.push(task);
         Ok(())
+    }
+    fn finalize_photon_probe(&mut self) -> job::Result<()> {
+        let Some(report) = self.photon_diagnostics.report() else { return Ok(()) };
+        self.cancel.check()?;
+        let progressive = self.progressive.as_ref().ok_or_else(|| invalid("CPU photon camera accounting needs its raw film"))?;
+        if progressive.film.samples() != progressive.target {
+            return Err(invalid("CPU photon camera accounting finalized before production completed"));
+        }
+        let mut trace = [[0.0_f32; 4]; job::photon_diagnostics::MAX_PROBE_PIXELS];
+        let mut counts = [0; job::photon_diagnostics::MAX_PROBE_PIXELS];
+        for (slot, entry) in report.camera.trace_pixels.iter().enumerate().take(report.camera.trace_pixel_count as usize) {
+            let index = u64::from(entry.pixel[1]) * u64::from(self.request.width) + u64::from(entry.pixel[0]);
+            let index = usize::try_from(index).map_err(|_| invalid("CPU photon camera footprint index overflow"))?;
+            let (rgb, covered, samples) = progressive.film.pixel(index)?;
+            if samples == 0 || covered > samples {
+                return Err(invalid("CPU photon camera footprint has incomplete coverage"));
+            }
+            counts[slot] = samples;
+            trace[slot] = [rgb[0] as f32, rgb[1] as f32, rgb[2] as f32, (f64::from(covered) / f64::from(samples)) as f32];
+        }
+        // The same shared resolver used by output consumes these already
+        // normalized f32 trace pixels; no image-sized diagnostic copy is needed.
+        let raw = job::resolve_pixel(1, report.camera.supersampling, &trace, 0)?;
+        self.photon_diagnostics.finalize(raw, counts, 2e-6)
     }
     fn complete_png(&mut self, png: Vec<u8>, charged: bool) -> job::Result<ImagePoll> {
         self.cancel.check()?;
@@ -1262,7 +1393,31 @@ impl ImageTask {
                 return Ok(ImagePoll::Preview { png, samples_per_pixel });
             }
         }
-        if let Some(report) = self.progressive.as_ref().map(|p| p.film.report()).transpose()?.flatten() {
+        self.finalize_photon_probe()?;
+        let strata = self.options.path.map_or(1, |path| path.transmission_samples);
+        let split_first_interface = self.options.path.is_some_and(|path| path.split_first_interface);
+        let lanes = self.options.path.map_or(1, |path| path.production_lanes());
+        let mut sampling_report = self.progressive.as_ref().map(|p| p.film.report()).transpose()?.flatten();
+        let pixels = u64::from(self.request.width) * u64::from(self.request.height);
+        if sampling_report.is_none() && lanes > 1 {
+            let production = self.options.progressive.ok_or_else(|| invalid("CPU Fresnel sampling report needs progressive options"))?;
+            sampling_report = Some(job::adaptive::SamplingReport {
+                pilot_samples_per_pixel: 0,
+                minimum_production_samples: production.samples_per_pixel,
+                maximum_production_samples: production.samples_per_pixel,
+                production_samples: pixels * u64::from(production.samples_per_pixel),
+                primary_path_evaluations: 0,
+                pixels_at_cap: pixels,
+                budget_limited_pixels: 0,
+                transmission_strata: strata,
+                split_first_interface,
+                pilot_evidence: None,
+            });
+        }
+        if let Some(mut report) = sampling_report {
+            report.transmission_strata = strata;
+            report.split_first_interface = split_first_interface;
+            report.primary_path_evaluations = report.production_samples * u64::from(lanes) + pixels * u64::from(report.pilot_samples_per_pixel);
             if self.sampling.capacity() != 1 || !self.sampling.is_empty() {
                 return Err(invalid("CPU adaptive report slot is not admitted or available"));
             }
@@ -1297,6 +1452,10 @@ impl ImageTask {
     }
 
     fn release_completed_work(&mut self) -> job::Result<()> {
+        if let Some(stats) = self.statistics.first_mut() {
+            stats.report = stats.film.report(&self.cancel)?;
+            stats.film = crate::radiance_film::RadianceFilm::new(0, 0, false, false, &self.cancel)?;
+        }
         self.done = true;
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1431,8 +1590,11 @@ impl ImageTask {
                     TaskPoll::Pending(_) => {}
                     TaskPoll::Complete(png) => {
                         let mut output = self.output.pop().ok_or_else(|| invalid("missing completed CPU output task"))?;
-                        self.denoise_diagnostics = output.denoise_diagnostics();
-                        self.denoise_mask = output.take_denoise_mask();
+                        if self.options.denoise_diagnostics {
+                            let diagnostics = self.denoise_result.first_mut().ok_or_else(|| invalid("missing admitted denoise report slot"))?;
+                            diagnostics.report = output.denoise_diagnostics();
+                            diagnostics.mask = output.take_denoise_mask();
+                        }
                         let (rgba, exr) = output.finish()?;
                         self.pixels = rgba;
                         self.linear_exr = exr;

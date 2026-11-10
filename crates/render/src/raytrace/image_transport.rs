@@ -6,6 +6,10 @@ pub(super) struct TransportContext<'a> {
     pub maps: &'a mut Vec<job::textures::cpu_cache::CpuTextureCache>,
     pub aging: &'a mut Vec<super::super::aging::Task>,
     pub caustics: &'a [caustics::Task],
+    pub photon_diagnostics: &'a mut job::photon_diagnostics::PhotonProbe,
+    pub capture_components: bool,
+    pub completed_components: Option<crate::radiance::RadianceComponents>,
+    pub completed_pilot_support: job::adaptive::PilotPhotonSupport,
     pub punctual_diagnostics: &'a mut job::PunctualDiagnostics,
     pub progressive: Option<&'a Progressive>,
     pub glass: &'a [super::super::glass_mesh::Task],
@@ -24,6 +28,7 @@ pub(super) struct TransportContext<'a> {
     pub bvh: Option<&'a Bvh>,
     pub pixel: usize,
     pub spatial: u8,
+    pub fresnel_stratum: u32,
     pub primary_coverage: u32,
     pub completed: Option<Vec3>,
 }
@@ -35,6 +40,10 @@ impl<'a> TransportContext<'a> {
             aging: &mut task.aging,
             caustics: &task.caustics,
             punctual_diagnostics: &mut task.punctual_diagnostics,
+            photon_diagnostics: &mut task.photon_diagnostics,
+            capture_components: capture_components(&task.options, task.progressive.as_ref()),
+            completed_components: None,
+            completed_pilot_support: Default::default(),
             progressive: task.progressive.as_ref(),
             glass: &task.glass,
             environment: task.environment.as_ref(),
@@ -52,6 +61,7 @@ impl<'a> TransportContext<'a> {
             bvh: task.bvh.as_ref(),
             pixel: task.pixel,
             spatial: task.spatial,
+            fresnel_stratum: 0,
             primary_coverage: task.primary_coverage,
             completed: None,
         }
@@ -68,4 +78,11 @@ impl<'a> TransportContext<'a> {
         self.completed = Some(radiance);
         Ok(())
     }
+}
+
+pub(super) fn capture_components(options: &RaytraceOptions, progressive: Option<&Progressive>) -> bool {
+    options.radiance_components
+        || options.adaptive.as_ref().is_some_and(|adaptive| {
+            adaptive.component_uncertainty && progressive.is_some_and(|progressive| progressive.film.samples() < adaptive.pilot_samples)
+        })
 }
