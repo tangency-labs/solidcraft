@@ -8,15 +8,16 @@
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::check::whole;
 use super::config::NameList;
+use super::motion::require;
 use super::types::{
     AngleExpr, AxisDir, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FacesParam,
     FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr, NumberExpr,
-    OperationParam, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam, ToPoint,
-    TouchingParam, feature_common, present,
+    OperationParam, PatternAxis, PlaneCommon, PlaneOrFace, Point3, PointExpr3, ProfilesParam, ScaleFactors, SketchRef, StringList, ThinSideParam,
+    ToPoint, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -752,6 +753,63 @@ pub struct FilletParams {
     pub common: FeatureCommon,
 }
 
+fn face_or_edges(schema: &mut Schema) {
+    require(schema, "distance");
+    schema.insert("anyOf".into(), json!([{"required": ["face"]}, {"required": ["edges"]}]));
+}
+
+/// Press Pull a face or round edges. A flat face moves along its normal: a positive distance joins
+/// material outward, a negative one cuts inward. A curved face offsets. A fillet's or chamfer's
+/// face changes that feature's size by the distance. Edges are rounded with the distance as the
+/// radius. `edges` is read before `face`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = face_or_edges)]
+pub struct PressPullParams {
+    /// A point on the face to move.
+    #[serde(default)]
+    pub face: Option<Point3>,
+    /// The edges to round: a point on each, or `{body, index}`.
+    #[serde(default)]
+    pub edges: Option<EdgeRefs>,
+    /// How far the face moves, positive outward; the radius for `edges`.
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
+    /// The body the face or edges are on. Default: found from the points.
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+/// A fillet's or chamfer's face was pressed or pulled: the feature it belongs to changed size.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PressPullEdit {
+    /// The edited feature's id.
+    pub feature: u64,
+    /// The edited feature's name.
+    pub edited: String,
+    /// A fillet's new radius, as an expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<String>,
+    /// A chamfer's new distance, as an expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<String>,
+    /// How many features were evaluated again.
+    pub recomputed: Option<usize>,
+    /// How many features were restored from earlier results.
+    pub restored: Option<usize>,
+}
+
+/// What `solid.press_pull` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PressPullResult {
+    /// A new feature: the extrude, offset or fillet the press or pull made.
+    Feature(Box<FilletResult>),
+    /// An existing fillet or chamfer changed size.
+    Edited(PressPullEdit),
+}
+
 /// A fillet corner set back.
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SetbackParam {
@@ -813,6 +871,66 @@ pub struct FilletResult {
     /// With `fit: reduce` where it reduced the radius: each edge's radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radii_applied: Option<Vec<AppliedRadius>>,
+}
+
+/// `alignment`, with the handler's message.
+fn pattern_alignment<'de, D: Deserializer<'de>>(d: D) -> Result<Option<solidcraft_sketch::PatternAlignment>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`alignment` must be left, center or right")))
+}
+
+/// `reversed`, with the handler's message.
+fn pattern_reversed<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    serde_json::from_value(Value::deserialize(d)?).map(Some).map_err(|_| D::Error::custom(whole("`reversed` must be true or false")))
+}
+
+/// Copy features, bodies or components evenly round an axis. Give one of `features`, `bodies` or
+/// `components`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatternCircularParams {
+    /// The features to copy, by name. Used when `bodies` and `components` are left out or empty.
+    #[serde(default)]
+    pub features: Option<NameList>,
+    /// The bodies to copy, by name. Used when `components` is left out or empty.
+    #[serde(default)]
+    pub bodies: Option<NameList>,
+    /// The components to place more of, by id or name. The reply then lists the new occurrences.
+    #[serde(default)]
+    pub components: Option<NameList>,
+    /// The axis to turn about. The coordinates of `{origin, dir}`'s origin may also be length
+    /// expressions, which the pattern follows.
+    pub axis: PatternAxis,
+    /// How many, the original included: a whole number or an expression that gives one.
+    pub count: NumberExpr,
+    /// The angle the copies span. Default: 360 deg; a partial arc includes both ends.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Where the original sits in the pattern. Default: right, the original stays fixed.
+    #[serde(default, deserialize_with = "pattern_alignment", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "super::sketch_modify::alignment_schema")]
+    pub alignment: Option<solidcraft_sketch::PatternAlignment>,
+    /// Flip the pattern's direction; for an even count centred, selects the extra side.
+    #[serde(default, deserialize_with = "pattern_reversed", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reversed: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// What `solid.pattern.circular` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PatternCircularResult {
+    /// With `features` or `bodies`.
+    Feature(Box<FeatureResult>),
+    /// With `components`.
+    Components {
+        /// The new occurrences' ids.
+        occurrences: Vec<u64>,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
 }
 
 /// What a feature command returns.

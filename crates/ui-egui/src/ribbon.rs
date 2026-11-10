@@ -579,7 +579,7 @@ pub fn galley_at(ui: &egui::Ui, at: Pos2, galley: std::sync::Arc<egui::Galley>, 
 
 /// The colour a command's icon means, for a pressed gallery cell on the default accent.
 fn icon_accent(icon: &str) -> Color32 {
-    crate::icon_svg::primary(icon, solidcraft_theme::is_dark(), solidcraft_theme::vision())
+    crate::ui_kit::icons::primary(icon, solidcraft_theme::is_dark(), solidcraft_theme::vision())
 }
 
 fn handle(prefix: &str, key: &str) -> String {
@@ -675,7 +675,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             }
             if let Some(icon) = group.icon {
                 let icon_rect = Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0));
-                crate::icons::paint_icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
+                crate::ui_kit::icons::paint_icon(&painter, icon_rect, icon, f32::from(t.icon.a()) / 255.0);
             }
             dropdown_arrow(&painter, pos2(br.center().x, br.bottom() - 3.0), t.text_dim);
             if fresp.backing_on_hover_text(group.tip).clicked() && group.enabled {
@@ -731,7 +731,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
             let side = if exit { 30.0 } else { 26.0 };
             let icon_rect =
                 Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-            crate::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled { 1.0 } else { 0.35 });
+            crate::ui_kit::icons::paint_icon(&painter, icon_rect, b.icon, if b.enabled { 1.0 } else { 0.35 });
             if !b.app_paints {
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && b.enabled, b.name));
             }
@@ -809,7 +809,7 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
                     paint_reveal(&painter, cell, &accent, r.strength, true);
                     solidcraft_ui_registry::publish_rect(h.reveal, cell);
                 }
-                crate::icons::paint_icon(
+                crate::ui_kit::icons::paint_icon(
                     &painter,
                     Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
                     c.icon,
@@ -1376,7 +1376,7 @@ pub fn menu_row(ui: &mut egui::Ui, entry: &MenuEntry, width: f32, revealed: Opti
         if pin.hovered() {
             p.rect_filled(pr, t.radius_sm.saturating_sub(1), t.border.gamma_multiply(0.6));
         }
-        crate::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
+        crate::ui_kit::icons::glyphs::pin_icon(p, pr, entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
         solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
     }
     let tip = if entry.pinned { style.unpin_tip } else { style.pin_tip };
@@ -1752,7 +1752,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         painter.add(neutral);
         None
     };
-    crate::icons::paint_icon(
+    crate::ui_kit::icons::paint_icon(
         &painter,
         Rect::from_center_size(rect.center(), vec2(GRID_ICON, GRID_ICON)),
         entry.icon,
@@ -1764,7 +1764,7 @@ pub fn grid_cell(ui: &mut egui::Ui, entry: &MenuEntry, rect: Rect, style: &MenuS
         if pin_hovered {
             painter.rect_filled(pr, 3.0, t.border.gamma_multiply(0.6));
         }
-        crate::icons::glyphs::pin_icon(&painter, pr.shrink(2.5), entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
+        crate::ui_kit::icons::glyphs::pin_icon(&painter, pr.shrink(2.5), entry.pinned, if entry.pinned { t.accent } else { t.text_dim });
     }
     if let Some(pin) = pin {
         solidcraft_ui_registry::publish_handle(&handle(style.pin, entry.id), pr.center());
@@ -1844,12 +1844,12 @@ fn drag_ghost(ui: &egui::Ui, icon: &str, at: Pos2, removing: bool, handles: &Han
     let p = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("ribbon_drag_ghost")));
     let r = Rect::from_center_size(at + vec2(14.0, 16.0), vec2(30.0, 30.0));
     p.rect(r, t.radius_sm, t.toolbar.gamma_multiply(0.92), Stroke::new(1.0, if removing { t.error } else { t.accent }), egui::StrokeKind::Inside);
-    crate::icons::paint_icon(&p, r.shrink(5.0), icon, f32::from(t.icon.a()) / 255.0);
+    crate::ui_kit::icons::paint_icon(&p, r.shrink(5.0), icon, f32::from(t.icon.a()) / 255.0);
     if removing {
         let s = Stroke::new(2.0, t.error);
         let x = Rect::from_center_size(r.right_top(), vec2(9.0, 9.0));
         p.circle_filled(x.center(), 7.0, t.toolbar);
-        crate::icons::glyphs::cross(&p, x, s);
+        crate::ui_kit::icons::glyphs::cross(&p, x, s);
     }
     solidcraft_ui_registry::publish_handle(if removing { handles.drag_remove } else { handles.drag }, at);
 }

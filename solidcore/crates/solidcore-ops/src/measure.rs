@@ -186,9 +186,7 @@ impl Body {
     /// area, or a result that is not finite; [`Error::Status`] `SM_ERR_NOT_CONVERGING` when the
     /// integration does not converge (the kernel's `NotConverged`); [`Error::Degenerate`] for
     /// an integrand that is not finite; [`Error::Unsupported`] for a span the integrator took
-    /// no step over, or a body with a partition while the session's
-    /// `brep_area_between_solid_and_void` fix is off (its area would count the partition from
-    /// both sides); [`Error::UnsureRegion`] for a region the kernel is unsure is material.
+    /// no step over; [`Error::UnsureRegion`] for a region the kernel is unsure is material.
     pub fn mass_properties(&self, relative_accuracy: f64) -> Result<MassPropertiesEstimate> {
         with_body("mass_properties", self, |k, b| {
             let store = AttributeStore::default();

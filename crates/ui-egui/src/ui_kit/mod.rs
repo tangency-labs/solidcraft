@@ -16,13 +16,14 @@ mod details;
 mod disclosure;
 mod drag;
 mod fields;
-mod file_view;
+pub(crate) mod file_view;
 mod framing;
 mod history;
 mod history_group;
+pub mod icons;
 mod layout;
 mod look_chain;
-mod menu;
+pub mod menu;
 mod metrics;
 mod name_list;
 mod navigation;
@@ -33,12 +34,12 @@ mod panel_host;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
-mod preferences_cards;
+pub(crate) mod preferences_cards;
 #[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
-mod preferences_figure_data;
+pub(crate) mod preferences_figure_data;
 #[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
 mod preferences_figure_ops;
-mod preferences_figures;
+pub(crate) mod preferences_figures;
 mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
@@ -68,9 +69,9 @@ pub(crate) use assistant::*;
 pub(crate) use assistant_entry::*;
 pub(crate) use attention::*;
 #[cfg(test)]
-pub(crate) use checks::tests::{raster as raster_ui, textures_update as update_test_textures};
+pub(crate) use checks::tests::{checkbox_shapes as test_checkbox_shapes, raster as test_raster, textures_update as test_textures_update};
 #[cfg(test)]
-pub(crate) use checks::tests::{raster as test_raster, textures_update as test_textures_update};
+pub(crate) use checks::tests::{raster as raster_ui, textures_update as update_test_textures};
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
@@ -92,15 +93,16 @@ pub(crate) use history_group::*;
 pub(crate) use layout::*;
 pub use look_chain::{LookStep, look_chain};
 pub use menu::{Item, LIST_W};
-pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
-pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
+pub(crate) use menu::{Menu, MenuItem, WorkspaceMenu, WorkspaceStyle, rename_menu, workspace_menu};
+pub(crate) use metrics::{ContentWidth, dimension, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
 pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
 pub(crate) use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover, within,
+    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
+    within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]
@@ -131,6 +133,7 @@ pub(crate) use status::*;
 pub(crate) use table::*;
 #[cfg(test)]
 pub(crate) use text::ellipsize_middle;
+pub(crate) use text::paint_text;
 pub(crate) use text_menu::menu_open as text_menu_open;
 pub(crate) use theme_picker::*;
 pub(crate) use tree::*;
@@ -138,12 +141,13 @@ pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;
 
 #[cfg(test)]
-mod gallery;
+#[path = "gallery_tests.rs"]
+pub(crate) mod gallery;
 #[cfg(test)]
 mod slider_tests;
 #[cfg(test)]
 #[path = "test_support_tests.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 pub(crate) use layout::label as row_label;
 
@@ -164,3 +168,6 @@ pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt:
 // Share the existing CPU rasteriser with page-level artwork regressions.
 #[cfg(test)]
 pub(crate) use checks::tests::raster as raster_test_shapes;
+
+#[cfg(test)]
+pub(crate) use checks::tests::textures_update;

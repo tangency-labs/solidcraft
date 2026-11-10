@@ -909,7 +909,10 @@ impl FilletCorner {
             ) => Err(e),
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: with the
             // opt-in fix they read as FALSE (WR-254).
-            Err(SolidError::Upstream { .. }) if env.k.fixes.analytic_corner_failure_is_false => {
+            Err(e)
+                if e.upstream_status().is_some()
+                    && env.k.fixes.analytic_corner_failure_is_false =>
+            {
                 Ok(false)
             }
             Err(_) => Ok(true),

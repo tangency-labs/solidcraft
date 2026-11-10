@@ -4,7 +4,6 @@ use crate::ui_kit::{
     test_support::{frame, key, pointer},
 };
 use egui::Shape;
-use serde_json::json;
 use std::collections::HashMap;
 
 #[test]
@@ -12,7 +11,7 @@ fn checkbox_keyboard_pointer_disabled_and_mixed() {
     for mixed in [false, true] {
         for enabled in [false, true] {
             for activation in [None, Some(egui::Key::Space), Some(egui::Key::Enter)] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut on = false;
                 let mut changed = false;
                 let target = std::cell::Cell::new(Rect::NOTHING);
@@ -45,7 +44,7 @@ fn checkbox_keyboard_pointer_disabled_and_mixed() {
 #[test]
 fn wrapped_checkbox_keeps_full_label_and_clicks_on_its_last_line() {
     for enabled in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let label = "A long translated checkbox label remains readable and clickable on its final line";
         let target = std::cell::Cell::new(Rect::NOTHING);
         let mut value = false;
@@ -67,7 +66,7 @@ fn wrapped_checkbox_keeps_full_label_and_clicks_on_its_last_line() {
     }
 }
 
-fn checkbox_shapes(output: &egui::FullOutput) -> Vec<(Rect, Vec<egui::epaint::ClippedShape>)> {
+pub(crate) fn checkbox_shapes(output: &egui::FullOutput) -> Vec<(Rect, Vec<egui::epaint::ClippedShape>)> {
     let t = Tokens::get();
     output
         .shapes
@@ -204,140 +203,6 @@ pub(crate) fn textures_update(textures: &mut HashMap<egui::TextureId, egui::Colo
     }
 }
 
-fn surface(
-    ui: &mut Ui,
-    name: &str,
-    app: &mut crate::SolveApp,
-    editor: &mut crate::dialogs_motion::Mo,
-    appearance: &mut crate::dialogs_appearance::Ap,
-    inputs: &mut [crate::selection::SelInput],
-) {
-    ui.set_width(if name == "appearance" { 340.0 } else { 760.0 });
-    match name {
-        "config" => ui_kit::scope(ui, |ui| {
-            let id = ui.make_persistent_id("rule_editor");
-            ui.ctx().data_mut(|d| d.insert_persisted(id, true));
-            crate::dialogs_motion::rows(app, ui, editor, &mut []);
-        }),
-        "appearance" => ui_kit::scope(ui, |ui| {
-            crate::dialogs_appearance::rows(app, ui, appearance, inputs);
-        }),
-        "preferences" => crate::prefs::show(app, ui.ctx()),
-        "menu" => {
-            crate::context_menu::menu_frame(ui, |ui| crate::toolbar::selection_filter(app, ui));
-        }
-        _ => panic!("unknown surface {name}"),
-    }
-}
-
-#[test]
-fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x() {
-    let previous = solidcraft_theme::is_dark();
-    let evidence = std::env::var_os("SOLIDCRAFT_CHECKBOX_EVIDENCE").map(std::path::PathBuf::from);
-    for dark in [false, true] {
-        solidcraft_theme::set_dark(dark);
-        for ppp in [1.0, 2.0] {
-            let reference_ctx = crate::fonts::test_context();
-            reference_ctx.set_pixels_per_point(ppp);
-            let mut references = Vec::new();
-            for on in [false, true] {
-                for disabled in [false, true] {
-                    let mut value = on;
-                    let mut output = reference_ctx.run_ui(Default::default(), |ui| {
-                        ui.add_enabled_ui(!disabled, |ui| {
-                            checkbox(ui, "Reference", &mut value);
-                        });
-                    });
-                    let (square, shapes) = checkbox_shapes(&output).remove(0);
-                    references.push((square, shapes.clone(), raster(&reference_ctx, shapes, ppp, square, &HashMap::new())));
-                    output.textures_delta.clear();
-                }
-            }
-            for name in ["config", "appearance", "preferences", "menu"] {
-                let ctx = crate::fonts::test_context();
-                ctx.set_pixels_per_point(ppp);
-                ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-                let mut app = crate::SolveApp::new(Default::default(), Default::default());
-                app.home.open = false;
-                app.ui.dark = dark;
-                app.run("parameters.add", json!({"name":"width", "expression":"10 mm"})).unwrap();
-                app.run("config.configure", json!({"params":["width"]})).unwrap();
-                app.run("config.rule", json!({"rule":{"id":"width_rule","name":"Width rule", "enabled":true, "condition":{"type":"always"},"effect":{"type":"drive_parameter", "parameter":"width","expression":"12 mm"}}})).unwrap();
-                let mut editor = crate::dialogs_motion::Mo::Configurations { new_row: String::new(), error: None, rule_editor: Default::default() };
-                let Some((crate::dialogs::Kind::Appearance(mut appearance), mut inputs)) =
-                    crate::dialogs_appearance::start(&app, "appearance.assign")
-                else {
-                    panic!("appearance fixture");
-                };
-                appearance.pbr = Some(Default::default());
-                appearance.local.overwrite = true;
-                app.ui.pick_bodies = true;
-                if name == "preferences" {
-                    // Find the redesigned Layout checkbox by its current visible label.
-                    crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);
-                    app.prefs_window.shell.filter = app.tr("prefs.layout_page.active_commands").to_string();
-                }
-                let mut textures = HashMap::new();
-                let mut final_output = None;
-                for _ in 0..3 {
-                    crate::scenario::clear_handles();
-                    let mut output = ctx.run_ui(
-                        egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 1300.0))), ..Default::default() },
-                        |ui| surface(ui, name, &mut app, &mut editor, &mut appearance, &mut inputs),
-                    );
-                    textures_update(&mut textures, &output.textures_delta);
-                    output.textures_delta.clear();
-                    final_output = Some(output);
-                }
-                let output = final_output.unwrap();
-                let boxes = checkbox_shapes(&output);
-                assert!(boxes.len() >= if matches!(name, "config" | "appearance") { 2 } else { 1 }, "{name}: missing actual checkbox controls");
-                let mut ticks = 0;
-                for (square, shapes) in boxes {
-                    let checked = shapes.len() > 1;
-                    ticks += usize::from(checked);
-                    let Shape::Rect(box_shape) = &shapes[0].shape else {
-                        panic!("checkbox box");
-                    };
-                    let opaque_fill = if checked { Tokens::get().form_primary } else { Tokens::get().control_fill };
-                    let disabled = box_shape.fill.a() < opaque_fill.a();
-                    let (reference_square, reference_shapes, reference_pixels) = &references[usize::from(checked) * 2 + usize::from(disabled)];
-                    // Compare the actual path, independent of a form/menu's placement.
-                    if checked {
-                        let (Shape::Path(actual), Shape::Path(reference)) = (&shapes[1].shape, &reference_shapes[1].shape) else {
-                            panic!("tick path");
-                        };
-                        let normalized = |points: &[egui::Pos2], min| points.iter().map(|p| *p - min).collect::<Vec<_>>();
-                        assert_eq!(
-                            normalized(&actual.points, square.min),
-                            normalized(&reference.points, reference_square.min),
-                            "{name}: tick geometry"
-                        );
-                        assert_eq!(actual.stroke, reference.stroke, "{name}: tick stroke");
-                    }
-                    let pixels = raster(&ctx, shapes, ppp, square, &HashMap::new());
-                    let max_difference = pixels.as_raw().iter().zip(reference_pixels.as_raw()).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
-                    assert!(max_difference <= 1, "{name}: box/check pixel difference {max_difference}, dark={dark}, ppp={ppp}");
-                }
-                assert!(ticks > 0, "{name}: must exercise checked rows");
-                if let Some(dir) = &evidence {
-                    std::fs::create_dir_all(dir).unwrap();
-                    let mut image = raster(&ctx, output.shapes, ppp, Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 1300.0)), &textures);
-                    let background = Tokens::get().dialog_body.to_array();
-                    for pixel in image.pixels_mut() {
-                        let remaining = 1.0 - f32::from(pixel.0[3]) / 255.0;
-                        for (dest, back) in pixel.0.iter_mut().zip(background) {
-                            *dest = (f32::from(*dest) + f32::from(back) * remaining).round() as u8;
-                        }
-                    }
-                    image.save(dir.join(format!("{name}-{}-{ppp}x.png", if dark { "dark" } else { "light" }))).unwrap();
-                }
-            }
-        }
-    }
-    solidcraft_theme::set_dark(previous);
-}
-
 #[test]
 fn grid_palette_inline_and_menu_share_every_box_state() {
     let previous = solidcraft_theme::is_dark();
@@ -348,7 +213,7 @@ fn grid_palette_inline_and_menu_share_every_box_state() {
                 for state in ["idle", "hover", "focus", "disabled"] {
                     let mut reference = None;
                     for variant in ["inline", "grid", "palette", "menu"] {
-                        let ctx = crate::fonts::test_context();
+                        let ctx = crate::ui_kit::test_support::context();
                         ctx.set_pixels_per_point(ppp);
                         let mut at = None;
                         let mut final_output = None;
@@ -377,7 +242,7 @@ fn grid_palette_inline_and_menu_share_every_box_state() {
                                                     ui_kit::checkbox_row(ui, "option", "Option", value);
                                                 }
                                                 "menu" => {
-                                                    crate::context_menu::menu_frame(ui, |ui| {
+                                                    crate::ui_kit::menu::menu_frame(ui, |ui| {
                                                         checkbox(ui, "Option", &mut value);
                                                     });
                                                 }
@@ -429,7 +294,7 @@ fn grid_palette_inline_and_menu_share_every_box_state() {
 #[test]
 fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
     for mixed in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         ctx.enable_accesskit();
         let mut value = false;
         let mut before = None;
@@ -469,4 +334,53 @@ fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
         assert_eq!(after.label.as_deref(), Some("Enabled"));
         assert_eq!(after.selected, Some(true));
     }
+}
+
+/// Customize Toolbar's rows (#11471): the command's icon sits between the box and the label,
+/// is drawn from its artwork, and a click on it toggles the row like a click on the label.
+#[test]
+fn checkbox_icon_draws_the_icon_between_box_and_label_and_toggles_on_it() {
+    let t = Tokens::get();
+    let icon = solidcraft_engine::find_command("solid.extrude").map(|c| c.icon).unwrap_or_default();
+    assert!(!icon.is_empty());
+    let ctx = crate::fonts::test_context();
+    let viewport = Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 120.0));
+    let run = |events: Vec<egui::Event>, on: &mut bool| {
+        let (mut plain_width, mut row) = (0.0, Rect::NOTHING);
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(viewport), events, ..Default::default() }, |ui| {
+            plain_width = checkbox(ui, "Extrude", &mut false).rect.width();
+            row = checkbox_icon(ui, "Extrude", icon, on).rect;
+        });
+        output.textures_delta.clear();
+        (output, plain_width, row)
+    };
+    let mut on = false;
+    let (output, plain_width, row) = run(vec![], &mut on);
+    assert_eq!(row.width(), plain_width + t.space_6 + t.space_16, "the icon takes its own slot");
+    let slot = Rect::from_min_max(
+        egui::pos2(row.left() + t.space_14, row.top()),
+        egui::pos2(row.left() + t.space_14 + t.space_6 * 2.0 + t.space_16, row.bottom()),
+    );
+    assert!(
+        output.shapes.iter().any(|clipped| matches!(&clipped.shape,
+            Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::default() && slot.contains_rect(mesh.calc_bounds()))),
+        "the icon's artwork is drawn between the box and the label"
+    );
+    let at = slot.center();
+    run(pointer(at, true), &mut on);
+    run(pointer(at, false), &mut on);
+    assert!(on, "a click on the icon toggles the row");
+
+    // A wrapped label leaves room for the icon: the row stays inside a narrow card.
+    let (mut wrapped, mut single) = (Rect::NOTHING, Rect::NOTHING);
+    let label = "A label long enough that it has to wrap in a narrow card";
+    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(viewport), ..Default::default() }, |ui| {
+        ui.set_max_width(120.0);
+        single = checkbox_icon(ui, "Extrude", icon, &mut false).rect;
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+        wrapped = checkbox_icon(ui, label, icon, &mut false).rect;
+    });
+    output.textures_delta.clear();
+    assert!(wrapped.width() <= 120.0, "{wrapped:?}");
+    assert!(wrapped.height() > single.height(), "{wrapped:?} {single:?}");
 }

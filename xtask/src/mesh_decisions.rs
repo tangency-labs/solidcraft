@@ -60,7 +60,6 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/kernel/src/meshbody.rs", "mesh bodies"),
     ("crates/kernel/src/native/preview.rs", "a feature's preview mesh"),
     ("crates/kernel/src/polybool.rs", "mesh bodies: booleans of a body with a closed triangle mesh"),
-    ("crates/kernel/src/tess", "the mesher: a body's display tessellation"),
 ];
 
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a

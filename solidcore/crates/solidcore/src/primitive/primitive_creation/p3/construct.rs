@@ -16,8 +16,7 @@
 //! Deviations: typed service resolution replaces pointers. Output face lists
 //! preserve partial results; owned geometry handles cleanup. Missing analytic
 //! NURBs are generated on owned copies with caller context/owner. No recursion.
-//! Not upstream (WR-404, tangency-labs/solidcore#411, opt-in
-//! `Kernel::fixes.curve_sweep_caps_at_sweep_ends`): the curve sweep's caps
+//! Not upstream (WR-404, tangency-labs/solidcore#411): the curve sweep's caps
 //! come from the side faces at the sweep's ends (`sweep_end_curves`), not the first
 //! and last `count` side faces.
 //! Not upstream (tangency-labs/solidcore#2192, opt-in
@@ -453,7 +452,6 @@ impl PrimitiveCreation {
                 options,
                 test_continuity,
             )?;
-            let count = prepared.profiles.len();
             let curves = core::mem::take(&mut prepared.profiles)
                 .into_iter()
                 .map(Curve::from)
@@ -544,8 +542,8 @@ impl PrimitiveCreation {
             let cap_ends = options.cap_ends
                 && !(a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
                     && sweep_ends_coincide(&*a, brep, side_faces, options.translational_sweep)?);
-            if cap_ends && a.kernel(brep)?.fixes.curve_sweep_caps_at_sweep_ends {
-                // not upstream (WR-404, #411, opt-in)
+            if cap_ends {
+                // not upstream (WR-404, #411)
                 let (mut starts, mut ends) = sweep_end_curves(
                     &*a,
                     brep,
@@ -554,59 +552,6 @@ impl PrimitiveCreation {
                     options.translational_sweep,
                     approx_tol,
                 )?;
-                a.planar_faces(region, &mut starts, approx_tol, start_faces)?;
-                a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
-            } else if cap_ends {
-                let mut starts = Vec::new();
-                let mut ends = Vec::new();
-                let mut direction = SurfParamType::U;
-                let total = side_faces.len();
-                for (i, &face) in side_faces.iter().enumerate() {
-                    let surface = face_surface(a, (brep, face))?;
-                    let domain = surface.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
-                    if i < count {
-                        direction = if options.translational_sweep {
-                            SurfParamType::V
-                        } else {
-                            SurfParamType::U
-                        };
-                        let param = if options.translational_sweep {
-                            domain.min().y
-                        } else {
-                            domain.min().x
-                        };
-                        let curve = surface
-                            .create_iso_parametric_curve(
-                                a.kernel(brep)?,
-                                direction,
-                                param,
-                                approx_tol / 10.0,
-                                None,
-                                false,
-                            )?
-                            .curve;
-                        starts.push(Some(curve));
-                    }
-                    if count > total || i >= total - count {
-                        let param = if options.translational_sweep {
-                            direction = SurfParamType::V;
-                            domain.max().y
-                        } else {
-                            domain.max().x
-                        };
-                        let curve = surface
-                            .create_iso_parametric_curve(
-                                a.kernel(brep)?,
-                                direction,
-                                param,
-                                approx_tol / 10.0,
-                                None,
-                                false,
-                            )?
-                            .curve;
-                        ends.push(Some(curve));
-                    }
-                }
                 a.planar_faces(region, &mut starts, approx_tol, start_faces)?;
                 a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
             }
@@ -957,7 +902,6 @@ mod tests {
         let mut outer_solid = sweep(&mut k, &[Some(&outer)]).brep;
         let solid_outer = brep_volume(&k, &mut outer_solid, 1e-6, &attributes).unwrap();
 
-        k.fixes.curve_sweep_caps_at_sweep_ends = true;
         let mut pipe = sweep(&mut k, &[Some(&outer), Some(&inner)]);
         // each cap is the annulus: the outer loop and the hole
         for cap in [pipe.start_faces[0], pipe.end_faces[0]] {

@@ -223,7 +223,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
-    k.fixes.brep_area_between_solid_and_void = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.check_loop_projected_seam_ends = true;
@@ -237,7 +236,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.curve_loop_normal_from_area = true;
-    k.fixes.curve_sweep_caps_at_sweep_ends = true;
     k.fixes.curve_tight_box_interval_knots = true;
     k.fixes.cylinder_plane_tangent_within_tolerance = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
@@ -306,7 +304,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.join_touching_loops = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
-    k.fixes.linear_sweep_arc_to_cylinder_zero = true;
     k.fixes.local_operation_box_holds_new_surfaces = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
@@ -317,8 +314,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_clip_right_side_out = true;
-    k.fixes.offset_closed_curve_trim_arc = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_extended_edges_mated = true;
@@ -333,7 +328,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.perspective_sphere_offsets = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
-    k.fixes.planar_path_uncapped_open_profiles = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.precise_properties_body_length_scale = true;
     k.fixes.primitive_path_curve_statuses = true;
@@ -350,7 +344,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
@@ -365,9 +358,7 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.stitch_solid_nests_cavities = true;
     k.fixes.sweep_frame_on_planar_path_normal = true;
-    k.fixes.taper_pivot_nearest_corner = true;
     k.fixes.taper_tangent_corner_planes = true;
-    k.fixes.taper_wall_closes_at_apex = true;
     k.fixes.thicken_planar_side_walls = true;
     k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.torus_check_reads_v_interval = true;

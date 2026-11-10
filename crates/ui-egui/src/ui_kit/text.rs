@@ -37,7 +37,7 @@ pub(crate) fn ellipsize_middle(ui: &Ui, text: &str, font: egui::FontId, max_widt
 
 /// Paint one pixel-aligned text run with the requested interface weight.
 /// Clipped, device-pixel-snapped weighted text. Tokens: `font_section_tracking; caller supplies font/ink tokens`.
-pub(super) fn paint_text(ui: &Ui, rect: egui::Rect, text: &str, font: egui::FontId, ink: egui::Color32, spaced: bool) {
+pub(crate) fn paint_text(ui: &Ui, rect: egui::Rect, text: &str, font: egui::FontId, ink: egui::Color32, spaced: bool) {
     paint_text_aligned(ui, rect, text, font, ink, spaced, false);
 }
 

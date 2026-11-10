@@ -8,45 +8,22 @@ pub(crate) enum Availability {
     Available,
     /// Message-catalog id, translated at the presentation boundary.
     Unavailable(&'static str),
+    /// A standard option this app provides no behaviour for; the host says why.
+    Unsupported,
 }
 
+/// A standard option's behaviour. Its name and help are the host's text for its `id`.
 pub(crate) struct Provider {
     pub id: &'static str,
-    pub label: &'static str,
-    pub help: &'static str,
     pub availability: fn() -> Availability,
     pub apply: fn(&mut Tokens, &OptionValue),
 }
 
 pub(crate) const PROVIDERS: &[Provider] = &[
-    Provider {
-        id: "blur",
-        label: "prefs.theme_option_blur",
-        help: "prefs.theme_option_blur_help",
-        availability: || Availability::Available,
-        apply: apply_runtime_setting,
-    },
-    Provider {
-        id: "opacity",
-        label: "prefs.theme_option_opacity",
-        help: "prefs.theme_option_opacity_help",
-        availability: || Availability::Available,
-        apply: apply_opacity,
-    },
-    Provider {
-        id: "tab_colours",
-        label: "prefs.theme_option_tab_colours",
-        help: "prefs.theme_option_tab_colours_help",
-        availability: || Availability::Available,
-        apply: apply_runtime_setting,
-    },
-    Provider {
-        id: "tab_fade_ms",
-        label: "prefs.theme_option_tab_fade_ms",
-        help: "prefs.theme_option_tab_fade_ms_help",
-        availability: || Availability::Available,
-        apply: apply_runtime_setting,
-    },
+    Provider { id: "blur", availability: || Availability::Available, apply: apply_runtime_setting },
+    Provider { id: "opacity", availability: || Availability::Available, apply: apply_opacity },
+    Provider { id: "tab_colours", availability: || Availability::Available, apply: apply_runtime_setting },
+    Provider { id: "tab_fade_ms", availability: || Availability::Available, apply: apply_runtime_setting },
 ];
 
 /// Hardware/OS state is resolved per app, outside the theme token cache. An unavailable
@@ -61,11 +38,11 @@ pub(crate) fn availability(file: &ThemeFile, id: &str, providers: &[Provider], b
                 return state;
             }
         } else if standard(id) {
-            return Availability::Unavailable("prefs.theme_options_unavailable");
+            return Availability::Unsupported;
         }
         current = file.options.iter().find(|o| o.id == id).and_then(|o| o.parent.as_deref());
     }
-    Availability::Unavailable("prefs.theme_options_unavailable")
+    Availability::Unsupported
 }
 
 pub(crate) fn blur_radius(file: &ThemeFile, values: &BTreeMap<String, OptionValue>, blur: Availability) -> f32 {

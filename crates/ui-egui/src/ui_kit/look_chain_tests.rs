@@ -1,13 +1,13 @@
 use super::*;
-use crate::scenario;
 use crate::ui_kit::{
     FinishKind,
     test_support::{frame, pointer},
 };
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn chain_has_one_active_ring_and_empty_slots_and_returns_each_click() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let t = Tokens::get();
     let sphere = Sphere { color: t.render_accent, kind: FinishKind::Satin, opacity: None };
     for active in LookStep::ALL {
@@ -21,8 +21,8 @@ fn chain_has_one_active_ring_and_empty_slots_and_returns_each_click() {
             assert_eq!(clicked.get(), None);
             for step in LookStep::ALL {
                 let key = format!("chain:{}", step.name());
-                let pos = scenario::handle_at(&key).unwrap();
-                assert!(scenario::rect_of("chain").unwrap().contains(pos));
+                let pos = registry::handle_at(&key).unwrap();
+                assert!(registry::rect_of("chain").unwrap().contains(pos));
                 frame(&ctx, pointer(pos, true), &mut draw);
                 frame(&ctx, pointer(pos, false), &mut draw);
                 assert_eq!(clicked.get(), Some(step));
@@ -39,7 +39,7 @@ fn chain_has_one_active_ring_and_empty_slots_and_returns_each_click() {
                 })
                 .collect();
             assert_eq!(rings.len(), 1);
-            let active_rect = scenario::rect_of(&format!("paint:{}", active.name())).unwrap();
+            let active_rect = registry::rect_of(&format!("paint:{}", active.name())).unwrap();
             assert_eq!(rings[0].center.x, active_rect.center().x);
             let meshes = output.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Mesh(_))).count();
             let dashes = output.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Path(_))).count();
@@ -51,7 +51,7 @@ fn chain_has_one_active_ring_and_empty_slots_and_returns_each_click() {
 
 #[test]
 fn disabled_chain_does_not_return_clicks() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut clicked = None;
     let mut draw = |ui: &mut Ui| {
         ui.add_enabled_ui(false, |ui| {
@@ -59,7 +59,7 @@ fn disabled_chain_does_not_return_clicks() {
         });
     };
     frame(&ctx, vec![], &mut draw);
-    let pos = scenario::handle_at("disabled:face").unwrap();
+    let pos = registry::handle_at("disabled:face").unwrap();
     frame(&ctx, pointer(pos, true), &mut draw);
     frame(&ctx, pointer(pos, false), &mut draw);
     assert_eq!(clicked, None);

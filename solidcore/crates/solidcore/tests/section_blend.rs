@@ -6,10 +6,17 @@
     clippy::indexing_slicing
 )]
 
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use solidcore::surface::procedural_blend::convert::{
+    section_blend_from_record, section_blend_rebuild, section_blend_to_record,
+};
+use solidcore::surface::procedural_blend::record::SectionBlendRecord;
 use solidcore::surface::surface::Surface;
-use solidcore::sweep::section_blend::{section_blend, EndOrder, SectionFrame};
+use solidcore::sweep::section_blend::{
+    section_blend, section_blend_surface, EndOrder, SectionFrame,
+};
 use solidcore::Kernel;
 
 fn frame(p: Point3) -> SectionFrame {
@@ -437,4 +444,103 @@ fn malformed_blends_are_refused() {
         section_blend(&[steep, line(9.0)], [EndOrder::G2, EndOrder::G0], flat),
         "a section's derivatives along the run are not finite",
     );
+}
+
+/// Four sections of three stations, the ends with frames that use every condition.
+fn kept_sections() -> Vec<Vec<SectionFrame>> {
+    (0..4)
+        .map(|i| {
+            let x = f64::from(i);
+            (0..3)
+                .map(|j| {
+                    let y = f64::from(j);
+                    SectionFrame {
+                        p: Point3::new(x + 0.1 * y * y, y, 0.3 * x * x - 0.2 * y),
+                        leave: Vec3::new(1.0, 0.0, 0.2),
+                        bend: Vec3::new(0.0, 0.0, 0.1),
+                        bend_change: Vec3::new(0.0, 0.05, 0.0),
+                    }
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The blend's surface moved twice: a turn with a uniform scale, then a move.
+fn kept_and_moved(k: &Kernel) -> Surface {
+    let mut s =
+        section_blend_surface(kept_sections(), [EndOrder::G2, EndOrder::G3], [0.2, -0.1]).unwrap();
+    let mut turn = Axis2Placement::IDENTITY;
+    turn.rotate_about_axis(0.7, Vec3::new(1.0, 2.0, 2.0) * (1.0 / 3.0));
+    turn.translate(Vec3::new(5.0, -2.0, 1.0));
+    s.transform(k, &turn, Some(Vec3::new(2.5, 2.5, 2.5)))
+        .unwrap();
+    let mut shift = Axis2Placement::IDENTITY;
+    shift.translate(Vec3::new(-0.3, 0.7, 11.0));
+    s.transform(k, &shift, None).unwrap();
+    s
+}
+
+/// The surface keeps its definition, re-certified exactly (bound 0) as made and after two
+/// motions; its record, through JSON and back, rebuilds the same surface (the same record,
+/// the same points bit for bit) and re-certifies.
+#[test]
+fn a_record_round_trip_keeps_and_recertifies_the_blend() {
+    let k = Kernel::default();
+    let made =
+        section_blend_surface(kept_sections(), [EndOrder::G2, EndOrder::G3], [0.2, -0.1]).unwrap();
+    let blend = made.procedural_blend().unwrap();
+    assert!(blend.section_blend().is_some());
+    assert_eq!(blend.bound(), 0.0);
+    assert_eq!(blend.recertify(&k).unwrap(), 0.0);
+
+    let s = kept_and_moved(&k);
+    let blend = s.procedural_blend().unwrap();
+    assert_eq!(blend.section_blend().unwrap().motions().len(), 2);
+    assert_eq!(blend.recertify(&k).unwrap(), 0.0);
+
+    let rec = section_blend_to_record(&s).unwrap();
+    let json = serde_json::to_string(&rec).unwrap();
+    let back: SectionBlendRecord = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, rec);
+    let rebuilt = section_blend_rebuild(&back).unwrap();
+    assert_eq!(section_blend_to_record(&rebuilt).unwrap(), rec);
+    assert_eq!(
+        rebuilt.procedural_blend().unwrap().recertify(&k).unwrap(),
+        0.0
+    );
+    for (u, v) in [(0.0, 0.0), (0.3, 0.6), (0.5, 1.0), (1.0, 0.25)] {
+        let (a, b) = (
+            s.evaluate_point(&k, Point2::new(u, v)).unwrap(),
+            rebuilt.evaluate_point(&k, Point2::new(u, v)).unwrap(),
+        );
+        assert_eq!(
+            [a.x, a.y, a.z].map(f64::to_bits),
+            [b.x, b.y, b.z].map(f64::to_bits)
+        );
+    }
+}
+
+/// A net one ulp off its definition's is refused, as is a record that drops a motion or moves
+/// a station: the definition no longer rebuilds the net exactly.
+#[test]
+fn a_tampered_net_is_refused() {
+    let k = Kernel::default();
+    let rec = section_blend_to_record(&kept_and_moved(&k)).unwrap();
+    assert!(section_blend_rebuild(&rec).is_ok());
+
+    let mut off = rec.clone();
+    let y = &mut off.net.points[4][1];
+    *y = f64::from_bits(y.to_bits() + 1);
+    // (the record is well formed: only the re-certification refuses it)
+    assert!(section_blend_from_record(&off).is_ok());
+    assert!(section_blend_rebuild(&off).is_err());
+
+    let mut unmoved = rec.clone();
+    unmoved.motions.pop();
+    assert!(section_blend_rebuild(&unmoved).is_err());
+
+    let mut shifted = rec;
+    shifted.sections[1][1].p[2] += 1e-6;
+    assert!(section_blend_rebuild(&shifted).is_err());
 }
