@@ -1280,37 +1280,27 @@ fn holds_case() -> Case {
 
 /// `cf1c08b` + `0389af2`: the progressive cubic law `[2, 2, 6, 3, 0]` lies on the union of its
 /// balls, passes `Level2`, has the volume of its balls' envelope ([`HOLDS_VOLUME`]), and is G1
-/// along both seams; with SolidCraft's fixes its exact circles take one arc count and its end
-/// point their weights (`fillet_exact_arc_spans`, WR-711).
+/// along both seams; its exact circles take one arc count and its end point their weights
+/// (WR-711). Its exact circles are skinned between the trace's stations, so the round stays
+/// on its balls only where the stations follow the law (`fillet_variable_span_follows_fillet`,
+/// the fork's 4438859): without it the default kernel's round is 5.0e-4 off them and its volume
+/// 1.2e-7 over the envelope's (upstream's approximated arcs, which a round no longer takes,
+/// were within the grade there).
 #[test]
 fn the_progressive_cubic_variable_round_lies_on_its_balls_union_and_is_g1() {
     let case = holds_case();
-    assert_passes(&case, &mut Kernel::default());
+    let mut k = Kernel::default();
+    k.fixes.fillet_variable_span_follows_fillet = true;
+    assert_passes(&case, &mut k);
     assert_passes(&case, &mut solidcraft_kernel());
 }
 
-/// WR-711: with WR-708's exact circles but without `fillet_exact_arc_spans`, the progressive
-/// cubic round is the fork's (523bc25, 5e8c9c1): 1.966e-3 off its balls' union, its
-/// sections sweeping across 91 degrees one and two arcs; with it, 8.2e-5 off, nearer than
-/// the approximated arcs' 1.0e-4, and within 3e-8 of the envelope's volume.
+/// WR-711: the progressive cubic round's exact circles take one arc count: 8.2e-5 off its
+/// balls' union, nearer than the approximated arcs' 1.0e-4, and within 3e-8 of the
+/// envelope's volume (the fork's 523bc25 and 5e8c9c1, without it: 1.966e-3 off).
 #[test]
 fn wr711_exact_circles_of_one_arc_count_keep_the_progressive_round_on_its_balls() {
     let case = holds_case();
-    let mut off = solidcraft_kernel();
-    off.fixes.fillet_exact_arc_spans = false;
-    let g_off = grade(&case, &mut off);
-    println!("spans off: {g_off:?}");
-    assert!(g_off.failed.is_none(), "{g_off:?}");
-    near(g_off.off, 1.966_136e-3, 1e-8, "the fork's distance off");
-    // the fork's 5957.716621492882 at SmApiBrepComputeVolume's 1e-8; the grade integrates
-    // at 1e-7
-    near(
-        g_off.volume,
-        5_957.716_621_492_882,
-        1e-5,
-        "the fork's volume",
-    );
-
     let g_on = grade(&case, &mut solidcraft_kernel());
     println!("spans on: {g_on:?}");
     assert!(
