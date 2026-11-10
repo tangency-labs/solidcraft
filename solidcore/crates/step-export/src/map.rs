@@ -21,11 +21,69 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::geom::{self, build_frame, conic_angle, dist, unit};
-use crate::model::{
+use solidcore_record::step::model::{
     BSplineCurve, BSplineSurface, Body, BodyKind, Bound, Curve, Curve2d, Diagnostic, Edge, Face,
     FilePcurves, Frame, Loop, Model, OrientedEdge, Pcurve, Shell, Skipped, Surface, Vertex, P3,
 };
-use crate::part21::{Instance, Limits, Param, Record, StepFile};
+use solidcore_record::step::p21::{self, Entity, Exchange as StepFile, Param, Record};
+
+/// Bounds the mapper applies to untrusted input (the parser's own are [`p21`]'s `MAX_*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// Deepest chain of references the mapper follows from a representation item
+    /// (e.g. surface of revolution -> curve -> ...). Cycles stop here.
+    pub max_ref_depth: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self { max_ref_depth: 64 }
+    }
+}
+
+/// An entity instance as the mapper reads it: one record, or the parts of a complex instance.
+#[derive(Debug, Clone, Copy)]
+enum Instance<'a> {
+    Simple(&'a Record),
+    Complex(&'a [Record]),
+}
+
+impl<'a> Instance<'a> {
+    fn of(entity: &'a Entity) -> Self {
+        match entity.records.as_slice() {
+            [record] => Self::Simple(record),
+            records => Self::Complex(records),
+        }
+    }
+
+    fn record(self, name: &str) -> Option<&'a Record> {
+        match self {
+            Self::Simple(r) => (r.name == name).then_some(r),
+            Self::Complex(rs) => rs.iter().find(|r| r.name == name),
+        }
+    }
+
+    fn type_name(self) -> String {
+        match self {
+            Self::Simple(r) => r.name.clone(),
+            Self::Complex(rs) => rs
+                .iter()
+                .map(|r| r.name.as_str())
+                .collect::<Vec<_>>()
+                .join("+"),
+        }
+    }
+}
+
+/// Reads `bytes` as a Part 21 file and maps its bodies to the neutral [`Model`].
+///
+/// # Errors
+/// The [`p21::Error`] when the text is not a readable exchange structure.
+pub fn import(bytes: &[u8], limits: &Limits) -> Result<Model, p21::Error> {
+    let text = String::from_utf8_lossy(bytes);
+    let file = p21::parse(&text)?;
+    Ok(map_file(&file, limits))
+}
 
 /// Why a body could not be mapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,10 +155,11 @@ struct Ctx {
 }
 
 impl<'a> Mapper<'a> {
-    fn inst(&self, id: u64) -> R<&'a Instance> {
+    fn inst(&self, id: u64) -> R<Instance<'a>> {
         self.file
             .entities
             .get(&id)
+            .map(Instance::of)
             .map_or_else(|| invalid(format!("dangling reference #{id}")), Ok)
     }
 
@@ -272,7 +331,7 @@ impl<'a> Mapper<'a> {
     /// Representation item id -> context id, from every representation's items.
     fn item_contexts(&self) -> BTreeMap<u64, u64> {
         let mut out = BTreeMap::new();
-        for inst in self.file.entities.values() {
+        for inst in self.file.entities.values().map(Instance::of) {
             let rec = match inst {
                 Instance::Simple(r) if r.name.ends_with("REPRESENTATION") => r,
                 Instance::Complex(rs) => match rs.iter().find(|r| r.name == "REPRESENTATION") {
@@ -1210,7 +1269,11 @@ fn polygon_plane(pts: &[P3]) -> R<Surface> {
     Ok(Surface::Plane { frame })
 }
 
-pub(crate) fn check_bspline_curve(b: &BSplineCurve) -> R<()> {
+/// Checks a B-spline curve is well formed.
+///
+/// # Errors
+/// [`MapError::Invalid`] naming the fault.
+pub fn check_bspline_curve(b: &BSplineCurve) -> R<()> {
     let n = b.points.len();
     let p = b.degree as usize;
     if n < p + 1 {
@@ -1228,7 +1291,11 @@ pub(crate) fn check_bspline_curve(b: &BSplineCurve) -> R<()> {
     Ok(())
 }
 
-pub(crate) fn check_knots(knots: &[f64], mults: &[u32], degree: usize) -> R<()> {
+/// Checks a knot vector increases and its multiplicities fit `degree`.
+///
+/// # Errors
+/// [`MapError::Invalid`] naming the fault.
+pub fn check_knots(knots: &[f64], mults: &[u32], degree: usize) -> R<()> {
     if knots
         .windows(2)
         .any(|w| matches!(w, [a, b] if a.partial_cmp(b) != Some(std::cmp::Ordering::Less)))
@@ -1448,7 +1515,7 @@ fn trim_parameter(p: &Param) -> Option<f64> {
     p.as_list()?
         .iter()
         .find_map(|select| match select {
-            Param::Typed(name, value) if name == "PARAMETER_VALUE" => value.as_f64(),
+            Param::Typed(name, _) if name == "PARAMETER_VALUE" => select.as_f64(),
             Param::Real(_) | Param::Int(_) => select.as_f64(),
             _ => None,
         })
@@ -1484,7 +1551,7 @@ fn scale_curve_2d(curve: Curve2d, su: f64, sv: f64) -> Curve2d {
 /// The `#id` of face `id`'s surface (through `ORIENTED_FACE`s), when it has one.
 fn face_surface_id(file: &StepFile, id: u64, max_depth: usize) -> Option<u64> {
     let base = resolve_face(file, id, max_depth)?;
-    let Instance::Simple(record) = file.entities.get(&base)? else {
+    let Instance::Simple(record) = file.entities.get(&base).map(Instance::of)? else {
         return None;
     };
     if !matches!(record.name.as_str(), "ADVANCED_FACE" | "FACE_SURFACE") {
@@ -1539,12 +1606,16 @@ fn collect_dangling_references(file: &StepFile, diagnostics: &mut Vec<Diagnostic
                     visit(item, missing);
                 }
             }
-            Param::Typed(_, value) => visit(value, missing),
+            Param::Typed(_, values) => {
+                for value in values {
+                    visit(value, missing);
+                }
+            }
             _ => {}
         }
     }
     let mut seen = BTreeSet::new();
-    for (id, inst) in &file.entities {
+    for (id, inst) in file.entities.iter().map(|(id, e)| (id, Instance::of(e))) {
         let records: &[Record] = match inst {
             Instance::Simple(record) => std::slice::from_ref(record),
             Instance::Complex(records) => records,
@@ -1570,7 +1641,7 @@ fn collect_dangling_references(file: &StepFile, diagnostics: &mut Vec<Diagnostic
 fn resolve_face(file: &StepFile, id: u64, max_depth: usize) -> Option<u64> {
     let mut current = id;
     for _ in 0..=max_depth {
-        let Instance::Simple(record) = file.entities.get(&current)? else {
+        let Instance::Simple(record) = file.entities.get(&current).map(Instance::of)? else {
             return Some(current);
         };
         if record.name != "ORIENTED_FACE" {
@@ -1587,7 +1658,7 @@ fn resolve_face(file: &StepFile, id: u64, max_depth: usize) -> Option<u64> {
 /// Every face id a shell references, plus the `ORIENTED_FACE` wrapper ids themselves.
 fn shell_referenced_faces(file: &StepFile, max_depth: usize) -> BTreeSet<u64> {
     let mut referenced = BTreeSet::new();
-    for instance in file.entities.values() {
+    for instance in file.entities.values().map(Instance::of) {
         let Instance::Simple(record) = instance else {
             continue;
         };
@@ -1613,7 +1684,7 @@ fn shell_referenced_faces(file: &StepFile, max_depth: usize) -> BTreeSet<u64> {
 /// The inner face of every `ORIENTED_FACE` (mapped through the wrapper instead).
 fn oriented_face_targets(file: &StepFile) -> BTreeSet<u64> {
     let mut targets = BTreeSet::new();
-    for instance in file.entities.values() {
+    for instance in file.entities.values().map(Instance::of) {
         let Instance::Simple(record) = instance else {
             continue;
         };
@@ -1638,7 +1709,7 @@ fn map_loose_faces(
     let referenced = shell_referenced_faces(m.file, m.limits.max_ref_depth);
     let inner = oriented_face_targets(m.file);
     let mut candidates = Vec::new();
-    for (id, instance) in &m.file.entities {
+    for (id, instance) in m.file.entities.iter().map(|(id, e)| (id, Instance::of(e))) {
         let Instance::Simple(record) = instance else {
             continue;
         };
@@ -1683,7 +1754,7 @@ fn map_loose_faces(
                     .file
                     .entities
                     .get(&id)
-                    .map_or_else(String::new, Instance::type_name),
+                    .map_or_else(String::new, |e| Instance::of(e).type_name()),
                 reason: error.to_string(),
             }),
         }
@@ -1692,7 +1763,7 @@ fn map_loose_faces(
     // loose-face heuristic above sees no candidate. If the file has no solid bodies at
     // all, treat every face as a sheet rather than returning an empty model.
     if model.bodies.is_empty() {
-        for (id, instance) in &m.file.entities {
+        for (id, instance) in m.file.entities.iter().map(|(id, e)| (id, Instance::of(e))) {
             let Instance::Simple(record) = instance else {
                 continue;
             };
@@ -1733,7 +1804,7 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
     // Fallback units when an item is in no representation: those of the file's only
     // context with a unit assignment, if there is exactly one kind.
     let mut all_units: Vec<Units> = Vec::new();
-    for (id, inst) in &file.entities {
+    for (id, inst) in file.entities.iter().map(|(id, e)| (id, Instance::of(e))) {
         if inst.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").is_some() {
             if let Ok(u) = m.context_units(*id) {
                 if !all_units.contains(&u) {
@@ -1765,7 +1836,7 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
             ),
         });
     }
-    for (id, inst) in &file.entities {
+    for (id, inst) in file.entities.iter().map(|(id, e)| (id, Instance::of(e))) {
         let rec = match inst {
             Instance::Simple(r) => r,
             Instance::Complex(_) => {
@@ -1819,11 +1890,13 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::part21::parse;
+    use solidcore_record::step::p21::parse;
 
     fn model(data: &str) -> Model {
-        let text = format!("ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n{data}\nENDSEC;\nEND-ISO-10303-21;\n");
-        let f = parse(text.as_bytes(), &Limits::default()).unwrap();
+        let text = format!(
+            "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n{data}\nENDSEC;\nEND-ISO-10303-21;\n"
+        );
+        let f = parse(&text).unwrap();
         map_file(&f, &Limits::default())
     }
 

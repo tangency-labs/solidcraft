@@ -45,7 +45,7 @@ from pathlib import Path
 LIST = Path("plan/panic-sites.tsv")
 # solidcore and the STEP crates SolidCraft links. nurbs-grid-mesh is not here: nothing
 # depends on it, and docs/layers.md has it merged into solidcore-tess and then deleted.
-CRATES = ["solidcore", "step-import", "step-export"]
+CRATES = ["solidcore", "step-export"]
 COLUMNS = ["file", "fn", "pattern", "n", "status", "code", "reason"]
 
 # clippy `disallowed-methods` path -> pattern name. Only calls that can panic on their
@@ -418,7 +418,11 @@ def run_clippy(root):
         for crate in CRATES:
             cmd += ["-p", crate]
         # a renamed or misspelt lint would otherwise pass with no sites at all
-        cmd += ["--", "-D", "unknown_lints"] + [arg for lint in LINTS for arg in ("-W", lint)]
+        # --cap-lints warn: a workspace crate a listed crate depends on but this list does not
+        # cover (solidcore-record, which denies disallowed_methods in its own source) is checked
+        # too, and its denies must not fail the run; its sites are not rows.
+        cmd += ["--", "--cap-lints", "warn", "-D", "unknown_lints"]
+        cmd += [arg for lint in LINTS for arg in ("-W", lint)]
         env = dict(os.environ, CLIPPY_CONF_DIR=tmp)
         res = subprocess.run(cmd, cwd=root, env=env, stdout=subprocess.PIPE, text=True)
     if res.returncode != 0:

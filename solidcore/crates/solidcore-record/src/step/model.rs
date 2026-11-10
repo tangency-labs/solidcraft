@@ -368,7 +368,7 @@ pub struct FilePcurves {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Model {
     /// Part 21 header metadata.
-    pub header: crate::part21::Header,
+    pub header: crate::step::p21::Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
     /// Bodies in entity id order. Includes a one-face open-shell

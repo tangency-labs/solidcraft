@@ -7,8 +7,8 @@
 
 use std::fmt;
 
-use crate::model::{Body, Model};
-use crate::part21::{Instance, Param, Record, StepFile};
+use solidcore_record::step::model::{Body, Model};
+use solidcore_record::step::p21::{Exchange as StepFile, Param, Record};
 
 /// One validation problem.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +38,11 @@ fn visit(param: &Param, missing: &mut Vec<u64>) {
                 visit(item, missing);
             }
         }
-        Param::Typed(_, value) => visit(value, missing),
+        Param::Typed(_, values) => {
+            for value in values {
+                visit(value, missing);
+            }
+        }
         _ => {}
     }
 }
@@ -46,10 +50,7 @@ fn visit(param: &Param, missing: &mut Vec<u64>) {
 fn dangling_references(file: &StepFile) -> Vec<ValidationError> {
     let mut errors = Vec::new();
     for (id, instance) in &file.entities {
-        let records: &[Record] = match instance {
-            Instance::Simple(record) => std::slice::from_ref(record),
-            Instance::Complex(records) => records,
-        };
+        let records: &[Record] = &instance.records;
         for record in records {
             for param in &record.params {
                 let mut missing = Vec::new();
@@ -95,7 +96,7 @@ fn validate_body(body: &Body) -> Vec<ValidationError> {
     for face in &body.faces {
         for loop_ in &face.loops {
             match &loop_.bound {
-                crate::model::Bound::Edges(edges) => {
+                solidcore_record::step::model::Bound::Edges(edges) => {
                     for edge in edges {
                         if edge.edge >= body.edges.len() {
                             errors.push(ValidationError {
@@ -108,7 +109,7 @@ fn validate_body(body: &Body) -> Vec<ValidationError> {
                         }
                     }
                 }
-                &crate::model::Bound::Vertex(vertex) => {
+                &solidcore_record::step::model::Bound::Vertex(vertex) => {
                     if vertex >= body.vertices.len() {
                         errors.push(ValidationError {
                             step_id: Some(body.step_id),
@@ -145,13 +146,13 @@ pub fn validate(file: &StepFile, model: &Model) -> Vec<ValidationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::map_file;
-    use crate::part21::{parse, Limits};
+    use crate::map::{map_file, Limits};
+    use solidcore_record::step::p21::parse;
 
     #[test]
     fn reports_dangling_references() {
         let text = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n#1=PRODUCT('p','p','',(#9));\nENDSEC;\nEND-ISO-10303-21;\n";
-        let file = parse(text.as_bytes(), &Limits::default()).unwrap();
+        let file = parse(text).unwrap();
         let model = map_file(&file, &Limits::default());
         assert!(validate(&file, &model)
             .iter()
@@ -163,7 +164,7 @@ mod tests {
         // A face with no shell is mapped as a one-face open-shell sheet body; its
         // synthetic shell must still validate.
         let text = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n#6=FACE('',(#7));#7=FACE_OUTER_BOUND('',#8,.T.);#8=POLY_LOOP('',(#9,#10,#11));#9=CARTESIAN_POINT('',(0.,0.,0.));#10=CARTESIAN_POINT('',(3.,0.,0.));#11=CARTESIAN_POINT('',(0.,4.,0.));\nENDSEC;\nEND-ISO-10303-21;\n";
-        let file = parse(text.as_bytes(), &Limits::default()).unwrap();
+        let file = parse(text).unwrap();
         let model = map_file(&file, &Limits::default());
         assert_eq!(model.bodies.len(), 1);
         assert!(
@@ -176,13 +177,13 @@ mod tests {
     #[test]
     fn reports_a_vertex_loop_of_a_missing_vertex() {
         let text = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n#6=FACE('',(#7));#7=FACE_OUTER_BOUND('',#8,.T.);#8=POLY_LOOP('',(#9,#10,#11));#9=CARTESIAN_POINT('',(0.,0.,0.));#10=CARTESIAN_POINT('',(3.,0.,0.));#11=CARTESIAN_POINT('',(0.,4.,0.));\nENDSEC;\nEND-ISO-10303-21;\n";
-        let file = parse(text.as_bytes(), &Limits::default()).unwrap();
+        let file = parse(text).unwrap();
         let mut model = map_file(&file, &Limits::default());
         let nv = model.bodies[0].vertices.len();
-        let vertex_loop = |v| crate::model::Loop {
+        let vertex_loop = |v| solidcore_record::step::model::Loop {
             outer: false,
             orientation: true,
-            bound: crate::model::Bound::Vertex(v),
+            bound: solidcore_record::step::model::Bound::Vertex(v),
         };
         // A vertex loop of an existing vertex is consistent.
         model.bodies[0].faces[0].loops.push(vertex_loop(nv - 1));
@@ -199,7 +200,7 @@ mod tests {
 
     #[test]
     fn accepts_a_consistent_model() {
-        let file = parse(b"ISO-10303-21;HEADER;FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));ENDSEC;DATA;ENDSEC;END-ISO-10303-21;", &Limits::default()).unwrap();
+        let file = parse("ISO-10303-21;HEADER;FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));ENDSEC;DATA;ENDSEC;END-ISO-10303-21;").unwrap();
         let model = map_file(&file, &Limits::default());
         assert!(validate(&file, &model).is_empty());
     }

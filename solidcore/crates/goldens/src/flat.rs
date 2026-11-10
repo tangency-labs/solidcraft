@@ -25,11 +25,11 @@
 //!
 //! `kind` is 0 manifold solid, 1 solid with voids, 2 faceted, 3 shell model.
 
-use crate::map::{check_bspline_curve, check_knots};
-use crate::model::{
+use solidcore_record::step::model::{
     BSplineCurve, BSplineSurface, Body, BodyKind, Bound, Curve, Edge, Face, Frame, Loop,
     OrientedEdge, Shell, Surface, Vertex, P3,
 };
+use step_export::map::{check_bspline_curve, check_knots};
 
 /// First word of an encoded body.
 pub const MAGIC: f64 = 21.0;
@@ -590,7 +590,7 @@ impl Rd<'_> {
         let (u_knots, u_mults) = self.knots(nuk)?;
         let (v_knots, v_mults) = self.knots(nvk)?;
         let fits = |k: &[f64], m: &[u32], n: usize, d: usize| {
-            crate::geom::expand_knots(k, m, n + d + 1).is_some()
+            step_export::geom::expand_knots(k, m, n + d + 1).is_some()
         };
         if nu < ud + 1
             || nv < vd + 1
