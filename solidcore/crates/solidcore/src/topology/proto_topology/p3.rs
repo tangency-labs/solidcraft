@@ -2344,11 +2344,11 @@ mod tests {
     }
 
     /// An `n`-sided prism of circumradius 30 from `z0` up `h`.
-    fn prism(k: &mut crate::kernel::Kernel, n: usize, z0: f64, h: f64) -> Brep {
+    fn prism(k: &mut Kernel, n: usize, z0: f64, h: f64) -> Brep {
         use crate::curve::curve::Curve;
         let point = |i: usize| {
             let t = core::f64::consts::TAU * i as f64 / n as f64;
-            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), z0)
+            Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), z0)
         };
         let curves: Vec<Curve> = (0..n)
             .map(|i| {
@@ -2359,29 +2359,23 @@ mod tests {
             })
             .collect();
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
-        crate::sweep::api_brep::create_linear_sweep(
-            k,
-            &refs,
-            crate::math::Vec3::new(0.0, 0.0, 1.0),
-            h,
-            true,
-        )
-        .unwrap()
+        crate::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), h, true)
+            .unwrap()
     }
 
     /// A Join of a prism into a prism of the same outline (z 1..2 into z 0..2: coincident
     /// sides and top) splits its proto edges where they cross. Every pair of proto edges
     /// is asked; a pair of lines whose boxes are apart now ends before any curve
-    /// intersection (#14329). The intersections run stay flat as the outline grows
-    /// (none here), where every one of the N² pairs ran one before, and the union is
-    /// the outer prism.
+    /// intersection (#14329). The intersections run stay flat as the outline grows:
+    /// none here, where 558 (12 sides) and 10,008 (48 sides) ran before, growing with
+    /// N². The union is the outer prism.
     #[test]
     fn a_join_of_coincident_prisms_intersects_no_far_apart_edges() {
         let mut counts = Vec::new();
         for n in [12, 48] {
-            let mut k = crate::kernel::Kernel {
+            let mut k = Kernel {
                 fixes: crate::kernel::UpstreamFixes::all(),
-                ..crate::kernel::Kernel::default()
+                ..Kernel::default()
             };
             let a = prism(&mut k, n, 0.0, 2.0);
             let b = prism(&mut k, n, 1.0, 1.0);

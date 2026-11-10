@@ -2291,6 +2291,17 @@ fn value_report(
     Ok(false)
 }
 
+/// The disjoint test of `IntersectWithLine`: the box of segment `a` grown by `tol`
+/// misses the box of segment `b`.
+fn segment_boxes_apart(a: [Point3; 2], b: [Point3; 2], tol: f64) -> bool {
+    let mut bbox1 = Extent3d::from_point(a[0]);
+    bbox1.add_point(a[1]);
+    bbox1.expand_absolute(tol);
+    let mut bbox2 = Extent3d::from_point(b[0]);
+    bbox2.add_point(b[1]);
+    bbox1.are_disjoint(&bbox2, 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2510,15 +2521,4 @@ mod tests {
         assert_eq!(s.natural_interval(), Extent1d::from_min_max(0.0, 4.0));
         assert_eq!(s.step_interval(), Extent1d::from_min_max(0.0, 1.0));
     }
-}
-
-/// The disjoint test of `IntersectWithLine`: the box of segment `a` grown by `tol`
-/// misses the box of segment `b`.
-fn segment_boxes_apart(a: [Point3; 2], b: [Point3; 2], tol: f64) -> bool {
-    let mut bbox1 = Extent3d::from_point(a[0]);
-    bbox1.add_point(a[1]);
-    bbox1.expand_absolute(tol);
-    let mut bbox2 = Extent3d::from_point(b[0]);
-    bbox2.add_point(b[1]);
-    bbox1.are_disjoint(&bbox2, 0.0)
 }
