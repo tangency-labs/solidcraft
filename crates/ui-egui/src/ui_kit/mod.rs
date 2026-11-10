@@ -141,6 +141,7 @@ pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;
 
 #[cfg(test)]
+#[path = "gallery_tests.rs"]
 pub(crate) mod gallery;
 #[cfg(test)]
 mod slider_tests;

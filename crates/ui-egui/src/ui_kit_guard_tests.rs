@@ -1383,8 +1383,8 @@ fn shared_code_holds_no_host_tab_names_or_command_ids() {
             }
             return;
         }
-        // Test files and the kit's gallery (a `#[cfg(test)]` module) may use any sample data.
-        if path.extension().is_none_or(|e| e != "rs") || relative.ends_with("_tests.rs") || relative.ends_with("ui_kit/gallery.rs") {
+        // Test files (the kit's gallery among them) may use any sample data.
+        if path.extension().is_none_or(|e| e != "rs") || relative.ends_with("_tests.rs") {
             return;
         }
         let mut found = host_names_in(&std::fs::read_to_string(path).unwrap(), names);
