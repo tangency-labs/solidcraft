@@ -1374,7 +1374,7 @@ fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
     let mut time = 0.0;
     crate::scenario::clear_handles();
     frame(&mut app, &ctx, &mut time, egui::Modifiers::NONE, vec![]);
-    assert_eq!(crate::navigation_bar::canvas_caps(&app), crate::navigation::NavCaps { orbit: false, pick: false });
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&app), crate::navigation::NavCaps { orbit: false, pick: false });
     for slot in ["orbit", "spin", "look_at", "projection", "visual_style"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
     }

@@ -139,6 +139,7 @@ crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	1	o
 crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	2	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	3	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/blend/feature_executive.rs	FeatureExecutive::restore_features	Vec::remove	1	open	remove(ii)	
+crates/solidcore/src/blend/feature_executive.rs	FeatureExecutive::take_off	Vec::remove	1	proven	remove(f.feature)	the index was just read by self.features.get_mut(f.feature), and kept is walked in descending order
 crates/solidcore/src/blend/feature_executive.rs	collect_feature_loop_edges	Vec::remove	1	open	remove(kk)	
 crates/solidcore/src/blend/feature_executive.rs	fix_edge_chain_list	Vec::remove	1	open	remove(id)	
 crates/solidcore/src/blend/feature_executive.rs	fix_edge_chain_list	Vec::remove	2	open	remove(id)	
@@ -931,6 +932,7 @@ crates/solidcore/src/sweep/screw.rs	Stations::weight	int-rem	1	proven	j % 2	cons
 crates/solidcore/src/sweep/screw.rs	axial_radius	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/sweep/screw.rs	path	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/sweep/screw.rs	sweep	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/stations.rs	fractions	Ord::clamp	1	proven	clamp(MIN_SKIN_STATIONS, MAX_SKIN_STATIONS)	constants 16 <= 2048, so min <= max always
 crates/solidcore/src/sweep/topology_sweep/store.rs	SweepStore::drop	Vec::drain	1	proven	drain(..)	full drain(..) has no invalid bounds
 crates/solidcore/src/sweep/topology_sweep/store.rs	SweepStore::unlock_mark	Vec::remove	1	proven	remove(index)	index is rposition() in the same locks Vec
 crates/solidcore/src/sweep/topology_sweep/store.rs	body_pair_mut	split_at	1	proven	split_at_mut(si.max(di))	entry() validates both base-adjusted indices against the same slots Vec

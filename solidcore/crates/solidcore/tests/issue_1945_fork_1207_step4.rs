@@ -99,7 +99,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_walls_touch_refused = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_missing_surface_fails = true;
@@ -130,7 +129,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;

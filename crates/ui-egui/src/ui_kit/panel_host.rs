@@ -161,12 +161,12 @@ pub(crate) fn panel_host_control_label_opacity(
         if chrome.icon_only {
             if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
                 let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
-                crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
+                crate::ui_kit::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
             } else {
-                crate::icons::paint_ink(&painter, icon_rect, icon, ink);
+                crate::ui_kit::icons::paint_ink(&painter, icon_rect, icon, ink);
             }
         } else {
-            crate::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
+            crate::ui_kit::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
         }
         let gap = if chrome.title { t.space_8 } else { t.space_4 };
         if chrome.rtl {
@@ -243,10 +243,10 @@ pub(crate) fn panel_host_disclosure(
     let duration = solidcraft_theme::panel_motion_duration(ui.ctx(), reduced);
     let expanded = ui.ctx().animate_bool_with_time_and_easing(id.with("disclosure_ink"), !collapsed, duration, solidcraft_theme::panel_motion_ease);
     if expanded < 1.0 {
-        crate::icons::paint_ink(&painter, icon, "chevron", ink.linear_multiply(1.0 - expanded));
+        crate::ui_kit::icons::paint_ink(&painter, icon, "chevron", ink.linear_multiply(1.0 - expanded));
     }
     if expanded > 0.0 {
-        crate::icons::paint_ink_flipped(&painter, icon, "chevron", ink.linear_multiply(expanded));
+        crate::ui_kit::icons::paint_ink_flipped(&painter, icon, "chevron", ink.linear_multiply(expanded));
     }
     response
 }

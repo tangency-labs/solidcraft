@@ -684,14 +684,15 @@ fn arguments_are_checked_before_the_kernel() {
         blend(&b, Blend::Chamfer, &[e], &[1.0], &back, Corners::Filled),
         Err(Error::Unsupported(_))
     ));
-    // a setback longer than its edges leaves no room
+    // a setback at a vertex the kernel does not set back (the end of one round), however
+    // long: that corner is refused (#3145: the length is the kernel's, at a real corner)
     let long = [SetBack {
         vertex: corner,
         distance: 50.0,
     }];
     assert_eq!(
         blend(&b, Blend::Round, &[e], &[1.0], &long, Corners::Filled),
-        Err(Error::NoRoom)
+        Err(Error::CornerRefused { corner: 0 })
     );
     assert_eq!(
         chamfer_sides(&b, &[e], &[], 1.0, ChamferSecond::Distance(1.0)),
@@ -1054,4 +1055,106 @@ fn curvature_rounds_over_mixed_wedges_each_take_their_own_balls_area() {
     assert!((ab - 40.0 * per_length).abs() < 1e-5, "[A, B] took {ab}");
     assert!((ba - 40.0 * per_length).abs() < 1e-5, "[B, A] took {ba}");
     assert!((ab - ba).abs() < 1e-7, "{ab} {ba}");
+}
+
+/// #3145: a chamfer too large for its faces is refused with the distance that builds, which the
+/// kernel reads through the chamfer's definition (its offsets linear in its sizes at the edge's
+/// wedge), and that distance builds. A 2 thick wall, both its top edges chamfered 1.5 at
+/// equal distances: square edges, so each chamfer's setback is its distance, and the two bands
+/// on the top meet when the setbacks are 1 each: the fit is 1. Chamfered at it, each edge
+/// loses the prism of the right triangle of side 1 along the wall's 30: `2 * 30 / 2` removed.
+#[test]
+fn a_chamfer_too_large_is_refused_with_the_distance_that_builds() {
+    all_fixes();
+    let b = make_box([0.0; 3], [30.0, 2.0, 10.0]).unwrap();
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [15.0, 2.0, 10.0]),
+    ];
+    let size = match blend(&b, Blend::Chamfer, &edges, &[1.5], &[], Corners::Filled) {
+        Err(Error::TooLarge { size, kind, .. }) => {
+            assert_eq!(kind, FitKind::Distance);
+            size
+        }
+        other => panic!("{other:?}"),
+    };
+    // the kernel's fit read through the chamfer's offsets and back: lines, so no quadrature,
+    // only the fit's and the conversions' rounding (measured 1.1e-13)
+    assert!((size - 1.0).abs() <= 1e-12, "{size}");
+    let before = volume(&b);
+    blend(&b, Blend::Chamfer, &edges, &[size], &[], Corners::Filled).unwrap();
+    let removed = before - volume(&b);
+    let want = 30.0 * size * size;
+    assert!(rel(removed, want) <= 1e-9, "{removed} vs {want}");
+}
+
+/// #3145: a setback longer than an edge at a real set-back corner is the kernel's refusal before
+/// the trace, naming the largest that fits: the block's corner at (30, 0, 10) with its three
+/// edges rounded 1 and set back 50, its shortest edge 10 long. A setback of 10 would leave that
+/// edge's round no length (an open bound), so the size named is 10 less a thousand of the
+/// edge's tolerances; set back that, the block builds, and just above it is refused. Without
+/// the check the trace refused first, as a round too large (radius 19.99, the corners taking a
+/// whole edge).
+#[test]
+fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
+    all_fixes();
+    let b = block();
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [30.0, 10.0, 10.0]),
+        edge_at(&b, [30.0, 0.0, 5.0]),
+    ];
+    let corner = vertex_at(&b, [30.0, 0.0, 10.0]);
+    let set_back = |distance: f64| {
+        [SetBack {
+            vertex: corner,
+            distance,
+        }]
+    };
+    let tol = {
+        let (_k, kb) = kernel_copy(&b);
+        edge::tolerance(&kb, kb.edge_list()[edges[2]]).unwrap()
+    };
+    let named = match blend(
+        &b,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &set_back(50.0),
+        Corners::Filled,
+    ) {
+        Err(Error::SetbackTooLong { vertex, largest }) => {
+            assert_eq!(vertex, corner);
+            // the least of the three edges' lengths (lines: exact), the far ends set back none,
+            // less the fit margin
+            let want = 10.0 - 1000.0 * tol;
+            assert!((largest - want).abs() <= 1e-12, "{largest} against {want}");
+            largest
+        }
+        other => panic!("{other:?}"),
+    };
+    // just above the named size: refused by the same test, the block unchanged
+    match blend(
+        &b,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &set_back(named + 1e-9),
+        Corners::Filled,
+    ) {
+        Err(Error::SetbackTooLong { vertex, .. }) => assert_eq!(vertex, corner),
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), 6000.0) < 1e-12);
+    // at it: the block builds (the rounds take volume)
+    blend(
+        &b,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &set_back(named),
+        Corners::Filled,
+    )
+    .unwrap();
+    assert!(volume(&b) < 6000.0);
 }

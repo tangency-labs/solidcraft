@@ -118,6 +118,16 @@ pub struct State<H> {
     restore_error: Option<String>,
 }
 
+impl<H> State<H> {
+    /// Keeps the outline of the row a search result revealed on screen until the test is done.
+    #[cfg(test)]
+    pub(crate) fn keep_reveal_visible(&mut self) -> bool {
+        let Some(reveal) = self.reveal.as_mut() else { return false };
+        reveal.until = f64::INFINITY;
+        true
+    }
+}
+
 impl<H> Default for State<H> {
     fn default() -> Self {
         State { open: false, section: 0, filter: String::new(), search_from: None, reveal: None, snapshot: None, restore_error: None }
@@ -221,7 +231,7 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         return None;
     }
     hold(host);
-    if host.window_ref().reveal.as_ref().is_some_and(|reveal| crate::now_ms() > reveal.until) {
+    if host.window_ref().reveal.as_ref().is_some_and(settings_search::Reveal::expired) {
         host.window().reveal = None;
     }
     let sink = settings_search::shift_key_sink(ctx);

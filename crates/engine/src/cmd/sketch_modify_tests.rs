@@ -4226,7 +4226,10 @@ fn trim_hover_made_once_and_extend_previews_per_end_answer_as_afresh() {
             let Some(piece) = piece else { continue };
             if k % 4 == 1 {
                 let mut after = sk.clone();
-                super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                let (_, removed) = super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                if c.kind.is_freeform() {
+                    assert_eq!(piece, removed, "{} at {at:?}", c.id);
+                }
                 let mid = if piece.len() > 2 { piece[piece.len() / 2] } else { (piece[0] + piece[1]) * 0.5 };
                 assert!(!(0..after.curves.len()).filter_map(|i| after.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "{} at {at:?}", c.id);
                 trimmed += 1;
@@ -5735,4 +5738,28 @@ fn split_failures_name_the_public_command() {
     assert!(text.contains("invalid parameters for `sketch.break`"), "{text}");
     assert!(!text.contains("invalid parameters for `split`"), "{text}");
     assert!(!text.contains("sketch.modify"), "{text}");
+}
+
+/// #12294: a spline offset together with a line is trimmed and unlinked, so a distance that names a
+/// parameter drives nothing. The reply says so; a linked offset of the same parameter does not.
+#[test]
+fn an_unlinked_offset_says_its_parameter_drives_nothing() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
+    let sp = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[-20, 0], [-10, 15], [10, 15], [20, 0]]}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [[20, 0], [-20, 0]]}));
+    let r = run(&mut s, "sketch.offset", json!({"curves": [sp], "distance": "wall", "side": [0, 5], "param": "w_in"}));
+    assert!(r["param"].is_null(), "{r}");
+    let warning = r["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("not linked to its source"), "{r}");
+    // A rectangle's offset is linked: its parameter drives it and nothing is said.
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name": "wall", "expression": "1 mm"}));
+    let lines: Vec<String> = [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[20, 10], [0, 10]], [[0, 10], [0, 0]]]
+        .iter()
+        .map(|p| ids(&run(&mut s, "sketch.line", json!({"points": p}))["curves"])[0].clone())
+        .collect();
+    let r = run(&mut s, "sketch.offset", json!({"curves": lines, "distance": "wall", "side": [10, 5]}));
+    assert!(r["param"].is_string(), "{r}");
+    assert!(r.get("warning").is_none(), "{r}");
 }

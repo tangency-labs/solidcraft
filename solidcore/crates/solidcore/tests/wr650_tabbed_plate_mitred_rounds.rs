@@ -263,7 +263,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_closed_curve_trim_arc = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_extended_edges_mated = true;
@@ -294,7 +293,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
