@@ -459,6 +459,22 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             && s["retired"].as_array().is_some_and(|r| r.contains(&json!(name3)))
     })?;
     step("update in another tab: the kept v3 still starts; its copy is retired, not deleted", t);
+    // The page still open is v3's: a file it asks for now comes from v3's copy, not from v4 which the
+    // worker has taken over with (nor from the network, which serves v4).
+    let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
+    if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}"));
+    }
+    // A page whose record is lost never gets the worker's build instead: its request fails visibly.
+    let lost = cdp.eval(
+        "caches.keys().then(async (ks) => {
+          for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) await c.delete(r); }
+          return (await fetch('shared.js?lost', { cache: 'no-store' })).status;
+        })",
+    )?;
+    if lost != json!(503) {
+        return Err(format!("a page with no remembered build was answered with status {lost}, not the visible failure (503)"));
+    }
     other.call("Page.close", json!({}))?;
 
     server.set(Mode::Serve(v4));
