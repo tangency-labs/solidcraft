@@ -1623,11 +1623,10 @@ impl Body {
 
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
     /// arcs, single free-form segments, and a free-form curve of several spans as the one
-    /// B-spline it is, for a sketch to project them. An edge out of the plane that lies on a
-    /// cylinder whose axis is `plane`'s normal (a hole's rim on a curved wall) projects onto that
-    /// cylinder's circle: the arc of it ([`Body::projected_on_cylinder`]). `None` for any other
-    /// edge that doesn't lie in a plane parallel to `plane`, one that isn't read exactly or isn't
-    /// there, and for every edge of a mesh body.
+    /// B-spline it is, for a sketch to project them. Splines and ellipses also project exactly
+    /// between nonparallel planes. An edge on a cylinder whose axis is `plane`'s normal projects
+    /// as that cylinder's circle or arc ([`Body::projected_on_cylinder`]). `None` for other edges
+    /// outside a parallel plane, edges that aren't read exactly or aren't there, and mesh bodies.
     pub fn planar_edges(&self, plane: &solidcore_record::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];

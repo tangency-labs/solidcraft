@@ -370,6 +370,15 @@ fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
         pts.push(p);
         pts.len() - 1
     }
+    fn spline_point(pts: &mut Vec<Vec2>, p: Vec2) -> usize {
+        // A nearby endpoint is a different control and changes the curve. Native edge
+        // topology has already supplied shared vertices before the geometry reaches us.
+        if let Some(i) = pts.iter().position(|q| *q == p) {
+            return i;
+        }
+        pts.push(p);
+        pts.len() - 1
+    }
     // A face seen edge-on projects its edges onto one another; one line stands for them.
     let same_line = |cs: &[LCurve], a: usize, b: usize| cs.iter().any(|k| matches!(*k, LCurve::Line(x, y) if (x, y) == (a, b) || (x, y) == (b, a)));
     for g in geom.iter().filter(|g| g.finite()) {
@@ -412,11 +421,11 @@ fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
             }
             LinkGeom::Spline { pts, control, degree, periodic, nurbs } => {
                 let (Some(first), Some(last)) = (pts.first(), pts.last()) else { continue };
-                let s0 = pt(&mut l.pts, *first);
+                let s0 = spline_point(&mut l.pts, *first);
                 let first_in = l.pts.len();
                 let inner = pts.get(1..pts.len() - 1).unwrap_or_default();
                 l.pts.extend(inner.iter().copied());
-                let s1 = pt(&mut l.pts, *last);
+                let s1 = spline_point(&mut l.pts, *last);
                 l.curves.push(LCurve::Spline(s0, s1, first_in, inner.len(), control, degree, periodic, nurbs));
             }
         }
@@ -481,16 +490,6 @@ fn same_shape(a: &LCurve, b: &LCurve) -> bool {
     )
 }
 
-/// Whether two splines' own knots and weights ([`crate::Nurbs`]) are the same within `close`.
-fn same_nurbs(a: Option<&crate::Nurbs>, b: Option<&crate::Nurbs>, close: impl Fn(f64, f64) -> bool) -> bool {
-    let all = |x: &[f64], y: &[f64]| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| close(*p, *q));
-    match (a, b) {
-        (None, None) => true,
-        (Some(a), Some(b)) => all(&a.knots, &b.knots) && all(&a.weights, &b.weights),
-        _ => false,
-    }
-}
-
 /// Whether two readings of a linked point are the same point: within [`same_geometry`]'s tolerance.
 fn near_point(p: Vec2, q: Vec2) -> bool {
     p.dist(q) <= SAME_TOL * (1.0 + p.len().max(q.len()))
@@ -503,23 +502,24 @@ const SAME_TOL: f64 = 1e-6;
 /// the direction a loop was walked? Lines match with either end first; circles by centre and
 /// radius; arcs by centre and their (start, end) pair; conics by all their points and rho.
 fn same_geometry(a: &[(LCurve, Vec<Vec2>)], b: &[(LCurve, Vec<Vec2>)]) -> bool {
-    let close = |x: f64, y: f64| (x - y).abs() <= SAME_TOL * (1.0 + x.abs().max(y.abs()));
+    // Equality may absorb arithmetic roundoff, never a coordinate-scaled modeling tolerance.
+    const TOL: f64 = f64::EPSILON * 64.;
+    let near = |p: Vec2, q: Vec2| p.dist(q) <= TOL * (1.0 + p.len().max(q.len()));
+    let close = |x: f64, y: f64| (x - y).abs() <= TOL * (1.0 + x.abs().max(y.abs()));
     let matches = |(ca, pa): &(LCurve, Vec<Vec2>), (cb, pb): &(LCurve, Vec<Vec2>)| -> bool {
         if pa.len() != pb.len() {
             return false;
         }
-        let all = || pa.iter().zip(pb).all(|(p, q)| near_point(*p, *q));
+        let all = || pa.iter().zip(pb).all(|(p, q)| near(*p, *q));
         match (ca, cb) {
             (LCurve::Line(..), LCurve::Line(..)) => {
-                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near_point(*a0, *b1) && near_point(*a1, *b0))
+                all() || matches!((pa.as_slice(), pb.as_slice()), ([a0, a1], [b0, b1]) if near(*a0, *b1) && near(*a1, *b0))
             }
             (LCurve::Circle(_, ra), LCurve::Circle(_, rb)) => all() && close(*ra, *rb),
             (LCurve::Arc(..), LCurve::Arc(..)) => all(),
             (LCurve::Conic(.., ra), LCurve::Conic(.., rb)) => all() && close(*ra, *rb),
             (LCurve::Ellipse(.., ra), LCurve::Ellipse(.., rb)) => all() && close(*ra, *rb),
-            (LCurve::Spline(.., ca, da, pa, ka), LCurve::Spline(.., cb, db, pb, kb)) => {
-                ca == cb && da == db && pa == pb && same_nurbs(ka.as_ref(), kb.as_ref(), close) && all()
-            }
+            (LCurve::Spline(.., ca, da, pa, ka), LCurve::Spline(.., cb, db, pb, kb)) => ca == cb && da == db && pa == pb && ka == kb && all(),
             _ => false,
         }
     };
@@ -1287,9 +1287,14 @@ impl Sketch {
                     {
                         *r = *value;
                     }
-                    if let (Some(Curve { kind: CurveKind::Spline { nurbs, .. }, .. }), Some(LCurve::Spline(.., value))) =
-                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                    if let (
+                        Some(Curve { kind: CurveKind::Spline { control, degree, periodic, nurbs, .. }, .. }),
+                        Some(LCurve::Spline(_, _, _, _, ct, d, closed, value)),
+                    ) = (self.curves.get_mut(*ci), lay.curves.get(li))
                     {
+                        *control = *ct;
+                        *degree = *d;
+                        *periodic = *closed;
                         nurbs.clone_from(value);
                     }
                 }
