@@ -77,6 +77,10 @@ click ends the selection; in the message box Ctrl+A selects only the draft.
   window and let go. The side it would land on lights up while you drag. You can also pick
   **Left** or **Right** under Preferences → AI → Panel. SolidCraft remembers the side.
 - **Width:** drag the panel's inner edge. SolidCraft remembers it.
+- **Text size:** **A−** and **A+** under the input make the chat's messages and the input smaller
+  or bigger, 10 % a click, from 70 % to 200 %; Preferences → AI → Panel → **Text size** sets it too.
+  SolidCraft remembers it. The rest of the window keeps its size (Appearance → UI scale changes all
+  of it).
 - **Its own window:** the pop-out button in the header (a window with an arrow) moves the chat
   into a window of its own, named after the design, which you can move anywhere, including
   another screen. The window's own close button closes the chat, which opens there again next

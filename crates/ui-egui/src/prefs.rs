@@ -1535,6 +1535,9 @@ preference_settings! {
     /// The side the panel docks on (`left` or `right`), its width, and whether it is folded to a strip.
     agent_chat_side: String = "right".into(), PAGE_ASSISTANT;
     agent_chat_width: f32 = 380.0, PAGE_ASSISTANT;
+    /// The size of the chat's text (its messages and the input) as a factor on the usual sizes;
+    /// also the A− and A+ buttons under the chat's input.
+    agent_chat_text_scale: f32 = 1.0, PAGE_ASSISTANT, accept(crate::agent_chat::CHAT_TEXT_SCALE);
     agent_chat_minimized: bool = false, PAGE_ASSISTANT;
     /// Whether the chat is in its own window instead of the side panel, and that window's place
     /// and size as the system last reported them (`[x, y, width, height]`, points; `x` can be
@@ -3996,6 +3999,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::constraint_glyph_scale(&p) {
         p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
     }
+    if !accepted::agent_chat_text_scale(&p) {
+        p.agent_chat_text_scale = Prefs::default().agent_chat_text_scale;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4173,6 +4179,9 @@ fn prepare_preferences(
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
     }
+    if !accepted::agent_chat_text_scale(&new) {
+        return Err("`agent_chat_text_scale` must be 0.7…2".into());
+    }
     if !accepted::constraint_glyph_scale(&new) {
         return Err("`constraint_glyph_scale` must be 1…3".into());
     }
@@ -4254,6 +4263,9 @@ fn prepare_preferences(
     }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
+    }
+    if !accepted::agent_chat_text_scale(&new) {
+        return Err("`agent_chat_text_scale` must be 0.7…2".into());
     }
     if !accepted::perspective_fov(&new) {
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
@@ -9108,6 +9120,21 @@ mod tests {
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(h.app.preferences.max_sketch_points, DEFAULT_POINTS);
         h.call("ui.prefs", json!({"button": "cancel"}));
+    }
+
+    /// The chat's text size: `ui.prefs` refuses a value outside 0.7 to 2, and a file with one
+    /// comes back at the usual size.
+    #[test]
+    fn the_chat_text_size_refuses_out_of_range_and_falls_back() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let out = h.call("ui.prefs", json!({"agent_chat_text_scale": 1.5}));
+        assert_eq!(out["result"]["agent_chat_text_scale"].as_f64(), Some(1.5), "{out}");
+        for bad in [json!({"agent_chat_text_scale": 0.5}), json!({"agent_chat_text_scale": 3.0}), json!({"agent_chat_text_scale": "big"})] {
+            assert!(h.call("ui.prefs", bad.clone())["error"].is_string(), "{bad}");
+        }
+        assert_eq!(h.app.preferences.agent_chat_text_scale, 1.5, "a refused value changes nothing");
+        assert_eq!(super::lenient(&json!({"agent_chat_text_scale": 5.0})).agent_chat_text_scale, 1.0);
     }
 
     #[test]

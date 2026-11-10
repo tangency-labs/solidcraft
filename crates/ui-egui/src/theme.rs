@@ -2,6 +2,7 @@
 //! palette, its per-tab surfaces resolved, faded and published each frame, the blur it offers, and the 3D view's
 //! colours preference. Theme files themselves are `theme_files`, their options `theme_options`.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 
 use egui::Color32;
@@ -9,6 +10,70 @@ use serde::{Deserialize, Serialize};
 use solidcraft_theme::{
     AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
 };
+
+thread_local! {
+    /// The usual tokens and the ones [`with_text_scale`] draws with in their place, while one part
+    /// of the window is drawn with its own text size, per thread like the theme's state. `None`
+    /// everywhere else.
+    static TEXT_SCALED: Cell<Option<(Tokens, Tokens)>> = const { Cell::new(None) };
+}
+
+/// Draw with every font size of [`Tokens::get`] times `scale` (the agent chat's text size); the
+/// usual sizes come back afterwards, also when `draw` panics. A scale inside another one counts
+/// from the usual sizes. The tokens are bound as the panel's paint palette
+/// (`solidcraft_theme::scoped_panel_tokens`), so nothing of the theme's state changes.
+pub fn with_text_scale<R>(scale: f32, draw: impl FnOnce() -> R) -> R {
+    struct Restore(Option<(Tokens, Tokens)>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEXT_SCALED.set(self.0);
+        }
+    }
+    let current = Tokens::get();
+    let previous = TEXT_SCALED.get();
+    let usual = previous.filter(|(_, scaled)| *scaled == current).map_or(current, |(usual, _)| usual);
+    let scaled = text_scaled(usual, scale);
+    if scaled == current {
+        return draw();
+    }
+    TEXT_SCALED.set(Some((usual, scaled)));
+    // Declared before the palette's guard, so the palette goes back first.
+    let _restore = Restore(previous);
+    let _tokens = solidcraft_theme::scoped_panel_tokens(scaled);
+    draw()
+}
+
+/// `tokens` with every font size times `scale`; a scale that is not a positive number leaves
+/// them as they are.
+pub fn text_scaled(tokens: Tokens, scale: f32) -> Tokens {
+    if !scale.is_finite() || scale <= 0.0 || scale == 1.0 {
+        return tokens;
+    }
+    let mut t = tokens;
+    for size in [
+        &mut t.font_start_title,
+        &mut t.font_badge,
+        &mut t.font_micro,
+        &mut t.font_panel,
+        &mut t.font_small,
+        &mut t.font_caption,
+        &mut t.font_body,
+        &mut t.font_label,
+        &mut t.font_button,
+        &mut t.font_heading,
+        &mut t.font_triad,
+        &mut t.font_compass,
+        &mut t.font_subtitle,
+        &mut t.font_intro,
+        &mut t.font_page_heading,
+        &mut t.font_article_heading,
+        &mut t.font_title,
+        &mut t.font_display,
+    ] {
+        *size *= scale;
+    }
+    t
+}
 
 #[derive(Clone)]
 struct PreparedTheme {
@@ -614,5 +679,56 @@ mod tests {
             publish("SKETCH", 2.1);
             assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
         }
+    }
+
+    /// Every `font_*` size of the tokens scales (a new one would fail here), the tracking does not.
+    /// The fields come from the tokens' Debug text; a `font_*` field that is no number would be
+    /// skipped, which the count against the text catches.
+    #[test]
+    fn the_text_scale_covers_every_font_size() {
+        let fields = |t: &Tokens| -> std::collections::BTreeMap<String, f32> {
+            format!("{t:?}")
+                .split(", ")
+                .filter_map(|kv| {
+                    let (k, v) = kv.split_once(": ")?;
+                    let k = k.rsplit(' ').next()?;
+                    k.starts_with("font_").then(|| v.trim_end_matches(" }").parse::<f32>().ok().map(|v| (k.to_string(), v))).flatten()
+                })
+                .collect()
+        };
+        let (usual, scaled) = (fields(&Tokens::light()), fields(&text_scaled(Tokens::light(), 2.0)));
+        let named = format!("{:?}", Tokens::light()).matches("font_").count();
+        assert!(usual.len() == named && named >= 19 && usual.keys().eq(scaled.keys()), "{usual:?} of {named}");
+        for (k, v) in &usual {
+            let expected = if k == "font_section_tracking" { *v } else { v * 2.0 };
+            assert_eq!(scaled[k], expected, "{k}");
+        }
+    }
+
+    /// The agent chat's text size: every font size grows while its part is drawn, nothing else
+    /// does, and the usual sizes come back afterwards, also after a nested scale or a panic.
+    #[test]
+    fn a_text_scale_holds_only_while_its_part_is_drawn() {
+        let normal = Tokens::get();
+        let inside = with_text_scale(1.5, || {
+            let t = Tokens::get();
+            assert_eq!(with_text_scale(2.0, || Tokens::get().font_body), normal.font_body * 2.0);
+            assert_eq!(with_text_scale(1.0, || Tokens::get().font_body), normal.font_body);
+            assert_eq!(Tokens::get().font_body, normal.font_body * 1.5);
+            t
+        });
+        assert_eq!(inside.font_body, normal.font_body * 1.5);
+        assert_eq!(inside.font_article_heading, normal.font_article_heading * 1.5);
+        assert_eq!(inside.font_caption, normal.font_caption * 1.5);
+        assert_eq!((inside.space_8, inside.control_height), (normal.space_8, normal.control_height), "only text grows");
+        assert_eq!(Tokens::get(), normal);
+        assert_eq!(with_text_scale(f32::NAN, Tokens::get), normal, "a scale that is no number changes nothing");
+        // A palette bound inside a scaled part is scaled from its own sizes.
+        with_text_scale(1.5, || {
+            let _panel = solidcraft_theme::scoped_panel_tokens(Tokens::light());
+            assert_eq!(with_text_scale(2.0, || Tokens::get().font_body), Tokens::light().font_body * 2.0);
+        });
+        let _ = std::panic::catch_unwind(|| with_text_scale(3.0, || panic!("drawing failed")));
+        assert_eq!(Tokens::get(), normal, "a panic leaves the usual sizes");
     }
 }

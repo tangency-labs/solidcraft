@@ -51,7 +51,9 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{finish_shared, left_inset, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
+pub(crate) use panel::{
+    TEXT_SCALE as CHAT_TEXT_SCALE, finish_shared, left_inset, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space,
+};
 pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
