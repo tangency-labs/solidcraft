@@ -3952,23 +3952,27 @@ fn texture_admission_rejects_glass_and_stale_identity_and_honors_cancellation() 
     assert!(admission(&scene, &input, JobOptions::default()).is_err());
 }
 #[test]
-fn host_readiness_includes_unmapped_non_nested_glass() {
+fn host_readiness_includes_unmapped_glass() {
     let Some(executor) = executor() else { return };
     let context = &executor.context;
-    assert!(context.prepared_scene_pipeline(true, false, false, false).is_ok());
-    assert!(context.prepared_scene_pipeline(false, false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
+    assert!(context.prepared_scene_pipeline(true, false, false).is_ok());
+    assert!(context.prepared_scene_pipeline(false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
     assert!(context.clamped_pipelines.iter().all(|slot| slot.get().is_none()), "indirect-clamp programs stay lazy");
-    let plain = scene_pipeline_variant(false, false, false).unwrap();
+    let plain = scene_pipeline_variant(false, false).unwrap();
     assert!(context.scene_pipelines[plain].get().is_some());
-    for (opaque, maps, nested) in [(true, true, false), (false, false, true), (false, true, false), (false, true, true)] {
-        let variant = scene_pipeline_variant(opaque, maps, nested).unwrap();
-        assert!(context.scene_pipelines[variant].get().is_none(), "uncommon map/nesting programs stay lazy");
+    for (opaque, maps) in [(true, true), (false, true)] {
+        let variant = scene_pipeline_variant(opaque, maps).unwrap();
+        assert!(context.scene_pipelines[variant].get().is_none(), "the mapped program stays lazy");
     }
     let mut glass = sphere(white());
     glass.meshes[0].transmission = Some(clear_glass());
     let options = JobOptions { samples: 1, max_depth: 3, ..Default::default() };
+    // Nested media are a uniform: such a job runs the ready unmapped program, no second compile.
+    let nested = Task::new(context.clone(), glass.clone(), request(2), JobOptions { nested_media: true, ..options }, CancelToken::default()).unwrap();
+    assert_eq!(&nested.render_pipeline, context.prepared_scene_pipeline(false, false, false).unwrap());
     let mut task = Task::new(context.clone(), glass, request(2), options, CancelToken::default()).unwrap();
     assert!(!task.opaque_scene && !task.has_textures);
+    assert_eq!(task.render_pipeline, nested.render_pipeline);
     task.complete_sample().unwrap();
     let pixels = task.read_linear().unwrap();
     assert_eq!(pixels.len(), 4);
@@ -3977,7 +3981,7 @@ fn host_readiness_includes_unmapped_non_nested_glass() {
     let options = JobOptions { clamp_indirect: Some(2.0), ..options };
     let mut clamped = Task::new(context.clone(), sphere(white()), request(2), options, CancelToken::default()).unwrap();
     clamped.complete_sample().unwrap();
-    let opaque = clamped_pipeline_variant(true, false, false);
+    let opaque = clamped_pipeline_variant(true, false);
     for (index, slot) in context.clamped_pipelines.iter().enumerate() {
         assert_eq!(slot.get().is_some(), index == opaque, "clamped program {index}");
     }
@@ -4030,33 +4034,22 @@ fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
     let mut variants = std::collections::BTreeSet::new();
     for opaque in [false, true] {
         for maps in [false, true] {
-            for nested in [false, true] {
-                let slot = scene_pipeline_variant(opaque, maps, nested);
-                assert_eq!(slot.is_none(), opaque && !maps, "only opaque/no-map uses the eager base");
-                assert!(slot.is_none_or(|index| index < SCENE_PIPELINE_CACHE_SLOTS));
-                variants.insert(slot);
-            }
-            if opaque {
-                assert_eq!(scene_pipeline_variant(opaque, maps, false), scene_pipeline_variant(opaque, maps, true));
-            } else {
-                assert_ne!(
-                    scene_pipeline_variant(opaque, maps, false),
-                    scene_pipeline_variant(opaque, maps, true),
-                    "disjoint and nested options retain separate scene cache entries"
-                );
-            }
+            let slot = scene_pipeline_variant(opaque, maps);
+            assert_eq!(slot.is_none(), opaque && !maps, "only opaque/no-map uses the eager base");
+            assert!(slot.is_none_or(|index| index < SCENE_PIPELINE_CACHE_SLOTS));
+            variants.insert(slot);
         }
     }
     assert_eq!(variants.len(), SCENE_PIPELINE_CACHE_SLOTS + 1);
-    // Each of the six programs has its own clamped slot.
+    // The slot is the program: an opaque scene with maps runs the full program with maps.
+    assert_eq!(scene_pipeline_variant(true, true), scene_pipeline_variant(false, true), "mapped opaque and glass compile one program");
+    // Each of the three programs has its own clamped slot.
     let mut clamped = std::collections::BTreeMap::new();
     for opaque in [false, true] {
         for maps in [false, true] {
-            for nested in [false, true] {
-                let slot = clamped_pipeline_variant(opaque, maps, nested);
-                assert!(slot < CLAMPED_PIPELINE_CACHE_SLOTS);
-                clamped.entry(slot).or_insert_with(std::collections::BTreeSet::new).insert(scene_pipeline_variant(opaque, maps, nested));
-            }
+            let slot = clamped_pipeline_variant(opaque, maps);
+            assert!(slot < CLAMPED_PIPELINE_CACHE_SLOTS);
+            clamped.entry(slot).or_insert_with(std::collections::BTreeSet::new).insert(scene_pipeline_variant(opaque, maps));
         }
     }
     assert_eq!(clamped.len(), CLAMPED_PIPELINE_CACHE_SLOTS);
