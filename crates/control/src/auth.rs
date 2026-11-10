@@ -18,6 +18,10 @@ pub const MIN_TOKEN_LEN: usize = 32;
 /// program).
 pub const PORT_TRIES: u16 = 16;
 
+/// The error a connection past the server's `MAX_CONNECTIONS` is refused with, unrun; here, not in
+/// the desktop-only server, because clients on every target read it (docs/control-protocol.md).
+pub const TOO_MANY_CONNECTIONS: &str = "too many connections";
+
 /// Which app a control channel belongs to: where its token files live, its environment and its
 /// name in messages.
 #[derive(Clone, Copy)]
