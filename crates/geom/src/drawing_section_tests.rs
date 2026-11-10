@@ -35,8 +35,8 @@ fn a_line_along_a_paper_axis_gives_the_parent_turned_about_it() {
         let basis = full(a, b, arrows).basis(&front).unwrap();
         assert_eq!(axes(basis), axes(view.basis()), "{arrows:?} → {view:?}");
     }
-    // A half section looks across its first segment, not its last (which here runs down).
-    let half = line(SectionKind::Half, &[(-10.0, 5.0), (20.0, 5.0), (20.0, -10.0)], Right).unwrap();
+    // A half section looks across its first segment, not its last (which here runs up).
+    let half = line(SectionKind::Half, &[(-10.0, 5.0), (20.0, 5.0), (20.0, 20.0)], Right).unwrap();
     assert_eq!(axes(half.basis(&front).unwrap()), axes(NamedView::Top.basis()));
     // On a top view, a horizontal line with its arrows up gives the front view: as projected below it.
     let top = NamedView::Top.basis();
@@ -114,9 +114,10 @@ fn the_kept_region_holds_the_arrows_side() {
         (Full, &[(10.0, 10.0), (12.0, 10.0)], Right, 400),
         // Through the box's corner, slanted (no cell's centre on it): the triangle below, 40 × 20 / 2.
         (Full, &[(0.0, 0.0), (40.0, 20.0)], Right, 400),
-        // From the left to the middle, then down: the quarter it walks round on its right.
-        (Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, -5.0)], Right, 400),
+        // From the left to the middle, then down with its arrows on its left, or up with them on its right: all but
+        // the quarter inside its corner.
         (Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, -5.0)], Left, 1200),
+        (Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, 45.0)], Right, 1200),
         // Steps up at x = 15: below y = 10 left of it, below y = 30 right of it.
         (Offset, &[(-5.0, 10.0), (15.0, 10.0), (15.0, 30.0), (45.0, 30.0)], Right, 150 + 750),
         // A right-angled V about (20, 20): the quarter above right of it on its left.
@@ -169,12 +170,17 @@ fn hostile_lines_are_refused() {
     assert_eq!(refused(Full, &[(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)]), "a full section's cutting line has 2 points");
     assert_eq!(refused(Half, &[(0.0, 0.0), (1.0, 0.0)]), "a half section's cutting line has 3 points");
     // A square turn: cosine 1e-9 is kept, a little more refused; a turn of 89°, a turn back, refused.
-    assert!(line(Half, &[(-1.0, 0.0), (0.0, 0.0), (1e-9, 1.0)], Left).is_ok());
+    assert!(line(Half, &[(-1.0, 0.0), (0.0, 0.0), (1e-9, -1.0)], Left).is_ok());
     let square = "a half section's cutting line turns a square corner";
-    assert_eq!(refused(Half, &[(-1.0, 0.0), (0.0, 0.0), (1.1e-9, 1.0)]), square);
+    assert_eq!(refused(Half, &[(-1.0, 0.0), (0.0, 0.0), (1.1e-9, -1.0)]), square);
     let (s, c) = 89f64.to_radians().sin_cos();
-    assert_eq!(refused(Half, &[(0.0, 0.0), (1.0, 0.0), (1.0 + c, s)]), square);
+    assert_eq!(refused(Half, &[(0.0, 0.0), (1.0, 0.0), (1.0 + c, -s)]), square);
     assert_eq!(refused(Half, &[(0.0, 0.0), (1.0, 0.0), (0.5, 0.0)]), square);
+    // It turns away from its arrows, so the quarter it takes is inside its corner: a right turn for arrows on its
+    // left, a left turn for arrows on its right. Toward them, it would keep only that quarter.
+    let away = "a half section's cutting line turns away from its arrows";
+    assert_eq!(refused(Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, 45.0)]), away);
+    assert_eq!(line(Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, -5.0)], ArrowSide::Right).unwrap_err().0, away);
     assert_eq!(refused(Offset, &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]), "an offset section's cutting line has an even number of points, 4 or more");
     assert_eq!(refused(Offset, &[(0.0, 0.0), (1.0, 0.0)]), "an offset section's cutting line has an even number of points, 4 or more");
     assert_eq!(refused(Offset, &[(0.0, 0.0), (1.0, 0.0), (1.1, 1.0), (2.0, 1.0)]), "an offset section's cutting line turns only square corners");
@@ -211,6 +217,7 @@ fn seeded_lines_keep_their_arrows_side() {
         let scale = 10f64.powf(rng.unit() * 8.0 - 3.0);
         let mut at = Vec2::new(rng.unit() - 0.5, rng.unit() - 0.5) * scale;
         let first = Vec2::from_angle(rng.unit() * std::f64::consts::TAU);
+        let arrows = if rng.unit() < 0.5 { ArrowSide::Left } else { ArrowSide::Right };
         let kinds = [SectionKind::Full, SectionKind::Half, SectionKind::Offset, SectionKind::Aligned];
         let pick = (rng.unit() * 4.0) as usize % 4;
         let kind = kinds[pick];
@@ -224,8 +231,8 @@ fn seeded_lines_keep_their_arrows_side() {
             SectionKind::Full => step(first, &mut rng),
             SectionKind::Half => {
                 step(first, &mut rng);
-                let side = if rng.unit() < 0.5 { first.perp() } else { -first.perp() };
-                step(side, &mut rng);
+                // Away from its arrows: left (`perp`) for arrows on its right.
+                step(if arrows == ArrowSide::Right { first.perp() } else { -first.perp() }, &mut rng);
             }
             SectionKind::Offset => {
                 for _ in 0..1 + (rng.unit() * 4.0) as usize {
@@ -240,7 +247,6 @@ fn seeded_lines_keep_their_arrows_side() {
                 step(Vec2::from_angle(first.angle() + 0.2 + rng.unit() * 2.7), &mut rng);
             }
         }
-        let arrows = if rng.unit() < 0.5 { ArrowSide::Left } else { ArrowSide::Right };
         let Ok(cut) = CuttingLine::new(kind, points.clone(), arrows) else {
             continue;
         };
@@ -261,7 +267,7 @@ fn seeded_lines_keep_their_arrows_side() {
 /// A line reads back as it was written, and a saved line that breaks a rule is refused on reading.
 #[test]
 fn a_line_round_trips_and_a_bad_one_is_refused_on_reading() {
-    let cut = line(SectionKind::Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, -5.0)], ArrowSide::Right).unwrap();
+    let cut = line(SectionKind::Half, &[(-5.0, 20.0), (20.0, 20.0), (20.0, 45.0)], ArrowSide::Right).unwrap();
     let text = serde_json::to_string(&cut).unwrap();
     assert!(text.starts_with(r#"{"kind":"half","points":"#) && text.ends_with(r#","arrows":"right"}"#), "{text}");
     assert_eq!(serde_json::from_str::<CuttingLine>(&text).unwrap(), cut);

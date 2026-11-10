@@ -32,7 +32,8 @@ pub const MIN_LENGTH: f64 = 1e-6;
 pub enum SectionKind {
     /// One straight cut: two points.
     Full,
-    /// A cut to the middle that turns a quarter turn, taking a quarter away: three points.
+    /// A cut to the middle that turns a quarter turn away from its arrows, taking away the quarter inside its corner:
+    /// three points.
     Half,
     /// A stepped cut: legs that all run the first one's way, joined by square steps, four or more
     /// points, a leg first and last.
@@ -94,7 +95,8 @@ impl CuttingLine {
     /// The line through `points` of shape `kind`, its arrows to `arrows`. Every point is finite and
     /// within 1e12 mm, there are 2 to [`MAX_POINTS`] of them, and each segment is at least
     /// [`MIN_LENGTH`] long. A square turn and parallel legs are within [`PARALLEL`] (the cosine or
-    /// sine of their angle): the same tolerance as a view's directions. Within those rules no kind's
+    /// sine of their angle): the same tolerance as a view's directions. A half line turns away from its
+    /// arrows, so that it keeps three quarters. Within those rules no kind's
     /// line can cross itself, so none is checked for it.
     pub fn new(kind: SectionKind, points: Vec<Vec2>, arrows: ArrowSide) -> Result<CuttingLine> {
         require((2..=MAX_POINTS).contains(&points.len()), "a cutting line has 2 to 32 points")?;
@@ -108,6 +110,9 @@ impl CuttingLine {
             SectionKind::Half => {
                 require(points.len() == 3, "a half section's cutting line has 3 points")?;
                 require(turns().all(|(_, cos)| cos.abs() <= PARALLEL), "a half section's cutting line turns a square corner")?;
+                // Away from its arrows, so that it keeps three quarters: left (a positive sine) for arrows on its right.
+                let turns_left = turns().all(|(sin, _)| sin > 0.0);
+                require(turns_left == (arrows == ArrowSide::Right), "a half section's cutting line turns away from its arrows")?;
             }
             SectionKind::Offset => {
                 require(
