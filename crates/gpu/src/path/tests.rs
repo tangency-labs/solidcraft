@@ -2361,46 +2361,69 @@ fn shader_validates_without_a_device() {
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&caustic).unwrap();
 }
 
+/// Visits every statement a native compiler inlines into `block`: nested blocks, and at each call
+/// site the callee's body again, as inlining copies it.
+fn each_inlined(module: &naga::Module, block: &naga::Block, visit: &mut impl FnMut(&naga::Statement)) {
+    for statement in block.iter() {
+        visit(statement);
+        match statement {
+            naga::Statement::Call { function, .. } => each_inlined(module, &module.functions[*function].body, visit),
+            naga::Statement::Block(inner) => each_inlined(module, inner, visit),
+            naga::Statement::If { accept, reject, .. } => {
+                each_inlined(module, accept, visit);
+                each_inlined(module, reject, visit);
+            }
+            naga::Statement::Switch { cases, .. } => cases.iter().for_each(|case| each_inlined(module, &case.body, visit)),
+            naga::Statement::Loop { body, continuing, .. } => {
+                each_inlined(module, body, visit);
+                each_inlined(module, continuing, visit);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// #6705: native compilers inline every call. With 33 inlined BVH walks in `main` (three path
 /// samples, a shadow walk per light source family) NVIDIA's Vulkan compiler crashed or ran out
 /// of memory and never built the pipeline. Count the walks `main` inlines, so another call site
 /// is a deliberate choice, checked on such a driver.
 #[test]
 fn main_inlines_few_bvh_walks() {
-    fn callees(block: &naga::Block, out: &mut Vec<naga::Handle<naga::Function>>) {
-        for statement in block.iter() {
-            match statement {
-                naga::Statement::Call { function, .. } => out.push(*function),
-                naga::Statement::Block(inner) => callees(inner, out),
-                naga::Statement::If { accept, reject, .. } => {
-                    callees(accept, out);
-                    callees(reject, out);
-                }
-                naga::Statement::Switch { cases, .. } => cases.iter().for_each(|case| callees(&case.body, out)),
-                naga::Statement::Loop { body, continuing, .. } => {
-                    callees(body, out);
-                    callees(continuing, out);
-                }
-                _ => {}
-            }
-        }
-    }
-    fn walks(module: &naga::Module, function: &naga::Function) -> usize {
-        let mut called = Vec::new();
-        callees(&function.body, &mut called);
-        called
-            .into_iter()
-            .map(|handle| {
-                let callee = &module.functions[handle];
-                let walk = matches!(callee.name.as_deref(), Some("trace_precise_within" | "trace_ordered_within" | "origin_boundary"));
-                usize::from(walk) + walks(module, callee)
-            })
-            .sum()
-    }
     let module = naga::front::wgsl::parse_str(SHADER).unwrap();
     let main = module.entry_points.iter().find(|entry| entry.name == "main").unwrap();
-    let inlined = walks(&module, &main.function);
+    let mut inlined = 0;
+    each_inlined(&module, &main.function.body, &mut |statement| {
+        if let naga::Statement::Call { function, .. } = statement {
+            let callee = module.functions[*function].name.as_deref();
+            inlined += usize::from(matches!(callee, Some("trace_precise_within" | "trace_ordered_within" | "origin_boundary")));
+        }
+    });
     assert!(inlined <= 5, "`main` inlines {inlined} BVH walks");
+}
+
+/// #14105: the walks' size matters too. A native compiler's time and memory grow faster than the
+/// statements it inlines: on one Vulkan driver the path programs took up to 17 minutes and 61 GB
+/// to compile. Each budget is about 1.5 times its entry point's count when #14105 was fixed, far
+/// below the count before (before -> fixed): path `main` 196,450 -> 28,414, `optical_resolve`
+/// 54,888 -> 7,777, `denoise_guides` 70,517 -> 7,906, caustic `main` 211,786 -> 33,386 and
+/// `photon_emit` 107,085 -> 14,782. A larger program is a deliberate choice, checked on such a driver.
+#[test]
+fn heavy_entry_points_inline_few_statements() {
+    let guides = format!("{SHADER}\n{}", denoise::GUIDES);
+    let caustics = photons::shader_source().unwrap();
+    for (program, source, entry, budget) in [
+        ("path", SHADER, "main", 45_000),
+        ("path", SHADER, "optical_resolve", 12_000),
+        ("denoise", guides.as_str(), "denoise_guides", 12_000),
+        ("caustic", caustics.as_str(), "main", 50_000),
+        ("caustic", caustics.as_str(), "photon_emit", 22_000),
+    ] {
+        let module = naga::front::wgsl::parse_str(source).unwrap();
+        let function = &module.entry_points.iter().find(|point| point.name == entry).unwrap().function;
+        let mut statements = 0usize;
+        each_inlined(&module, &function.body, &mut |_| statements += 1);
+        assert!(statements <= budget, "the {program} program's `{entry}` inlines {statements} statements, over its budget of {budget}");
+    }
 }
 
 #[test]

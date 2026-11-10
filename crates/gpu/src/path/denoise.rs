@@ -7,7 +7,7 @@ use wgpu::util::DeviceExt;
 pub(super) const GUIDE_BYTES_PER_PIXEL: u64 = 96; // two complete surface guides
 pub(super) const BYTES_PER_PIXEL: u64 = GUIDE_BYTES_PER_PIXEL + 32; // two colour vec4s
 const FILTER: &str = include_str!("denoise.wgsl");
-const GUIDES: &str = include_str!("denoise_guides.wgsl");
+pub(super) const GUIDES: &str = include_str!("denoise_guides.wgsl");
 #[cfg(test)]
 #[path = "denoise_tests.rs"]
 mod tests;
