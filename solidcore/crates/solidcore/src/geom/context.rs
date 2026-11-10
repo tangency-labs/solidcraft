@@ -1413,6 +1413,24 @@ mod tests {
         }
     }
 
+    /// WR-1 regression (golden `geom.context`): after a pair lock on two contexts
+    /// whose free marks differ, releasing every lock leaves no mark locked. The old
+    /// path locked context 0's mark type in context 1 and released context 1's own,
+    /// leaving context 1's `Mark2` locked.
+    #[test]
+    fn wr1_no_mark_stays_locked_after_every_release() {
+        let mut cs = [Context::default(), Context::default()];
+        let mut outer = MarkLock::new(&mut cs, 0, ALL_MARKS).unwrap();
+        let mut pair = MarkLock::new_pair(&mut cs, 0, 1).unwrap();
+        pair.release(&mut cs).unwrap();
+        outer.release(&mut cs).unwrap();
+        for (i, c) in cs.iter().enumerate() {
+            for m in ALL {
+                assert!(!c.is_mark_locked(m), "context {i} left {m:?} locked");
+            }
+        }
+    }
+
     #[test]
     fn wr1_same_context_and_out_of_bounds() {
         {

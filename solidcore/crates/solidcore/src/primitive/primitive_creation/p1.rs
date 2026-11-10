@@ -445,11 +445,15 @@ mod tests {
             ),
         ];
         let error = extend_path_curves(&paths, true, false, 0.15824074046667785).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("create_extended_curve_by_distance"),
-            "{error}"
+        assert_eq!(
+            error.operation(),
+            "nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance"
+        );
+        assert_eq!(
+            error.nurbs_failure(),
+            Some(&crate::error::nurbs::NurbsFailure::BSpline(
+                crate::error::nurbs::BSplineFailure::RoutineFailed
+            ))
         );
     }
 

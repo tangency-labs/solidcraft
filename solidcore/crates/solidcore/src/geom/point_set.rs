@@ -447,7 +447,8 @@ impl PointSet3d {
         // when asked and if needed - refine PBox
         if !self.cache.has(Cache::PBOX_REFINED) && want_refine {
             // Upstream aligns the box with a hull edge only for Planar sets; a Linear
-            // set's hull is its segment, which the alignment finds as well (WR-10).
+            // set's hull is its segment, which the alignment finds as well (WR-10). This
+            // cannot lose a point or loosen the box: see `set_up_tight_pseudo_box`.
             let align = self.cache.has(Cache::POINT_SET_TYPE)
                 && matches!(
                     self.point_set_type,
@@ -461,6 +462,17 @@ impl PointSet3d {
     /// `SetUpTightPseudoBox`: tries five rotations of the pseudo box about its normal
     /// and keeps the smallest base area; with `extra_planar_work`, also tries the
     /// rotation that puts a hull edge on the box boundary.
+    ///
+    /// Containment holds by construction, whatever the angles and whatever the set's
+    /// type. Every candidate box is built the same way: `set_basis` on a rotated basis,
+    /// then `init`, then `add_point` of every point. If `set_basis` refuses, the box
+    /// keeps its previous basis and is still rebuilt from every point. `add_point`
+    /// widens each interval to the point's coordinate along that basis, the same
+    /// coordinate `contains_point` tests, so each candidate's intervals run from the
+    /// smallest to the largest coordinate over all the points and enclose every one.
+    /// The angle decides only the base area, and a candidate replaces the box only
+    /// when its area is strictly smaller. Running the alignment for Linear sets
+    /// (`set_up_bboxes`) therefore can neither drop a point nor enlarge the box.
     fn set_up_tight_pseudo_box(
         &mut self,
         extra_planar_work: bool,
@@ -1073,6 +1085,67 @@ mod tests {
         assert!(pb.xy_area() < 1e-9, "area {}", pb.xy_area());
         for &p in &pts {
             assert!(pb.contains_point(p, 1e-9));
+        }
+    }
+
+    /// WR-10 Linear alignment: adversarial collinear sets (oblique and nearly parallel
+    /// box normals, a line along the box normal, huge and tiny scales, duplicates,
+    /// two points, noise within tolerance). Every tight box, with and without an
+    /// explicit normal, holds every point.
+    #[test]
+    fn wr10_linear_set_tight_box_holds_adversarial_sets() {
+        let dir = Vec3::new(3.0, -1.0, 2.0);
+        let base = Vec3::new(1.5, -2.0, 0.25);
+        let line = |ts: &[f64], o: Vec3, d: Vec3| -> Vec<Point3> {
+            ts.iter().map(|t| o + *t * d).collect()
+        };
+        let ts = [0.0, 7.0, -3.0, 2.5, 7.0, -3.0, 0.1];
+        let perp = dir.cross(Vec3::Z).unitize().unwrap();
+        let noisy: Vec<Point3> = ts
+            .iter()
+            .enumerate()
+            .map(|(i, t)| base + *t * dir + (if i % 2 == 0 { 3e-8 } else { -3e-8 }) * perp)
+            .collect();
+        let cases: Vec<(&str, Vec<Point3>, f64, Vec3)> = vec![
+            (
+                "oblique z",
+                line(&ts, base, dir),
+                1e-6,
+                Vec3::new(1.0, 2.0, 3.0),
+            ),
+            (
+                "z nearly along the line",
+                line(&ts, base, dir),
+                1e-6,
+                dir + Vec3::new(0.0, 1e-3, 0.0),
+            ),
+            ("line along z", line(&ts, base, Vec3::Z), 1e-6, Vec3::Z),
+            ("huge", line(&ts, base * 1e6, dir * 1e5), 1e-3, Vec3::Z),
+            (
+                "tiny",
+                line(&ts, base, dir * 1e-4),
+                1e-9,
+                Vec3::new(0.0, 1.0, 1.0),
+            ),
+            ("two points", line(&[0.0, 1.0], base, dir), 1e-6, Vec3::X),
+            ("noise within tolerance", noisy, 1e-6, Vec3::Z),
+        ];
+        for (name, pts, tol, z) in cases {
+            let scale = pts.iter().map(|p| p.length()).fold(1.0, f64::max);
+            let slack = tol + 1e-12 * scale;
+            let mut seq = PointSequence::new(pts.clone(), tol, true, None);
+            seq.normal().unwrap();
+            assert_eq!(seq.point_set_type, PointSetType::Linear, "{name}");
+            let mut zz = z;
+            let pb_z = seq.tight_pbox(Some(&mut zz)).unwrap();
+            let mut fresh = PointSequence::new(pts.clone(), tol, true, None);
+            let pb = fresh.tight_pbox(None).unwrap();
+            for b in [&pb_z, &pb] {
+                assert!(b.xy_area().is_finite(), "{name}");
+                for &p in &pts {
+                    assert!(b.contains_point(p, slack), "{name}: {p:?} outside");
+                }
+            }
         }
     }
 

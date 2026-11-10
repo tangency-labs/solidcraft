@@ -667,6 +667,22 @@ mod tests {
         assert_eq!((e.min(), e.max()), (0.8, 0.2));
     }
 
+    /// WR-6 regression (golden `geom.periodic_extent1d` `add_empty_quirk`): adding
+    /// an interval to an empty extent gives that interval, forward or backward. The
+    /// old path returned the full period `[0, 1]` for both.
+    #[test]
+    fn wr6_empty_extent_takes_the_added_interval_not_the_full_period() {
+        let mut forward = empty(1.0);
+        forward.add_interval(0.2, 0.3, true).unwrap();
+        assert!(!forward.is_full_period());
+        assert_eq!((forward.min(), forward.max()), (0.2, 0.3));
+
+        let mut backward = empty(1.0);
+        backward.add_interval(0.5, 0.2, false).unwrap();
+        assert!(!backward.is_full_period());
+        assert_ne!((backward.min(), backward.max()), (0.0, 1.0));
+    }
+
     #[test]
     fn wr6_empty_add_interval_backward() {
         let mut e = empty(1.0);
