@@ -605,7 +605,11 @@ pub fn show(ui: &mut egui::Ui, row: &Row, rect: Rect, more_rows: &mut dyn FnMut(
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
     // Pinned constraints join the grid, which widens a column at a time beyond its default six.
     let gallery_width = |cells: usize| {
-        if labels { GALLERY_WIDTH + gallery_columns(true, cells).saturating_sub(3) as f32 * 27.0 } else { gallery_columns(false, cells) as f32 * 27.0 }
+        if labels {
+            GALLERY_WIDTH + gallery_columns(true, cells).saturating_sub(3) as f32 * 27.0
+        } else {
+            gallery_columns(false, cells) as f32 * 27.0
+        }
     };
     let (top, right) = (rect.top(), rect.right());
     let mut px = rect.left();
