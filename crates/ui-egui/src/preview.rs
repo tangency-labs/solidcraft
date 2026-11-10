@@ -101,6 +101,9 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
+    /// how free the part is with the constraint it shows.
+    pub placed: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
@@ -153,6 +156,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The reply of a previewed assembly constraint (see [`Built::placed`]).
+    pub placed: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
@@ -187,6 +192,7 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.placed = None;
         self.tapered.clear();
         self.sketches.clear();
         self.busy = false;
@@ -223,6 +229,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.placed = b.placed;
                 self.tapered = b.tapered;
                 self.set_scene(b.scene);
             }
@@ -234,6 +241,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.placed = None;
                 self.tapered.clear();
             }
         }
@@ -323,6 +331,8 @@ fn motion_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> Option
                     | "joint.rack_pinion"
                     | "joint.screw"
                     | "joint.cam"
+                    | "assembly.constraint.create"
+                    | "assembly.constraint.edit"
             )
         })
     {
@@ -647,6 +657,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        placed: None,
     }
 }
 
@@ -795,7 +806,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, placed: None }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -1111,6 +1122,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            placed: None,
         }
     }
 

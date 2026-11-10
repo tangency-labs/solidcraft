@@ -127,6 +127,7 @@ impl MovePreview {
             sketches: Vec::new(),
             applied: None,
             stopped: None,
+            placed: None,
             tapered: Vec::new(),
             replaced: if copy { Vec::new() } else { bodies },
             error: None,

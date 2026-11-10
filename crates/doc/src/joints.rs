@@ -458,17 +458,18 @@ pub enum Constraint {
 }
 
 impl Constraint {
+    /// Every rule, the likeliest first for a pair of references (see [`Constraint::fitting`]).
     pub const ALL: [Constraint; 10] = [
         Constraint::Mate,
         Constraint::Flush,
-        Constraint::Distance,
         Constraint::Concentric,
         Constraint::Insert,
+        Constraint::Tangent,
+        Constraint::PointOnAxis,
+        Constraint::Distance,
         Constraint::Parallel,
         Constraint::Perpendicular,
         Constraint::Angle,
-        Constraint::Tangent,
-        Constraint::PointOnAxis,
     ];
 
     /// The rule's command name (`mate`, `point_on_axis`).
@@ -487,6 +488,46 @@ impl Constraint {
         }
     }
 
+    /// How the rule is kept as a joint between references of shapes `a` and `b`; `None` when they
+    /// don't fit it. The one table of which rules fit which references: the commands refuse what it
+    /// refuses, and the Constrain dialog offers what it fits.
+    pub fn fit(self, a: RefShape, b: RefShape) -> Option<Fit> {
+        use RefShape::*;
+        let fixed = |kind, flip| Some(Fit { kind, flip: Some(flip), swap: false });
+        let facing = |kind| Some(Fit { kind, flip: None, swap: false });
+        // A line: a round face's or edge's axis, or an axis itself.
+        let axial = |s: RefShape| matches!(s, Round | Axis);
+        // A rule between one plane or axis and something else: the plane or axis on side a.
+        let onto = |kind, want: &dyn Fn(RefShape) -> bool, other_ok: &dyn Fn(RefShape) -> bool| {
+            if want(a) && other_ok(b) {
+                Some(Fit { kind, flip: Some(false), swap: false })
+            } else if want(b) && other_ok(a) {
+                Some(Fit { kind, flip: Some(false), swap: true })
+            } else {
+                None
+            }
+        };
+        match (self, a, b) {
+            (Constraint::Mate, Plane, Plane) => fixed(JointKind::Planar, false),
+            (Constraint::Flush, Plane, Plane) => fixed(JointKind::Planar, true),
+            (Constraint::Distance, Plane, Plane) => facing(JointKind::Planar),
+            (Constraint::Distance, ..) => onto(JointKind::PointOnPlane, &|s| s == Plane, &|s| matches!(s, Round | Point)),
+            (Constraint::Concentric, ..) if axial(a) && axial(b) => facing(JointKind::Cylindrical),
+            (Constraint::Insert, Round, Round) => facing(JointKind::Revolute),
+            (Constraint::Parallel, ..) => facing(JointKind::Parallel),
+            (Constraint::Perpendicular, ..) => fixed(JointKind::Perpendicular, false),
+            (Constraint::Angle, ..) => fixed(JointKind::Angle, false),
+            (Constraint::Tangent, ..) => onto(JointKind::LineOnPlane, &|s| s == Plane, &|s| s == Round),
+            (Constraint::PointOnAxis, ..) => onto(JointKind::PointOnLine, &axial, &|s| s == Point),
+            _ => None,
+        }
+    }
+
+    /// The rules references of shapes `a` and `b` fit, the likeliest first.
+    pub fn fitting(a: RefShape, b: RefShape) -> Vec<Constraint> {
+        Constraint::ALL.into_iter().filter(|c| c.fit(a, b).is_some()).collect()
+    }
+
     /// Case, spaces, `_` and `-` are ignored; `coincident` and `axis` are also taken.
     pub fn parse(s: &str) -> Option<Constraint> {
         let key = s.to_ascii_lowercase().replace([' ', '_', '-'], "");
@@ -496,6 +537,41 @@ impl Constraint {
             _ => Constraint::ALL.into_iter().find(|c| c.name().replace('_', "") == key),
         }
     }
+}
+
+/// What an assembly constraint's reference is, for the rules that need one kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefShape {
+    /// A planar face, a frame or a datum plane: its plane and normal.
+    Plane,
+    /// A round face's or edge's centre and axis.
+    Round,
+    /// A point (a vertex, an edge, a sketch point): its position.
+    Point,
+    /// A datum or construction axis: a line, with no rim or radius.
+    Axis,
+}
+
+impl RefShape {
+    /// The shape of a joint origin's snap.
+    pub fn of(snap: &Snap) -> RefShape {
+        match snap {
+            Snap::FaceCenter { .. } | Snap::Frame { .. } | Snap::Plane { .. } => RefShape::Plane,
+            Snap::Axis { .. } => RefShape::Axis,
+            Snap::CircleCenter { .. } => RefShape::Round,
+            Snap::Point { .. } | Snap::Edge { .. } => RefShape::Point,
+        }
+    }
+}
+
+/// How a rule is kept as a joint: its kind, whether b faces along a (`flip`), and whether the two
+/// references go the other way round (the plane or axis on side a).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fit {
+    pub kind: JointKind,
+    /// `Some` where the rule fixes the facing; `None` keeps the parts' facing now.
+    pub flip: Option<bool>,
+    pub swap: bool,
 }
 
 /// A joint between two occurrences.
