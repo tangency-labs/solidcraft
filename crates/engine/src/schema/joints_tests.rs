@@ -28,7 +28,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SolveJointsParams>(), &["quiet"]);
     assert_keys(
         input_schema_for::<MakeJointOriginParams>(),
-        &["body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "point", "x", "z"],
+        &["axis", "body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "plane", "point", "x", "z"],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "joints", "occurrence", "point", "quiet", "z"]);
@@ -164,6 +164,8 @@ fn strict_keeps_todays_errors() {
         ("joint.origin", json!({"circle": [0, 0, 0], "occurrence": 0, "z": "up"})),
         ("joint.origin", json!({"edge": [0, 0, 0], "occurrence": 0, "z": 5})),
         ("joint.origin", json!({"frame": {"origin": [0, 0, 0]}, "occurrence": 0})),
+        ("joint.origin", json!({"plane": 5})),
+        ("joint.origin", json!({"axis": true})),
         // joint.rigid_group
         ("joint.rigid_group", json!({})),
         ("joint.rigid_group", json!({"occurrences": null})),
@@ -292,12 +294,16 @@ fn the_types_read_each_key_as_the_handlers_do() {
         json!({"edge": {"x": 0, "y": 0, "z": 0}, "z": [0, 0, 1]}),
         json!({"point": [1, 2, 3], "x": [1, 0, 0]}),
         json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1]}}),
+        json!({"plane": "XY"}),
+        json!({"plane": "o:2/origin/XY"}),
+        json!({"axis": "Z"}),
+        json!({"axis": "o:2/origin/X"}),
     ] {
         assert_eq!(create(json!({"a": side})), none(), "{side}");
     }
     assert_eq!(issues("joint.create", json!({"type": "rigid"})), none());
-    let why = "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name";
-    for side in [json!(5), json!(null), json!([1, 2, 3]), json!({}), json!({"face": [1, 2]}), json!({"face": 7})] {
+    let why = "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name";
+    for side in [json!(5), json!(null), json!([1, 2, 3]), json!({}), json!({"face": [1, 2]}), json!({"face": 7}), json!({"plane": 5})] {
         assert_eq!(create(json!({"a": side})), [why], "{side}");
     }
     assert_eq!(create(json!({"b": {"frame": {"z": [0, 0, 1]}}})), ["`frame` needs origin and z"]);
@@ -975,7 +981,9 @@ fn strict_keeps_todays_errors_for_the_cam() {
 #[test]
 fn the_remaining_types_read_each_key_as_the_handlers_do() {
     let none = Vec::<String>::new;
-    let why = "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name";
+    let why = "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name";
+    let plane_form = "`plane` must be a plane name (e.g. \"XY\", \"o:2/origin/XY\", \"Plane1\") or a plane definition object";
+    let axis_form = "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object";
     let x_form = "`x` is a direction [x, y, z], a face's name, or {face: [x, y, z]}";
     let end_name = "`end` is the name of a face a round end lies on";
     let end_round = "`end` is for a round origin (`circle`)";
@@ -1011,6 +1019,11 @@ fn the_remaining_types_read_each_key_as_the_handlers_do() {
         json!({"face": [1, 2], "point": [1, 2, 3]}),
         json!({"face": [1, 2, 3], "circle": "C", "end": "E"}),
         json!({"face": null, "circle": null, "point": [1, 2, 3]}),
+        // The datum forms: a plane or axis by name or key, as plane_origin and axis_origin read them.
+        json!({"plane": "XY"}),
+        json!({"plane": "o:2/origin/XY"}),
+        json!({"axis": "Z"}),
+        json!({"axis": "o:2/origin/X"}),
     ] {
         assert_eq!(origin(p.clone()), none(), "{p}");
     }
@@ -1061,6 +1074,9 @@ fn the_remaining_types_read_each_key_as_the_handlers_do() {
         (json!({"point": [1, 2, 3], "x": 5}), "a point origin's `x` is a direction [x, y, z]"),
         (json!({"point": [1, 2, 3], "x": "F"}), "a point origin's `x` is a direction [x, y, z]"),
         (json!({"point": [1, 2, 3], "name": 5}), "`name` must be text"),
+        // A datum side's value: a name or key, or a definition object, as the handler reads it.
+        (json!({"plane": 5}), plane_form),
+        (json!({"axis": true}), axis_form),
     ];
     for (p, message) in refused {
         assert_eq!(origin(p.clone()), [message], "{p}");
@@ -1279,6 +1295,11 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"edge": [1, 2, 3], "on": [0, 0, 0], "corner": {"x": 1, "y": 2, "z": 3}, "z": [1, 0, 0]}), true),
             (json!({"point": [1, 2, 3], "z": [0, 0, 1], "x": [1, 0, 0]}), true),
             (json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}), true),
+            (json!({"plane": "XY"}), true),
+            (json!({"plane": "o:2/origin/XY"}), true),
+            (json!({"axis": "Z"}), true),
+            (json!({"plane": 5}), false),
+            (json!({"axis": true}), false),
             (json!({}), false),
             (json!({"name": "N"}), false),
             (json!({"face": [1, 2]}), false),
@@ -1391,7 +1412,8 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
     let screw = input_schema_for::<ScrewParams>();
     assert_eq!(screw.as_value()["anyOf"], json!([{"required": ["joint"]}, {"required": ["a", "b"]}]));
     assert_eq!(input_schema_for::<ReachParams>().as_value()["dependentRequired"], json!({"axis": ["z"]}));
-    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(5));
+    // face, circle, edge, point, plane, axis and frame: the forms the handler reads.
+    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(7));
 }
 
 /// A design with the pieces the couplings join, and a tray with a hole for the joint origins by

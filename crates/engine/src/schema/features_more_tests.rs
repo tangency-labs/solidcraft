@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{BoundaryFillParams, CoilParams, RemoveParams, ReplaceFaceParams, RibParams};
+use super::{BoundaryFillParams, CoilParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -56,6 +56,23 @@ fn coil() -> Value {
     json!({"diameter": 40, "revolutions": 2, "pitch": 8, "section_size": 4})
 }
 
+/// `Sleeve`, a cylinder, and `Badge`, a rectangle on the plane touching it at Y = 10.
+fn badge(level: ParamCheck) -> Session {
+    session(
+        level,
+        &[
+            ("solid.cylinder", json!({"radius": 10, "height": 20, "body_name": "Sleeve"})),
+            ("sketch.create", json!({"name": "Badge", "plane": {"origin": [0, 10, 0], "x_dir": [-1, 0, 0], "y_dir": [0, 0, 1]}})),
+            ("sketch.rectangle.two_point", json!({"p0": [-2, 5], "p1": [2, 10]})),
+            ("sketch.finish", json!({})),
+        ],
+    )
+}
+
+fn emboss() -> Value {
+    json!({"sketch": "Badge", "face": [0, 10, 7.5], "depth": 1})
+}
+
 fn rib() -> Value {
     json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4})
 }
@@ -74,6 +91,10 @@ fn schemas_and_the_key_check_agree() {
         &["body_name", "body_names", "curves", "depth", "direction", "flip", "name", "participants", "sketch", "thickness", "touching"],
     );
     assert_keys(input_schema_for::<RemoveParams>(), &["bodies", "body_name", "body_names", "name", "participants"]);
+    assert_keys(
+        input_schema_for::<EmbossParams>(),
+        &["body_name", "body_names", "depth", "face", "mode", "name", "participants", "profiles", "sketch", "targets"],
+    );
     assert_keys(
         input_schema_for::<BoundaryFillParams>(),
         &["body_name", "body_names", "cells", "name", "operation", "participants", "remove_tools", "tools", "touching"],
@@ -224,6 +245,30 @@ fn the_contracts_refuse_what_the_handlers_ignore() {
     }
 }
 
+/// Calls Emboss refuses today get the same message in strict; a `mode` that isn't text, which
+/// the handler ignores, is refused by the contract, and so is a misspelt key.
+#[test]
+fn emboss_contract_keeps_the_handlers_errors() {
+    assert_strict_keeps_errors_on(
+        badge,
+        &[
+            ("solid.emboss", with(&emboss(), "depth", json!(null))),
+            ("solid.emboss", with(&emboss(), "depth", json!("nope"))),
+            ("solid.emboss", with(&emboss(), "depth", json!("2 deg"))),
+            ("solid.emboss", with(&emboss(), "mode", json!("sideways"))),
+            ("solid.emboss", with(&emboss(), "face", json!(null))),
+            ("solid.emboss", with(&emboss(), "face", json!([0, 10]))),
+            ("solid.emboss", with(&emboss(), "face", json!([500, 500, 500]))),
+            ("solid.emboss", with(&emboss(), "sketch", json!(true))),
+            ("solid.emboss", with(&emboss(), "sketch", json!("Nope"))),
+            ("solid.emboss", with(&emboss(), "targets", json!(5))),
+            ("solid.emboss", with(&emboss(), "profiles", json!(true))),
+        ],
+    );
+    assert!(!crate::schema::issues("solid.emboss", &with(&emboss(), "mode", json!(5))).is_empty());
+    assert!(badge(ParamCheck::Strict).execute("solid.emboss", &with(&emboss(), "depht", json!(1))).is_err());
+}
+
 /// #12655: the schemas take what the handlers take. Each call is checked against both the schema
 /// and the handler, with the check off, so the two can't drift apart.
 #[test]
@@ -271,6 +316,22 @@ fn the_schemas_take_what_the_handlers_take() {
         &[json!({"bodies": "B"}), json!({"bodies": ["A", "B"], "name": "Gone"}), json!({"bodies": []}), json!({"bodies": [5]}), json!({})],
     );
     agree(
+        badge,
+        "solid.emboss",
+        input_schema_for::<EmbossParams>(),
+        &[
+            emboss(),
+            with(&emboss(), "depth", json!("1 mm")),
+            with(&emboss(), "mode", json!("emboss")),
+            with(&emboss(), "profiles", json!("all")),
+            with(&emboss(), "targets", json!(["Sleeve"])),
+            with(&emboss(), "face", json!({"x": 0, "y": 10, "z": 7.5})),
+            with(&emboss(), "depth", json!("")),
+            with(&emboss(), "mode", json!("glue")),
+            with(&emboss(), "face", json!([0, 10])),
+        ],
+    );
+    agree(
         coil_section,
         "solid.coil",
         input_schema_for::<CoilParams>(),
@@ -294,6 +355,8 @@ fn the_features_reply_with_their_schemas() {
     let r = check(&mut bracket(ParamCheck::Warn), "solid.rib", with(&rib(), "name", json!("Brace")));
     assert_eq!((&r["name"], &r["changed_bodies"]), (&json!("Brace"), &json!(["L"])), "{r}");
     check(&mut bracket(ParamCheck::Warn), "solid.web", rib());
+    let r = check(&mut badge(ParamCheck::Warn), "solid.emboss", with(&emboss(), "name", json!("Mark")));
+    assert_eq!((&r["name"], &r["changed_bodies"]), (&json!("Mark"), &json!(["Sleeve"])), "{r}");
     let mut s = boxes(ParamCheck::Warn);
     let r = check(&mut s, "solid.boundary_fill", json!({"tools": ["A", "B"], "cells": [[15, 10, 10]], "body_name": "Lens"}));
     assert_eq!(r["created_bodies"], json!(["Lens"]), "{r}");

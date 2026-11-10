@@ -98,10 +98,11 @@ fn variable_round_reach(fix: bool) -> Vec<(f64, [[bool; 2]; 2])> {
 /// and 8 across, the union's top over 20001 balls).
 const ENVELOPE_VOLUME: f64 = 5_831.254_415;
 
-/// Traced farther, the round is the same union of balls (WR-685): both within 5.5e-5 of the
-/// 168.75 removed, to the approximated arcs' accuracy. The trace's stations differ, so the
-/// two skins differ by 1.5e-4 in volume (2.5e-8 relative); before the round was the union
-/// of its balls, the great circles' two skins agreed to 5e-6.
+/// Traced farther, the round is the same union of balls (WR-685): both within 1.6e-5 of the
+/// 168.75 removed, the skins of the balls' exact circles (WR-708). The trace's stations
+/// differ, yet the two skins agree to 2.1e-8 in volume; upstream's approximated arcs were
+/// 5.5e-5 off, their two skins 1.5e-4 apart, and before the round was the union of its
+/// balls, the great circles' two skins agreed to 5e-6.
 #[test]
 fn variable_round_traced_farther_comes_out_the_same() {
     for fix in [false, true] {

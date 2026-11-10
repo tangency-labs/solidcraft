@@ -30,12 +30,14 @@ pub mod command_help;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
+pub mod control_switch;
 pub mod crash_ui;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
 pub mod dialog_column;
 mod dialog_descriptor;
+pub(crate) mod dialog_tree;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -176,6 +178,7 @@ mod status_tests {
 }
 #[cfg(test)]
 mod apply_off_thread_tests;
+mod export_name;
 mod expression_complete;
 #[cfg(test)]
 mod extrude_auto_to_object_tests;
@@ -214,6 +217,7 @@ pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
+pub mod operations;
 pub mod panel_runtime;
 pub mod params_dialog;
 pub mod personal_sheet_rules;
@@ -493,6 +497,12 @@ pub struct Services {
     pub desktop_dark: Option<Box<dyn Fn() -> Option<bool>>>,
     /// Lazy background observation; `needed` arms polling, the return is cached only.
     pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
+    /// Graphics API that opened the current window; the saved preference applies next start.
+    pub graphics_backend: Option<&'static str>,
+    /// An explicit process override is controlling the API instead of the saved preference.
+    pub graphics_backend_override: bool,
+    /// The host's ordinary restart command, run only after unsaved designs are handled.
+    pub graphics_restart: Option<(std::path::PathBuf, Vec<String>)>,
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).
@@ -672,7 +682,8 @@ pub struct SolveApp {
     /// A command recomputing the history (the marker moved, undo) computing off the window
     /// thread, and those asked for meanwhile ([`deferred`]).
     pub deferred: Option<deferred::Deferred>,
-    pub deferred_queue: Vec<(String, Value)>,
+    /// Commands waiting their turn, each with its operation's serial ([`operations::serial`]).
+    pub deferred_queue: Vec<(String, Value, u64)>,
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
     pub start_after_roll: Option<(String, u64)>,
@@ -790,6 +801,8 @@ pub struct SolveApp {
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
     pub frame_rate: frame_rate::FrameRate,
+    /// The operations under way, in the view's corner ([`operations`]).
+    pub operations: operations::Panel,
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
@@ -798,6 +811,8 @@ pub struct SolveApp {
     /// A synthetic press is held: its drag never moves the real cursor (`navigation::wrap_cursor`).
     pub(crate) synthetic_press: bool,
     control_rx: Option<Receiver<ControlRequest>>,
+    /// The app's control channel turned on and off from the settings ([`control_switch`]).
+    pub control_switch: control_switch::ControlSwitch,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
     control_held: std::collections::VecDeque<ControlRequest>,
@@ -863,14 +878,12 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
-        // The app's icons, likewise, before the first frame.
-        icon_svg::install();
+        // The app's look (icons, glyphs and built-in theme files), likewise, before the first frame.
+        solidcraft_look::install_tables();
         // The tab table theme files are read against, likewise.
         workspace::install_tabs();
         // The navigation slots stored bars are read against, likewise.
         navigation_slots::install();
-        // The built-in theme files, likewise.
-        theme::install_builtin_themes();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -998,11 +1011,13 @@ impl SolveApp {
             cpu_meshing: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
             synthetic_press: false,
             control_rx: None,
+            control_switch: Default::default(),
             agent_chat: Default::default(),
             ai_connect: Default::default(),
             control_held: Default::default(),
@@ -1298,6 +1313,8 @@ impl SolveApp {
         // Before a file given at start opens: the largest file it may be (#4086).
         prefs::apply_file_limits(&self.preferences);
         render_workspace::apply_memory_policy(self);
+        // Before a design given at start opens: the largest sketch it may build (#10874).
+        prefs::apply_sketch_limit(&self.preferences);
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
             self.preferences.theme = if self.ui.dark { "dark" } else { "light" }.into();
@@ -1808,6 +1825,14 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
+            }
+            return;
+        }
+        // Before the folder pick is cleared: a clicked Browser folder is what Show/Hide acts on.
+        // With a menu open, this runs that menu's Show/Hide on what the menu is for.
+        if id == "ui.toggle_visibility" {
+            if !context_menu::press_shortcut(self, "V") {
+                context_menu::toggle_visibility(self);
             }
             return;
         }
@@ -2712,6 +2737,7 @@ impl SolveApp {
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
+        v.extend(agent_chat::hovered_chip(self).iter().cloned());
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v
@@ -3319,6 +3345,7 @@ impl SolveApp {
             self.esc_handled = false;
         }
         prefs::apply(self, ctx);
+        control_switch::tick(self, ctx.input(|i| i.time), Some(ctx));
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
         solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
         solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
@@ -3682,6 +3709,7 @@ impl SolveApp {
         }
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
         view_confirm::show(self, ui.ctx());
+        dialog_tree::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         if !self.universal_panel_host_enabled() {

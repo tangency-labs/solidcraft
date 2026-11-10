@@ -318,11 +318,12 @@ fn replies_match_the_output_schema() {
     // The midpoints of two lines.
     let mut s = editing(ParamCheck::Warn);
     dim(&mut s, json!({"entities": ["mid:l1", "mid:l2"], "text_at": [30, 15], "type": "auto"}));
-    // Scaling a sketch's first dimension.
+    // Scaling a sketch's first dimension. A lone circle's diameter only sizes the circle and
+    // does not scale the sketch (#11438), so the sketch here is a line.
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
-    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
-    let r = dim(&mut s, json!({"entities": ["c1"], "value": "30 mm", "scale_sketch": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let r = dim(&mut s, json!({"entities": ["l1"], "value": "30 mm", "scale_sketch": true}));
     assert!(r["scaled"].as_f64().is_some_and(|f| f > 1.0), "{r}");
     // An ellipse's half-axis.
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };

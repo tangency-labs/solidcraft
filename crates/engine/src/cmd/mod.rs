@@ -89,6 +89,7 @@ mod parts;
 mod point_cloud;
 mod script;
 mod section;
+mod selection;
 pub mod settings;
 pub(crate) use clipboard::{component_path_form, copy_keys};
 pub(crate) use component::matrix::{rigid as rigid_matrix, tolerance as matrix_tolerance};
@@ -364,6 +365,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
+    v.extend(selection::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());
     v.extend(sketch_clipboard::COMMANDS.iter());
     v.extend(script::COMMANDS.iter());

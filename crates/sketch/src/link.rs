@@ -748,7 +748,7 @@ impl Sketch {
         if lay.curves.is_empty() && lay.lone.is_empty() {
             return Err(SketchError::Invalid("the reference projects to nothing on this sketch plane".into()));
         }
-        if self.points.len() + lay.pts.len() > crate::model::MAX_POINTS {
+        if self.points.len().saturating_add(lay.pts.len()) > crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
