@@ -810,7 +810,8 @@ impl RemoveAll {
 /// one and the knot vectors are merged by knot insertion. Knots of different
 /// surfaces within the knot-merge tolerance are moved to their average first.
 ///
-/// Errors: `InvalidInput` for an empty slice or invalid surfaces; errors of the
+/// Errors: `InvalidInput` for an empty slice, invalid surfaces, or a surface whose
+/// control points mix rational and non-rational (changing nothing); errors of the
 /// degree elevation, the knot merge and the knot insertion (the surfaces are left as
 /// far as upstream got).
 pub fn make_compatible(sur: &mut [Surface], dir: Direction) -> Result<()> {
@@ -820,6 +821,11 @@ pub fn make_compatible(sur: &mut [Surface], dir: Direction) -> Result<()> {
             operation: OP,
             reason: "no surfaces",
         });
+    }
+    // As in `join`: on a mixed net the rational conversion would move weighted points
+    // or keep `NOW` as a weight.
+    for s in sur.iter() {
+        s.refuse_mixed_rationality(OP)?;
     }
 
     // Make surface definitions compatible.
@@ -948,9 +954,17 @@ fn merge_knots(sur: &mut [Surface], d: Direction) -> Result<Vec<Vec<f64>>> {
 /// other than [`Direction::U`] joins in v.
 ///
 /// Errors: [`NurbsFailure::Input`] when the net sizes or degrees across `dir` differ;
-/// errors of the degree elevation; `InvalidInput` for invalid surfaces.
+/// errors of the degree elevation; `InvalidInput` for invalid surfaces and for a
+/// surface whose control points mix rational and non-rational.
 pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p3::join";
+
+    // A net mixed after construction (through `Surface::cpt_mut`, `set_cpts_and_knots`
+    // or `set_size_indices`) is refused here: the rational conversion below judges a
+    // piece by `Pw[0][0]` alone, so it would give a weighted point of a "non-rational"
+    // piece the weight 1.0 (moving it), or keep `NOW` as a weight on a "rational" one.
+    sur1.refuse_mixed_rationality(OP)?;
+    sur2.refuse_mixed_rationality(OP)?;
 
     // Work in the v direction; the u direction transposes the inputs and the result.
     let tr = |s: &Surface| {
