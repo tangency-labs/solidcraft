@@ -1777,7 +1777,8 @@ mod tests {
             if saved {
                 let png = image::load_from_memory_with_format(&std::fs::read(path).unwrap(), image::ImageFormat::Png).unwrap();
                 assert_eq!(png.into_rgba8().dimensions(), (4, 3));
-                assert!(text.contains(path) && text.contains("drag the PNG file"));
+                assert!(text.contains("report.png") && text.contains("drag the PNG file"));
+                assert!(!text.contains(h.dir.to_str().unwrap()), "the public issue text never names the folder");
                 assert!(text.contains("NOT attached yet"));
                 assert!(draft.note.contains(path) && draft.note.contains("drag"));
             } else {

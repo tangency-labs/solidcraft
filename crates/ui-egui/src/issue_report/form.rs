@@ -58,7 +58,10 @@ pub(super) fn open_github(draft: &mut Draft, ctx: &egui::Context, path: &str) {
                     #[cfg(target_arch = "wasm32")]
                     let path = path.strip_prefix("/downloads/").unwrap_or(path);
                     let key = "ui.report_screenshot_drag";
-                    body = with_visual_context(&body, &english.format(key, &[("file", path)]));
+                    // The issue is public: it names the file only, never the folder (which can hold the
+                    // user name). The window's note keeps the whole path so the reporter can find it.
+                    let file = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+                    body = with_visual_context(&body, &english.format(key, &[("file", file)]));
                     draft.note = solidcraft_ui_text::format(key, &[("file", path)]);
                 }
                 Err(error) => {
