@@ -4,8 +4,8 @@
     "ui.first_dimension_scales_about_origin_tip": "On: the drawing always grows or shrinks about the sketch origin, so a shape drawn away from the origin moves. Off: a drawing that nothing ties to the origin scales about its own middle and stays where it was drawn."
   },
   "ar": {
-    "ui.first_dimension_scales_about_origin": "تغيير المقياس حول أصل الرسم التخطيطي",
-    "ui.first_dimension_scales_about_origin_tip": "عند التفعيل: يكبر الرسم أو يصغر دائمًا حول أصل الرسم التخطيطي، فيتحرك الشكل المرسوم بعيدًا عن الأصل. عند الإيقاف: الرسم غير المرتبط بالأصل يتغير مقياسه حول منتصفه ويبقى في مكانه."
+    "ui.first_dimension_scales_about_origin": "تغيير المقياس حول أصل الرسم",
+    "ui.first_dimension_scales_about_origin_tip": "عند التفعيل: يكبر المرسوم أو يصغر دائمًا حول أصل الرسم، فإذا كان الشكل مرسومًا بعيدًا عن الأصل تحرّك. عند الإيقاف: المرسوم غير المرتبط بالأصل يتغير مقياسه حول منتصفه ويبقى حيث رُسم."
   },
   "de": {
     "ui.first_dimension_scales_about_origin": "Um den Skizzenursprung skalieren",

@@ -140,7 +140,10 @@ fn copy_in(k: &mut Kernel, piece: &mut Brep, b: &mut Brep) -> Result<()> {
     let this_face = |f: FaceId| key_of(EntityRef::Face(f));
     let (_, copied) = copy_faces(k, piece, &faces, b, false, &this_face, &mut env)?;
     if !copied {
-        return Err(SolidError::sm_err("CopyFaces"));
+        return Err(SolidError::sweep_failed(
+            "CopyFaces",
+            "the corner pieces' faces could not be copied",
+        ));
     }
     Ok(())
 }
@@ -332,7 +335,10 @@ pub fn cornered_sweep(
     stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default())?;
     b.refresh_cached_topology();
     if !is_manifold_solid(&b)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep_failed(
+            OP,
+            "the cornered sweep is not a manifold solid",
+        ));
     }
     Ok(b)
 }

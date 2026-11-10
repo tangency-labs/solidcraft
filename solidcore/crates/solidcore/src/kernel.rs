@@ -148,9 +148,9 @@ impl Caches {
     }
 }
 
-/// Counts of the work done by the steps of a boolean or a blend whose cost once grew with
-/// the square of the body's size, so a test can check how that work grows: the same on every
-/// machine, where a ratio of times is not (the SolidCraft fork's `SmWorkCounters`,
+/// Counts of the work done by the steps of a boolean, a blend or a tight box whose cost once
+/// grew with the square of the body's size, so a test can check how that work grows: the same
+/// on every machine, where a ratio of times is not (the SolidCraft fork's `SmWorkCounters`,
 /// tangency-labs/smlib@2e9e6b2 and @edf7414).
 ///
 /// Each count is added where its work is done; counting changes no result. The fork's
@@ -163,6 +163,7 @@ pub struct WorkCounters {
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
+    face_extreme_control_points: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -199,12 +200,23 @@ impl WorkCounters {
         self.proto_edge_intersections.get()
     }
 
+    /// Control points of the B-spline nets the trimmed-face tight box's directed solves
+    /// ran on (`face_directed_max`, WR-588), summed over its solves: a solve's control-net
+    /// guesses read every control point of the surface it is given. Each cell of a
+    /// B-spline face is solved on its own subpatch, so the count grows with the cells'
+    /// spans, not with the cells times the whole net. Not the fork's.
+    #[must_use]
+    pub fn face_extreme_control_points(&self) -> u64 {
+        self.face_extreme_control_points.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
         self.proto_edge_intersections.set(0);
+        self.face_extreme_control_points.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -228,6 +240,12 @@ impl WorkCounters {
     pub(crate) fn add_proto_edge_intersection(&self) {
         self.proto_edge_intersections
             .set(self.proto_edge_intersections.get().saturating_add(1));
+    }
+
+    /// Counts the control points of the net one trimmed-face extreme solve ran on.
+    pub(crate) fn add_face_extreme_control_points(&self, n: u64) {
+        self.face_extreme_control_points
+            .set(self.face_extreme_control_points.get().saturating_add(n));
     }
 }
 
@@ -491,8 +509,6 @@ pub struct UpstreamFixes {
     pub loop_use_reports_open_gaps: bool,
     /// `SmEdge::AssertValid` test 9 orders the faces round an edge by the direction to each face's point 20 edge tolerances into it (square to the edge) where two of them leave the edge within `SM_ANG_TOL_DEG` of each other, instead of by the binormals alone, which tie for faces tangent along the edge (a cylinder resting on a plane, kept by a boolean as a four-face edge) and fail the valid order (WR-540, #383; the fork's tangency-labs/smlib@5533bbb).
     pub edge_check_orders_tangent_faces: bool,
-    /// `CreateOrientedTrimBoundary` takes a UV gap of whole periods (up to 1% of one) in a closed direction between consecutive curves for a seam crossing and moves the curves after it by the period, instead of filling it with a line across the whole domain that doubles the loop back on itself (WR-491). A loop that does not close that way keeps the line, and so does a gap along a singular side of the surface (a sphere's pole, a cone's apex; #1437).
-    pub trim_boundary_seam_wrap: bool,
     /// `SmBSplineCurve::AssertValid` reads the minimum radius of curvature before tests 13/14 compare it (WR-382, #475).
     pub bspline_check_min_radius: bool,
     /// `SmEllipse::AdjustSTEPInterval` rejects inverted STEP edits and collapsed or non-finite converted NURBS intervals before mutation, and revolution edits install their domain only after their generator accepts it (WR-211, #428).
@@ -513,8 +529,6 @@ pub struct UpstreamFixes {
     pub uv_trim_checks_on_surface: bool,
     /// `SmBSplineCurve::AssertValid` takes a zero-speed tangent end of an edge's curve or UV trim (its end control points coincide, its second derivative does not vanish, the end is a vertex of the edge, and the edge's faces have parallel normals there within `SM_CONTINUITY_ANGLE`): test 3 accepts the coincident first control points, and tests 13/14 (live with `bspline_check_min_radius`) skip a radius below the tolerance within the stretch of the end where its growth `2 |C''|^3 / |C'' x C'''| |t - t_end|` puts it below. A G2 blend's end on a face tangent to its own leaves the vertex as a B-spline in `t ~ sqrt(s)`, with zero speed there (WR-668; tangency-labs/smlib ecf1963, the same patch as 6ca3405 in tangency-labs/smlib#76).
     pub curve_check_zero_speed_tangent_end: bool,
-    /// `SmFace::ComputeLoopOrientation`'s 3D path holds a loop's dimensionless area to a floor relative to the loop's own bounding box instead of the face's whole domain, so a loop far smaller than its face (a 0.002 hole in a 3 m plate) is oriented (WR-561, #1523; tangency-labs/smlib 54ca3e0).
-    pub loop_orientation_floor_from_loop_box: bool,
     /// The N-dimensional local solve takes no value from a failed evaluation (WR-253; the fork's tangency-labs/smlib@d2757e1). The one-dimensional solver does this by default since #2574, so this flag no longer reaches it. `SmLocalSolveNd::SolveIt` sums no equations of a failed clamped or scaled evaluation, takes the clamped-and-scaled step only when it evaluated, and then with that evaluation's Jacobian and found flag (upstream kept the unscaled point's), stops the line search when the clamped step failed and no scaled one was taken, and finds no solution when the best guess cannot be re-evaluated (#1945), nor when the guess's first evaluation fails, where upstream reports the unevaluated guess as found (WR-20; the fork's tangency-labs/smlib@d5c5cfd).
     pub oscillating_skips_failed_guesses: bool,
     /// `sm_RefineCCSolutions` judges a range end's shift by its distance from 1 (WR-383, #527).
@@ -807,18 +821,6 @@ pub struct UpstreamFixes {
     /// of one read unset (WR-663, #2009 group D; tangency-labs/smlib 7a35f33, 6997962,
     /// 666242b, 8843967, 8311f8e, 21dcf69). Off by default for pinned parity.
     pub query_statuses_pass_on: bool,
-    /// `SmTrimmingTools::IsIsoCurve(cpUVCurve, eSide, dLow, d2DTolerance)`
-    /// ([`crate::topology::trimming_tools::is_iso_curve_at_with_fixes`], and its callers
-    /// [`crate::topology::trimming_tools::is_iso_curve`] and
-    /// [`crate::topology::trimming_tools::fix_backwards_outer_loop_on_seam`]) propagates a
-    /// failing `GetCanonical` status (such as `SM_ERR` on an `SmBSplineCurve` without a
-    /// NURB) as `Err` instead of returning `SER(cpUVCurve->GetCanonical(..))`'s nonzero
-    /// status as `SmBoolean` (`Ok(true)`), which falsely classifies a curve whose control
-    /// points cannot be read as an iso-curve (WR-97, #2212;
-    /// `plan/upstream-issues/WR-97--addendum-2026-11-01-is-iso-curve-canonical-failure.md`).
-    /// [`crate::topology::trimming_tools::is_iso_curve_at`] keeps its four-argument
-    /// signature and pinned `Ok(true)` default. Off by default for pinned C++ parity.
-    pub is_iso_curve_at_propagates_canonical_failure: bool,
     /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
     /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
     /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
@@ -877,8 +879,6 @@ pub struct UpstreamFixes {
     /// carrying on and reporting success (WR-661, #2009 group B; tangency-labs/smlib
     /// 873c7c9, 66b02de, 9b7cd48). Off by default for pinned parity.
     pub fillet_statuses_pass_on: bool,
-    /// `SmShell::IsInnerShellOf` passes on the statuses it ignores (fork 4038552): `UNSURE` when the outer shell's closure, the B-rep's box, the sample points or a crossing face's point or normal cannot be computed; a ray that cannot be solved or classified decides nothing and the next ray is tried (WR-497, #1473).
-    pub shell_inner_shell_of_statuses: bool,
     /// `SmEdge::ReverseOrientation` returns a failed curve reversal's status before installing the interval, flipping the edge uses or deleting their UV trims, and an edge without curve keeps its interval (WR-260, #521; WR-260 addendum, tangency-labs/smlib 47507b6).
     pub edge_reversal_keeps_failed_edge: bool,
     /// `SmProjectedCurve::Transform` permits an owned base curve
@@ -949,6 +949,49 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-101--addendum-2026-10-31-opt-in-upper-interval.md`). The
     /// lower child is `[old_min, dT]` either way. Off by default for pinned C++ parity.
     pub proto_edge_split_upper_keeps_the_old_max: bool,
+    /// `SmEdgeDefinition::Split` gives the new upper definition its own copies of the 3D and
+    /// UV curves and trims both definitions' curves to their intervals before
+    /// `AddEdgeDefinition` hangs the new one on the upper proto edge. Upstream copies and
+    /// trims after that call, and it reparameterizes the new definition onto the upper
+    /// proto edge whenever their intervals or directions differ: the new definition then
+    /// still holds the lower one's whole curve, so that curve is moved too (the lower
+    /// definition's trim to its interval then misses it: `SmBSplineCurve::Trim`, `SM_ERR`,
+    /// passed on with `ssi_proto_topology_statuses_pass_on`, ignored upstream), and the
+    /// whole curve, not the upper part, is mapped onto the upper proto edge. A proto edge
+    /// that both bodies split at one point has two definitions; a STEP part cut by an exact
+    /// copy of itself failed this way (solidcore-native, no fork commit).
+    pub split_edge_definition_owns_its_curves: bool,
+    /// With `simple_coincidence_crossing_is_point`, `SimpleCoincidenceChecker` decides on
+    /// which side of this curve the other lies from the end pairs' separation across this
+    /// curve (its tangent's component removed). An end of one curve that runs past the other
+    /// curve's end drops onto that end, so the raw separation there points along the
+    /// curves: forward at one end, back at the other, and two curves lying on each other
+    /// (`4.2e-14` apart, one `4.8e-6` longer at each end) were taken for curves crossing: one
+    /// point where they lie on each other, or `SM_ERR` where no crossing is found (a body cut
+    /// by an exact copy of itself) (solidcore-native, no fork commit).
+    pub simple_coincidence_side_across_the_curve: bool,
+    /// `SmTopologyIntersector::IntersectInsertRelate` keeps the proto topology's capture
+    /// distance below half the smallest distance between two vertices of either operand
+    /// (never below the intersection tolerance), so that no proto vertex captures two
+    /// distinct vertices of one operand: two points d apart are never both closer than d / 2
+    /// to a third. Upstream takes the larger of 0.01 and 2000 times the intersection
+    /// tolerance, unbounded: with a STEP file's tolerances (0.01 on every edge) that is
+    /// 20 mm, every vertex of a 30 mm rim was captured into one proto vertex, the rim's
+    /// intersection with an exact copy of itself became one closed proto edge, and the
+    /// merge failed (`SmMerge::MakeFaceuse`, `SM_ERR`) (solidcore-native, no fork commit).
+    pub boolean_capture_keeps_operand_vertices_apart: bool,
+    /// `SmEdge::RadialSectorClassify`, when stepping off the edge leaves a face before the
+    /// classification is unique, reads a coincident classify face's side against the face it
+    /// coincides with: the sector edge use's face (`CoincidentSector` or its mate) or the
+    /// radial partner's (`CoincidentRadial` or its mate), as the coincidence test of the same
+    /// loop does (with the sector face's normal, and with the classify face's normal from its
+    /// projected binormal). Upstream reads both against the radial partner's normal, which
+    /// for a classify face lying on the sector face is a different face at the sector angle:
+    /// past 90 degrees that picks the wrong face use, the coincident pair is taken for
+    /// opposite sides, and a body minus an exact copy of itself keeps the face (a cone face of a 30 mm rim,
+    /// stepped off its face at count 8, sector angle 59 degrees with a
+    /// near-antiparallel normal) and is not closed (solidcore-native, no fork commit).
+    pub radial_sector_step_off_coincidence_by_own_face: bool,
     /// `SmMerge::BooleanPostProcess` also checks the merged face's edges that a face merge left with that face on both sides (slits), not only the intersection edges (WR-304, #1120).
     pub boolean_cleanup_removes_slits: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057).
@@ -1016,8 +1059,6 @@ pub struct UpstreamFixes {
     pub imprint_trims_edge_to_proto_vertex: bool,
     /// `SmEdgeDefinition::Imprint` continues an intersection edge's 3d and UV curves, each by the polynomial of its own end span, to a proto vertex that lies a few tolerances past the curve's end, so the edge reaches its vertex (internal thread cuts; WR-453, #410; tangency-labs/smlib bf5d3ae (was a8caccd)). The end goes to its proto vertex's position only when that proto vertex is one vertex in each B-rep, else to its own final vertex (WR-498, #1480; tangency-labs/smlib 0b1b945 (was ffaf4e8)).
     pub imprint_extends_edge_to_proto_vertex: bool,
-    /// With `imprint_extends_edge_to_proto_vertex`, a line, circle or ellipse is continued to its proto vertex over its NURB and stays that kind: a circle or ellipse keeps its frame, radii and inside-out sense, its angular domain carried on to the new end, and a line runs between the continued ends (the bar-top/boss arc of a union, an exact `SmCircle` from `SmCone::IntersectWithPlane`, stopped 5.4e-10 short of its tangent point). Without it those kinds are not continued (the fork before this change made them plain B-splines). The new curve must evaluate as the continued NURB does, or the curve is not continued (WR-601; the fork's tangency-labs/smlib@bec8a0b).
-    pub imprint_extension_keeps_analytic_curve: bool,
     /// `SmEdgeDefinition::Imprint` takes an edge Brep2's face already has between the definition's two vertices along its curve (`SmTools::FindCoincidentEdge` within the larger of the face's and the definition's tolerance) as the definition's edge there, where upstream makes a second edge beside it: the face then has coincident edges and the merge copies the boundary edge into Brep1 beside the curve's (`SmFace` tests 33 and 34; two equal tubes meeting end to end) (WR-580, #1519; the fork's tangency-labs/smlib@81cd61a).
     pub imprint_reuses_coincident_face_edge: bool,
     /// `SmFilletSolver::ComputePointValues` chooses its finite-difference step for each point (1e-3 at a tangent point, 1e-5 otherwise), not once per process as the function-local static `sdStaticStep`, so a blend does not depend on the blends before it ([`Kernel::fillet_point_step`] is then neither read nor set, and an existing latch is kept as it is) (ND-3, #1173; the fork's tangency-labs/smlib@9e17f64 (was 0a05860)).

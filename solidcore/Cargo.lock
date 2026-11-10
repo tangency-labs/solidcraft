@@ -107,9 +107,10 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcore",
+ "solidcore-record",
  "solidcore-ssi",
  "ssi",
- "step-import",
+ "step-export",
  "toml",
 ]
 
@@ -378,14 +379,7 @@ name = "step-export"
 version = "0.1.0"
 dependencies = [
  "solidcore",
- "step-import",
-]
-
-[[package]]
-name = "step-import"
-version = "0.1.0"
-dependencies = [
- "solidcore",
+ "solidcore-record",
 ]
 
 [[package]]

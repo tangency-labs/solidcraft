@@ -13,9 +13,9 @@
     "prefs.export_name": "اسم ملف التصدير",
     "prefs.export_name.body": "اسم الجسم المُصدَّر (الأول إن تعددت الأجسام)",
     "prefs.export_name.design": "اسم التصميم",
-    "prefs.export_name_hint": "مثلاً {design}-{body}",
+    "prefs.export_name_hint": "مثلًا {design}-{body}",
     "prefs.export_name_sample": "تصدير هذا التصميم يقترح: {name}",
-    "prefs.export_name_tip": "اسم الملف الذي يقترحه ملف › تصدير وحفظ كشبكة. تُستبدل هذه العناصر النائبة:\n{placeholders}\nتُحذف خاصية التصميم غير المعيّنة. اترك الحقل فارغاً لاقتراح اسم التصميم، أو اسم الجسم للشبكة."
+    "prefs.export_name_tip": "اسم الملف الذي يقترحه «ملف › تصدير» و«حفظ كشبكة». تُستبدل هذه العناصر النائبة:\n{placeholders}\nتُحذف خاصية التصميم غير المعيّنة. اترك الحقل فارغًا لاقتراح اسم التصميم، أو اسم الجسم للشبكة."
   },
   "de": {
     "prefs.export": "Export",

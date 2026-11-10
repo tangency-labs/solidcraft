@@ -21,7 +21,7 @@
     "prefs.graphics_api_auto": "تلقائي",
     "prefs.graphics_api_help": "اختر واجهة الرسوميات المستخدمة لفتح SolidCraft. إذا تعذّر فتح النافذة عند التشغيل التالي، فستُستعاد السابقة.",
     "prefs.graphics_api_override": "يتحكم إعداد عند التشغيل في واجهة الرسوميات. سيُطبّق الاختيار المحفوظ عند فتح SolidCraft بالطريقة العادية.",
-    "prefs.graphics_api_restart_note": "يُطبّق بعد إعادة التشغيل. تُعالَج التصميمات غير المحفوظة قبل الإغلاق.",
+    "prefs.graphics_api_restart_note": "يُطبّق بعد إعادة التشغيل. تُعالَج التصاميم غير المحفوظة قبل الإغلاق.",
     "prefs.graphics_api_restart_unavailable": "أعد تشغيل SolidCraft لتطبيق واجهة الرسوميات المحفوظة.",
     "prefs.graphics_api_running": "الحالية: {current}. المختارة للتشغيل التالي: {selected}.",
     "prefs.graphics_api_save_failed": "تعذّر حفظ اختيار واجهة الرسوميات: {error}",
@@ -29,7 +29,7 @@
     "prefs.graphics_api_start_reverted": "لم يفتح التشغيل السابق باستخدام {requested} النافذة. استعاد SolidCraft الاختيار {previous}.",
     "prefs.graphics_api_unavailable": "اختيار واجهة الرسوميات متاح في تطبيق سطح المكتب.",
     "render.graphics_api_restart_vulkan": "إعادة التشغيل باستخدام Vulkan",
-    "render.graphics_api_restart_warning": "يؤدي تغيير واجهة الرسوميات إلى إعادة تشغيل SolidCraft ويطلب منك حفظ التصميمات غير المحفوظة. إذا تعذّر فتح النافذة بالواجهة الجديدة، فسيُستعاد الاختيار السابق عند التشغيل التالي.",
+    "render.graphics_api_restart_warning": "يؤدي تغيير واجهة الرسوميات إلى إعادة تشغيل SolidCraft ويطلب منك حفظ التصاميم غير المحفوظة. إذا تعذّر فتح النافذة بالواجهة الجديدة، فسيُستعاد الاختيار السابق عند التشغيل التالي.",
     "render.graphics_api_settings": "إعدادات الرسوميات",
     "render.graphics_api_vulkan_required": "يتطلب تتبّع المسارات بمعالج الرسوميات Vulkan في هذه الجلسة. أعد التشغيل باستخدام Vulkan، أو واصل استخدام طريقة صور بمعالج CPU."
   },

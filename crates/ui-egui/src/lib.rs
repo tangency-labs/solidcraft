@@ -3487,6 +3487,9 @@ impl SolveApp {
         let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        // #9841: dialog buttons answer their first letter only when the preference says so;
+        // off is the old behaviour, so the kit default and this preference default agree.
+        ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
@@ -3806,6 +3809,11 @@ impl SolveApp {
                 } else {
                     let _ = req.reply.send(json!({"ok": false, "error": "a file operation is in progress"}));
                 }
+                continue;
+            }
+            // Its client cancelled it while it waited (`control.cancel`): it does not run.
+            if !req.ticket.take() {
+                let _ = req.reply.send(control_job::cancelled_reply(&req.method));
                 continue;
             }
             req.started.store(true, std::sync::atomic::Ordering::Relaxed);

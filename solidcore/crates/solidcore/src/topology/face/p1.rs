@@ -767,8 +767,8 @@ pub fn create_oriented_trim_boundary(
         eu1::faceuse_loopuses(b, fu, false, None)?
     };
 
-    // WR-491, opt-in: the periods of the directions in which the surface is closed
-    let periods = if k.fixes.trim_boundary_seam_wrap && parameter_space && fill_singularities {
+    // WR-491: the periods of the directions in which the surface is closed
+    let periods = if parameter_space && fill_singularities {
         seam_periods(k, b, f)?
     } else {
         [None, None]

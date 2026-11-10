@@ -198,7 +198,9 @@ pub fn is_body_item(name: &str) -> bool {
 /// The topology a file holds outside any representation, as bodies to read (a file of bare
 /// geometry, or one whose topology no shape representation lists): every solid or surface model
 /// no other entity refers to, then every shell no solid, model or other shell lists, then every
-/// face no shell lists (each a one-face sheet), in id order within each. As solidcore's
+/// face no shell lists (each a one-face sheet), in id order within each. A presentation's reference
+/// (a style, a layer, an invisibility) does not count: a styled loose shell is still unlisted. As
+/// solidcore's
 /// step-import read such files (#2583, topology first): what the file's topology holds is read
 /// whether or not a product structure names it.
 pub fn roots(ex: &Exchange) -> Vec<u64> {
@@ -215,9 +217,10 @@ pub fn roots(ex: &Exchange) -> Vec<u64> {
             _ => {}
         }
     }
+    let presentation = |name: &str| name.ends_with("STYLED_ITEM") || matches!(name, "PRESENTATION_LAYER_ASSIGNMENT" | "INVISIBILITY");
     let mut referenced = HashSet::new();
     for e in ex.entities.values() {
-        for r in &e.records {
+        for r in e.records.iter().filter(|r| !presentation(&r.name)) {
             for p in &r.params {
                 refer(p, &mut referenced, 0);
             }
@@ -1912,7 +1915,15 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                 y = y.min(*n1);
                 if x < y && y - x < OPEN_DOMAIN_SPAN {
                     let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
-                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    // the box's latest start: the range's own where the range is narrower than
+                    // the span (`n1 - span` there is `n0`, which rounding may put below it)
+                    let last = if span < OPEN_DOMAIN_SPAN { *n0 } else { *n1 - span };
+                    // the range is the surface's, from the file: refused where it leaves no
+                    // room (crossed, or not a number), never clamped into one
+                    if !(*n0 <= last) {
+                        return Err(format!("a face's natural range [{n0}, {n1}] leaves no room for a box {span} across"));
+                    }
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, last);
                     (x, y) = (lo, (lo + span).min(*n1));
                 }
             }

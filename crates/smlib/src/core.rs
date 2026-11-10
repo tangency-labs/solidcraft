@@ -53,7 +53,7 @@ pub(crate) mod trim;
 mod trim_tests;
 
 pub(crate) use convert::{from_arrays, to_arrays};
-pub(crate) use measure::{area, bounds, check, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
+pub(crate) use measure::{area, bounds, check, check_with, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
 
 /// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
 pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
@@ -88,7 +88,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
@@ -104,7 +103,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.shell_inner_shell_of_statuses = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
@@ -119,6 +117,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_missing_surface_fails = true;
     f.fillet_nx1_end_rib_global_merge = true;
     f.uv_trim_corner_end_points_only = true;
+    f.split_edge_definition_owns_its_curves = true;
+    f.simple_coincidence_side_across_the_curve = true;
+    f.boolean_capture_keeps_operand_vertices_apart = true;
+    f.radial_sector_step_off_coincidence_by_own_face = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.cone_parallel_line_midpoint = true;
     f.cone_parallel_line_domains = true;
@@ -159,7 +161,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.found_torus_sphere_keep_tested_nurb = true;
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
-    f.loop_orientation_floor_from_loop_box = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.uv_trim_joins_drop_pieces = true;
     f.shell_edges_on_analytics_exact = true;
@@ -197,7 +198,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
-    f.imprint_extension_keeps_analytic_curve = true;
     f.fillet_trace_from_tangent_point_toward_next = true;
     f.fillet_tangent_point_one_sided_step = true;
     f.fillet_rails_meet_at_one_end_point = true;
@@ -306,7 +306,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.is_iso_curve_at_propagates_canonical_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
@@ -476,7 +475,7 @@ pub(crate) fn run_on<T: dump::Answer>(
 ) -> Result<T> {
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
-        return Err(Error::Solidcore(format!("{call}: cancelled")));
+        return Err(Error::Cancelled(call));
     }
     call_on(call, inputs, stop, f)
 }
@@ -519,9 +518,14 @@ fn call_on<T: dump::Answer>(
     };
     drop(in_flight);
     // Stopped, it is no failure to look into, and solidcore may have left the kernel part way.
+    // No result either, even one solidcore finished first: the caller never has to ask whether
+    // it came in time (as solidcore-ops' session answers).
     if stop.is_some_and(|s| s.is_cancelled()) {
         put_kernel(None);
-        return r;
+        return match r {
+            Err(Error::Internal(e)) => Err(Error::Internal(e)),
+            _ => Err(Error::Cancelled(call)),
+        };
     }
     let why = match &r {
         Ok(v) => v.refusal(),
@@ -564,6 +568,23 @@ pub(crate) fn with_body<T: dump::Answer>(
     }
     // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
     call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+}
+
+/// [`with_body`] on a body only this call reads (one the caller consumes): the token over this
+/// thread's work stops it, since what a stopped call leaves half-changed is never read again.
+pub(crate) fn with_own_body<T: dump::Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
+) -> Result<T> {
+    if body.0.is_poisoned() {
+        return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
+    }
+    let stop = crate::stop::token();
+    if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
+        return Err(Error::Cancelled(call));
+    }
+    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:

@@ -34,6 +34,8 @@ pub struct Row<'a> {
     pub eye_left: bool,
     pub icon: &'a str,
     pub label: &'a str,
+    /// A stable automation identity when several rows have the same visible label.
+    pub handle: Option<&'a str>,
     /// The label is a name someone gave (a body, sketch, component, …): it is shown as typed,
     /// not translated when it happens to match a UI label.
     pub name: bool,
@@ -164,6 +166,7 @@ pub fn tree_row_rect(ui: &egui::Ui, row: &Row<'_>) -> Rect {
 }
 
 pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
+    let handle = row.handle.unwrap_or(row.label);
     let t = Tokens::get();
     // Rows scrolled out of view only take their space: no widgets, no painting.
     let r = tree_row_rect(ui, row);
@@ -199,7 +202,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let mut x = r.left() + if row.compact { t.space_8 + row.depth as f32 * t.space_14 } else { 2.0 + row.depth as f32 * INDENT };
     let cy = r.top() + row_height / 2.0;
     // Where the row's depth puts it, whatever controls it has.
-    solidcraft_ui_registry::publish_handle(&format!("indent:{}", row.label), pos2(x, cy));
+    solidcraft_ui_registry::publish_handle(&format!("indent:{handle}"), pos2(x, cy));
     let action_width = if row.compact { t.space_16 } else { t.form_close_size };
     let action_left = (r.right() - if row.compact { t.space_8 } else { t.space_4 } - action_width * row.actions.len() as f32).max(r.left());
     for (index, action) in row.actions.iter().enumerate() {
@@ -274,7 +277,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         crate::disclosure(ui.painter(), pos2(x + 6.0, cy), open, if hover_on == 1 { t.text } else { t.text_dim });
         out.fold = resp.clicked() && click_on == 1;
         out.fold_at = Some(fold_r.center());
-        solidcraft_ui_registry::publish_handle(&format!("fold:{}", row.label), fold_r.center());
+        solidcraft_ui_registry::publish_handle(&format!("fold:{handle}"), fold_r.center());
     }
     x += if row.compact { t.space_16 } else { 14.0 };
     // Eye.
@@ -306,7 +309,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         }
         out.eye_rect = Some(eye_r.intersect(ui.clip_rect()));
         out.eye_at = Some(er.center());
-        solidcraft_ui_registry::publish_handle(&format!("eye:{}", row.label), er.center());
+        solidcraft_ui_registry::publish_handle(&format!("eye:{handle}"), er.center());
     }
     if !row.compact {
         x += slot;
@@ -360,7 +363,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         right -= t.space_16;
         let sr = Rect::from_center_size(pos2(right + t.space_8, cy), vec2(t.space_14, t.space_14));
         icons::paint_icon(ui.painter(), sr, status.icon(), 1.0);
-        solidcraft_ui_registry::publish_handle(&format!("status:{}:{}", status.icon(), row.label), sr.center());
+        solidcraft_ui_registry::publish_handle(&format!("status:{}:{handle}", status.icon()), sr.center());
         right -= t.space_4;
     }
     for text in [row.count, row.secondary, if row.compact { row.subtitle } else { "" }] {
@@ -395,10 +398,7 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let galley = ui.painter().layout_job(job);
     let lw = galley.size().x;
     let elided = galley.elided;
-    solidcraft_ui_registry::publish_rect(
-        &format!("row_label:{}", row.label),
-        Rect::from_min_size(pos2(x, cy - galley.size().y / 2.0), galley.size()),
-    );
+    solidcraft_ui_registry::publish_rect(&format!("row_label:{handle}"), Rect::from_min_size(pos2(x, cy - galley.size().y / 2.0), galley.size()));
     ui.painter().with_clip_rect(ui.painter().clip_rect().intersect(r)).galley(pos2(x, cy - galley.size().y / 2.0), galley, col);
     if row.cut {
         let inside = r.shrink2(vec2(t.space_2, t.space_2));
@@ -427,9 +427,9 @@ pub fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         let ir = Rect::from_center_size(action_r.center(), vec2(t.space_14, t.space_14));
         icons::paint_icon(ui.painter(), ir, icon, if action_hover { 1.0 } else { 0.6 });
         out.action = resp.clicked() && action_click;
-        solidcraft_ui_registry::publish_handle(&format!("action:{}", row.label), action_r.center());
+        solidcraft_ui_registry::publish_handle(&format!("action:{handle}"), action_r.center());
     }
-    solidcraft_ui_registry::publish_handle(&format!("row:{}", row.label), r.center());
+    solidcraft_ui_registry::publish_handle(&format!("row:{handle}"), r.center());
     let tip = match hover_on {
         0 if action_hover => row.action.map(|(_, tip)| solidcraft_ui_text::tr_label(tip)),
         1 => Some(if row.fold == Some(true) { solidcraft_ui_text::tr("ui.collapse") } else { solidcraft_ui_text::tr("ui.expand") }),
