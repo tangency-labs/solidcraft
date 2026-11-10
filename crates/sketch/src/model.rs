@@ -817,6 +817,10 @@ pub struct Sketch {
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
+    /// Figures: the points and curves one creation command made as a unit (a rectangle, polygon
+    /// or slot), for the browser's contents tree and the sketch history. Display metadata only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub figures: Vec<crate::figure::Figure>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -847,6 +851,7 @@ impl Sketch {
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
             equations: Vec::new(),
+            figures: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
         }
@@ -855,7 +860,8 @@ impl Sketch {
     /// Forget the id counters a fingerprint must not see: they advance with every id made,
     /// including ones since deleted. The document keeps them; only a copy about to be hashed
     /// calls this. The display options stay, because `three_d` and the `hide_*` flags change
-    /// what the evaluated sketch does.
+    /// what the evaluated sketch does. Figures stay too: the evaluated sketch carries them to
+    /// the browser, so a change to them must reach it.
     pub fn clear_id_counters(&mut self) {
         self.counters.clear();
     }
@@ -883,6 +889,7 @@ impl Sketch {
             .saturating_add(self.patterns.len())
             .saturating_add(self.links.len())
             .saturating_add(self.wires.len())
+            .saturating_add(self.figures.len())
             .saturating_add(
                 self.offsets.iter().filter_map(|r| r.topology.as_ref()).fold(0usize, |n, r| n.saturating_add(r.roles.len()).saturating_add(1)),
             )
@@ -920,6 +927,7 @@ impl Sketch {
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
+            .chain(self.figures.iter().map(|f| f.id.as_str()))
             .chain(
                 self.offsets
                     .iter()
@@ -934,6 +942,7 @@ impl Sketch {
         let taken = self.all_ids().map(str::to_owned).collect();
         SketchBatch { sketch: self, taken }
     }
+
     pub(crate) fn id_taken(&self, id: &str) -> bool {
         #[cfg(test)]
         crate::tests::count_id_scan();
@@ -943,6 +952,7 @@ impl Sketch {
             || self.patterns.iter().any(|p| p.id == id)
             || self.links.iter().any(|l| l.id == id)
             || self.wires.iter().any(|w| w.id == id)
+            || self.figures.iter().any(|f| f.id == id)
             || self.offsets.iter().filter_map(|r| r.topology.as_ref()).any(|r| r.id == id || r.roles.iter().any(|role| role.output == id))
     }
 
@@ -1958,6 +1968,7 @@ impl Sketch {
         self.remove_points(&orphans);
         self.prune_links();
         self.prune_patterns();
+        self.prune_figures();
     }
 
     /// Points held on one of the curves `which` exactly at one of its ends, and that end: a point
@@ -2116,6 +2127,7 @@ impl Sketch {
         });
         self.prune_links();
         self.prune_patterns();
+        self.prune_figures();
     }
 
     /// Resolve a point reference: a point id (`origin`, `l1.end`, `p3`) or `<curve>.start|end|center`.

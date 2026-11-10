@@ -964,6 +964,9 @@ pub struct SketchInspected {
     /// Links to geometry outside the sketch (projections, intersections, includes), as saved.
     #[schemars(with = "Vec<Map<String, Value>>")]
     pub links: Value,
+    /// The figures its creation commands recorded, as saved.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub figures: Value,
     /// Its 3D curves.
     pub wires: Vec<SketchWire>,
     /// Whether it is shown.

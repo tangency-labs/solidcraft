@@ -835,6 +835,11 @@ pub(super) fn ids_of(sk: &Sketch, curves: &[usize]) -> Vec<String> {
     curves.iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect()
 }
 
+/// The ids of the points at `points`, in order.
+pub(super) fn point_ids(sk: &Sketch, points: &[usize]) -> Vec<String> {
+    points.iter().filter_map(|p| sk.points.get(*p).map(|q| q.id.clone())).collect()
+}
+
 pub(super) fn add_c(sk: &mut Sketch, k: ConstraintKind) -> Result<String> {
     Ok(sk.add_constraint(k, None)?)
 }
@@ -864,6 +869,7 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
         .chain(before.curves.iter().map(|x| x.id.as_str()))
         .chain(before.constraints.iter().map(|x| x.id.as_str()))
         .chain(before.wires.iter().map(|x| x.id.as_str()))
+        .chain(before.figures.iter().map(|x| x.id.as_str()))
         .collect();
     let new = |id: &&str| !old.contains(*id);
     let points: Vec<&str> = after.points.iter().map(|x| x.id.as_str()).filter(new).collect();
@@ -871,14 +877,20 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
     let (dims, cons): (Vec<_>, Vec<_>) = after.constraints.iter().filter(|c| new(&c.id.as_str())).partition(|c| c.kind.is_dimension());
     let ids = |v: Vec<&solidcraft_sketch::Constraint>| v.into_iter().map(|c| c.id.clone()).collect::<Vec<_>>();
     let wires: Vec<String> = after.wires.iter().map(|x| x.id.as_str()).filter(new).map(str::to_string).collect();
+    let figures: Vec<String> = after.figures.iter().map(|x| x.id.as_str()).filter(new).map(str::to_string).collect();
     let owned = |v: Vec<&str>| v.into_iter().map(str::to_string).collect::<Vec<_>>();
-    let out = Created { points: owned(points), curves: owned(curves), constraints: ids(cons), dimensions: ids(dims), wires };
+    let out = Created { points: owned(points), curves: owned(curves), constraints: ids(cons), dimensions: ids(dims), wires, figures };
     serde_json::to_value(out).unwrap_or_default()
 }
 
 /// The reply of a line, circle or arc: what `result` gives, built from [`DrawResult`].
 fn draw_reply(out: (Vec<String>, Vec<String>), info: Value) -> Result<Value> {
-    let reply = DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() };
+    draw_reply_with_figure(out, info, None)
+}
+
+/// [`draw_reply`], naming the figure the command recorded.
+fn draw_reply_with_figure(out: (Vec<String>, Vec<String>), info: Value, figure: Option<String>) -> Result<Value> {
+    let reply = DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, figure, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -1588,8 +1600,9 @@ fn rect_names(sk: &Sketch, l: &[usize], pts: &[usize]) -> (RectSides, RectCorner
 }
 
 /// The reply of a rectangle with named sides and corners, built from [`RectResult`].
-fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides, RectCorners), info: Value) -> Result<Value> {
-    let reply = RectResult { curves: sk_out.0, constraints: sk_out.1, sketch: info, sides, corners, created: None, param_warnings: Vec::new() };
+fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides, RectCorners), info: Value, figure: Option<String>) -> Result<Value> {
+    let reply =
+        RectResult { curves: sk_out.0, constraints: sk_out.1, sketch: info, sides, corners, created: None, figure, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -1624,6 +1637,7 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     // Each side of the rectangle takes its coordinate from the corner it comes from.
     let (lo_x, hi_x) = if a.x <= b.x { (&ea.x, &eb.x) } else { (&eb.x, &ea.x) };
     let (lo_y, hi_y) = if a.y <= b.y { (&ea.y, &eb.y) } else { (&eb.y, &ea.y) };
+    let mut figure = None;
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
@@ -1633,15 +1647,20 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
         mark_construction(sk, &l, p);
         cons.extend(connect_points(sk, first, p)?);
         drop_implied_axes(sk, &mut cons);
-        Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
+        let curves = ids_of(sk, &l);
+        let points = point_ids(sk, &pts);
+        figure = Some(sk.add_figure("rectangle", cmd, &curves, &points, &[], &[])?);
+        Ok(((curves, cons), rect_names(sk, &l, &pts)))
     })?;
-    rect_result(out, names, info)
+    rect_result(out, names, info, figure)
 }
 
 /// A 2-point rectangle with its corners filleted, as one undo step: the rectangle and the
 /// fillet run in a scratch session that replaces the design only when both succeed.
 fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.rounded";
+    let target = sketch_store::target(s, p, cmd)?;
+    let before = sketch_store::read(&s.doc, target)?.clone();
     // The corners may be typed as expressions: `sketch.rectangle.two_point` below places them, so
     // here they are only worked out to check the radius against the sides.
     let ((a, _), (b, _)) = (corner_arg(&s.doc, p, "p0", cmd)?, corner_arg(&s.doc, p, "p1", cmd)?);
@@ -1704,6 +1723,25 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
+    // The figure the inner rectangle made follows the command's final geometry: the fillet
+    // trims the sides and may replace corner points, so take the whole command's new ids.
+    let after = sketch_store::read(&s.doc, target)?.clone();
+    let diff = created(Some(&before), &after);
+    let created_ids = |key: &str| -> Vec<String> {
+        diff.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default()
+    };
+    let (curves, points) = (created_ids("curves"), created_ids("points"));
+    let figure = out.get("figure").and_then(Value::as_str).map(str::to_owned);
+    let figure_id = sketch_store::update(s, target, |_, _, sk| {
+        if let Some(record) = figure.and_then(|id| sk.figures.iter_mut().find(|f| f.id == id)) {
+            record.kind = "rectangle.rounded".into();
+            record.curves = curves;
+            record.points = points;
+            Ok(record.id.clone())
+        } else {
+            Ok(sk.add_figure("rectangle.rounded", cmd, &curves, &points, &[], &[])?)
+        }
+    })?;
     let ids = |v: &Value, k: &str| -> Vec<String> {
         v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default()
     };
@@ -1720,6 +1758,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         centre,
         param: rounded.get("param").and_then(Value::as_str).unwrap_or_default().to_string(),
         created: None,
+        figure: Some(figure_id),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
@@ -1732,6 +1771,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     if h.x < 1e-9 || h.y < 1e-9 {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
     }
+    let mut figure = None;
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
@@ -1744,6 +1784,8 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
         };
         place_point(sk, pts.get(at), ek);
         let mut cons = rect_constraints(sk, &l)?;
+        let mut extra_curves = Vec::new();
+        let mut extra_points = Vec::new();
         // Both diagonals (construction), the centre at their crossing. Only the first carries
         // the midpoint constraint: diagonals of a parallelogram bisect each other, so a second
         // one would be redundant (over-constrained).
@@ -1754,17 +1796,29 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
                 if let Some(cu) = sk.curves.get_mut(d) {
                     cu.construction = true;
                 }
+                if let Some(cu) = sk.curves.get(d) {
+                    extra_curves.push(cu.id.clone());
+                }
             }
             let cp = sk.add_point(c, None)?;
             place_point(sk, Some(&cp), ec);
             cons.push(add_c(sk, ConstraintKind::Midpoint { p: cp, l: diag })?);
+            if let Some(point) = sk.points.get(cp) {
+                extra_points.push(point.id.clone());
+            }
         }
         mark_construction(sk, &l, p);
         cons.extend(connect_points(sk, first, p)?);
         drop_implied_axes(sk, &mut cons);
-        Ok(((ids_of(sk, &l), cons), rect_names(sk, &l, &pts)))
+        let curves = ids_of(sk, &l);
+        let mut figure_curves = curves.clone();
+        figure_curves.extend(extra_curves);
+        let mut figure_points = point_ids(sk, &pts);
+        figure_points.extend(extra_points);
+        figure = Some(sk.add_figure("rectangle.center", cmd, &figure_curves, &figure_points, &[], &[])?);
+        Ok(((curves, cons), rect_names(sk, &l, &pts)))
     })?;
-    rect_result(out, names, info)
+    rect_result(out, names, info, figure)
 }
 
 fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1776,8 +1830,9 @@ fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
     if w.abs() < 1e-9 {
         return Err(bad(cmd, "p2 must not be on the first edge"));
     }
+    let mut figure = None;
     let (out, info) = draw(s, p, cmd, |sk, _| {
-        let (l, _) = polygon_lines(sk, &[a, b, b + n * w, a + n * w])?;
+        let (l, pts) = polygon_lines(sk, &[a, b, b + n * w, a + n * w])?;
         let mut cons = Vec::new();
         if let [l0, l1, l2, l3] = l[..] {
             cons.push(add_c(sk, ConstraintKind::Perpendicular { a: l0, b: l1 })?);
@@ -1785,9 +1840,12 @@ fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
             cons.push(add_c(sk, ConstraintKind::Parallel { a: l1, b: l3 })?);
         }
         mark_construction(sk, &l, p);
-        Ok((ids_of(sk, &l), cons))
+        let curves = ids_of(sk, &l);
+        let points = point_ids(sk, &pts);
+        figure = Some(sk.add_figure("rectangle", cmd, &curves, &points, &[], &[])?);
+        Ok((curves, cons))
     })?;
-    draw_reply(out, info)
+    draw_reply_with_figure(out, info, figure)
 }
 
 pub(super) fn radius_arg(p: &Value, cmd: &str) -> Result<f64> {
@@ -2006,6 +2064,7 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, start: f64, n: usize, inscribed: bool) -> Result<Value> {
     let mut support_circle = String::new();
+    let mut figure = None;
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let corners: Vec<Vec2> = (0..n).map(|i| center + Vec2::from_angle(start + std::f64::consts::TAU * i as f64 / n as f64) * r_vertex).collect();
         let (l, pts) = polygon_lines(sk, &corners)?;
@@ -2015,12 +2074,17 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Equal { a: *a, b: *b })?);
             }
         }
+        let curves = ids_of(sk, &l);
+        let mut figure_curves = curves.clone();
         // Construction circle tying the polygon to its centre.
         let rc = if inscribed { r_vertex } else { r_vertex * (std::f64::consts::PI / n as f64).cos() };
         let circ = sk.add_circle(center, rc, None, None)?;
         support_circle = sk.curves.get(circ).map(|c| c.id.clone()).unwrap_or_default();
         if let Some(cu) = sk.curves.get_mut(circ) {
             cu.construction = true;
+        }
+        if let Some(cu) = sk.curves.get(circ) {
+            figure_curves.push(cu.id.clone());
         }
         if inscribed {
             for pt in &pts {
@@ -2035,6 +2099,9 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
             if let Some(cu) = sk.curves.get_mut(corner) {
                 cu.construction = true;
             }
+            if let Some(cu) = sk.curves.get(corner) {
+                figure_curves.push(cu.id.clone());
+            }
             cons.push(add_c(sk, ConstraintKind::Concentric { a: circ, b: corner })?);
             for pt in &pts {
                 cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: *pt, c: corner })?);
@@ -2043,9 +2110,11 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
-        Ok((ids_of(sk, &l), cons))
+        let points = point_ids(sk, &pts);
+        figure = Some(sk.add_figure("polygon", cmd, &figure_curves, &points, &[], &[])?);
+        Ok((curves, cons))
     })?;
-    let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, param_warnings: Vec::new() };
+    let reply = PolygonResult { curves: out.0, constraints: out.1, sketch: info, support_circle, created: None, figure, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -2108,12 +2177,13 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
+/// What [`slot`] adds: the curve and constraint ids, the sketch's solve, and its centre line/middle.
 pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
     let mut extra = (None, None);
+    let mut figure = None;
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
@@ -2135,10 +2205,13 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
         let mid = sk.add_point((c0 + c1) * 0.5, None)?;
         cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
         extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
-        Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
+        let curves = ids_of(sk, &[l1, a1, l2, a0]);
+        let points = point_ids(sk, &pts);
+        figure = Some(sk.add_figure("slot", cmd, &curves, &points, &[], &[])?);
+        Ok((curves, cons))
     })?;
     Ok(crate::schema::sketch_shapes::SlotResult {
-        drawn: DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() },
+        drawn: DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, figure, param_warnings: Vec::new() },
         centre_line: extra.0,
         middle: extra.1,
     })

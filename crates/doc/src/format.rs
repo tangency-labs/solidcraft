@@ -828,6 +828,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_figures().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
         }
@@ -881,8 +882,23 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             || len("curves") > solidcraft_sketch::MAX_CURVES
             || len("constraints") > solidcraft_sketch::MAX_CONSTRAINTS
             || len("patterns") > solidcraft_sketch::MAX_CONSTRAINTS
+            || len("figures") > solidcraft_sketch::MAX_FIGURES
         {
             return Err(invalid());
+        }
+        if let Some(figures) = sketch.get("figures").and_then(Value::as_array) {
+            let mut references = 0usize;
+            for figure in figures {
+                let size = |key: &str| figure.get(key).and_then(Value::as_array).map_or(0, Vec::len);
+                references = references
+                    .saturating_add(size("curves"))
+                    .saturating_add(size("points"))
+                    .saturating_add(size("adopted_curves"))
+                    .saturating_add(size("adopted_points"));
+                if references > solidcraft_sketch::MAX_FIGURE_REFERENCES {
+                    return Err(invalid());
+                }
+            }
         }
         if let Some(patterns) = sketch.get("patterns").and_then(Value::as_array) {
             let mut points = 0usize;
@@ -2378,6 +2394,32 @@ mod tests {
         assert_eq!(names.first().unwrap().as_str(), "d1");
         assert_eq!(names.last().unwrap().as_str(), "d15000");
         assert_eq!(names.iter().collect::<std::collections::BTreeSet<_>>().len(), names.len());
+    }
+
+    #[test]
+    fn a_sketch_figure_round_trips_and_an_old_design_without_it_loads() {
+        let mut sk = solidcraft_sketch::Sketch::new();
+        let a = sk.add_point(solidcore_record::Vec2::new(0.0, 0.0), None).unwrap();
+        let b = sk.add_point(solidcore_record::Vec2::new(10.0, 0.0), None).unwrap();
+        let line = sk.add_line_pts(a, b, None).unwrap();
+        let curve = sk.curves[line].id.clone();
+        let points = vec![sk.points[a].id.clone(), sk.points[b].id.clone()];
+        sk.add_figure("rectangle", "sketch.rectangle.two_point", &[curve], &points, &[], &[]).unwrap();
+        let mut d = Document::new("figures");
+        let id = d.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        assert_eq!(read(&d.to_json()).unwrap(), d, "figures survive a save and reopen");
+
+        // An older design has no `figures`: it loads with none.
+        let mut v: Value = serde_json::from_str(&d.to_json()).unwrap();
+        let features = v["features"].as_array_mut().unwrap();
+        let sketch = features.iter_mut().find(|f| f["type"] == "sketch").unwrap()["sketch"].as_object_mut().unwrap();
+        sketch.remove("figures");
+        let old = read(&serde_json::to_string(&v).unwrap()).unwrap();
+        let old_sketch = match &old.feature(id).unwrap().kind {
+            crate::FeatureKind::Sketch { sketch, .. } => sketch,
+            _ => panic!("the feature is a sketch"),
+        };
+        assert!(old_sketch.figures.is_empty());
     }
 
     #[test]

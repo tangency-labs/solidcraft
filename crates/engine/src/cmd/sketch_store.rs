@@ -63,6 +63,7 @@ pub(super) fn update<T>(s: &mut Session, id: u64, f: impl FnOnce(&Session, &Docu
 /// The checks an edited sketch passes before it is kept.
 pub(super) fn checked(sk: &Sketch) -> Result<()> {
     sk.validate_periodic_splines()?;
+    sk.validate_figures()?;
     Ok(())
 }
 
