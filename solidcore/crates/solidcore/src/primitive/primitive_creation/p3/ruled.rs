@@ -10,9 +10,9 @@
 //! Mutated offset/generator curves and marriage flags survive errors. The returned
 //! map is the surface attribute; callers attach it using their attribute store.
 //! No recursion. Invalid indices return errors instead of upstream undefined reads.
-//! Opt-in `Kernel::fixes.taper_pivot_nearest_corner` (WR-402): when the two links of a
-//! corner meet at both ends (a two-curve loop), the pivot is the joint nearest the
-//! corner's offset curve, not `sm_FindPivotPoint`'s first coincident pair.
+//! WR-402: when the two links of a corner meet at both ends (a two-curve loop), the
+//! pivot is the joint nearest the corner's offset curve, not `sm_FindPivotPoint`'s
+//! first coincident pair.
 //!
 //! With `primitive_path_curve_statuses` (#483), pivot endpoint failures propagate
 //! through both pivot policies instead of using undefined points.
@@ -94,11 +94,7 @@ pub fn ruled_surface_from_offset(
         let other = generators
             .get(other)
             .ok_or_else(|| SolidError::sm_err(OP))?;
-        let pivot = if k.fixes.taper_pivot_nearest_corner {
-            pivot_nearest_corner(k, source, other, options.same_point_tolerance, &first)?
-        } else {
-            find_pivot_point_with_kernel(k, source, other, options.same_point_tolerance)?
-        };
+        let pivot = pivot_nearest_corner(k, source, other, options.same_point_tolerance, &first)?;
         second = BSplineCurve::create_point_curve(pivot)?;
         second_is_generator = false;
         ignore_status(passed_on(first.transform(&options.movement, None), p)?)?;
@@ -300,7 +296,6 @@ mod tests {
         let curves = [Some(&line), Some(&arc)];
 
         let mut k = Kernel::default();
-        k.fixes.taper_pivot_nearest_corner = true;
         let mut solid = create_taper_extrude(&mut k, &curves, 10.0, -3.0, 3, false).unwrap();
         assert!(is_manifold_solid(&solid).unwrap());
         let store = AttributeStore::default();
