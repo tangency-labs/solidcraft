@@ -117,12 +117,6 @@ pub fn item(current: Option<(&str, usize, usize)>) {
     });
 }
 
-/// Whether the watcher of this thread's work asked it to stop (`false` when nobody watches):
-/// whatever the work computed since is no result (solidcore#3247).
-pub fn cancelled() -> bool {
-    CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
-}
-
 /// The kernel's long work (STEP import) reports to the same progress and stops on Cancel.
 struct KernelWatch(Arc<Progress>);
 
