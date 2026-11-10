@@ -12638,16 +12638,40 @@ mod settings_search_tests {
             let command = solidcraft_engine::command_specs().last().unwrap().id;
             let original = crate::toolbar_custom::export(&h.app);
             h.app.prefs_window.shell.filter = command.into();
-            h.frames(4);
-            let (_, _, hits) = nav(&h.ctx);
-            let matches: Vec<_> =
-                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command)).collect();
+            let find = |h: &crate::scenario::Harness| {
+                let (_, _, hits) = nav(&h.ctx);
+                hits.iter()
+                    .enumerate()
+                    .filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command))
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>()
+            };
+            // Wait for the results to appear rather than assuming four frames on a loaded machine.
+            for _ in 0..600 {
+                h.frames(1);
+                if !find(&h).is_empty() {
+                    break;
+                }
+            }
+            let matches: Vec<_> = find(&h).into_iter().map(|i| (i, ())).collect();
             assert_eq!(matches.len(), 1, "a collapsed result owns one real keyboard target");
             set_cursor(&h.ctx, matches[0].0);
             h.frames(2);
             h.step(&json!({"key":"Enter"})).unwrap();
             keep_reveal_visible(&mut h);
             h.frames(30);
+            // The reveal scrolls over later frames; wait until the target is in view.
+            for _ in 0..600 {
+                let in_view = match (crate::scenario::rect_of(&format!("keymap:capture:{command}")), crate::scenario::rect_of("dialog:page_body")) {
+                    (Some(target), Some(body)) => body.contains_rect(target),
+                    _ => false,
+                };
+                if h.app.prefs_window.shell.filter.is_empty() && in_view {
+                    break;
+                }
+                keep_reveal_visible(&mut h);
+                h.frames(1);
+            }
             assert!(h.app.prefs_window.shell.filter.is_empty());
             assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
             let target = crate::scenario::rect_of(&format!("keymap:capture:{command}")).unwrap();
