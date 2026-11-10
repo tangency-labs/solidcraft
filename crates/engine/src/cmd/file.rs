@@ -901,8 +901,12 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
 /// contents and all: the occurrence takes the shift, so the design's Z = 0 stays the board's top.
 fn at_origin(s: &mut Session, placed: &import::Placed, corner: [f64; 2]) {
     let Some(occurrence) = placed.occurrence else { return };
-    let shift =
-        solidcraft_doc::rigid(solidcraft_geom::Vec3::new(-corner[0], -corner[1], 0.0), solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::Z, 0.0);
+    let shift = solidcraft_doc::rigid(
+        solidcore_record::Vec3::new(-corner[0], -corner[1], 0.0),
+        solidcore_record::Vec3::ZERO,
+        solidcore_record::Vec3::Z,
+        0.0,
+    );
     if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence) {
         o.transform = shift;
     }
