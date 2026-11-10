@@ -8,8 +8,10 @@
 //! the seam back. A face on a B-spline surface that closes on itself around u (its first and
 //! last control columns the same) gets a seam the same way, along the surface's own boundary
 //! column (u at the start of its knots), the loops split there where they have no vertex on it;
-//! the period is the width of its knots. A torus face winding without a seam, and a spline
-//! closed in v or both ways, are refused for now.
+//! the period is the width of its knots. A torus face winding around its axis (a band between
+//! two circles about it, a half torus bounded by its rims) gets a seam round the tube at a
+//! vertex's angle, on the face's side of the tube. A torus face winding round its tube, and a
+//! spline closed in v or both ways, are refused for now.
 //!
 //! A face bounded by a slit alone (a loop out along edges and straight back, of no (u, v) area)
 //! on a closed surface is all of that surface less a cut of none: its slit is made its seams
@@ -74,6 +76,15 @@ struct Axis {
 enum Kind {
     Ruled,
     Sphere(f64),
+    /// A torus, its ring's and tube's radii: a face winding around its axis (a band between two
+    /// circles about it) gets a seam round the tube.
+    Torus {
+        major: f64,
+        minor: f64,
+    },
+    /// A torus face winding round its tube (a band between two circles round the tube, an elbow's
+    /// wall): its seam a circle about the axis, at a vertex's angle round the tube.
+    TorusTube,
     /// A placed revolution with u the angle: its profile.
     Revolved(BCurve),
     /// A B-spline surface closed on itself around u: its boundary column at u = `u0` (the start
@@ -103,6 +114,10 @@ fn axis(s: &BSurface) -> Option<Axis> {
         BSurface::Sphere { frame: f, radius } => {
             let (origin, z) = frame(f);
             Some(Axis { origin, z, kind: Kind::Sphere(*radius), poles: [Some(origin - z * *radius), Some(origin + z * *radius)], period: TAU })
+        }
+        BSurface::Torus { frame: f, major_radius, minor_radius, .. } => {
+            let (origin, z) = frame(f);
+            Some(Axis { origin, z, kind: Kind::Torus { major: *major_radius, minor: *minor_radius }, poles: [None, None], period: TAU })
         }
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward: false } if *matrix == IDENTITY => {
             let (origin, z) = (Vec3::from(*origin), Vec3::from(*axis));
@@ -311,9 +326,15 @@ impl Builder<'_, '_> {
             let found = axis(&surface).or_else(|| spline_axis(&surface, &eval));
             let mut up = Vec::new();
             let mut down = Vec::new();
+            // On a torus a face may wind round its tube instead (its loops turn in v, not u).
+            let mut tube = false;
             for (li, l) in face.loops.iter().enumerate() {
                 let LoopB::Edges(es) = l else { continue };
-                let w = self.winding(&eval, es, periods)?;
+                let mut w = self.winding(&eval, es, periods)?;
+                if matches!(surface, BSurface::Torus { .. }) && w[0] == 0 && w[1].abs() == 1 {
+                    tube = true;
+                    w = [w[1], 0];
+                }
                 if w[1] != 0 || w[0].abs() > 1 {
                     return Err(format!("face #{}: {}", face.step, unsupported("a loop winding around a surface more than once or in v")));
                 }
@@ -333,6 +354,7 @@ impl Builder<'_, '_> {
                 continue;
             }
             let step = face.step;
+            let found = if tube { found.map(|ax| Axis { kind: Kind::TorusTube, ..ax }) } else { found };
             let Some(ax) = found else {
                 return Err(format!("face #{step}: {}", unsupported("a face winding around a torus or a spline closed in v without a seam edge")));
             };
@@ -491,6 +513,44 @@ impl Builder<'_, '_> {
                     if along { [ta, tb] } else { [tb, ta] },
                     along,
                 )
+            }
+            Kind::Torus { major, minor } => {
+                // The tube circle at `a`'s angle about the axis: centred on the ring there, angle
+                // 0 outward and π/2 up the axis, so its angle is the surface's tube angle. The
+                // seam runs from the loop the face lies above (`a`'s, running +u) up the tube to
+                // `b`: the face's side of the circle, whichever half that is.
+                let da = pa - ax.origin;
+                let x = (da - ax.z * da.dot(ax.z)).normalized().ok_or("a torus seam on its axis")?;
+                let centre = ax.origin + x * *major;
+                let tube = |p: Vec3| {
+                    let d = p - centre;
+                    d.dot(ax.z).atan2(d.dot(x))
+                };
+                let (ta, tb) = (tube(pa), tube(pb));
+                let up = (tb - ta).rem_euclid(TAU);
+                if !(up > 1e-9) {
+                    return Err("a seam of no length".into());
+                }
+                (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(ax.z) }, radius: *minor }, [ta, ta + up], true)
+            }
+            Kind::TorusTube => {
+                // The circle about the axis through `a`: angle 0 at `a`, growing with the
+                // torus's u. The face lies to the left of its loops in (u, v), so from the loop
+                // running round the tube up (+v) it lies towards −u: the seam runs from `a` back
+                // round the axis to `b`, the edge from `b` to `a`.
+                let da = pa - ax.origin;
+                let h = da.dot(ax.z);
+                let radial = da - ax.z * h;
+                let r = radial.len();
+                let x = radial.normalized().ok_or("a torus seam on its axis")?;
+                let y = ax.z.cross(x);
+                let db = pb - ax.origin;
+                let back = (-(db.dot(y).atan2(db.dot(x)))).rem_euclid(TAU);
+                if !(back > 1e-9) {
+                    return Err("a seam of no length".into());
+                }
+                let centre = ax.origin + ax.z * h;
+                (BCurve::Circle { frame: Frame { origin: arr(centre), x_axis: arr(x), y_axis: arr(y) }, radius: r }, [-back, 0.0], false)
             }
             Kind::Iso { column, .. } => {
                 // Each vertex's v on the surface (a pole's from its end of the v range).
@@ -880,9 +940,11 @@ impl Builder<'_, '_> {
 
     /// Join loops `la` (running +u) and `lb` (running −u) of face `fi` by a seam.
     fn band_seam(&mut self, fi: usize, la: usize, lb: usize, ax: &Axis, eval: &SurfaceEval, splits: &mut usize) -> R<()> {
+        // The parameter the loops wind in: u, or v round a torus's tube.
+        let d = usize::from(ax.kind == Kind::TorusTube);
         let angle = |s: &Self, v: u32| -> R<f64> {
             let p = s.vpoint(v)?;
-            eval.project(p, None, f64::INFINITY).map(|q| q[0]).ok_or_else(|| "a vertex off its surface".to_string())
+            eval.project(p, None, f64::INFINITY).and_then(|q| q.get(d).copied()).ok_or_else(|| "a vertex off its surface".to_string())
         };
         let (Some(LoopB::Edges(a_es)), Some(LoopB::Edges(b_es))) =
             (self.faces.get(fi).and_then(|f| f.loops.get(la)), self.faces.get(fi).and_then(|f| f.loops.get(lb)))
@@ -893,9 +955,16 @@ impl Builder<'_, '_> {
         // Angles agree within the tolerance at the radius they are at.
         let close = |s: &Self, va: u32, vb: u32| -> R<bool> {
             let (ua, ub) = (angle(s, va)?, angle(s, vb)?);
-            let r = {
-                let p = s.vpoint(va)? - ax.origin;
-                (p - ax.z * p.dot(ax.z)).len()
+            let r = match &ax.kind {
+                // Round the tube the angle is the tube's, at the tube's radius at most.
+                Kind::TorusTube => match &s.faces.get(fi).map(|f| &f.surface) {
+                    Some(BSurface::Torus { minor_radius, .. }) => *minor_radius,
+                    _ => 0.0,
+                },
+                _ => {
+                    let p = s.vpoint(va)? - ax.origin;
+                    (p - ax.z * p.dot(ax.z)).len()
+                }
             };
             Ok(wrap(ua - ub).abs() * r <= s.tol)
         };
@@ -929,7 +998,7 @@ impl Builder<'_, '_> {
                 let target = angle(self, self.start(*a_es.first().ok_or("empty loop")?)?)?;
                 let mut found = None;
                 for &(e, _) in &b_es {
-                    if let Some(t) = self.crossing(e, target, ax.period, eval)? {
+                    if let Some(t) = self.crossing_in(e, d, target, ax.period, eval)? {
                         found = Some((e, t));
                         break;
                     }
@@ -974,10 +1043,18 @@ impl Builder<'_, '_> {
     /// The parameter inside edge `e`'s interval where its curve reaches the angle `target`
     /// about the axis, if it does.
     fn crossing(&self, e: u32, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
+        self.crossing_in(e, 0, target, period, eval)
+    }
+
+    /// [`Self::crossing`] of the surface's parameter `d` (0: u, 1: v).
+    fn crossing_in(&self, e: u32, d: usize, target: f64, period: f64, eval: &SurfaceEval) -> R<Option<f64>> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let [lo, hi] = edge.interval;
-        let d = |t: f64| c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).map(|q| wrap_by(q[0] - target, period));
+        let at = d;
+        let d = |t: f64| {
+            c.point(t).and_then(|p| eval.project(p, None, f64::INFINITY)).and_then(|q| q.get(at).copied()).map(|x| wrap_by(x - target, period))
+        };
         // A jump across the half period is the wrap, not a crossing.
         let near = period / TAU;
         let n = 64;

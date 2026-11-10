@@ -1,6 +1,6 @@
 //! Convert a `SolidCore` B-rep into the neutral [`step_import::Model`].
 //!
-//! This is the export counterpart of [`crate::build`]. It maps exact `SolidCore`
+//! This is the export counterpart of the STEP reader's build. It maps exact `SolidCore`
 //! topology and analytic/B-spline geometry to the neutral model that
 //! `step_export` writes, so an engine B-rep can be exported without being
 //! tessellated.
@@ -732,85 +732,6 @@ mod tests {
         }
     }
 
-    /// An open band on `surface` between two circles about the z axis of radius
-    /// `radius`, at z = `bottom` and z = `top`, joined by the seam edge `seam` (its
-    /// curve and parameters from bottom to top). With its seam given, the build adds
-    /// none (an added seam is a curve on the surface, which the exporter does not
-    /// write).
-    fn band(
-        surface: ModelSurface,
-        radius: f64,
-        bottom: f64,
-        top: f64,
-        seam: (ModelCurve, f64, f64),
-    ) -> Body {
-        let circle = |index: usize, z: f64| Edge {
-            step_id: index as u64 + 1,
-            start: index,
-            end: index,
-            curve: ModelCurve::Circle {
-                frame: Frame {
-                    origin: [0.0, 0.0, z],
-                    x: [1.0, 0.0, 0.0],
-                    y: [0.0, 1.0, 0.0],
-                    z: [0.0, 0.0, 1.0],
-                },
-                radius,
-            },
-            same_sense: true,
-            t_start: 0.0,
-            t_end: 360.0,
-        };
-        let (seam_curve, seam_start, seam_end) = seam;
-        let seam = Edge {
-            step_id: 3,
-            start: 0,
-            end: 1,
-            curve: seam_curve,
-            same_sense: true,
-            t_start: seam_start,
-            t_end: seam_end,
-        };
-        let uses = [(0, true), (2, true), (1, false), (2, false)]
-            .into_iter()
-            .map(|(edge, forward)| OrientedEdge { edge, forward })
-            .collect();
-        Body {
-            step_id: 1,
-            name: None,
-            kind: BodyKind::ShellModel,
-            unit_mm: 1.0,
-            uncertainty_mm: None,
-            shells: vec![Shell {
-                step_id: 1,
-                closed: false,
-                orientation: true,
-                faces: vec![0],
-            }],
-            faces: vec![Face {
-                step_id: 1,
-                surface,
-                same_sense: true,
-                loops: vec![Loop {
-                    outer: true,
-                    orientation: true,
-                    bound: Bound::Edges(uses),
-                }],
-            }],
-            edges: vec![circle(0, bottom), circle(1, top), seam],
-            vertices: vec![
-                Vertex {
-                    step_id: 1,
-                    point: [radius, 0.0, bottom],
-                },
-                Vertex {
-                    step_id: 2,
-                    point: [radius, 0.0, top],
-                },
-            ],
-        }
-    }
-
     /// Every exported pcurve point, lifted by the ISO 10303-42 formula of the exported
     /// surface at the file's parameters, lies on an edge of the B-rep: the pcurves are
     /// in STEP parameters (converted from the kernel's NURB ones), angles in radians.
@@ -819,7 +740,7 @@ mod tests {
         use solidcore::geom::global_solver::SolverOperation;
         let mut kernel = Kernel::default();
         let origin = Point3::new(0.0, 0.0, 0.0);
-        let mut breps = vec![
+        let breps = vec![
             (
                 "cylinder",
                 api::create_cylinder(&mut kernel, Point3::new(0.0, 0.0, -2.0), 2.0, 4.0).unwrap(),
@@ -837,46 +758,6 @@ mod tests {
                 api::create_torus(&mut kernel, origin, 5.0, 1.5).unwrap(),
             ),
         ];
-        // A surface of revolution of a line and an extrusion of a circle (its u an
-        // angle). (A revolved circular arc band gets a seam inserted as a curve on the
-        // surface even with its own seam edge, which this exporter does not write yet.)
-        let z_frame = |origin: [f64; 3], y: [f64; 3], z: [f64; 3]| Frame {
-            origin,
-            x: [1.0, 0.0, 0.0],
-            y,
-            z,
-        };
-        let line = |x: f64| ModelCurve::Line {
-            origin: [x, 0.0, 0.0],
-            dir: [0.0, 0.0, 1.0],
-            magnitude: 1.0,
-        };
-        let revolved_line = ModelSurface::Revolution {
-            curve: Box::new(line(10.0)),
-            axis_origin: [0.0, 0.0, 0.0],
-            axis_dir: [0.0, 0.0, 1.0],
-        };
-        let extruded_circle = ModelSurface::Extrusion {
-            curve: Box::new(ModelCurve::Circle {
-                frame: z_frame([0.0; 3], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-                radius: 10.0,
-            }),
-            dir: [0.0, 0.0, 1.0],
-            magnitude: 20.0,
-        };
-        for (name, body) in [
-            (
-                "revolved line",
-                band(revolved_line, 10.0, 0.0, 20.0, (line(10.0), 0.0, 20.0)),
-            ),
-            (
-                "extruded circle",
-                band(extruded_circle, 10.0, 0.0, 20.0, (line(10.0), 0.0, 20.0)),
-            ),
-        ] {
-            let brep = crate::build(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
-            breps.push((name, brep));
-        }
         for (name, brep) in &breps {
             let model = brep_to_model(brep).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(!model.pcurves.is_empty(), "{name}: no pcurves");

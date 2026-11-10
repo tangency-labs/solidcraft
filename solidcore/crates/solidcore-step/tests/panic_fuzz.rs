@@ -1,34 +1,40 @@
-//! A panic fuzz of STEP import (#2490): the repo's STEP files and files written by the
-//! exporter, mutated (truncated, bytes flipped, numbers replaced by huge counts, NaN or
-//! infinities, references broken or made cyclic, lines dropped or repeated, entity names
-//! swapped, lists nested deep), parsed and built into B-reps with
-//! [`step_brep::import_with_report_options`], and the built bodies exported again. Also
-//! [`step_import::flat::decode`] on mutated arrays. A result of `Err` is fine; a panic
-//! fails the test with the reproducing seed and the mutations.
+//! A panic fuzz of STEP import (#2490), ported from step-brep's `tests/panic_fuzz.rs` with its
+//! cases when step-brep's import was deleted (RFC 0003, 1.6): STEP files mutated (truncated,
+//! bytes flipped, numbers replaced by huge counts, NaN or infinities, references broken or made
+//! cyclic, lines dropped or repeated, entity names swapped, lists nested deep), parsed
+//! (`solidcore_record::step::p21`), read into records ([`solidcore_step::topology::read_solids`]),
+//! checked as the kernel takes them, made into kernel bodies, and written again
+//! ([`solidcore_step::write::topology::brep`]). A result of `Err` is fine; a panic fails the test
+//! with the reproducing seed and the mutations.
 //!
-//! The harness is solidcore's (`crates/solidcore/tests/support/panic_fuzz.rs`); see it
-//! for `SOLIDCORE_PANIC_FUZZ_CASES` and the other variables.
+//! The harness is solidcore's (`crates/solidcore/tests/support/panic_fuzz.rs`); see it for
+//! `SOLIDCORE_PANIC_FUZZ_CASES` and the other variables.
 
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::indexing_slicing
-)] // test helpers
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)] // test helpers
 
+// solidcore's harness keeps solidcore's formatting, not this crate's.
+#[rustfmt::skip]
 #[path = "../../solidcore/tests/support/panic_fuzz.rs"]
 mod panic_fuzz;
 
 use std::sync::OnceLock;
 
-use panic_fuzz::{assert_no_findings, fuzz, Family, Rng, Settings};
-use solidcore::primitive::api_primitives as prim;
-use solidcore::{CancelToken, Kernel, Point3};
-use step_brep::{BuildMode, BuildOptions};
-use step_import::Limits;
+use panic_fuzz::{Family, Rng, Settings, assert_no_findings, fuzz};
+use solidcore::CancelToken;
+use solidcore_record::step::p21;
+use solidcore_step::write::{GeomWriter, Writer, topology};
 
-/// The files mutated: the repo's STEP fixtures and the exporter's output for a few
-/// primitives.
+/// A record written as a STEP file of its solids and sheets.
+fn written(record: &solidcore_record::brep::Brep, name: &str) -> Option<String> {
+    let mut w = Writer::new();
+    let out = topology::brep(&mut GeomWriter::new(&mut w), record, name).ok()?;
+    let items: Vec<p21::Param> = out.solids.iter().copied().chain(out.sheets).map(p21::Param::Ref).collect();
+    w.add("SHAPE_REPRESENTATION", &[p21::Param::Str(String::new()), p21::Param::List(items), p21::Param::Null]);
+    Some(w.file(name, "AUTOMOTIVE_DESIGN"))
+}
+
+/// The files mutated: the STEP fixtures, and primitives written by this crate's writer (as
+/// step-brep's fuzz wrote them with step-export).
 fn bases() -> &'static [Vec<u8>] {
     static BASES: OnceLock<Vec<Vec<u8>>> = OnceLock::new();
     BASES.get_or_init(|| {
@@ -36,19 +42,17 @@ fn bases() -> &'static [Vec<u8>] {
             include_bytes!("fixtures/discord-2026-10-30-fillet.step").to_vec(),
             include_bytes!("../../goldens/src/units/topology_brep_constructor_tetra.stp").to_vec(),
         ];
-        let mut k = Kernel::default();
-        let o = Point3::new(0.0, 0.0, 0.0);
+        let o = [0.0; 3];
         let bodies = [
-            prim::create_box(&mut k, o, 1.0, 2.0, 3.0),
-            prim::create_cylinder(&mut k, o, 1.0, 2.0),
-            prim::create_cone(&mut k, o, 2.0, 1.0, 3.0),
+            solidcore_ops::make_box(o, [1.0, 2.0, 3.0]),
+            solidcore_ops::make_cylinder(o, 1.0, 2.0),
+            solidcore_ops::make_cone(o, 2.0, 1.0, 3.0),
             // (not the torus: building it back takes a debug build seconds per case)
-            prim::create_sphere(&mut k, o, 2.0),
+            solidcore_ops::make_sphere(o, 2.0),
         ];
         for b in bodies {
-            let b = b.expect("a primitive");
-            let model = step_brep::brep_to_model(&b).expect("export model");
-            out.push(step_export::write(&model).expect("export").into_bytes());
+            let (record, _) = b.expect("a primitive").to_record().expect("its record");
+            out.push(written(&record, "primitive").expect("written").into_bytes());
         }
         out
     })
@@ -98,17 +102,7 @@ const NUMBERS: &[&str] = &[
     "--1",
 ];
 
-const REFERENCES: &[&str] = &[
-    "0",
-    "-1",
-    "1",
-    "2",
-    "99999999",
-    "18446744073709551616",
-    "",
-    "#",
-    "10",
-];
+const REFERENCES: &[&str] = &["0", "-1", "1", "2", "99999999", "18446744073709551616", "", "#", "10"];
 
 const ENTITIES: &[&str] = &[
     "CARTESIAN_POINT",
@@ -186,16 +180,9 @@ fn place(bytes: &[u8], at: f64) -> usize {
 
 /// The token at or after `i` for which `start` holds, as a range continuing while
 /// `cont` holds.
-fn token(
-    bytes: &[u8],
-    i: usize,
-    start: impl Fn(u8) -> bool,
-    cont: impl Fn(u8) -> bool,
-) -> Option<(usize, usize)> {
+fn token(bytes: &[u8], i: usize, start: impl Fn(u8) -> bool, cont: impl Fn(u8) -> bool) -> Option<(usize, usize)> {
     let s = (i..bytes.len()).find(|&j| start(bytes[j]))?;
-    let e = (s + 1..bytes.len())
-        .find(|&j| !cont(bytes[j]))
-        .unwrap_or(bytes.len());
+    let e = (s + 1..bytes.len()).find(|&j| !cont(bytes[j])).unwrap_or(bytes.len());
     Some((s, e))
 }
 
@@ -220,23 +207,15 @@ fn entity_name(bytes: &[u8], i: usize) -> Option<(usize, usize)> {
         if !bytes.get(s).is_some_and(u8::is_ascii_uppercase) {
             continue;
         }
-        let e = skip(s, &|b| {
-            b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit()
-        });
+        let e = skip(s, &|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit());
         return Some((s, e));
     }
     None
 }
 
 fn line_at(bytes: &[u8], i: usize) -> (usize, usize) {
-    let s = bytes[..i]
-        .iter()
-        .rposition(|&b| b == b'\n')
-        .map_or(0, |p| p + 1);
-    let e = bytes[i..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .map_or(bytes.len(), |p| i + p + 1);
+    let s = bytes[..i].iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
+    let e = bytes[i..].iter().position(|&b| b == b'\n').map_or(bytes.len(), |p| i + p + 1);
     (s, e)
 }
 
@@ -254,8 +233,7 @@ fn apply(bytes: &mut Vec<u8>, e: &Edit) {
             bytes[i] ^= 1 << bit;
         }
         Edit::Number(at, text) => {
-            let is_num =
-                |b: u8| b.is_ascii_digit() || b == b'.' || b == b'E' || b == b'-' || b == b'+';
+            let is_num = |b: u8| b.is_ascii_digit() || b == b'.' || b == b'E' || b == b'-' || b == b'+';
             // a number not part of a reference
             let mut i = place(bytes, at);
             while let Some((s, end)) = token(bytes, i, |b| b.is_ascii_digit(), is_num) {
@@ -268,12 +246,7 @@ fn apply(bytes: &mut Vec<u8>, e: &Edit) {
             }
         }
         Edit::Reference(at, text) => {
-            if let Some((s, end)) = token(
-                bytes,
-                place(bytes, at),
-                |b| b == b'#',
-                |b| b.is_ascii_digit(),
-            ) {
+            if let Some((s, end)) = token(bytes, place(bytes, at), |b| b == b'#', |b| b.is_ascii_digit()) {
                 let mut t = b"#".to_vec();
                 t.extend_from_slice(text.as_bytes());
                 splice(bytes, (s, end), &t);
@@ -315,8 +288,6 @@ fn apply(bytes: &mut Vec<u8>, e: &Edit) {
 struct StepCase {
     base: usize,
     edits: Vec<Edit>,
-    options: BuildOptions,
-    tight_limits: bool,
 }
 
 struct StepImport;
@@ -329,17 +300,7 @@ impl Family for StepImport {
     }
 
     fn generate(&self, r: &mut Rng) -> StepCase {
-        StepCase {
-            base: r.below(bases().len()),
-            edits: (0..=r.below(4)).map(|_| edit(r)).collect(),
-            options: BuildOptions {
-                heal: r.chance(0.2),
-                skip_cone_seams: r.chance(0.2),
-                mode: r.pick(&[BuildMode::Default, BuildMode::Strict, BuildMode::StitchOnly]),
-                file_pcurves: r.chance(0.3),
-            },
-            tight_limits: r.chance(0.2),
-        }
+        StepCase { base: r.below(bases().len()), edits: (0..=r.below(4)).map(|_| edit(r)).collect() }
     }
 
     fn run(case: StepCase, _cancel: &CancelToken) {
@@ -347,87 +308,14 @@ impl Family for StepImport {
         for e in &case.edits {
             apply(&mut bytes, e);
         }
-        let limits = if case.tight_limits {
-            Limits {
-                max_entities: 200,
-                max_list_depth: 4,
-                max_ref_depth: 4,
-                max_list_len: 16,
-            }
-        } else {
-            Limits::default()
-        };
-        if let Ok(model) = step_import::import(&bytes, &limits) {
-            for body in &model.bodies {
-                let flat = step_import::flat::encode(body);
-                let _ = step_import::flat::decode(&flat);
-            }
-        }
-        if let Ok(report) = step_brep::import_with_report_options(&bytes, &limits, case.options) {
-            for b in &report.bodies {
-                let _ = step_brep::is_closed_solid(b);
-                let _ = step_brep::has_uv_trims(b);
-                let _ = step_brep::validate_for_display(b);
-                if let Ok(model) = step_brep::brep_to_model(b) {
-                    let _ = step_export::write(&model);
-                }
-            }
-        }
-    }
-}
-
-/// `flat::decode` on a body's array with values replaced by hostile ones (counts,
-/// kinds and coordinates alike) or the array cut short.
-#[derive(Clone, Debug)]
-struct FlatCase {
-    base: usize,
-    edits: Vec<(f64, f64)>,
-    truncate: Option<f64>,
-}
-
-struct FlatDecode;
-
-impl Family for FlatDecode {
-    type Input = FlatCase;
-
-    fn name(&self) -> &'static str {
-        "step-flat"
-    }
-
-    fn generate(&self, r: &mut Rng) -> FlatCase {
-        FlatCase {
-            base: r.below(bases().len()),
-            edits: (0..=r.below(4))
-                .map(|_| {
-                    let v = if r.chance(0.5) {
-                        r.pick(panic_fuzz::HOSTILE)
-                    } else {
-                        r.pick(&[-1.0, 0.0, 1.0, 2.0, 3.0, 7.0, 1e9, 4294967296.0, 0.5, 1e19])
-                    };
-                    (r.unit(), v)
-                })
-                .collect(),
-            truncate: r.chance(0.3).then(|| r.unit()),
-        }
-    }
-
-    fn run(case: FlatCase, _cancel: &CancelToken) {
-        let Ok(model) = step_import::import(&bases()[case.base], &Limits::default()) else {
-            return;
-        };
-        for body in &model.bodies {
-            let mut flat = step_import::flat::encode(body);
-            if flat.is_empty() {
-                continue;
-            }
-            for &(at, v) in &case.edits {
-                let i = ((at * flat.len() as f64) as usize).min(flat.len() - 1);
-                flat[i] = v;
-            }
-            if let Some(at) = case.truncate {
-                flat.truncate((at * flat.len() as f64) as usize);
-            }
-            let _ = step_import::flat::decode(&flat);
+        let Ok(text) = String::from_utf8(bytes) else { return };
+        let Ok(ex) = p21::parse(&text) else { return };
+        let read = solidcore_step::topology::read_solids(&ex);
+        for s in &read.solids {
+            let _ = solidcore_ops::record_check::validate(&s.brep);
+            let _ = solidcore_ops::record_check::agreement(&s.brep);
+            let _ = solidcore_ops::Body::from_record(&s.brep, false);
+            let _ = written(&s.brep, "again");
         }
     }
 }
@@ -448,17 +336,10 @@ fn entity_edit_lands_on_an_entity_name() {
         };
         let name = &text[s..e];
         assert!(
-            name.bytes().next().unwrap().is_ascii_uppercase()
-                && name
-                    .bytes()
-                    .all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit()),
+            name.bytes().next().unwrap().is_ascii_uppercase() && name.bytes().all(|b| b.is_ascii_uppercase() || b == b'_' || b.is_ascii_digit()),
             "{name:?} at byte {s}"
         );
-        assert_eq!(
-            bytes.get(e),
-            Some(&b'('),
-            "{name:?} at byte {s} is not followed by `(`"
-        );
+        assert_eq!(bytes.get(e), Some(&b'('), "{name:?} at byte {s} is not followed by `(`");
         // what precedes the name is `#<id>=`, then optionally `(` for a complex instance
         let head = text[..s].trim_end();
         let head = match head.strip_suffix('(') {
@@ -468,14 +349,9 @@ fn entity_edit_lands_on_an_entity_name() {
             }
             None => head,
         };
-        let head = head
-            .strip_suffix('=')
-            .unwrap_or_else(|| panic!("{name:?} at byte {s}"));
+        let head = head.strip_suffix('=').unwrap_or_else(|| panic!("{name:?} at byte {s}"));
         let id = head.trim_end().rsplit('#').next().unwrap();
-        assert!(
-            !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()),
-            "{name:?} at byte {s} does not follow `#<id>=`"
-        );
+        assert!(!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()), "{name:?} at byte {s} does not follow `#<id>=`");
         assert!(s >= at, "the name starts before the edit's place");
     }
     assert!(complex > 0, "no complex instance was reached");
@@ -487,8 +363,14 @@ fn panic_fuzz_step_import() {
     assert_no_findings("step", &findings);
 }
 
+/// The fuzz starts from files the reader reads: every primitive base comes back as one solid, so
+/// the mutations reach the topology build, the checks, the kernel and the writer.
 #[test]
-fn panic_fuzz_step_flat_decode() {
-    let findings = fuzz(&FlatDecode, &Settings::for_family("step-flat", 200));
-    assert_no_findings("step-flat", &findings);
+fn the_written_bases_read_back_as_solids() {
+    for (i, b) in bases().iter().enumerate().skip(2) {
+        let ex = p21::parse(std::str::from_utf8(b).unwrap()).unwrap();
+        let read = solidcore_step::topology::read_solids(&ex);
+        assert!(read.failures.is_empty() && read.solids.len() == 1, "base {i}: {:?}", read.failures);
+        assert!(solidcore_ops::Body::from_record(&read.solids[0].brep, false).is_ok(), "base {i}");
+    }
 }
