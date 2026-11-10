@@ -12,7 +12,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
-use solidcraft_doc::drawing_view::{TangentEdges, ViewDirection, ViewSettings};
+use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
 use solidcraft_geom::paper::line::LineGroup;
@@ -270,6 +270,68 @@ impl JsonSchema for ExplodedParam {
     }
 }
 
+/// The position of its assembly a view draws (#13048), as given: `"designed"`, or some of the design's
+/// joints at values of their own.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PoseParam {
+    Designed,
+    Joints(Vec<JointPoseParam>),
+}
+
+/// One joint of a position, as given: the joint by its id or name, and its values as `joint.drive` takes
+/// them (degrees and millimetres, numbers or expressions).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JointPoseParam {
+    pub joint: Value,
+    pub values: Vec<Value>,
+}
+
+impl<'de> Deserialize<'de> for PoseParam {
+    /// One message for anything that is neither, rather than serde's "did not match any variant".
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<PoseParam, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Either {
+            Name(String),
+            Joints(Vec<JointPoseParam>),
+        }
+        let message = "pose is \"designed\", or a list of joints, each {\"joint\": its id or name, \"values\": [...]}";
+        match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
+            Either::Name(name) if name.eq_ignore_ascii_case("designed") => Ok(PoseParam::Designed),
+            Either::Name(_) => Err(serde::de::Error::custom(message)),
+            Either::Joints(joints) => Ok(PoseParam::Joints(joints)),
+        }
+    }
+}
+
+impl JsonSchema for PoseParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewPose".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let joint = json!({
+            "type": "object",
+            "properties": {
+                "joint": {"description": "The joint, by its id or name.", "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]},
+                "values": {
+                    "description": "Its values in the order `joint.drive` takes them: degrees and millimetres, numbers or expressions.",
+                    "type": "array",
+                    "items": {"oneOf": [{"type": "number"}, {"type": "string"}]},
+                    "minItems": 1,
+                    "maxItems": MAX_JOINT_VALUES
+                }
+            },
+            "required": ["joint", "values"],
+            "additionalProperties": false
+        });
+        json_schema!({
+            "description": "The position of its assembly the view draws: \"designed\" (as the design places its parts), or some of the design's joints at values of their own, driven as `joint.drive` drives them (limits, closed loops and motion links alike). The design never changes.",
+            "oneOf": [{"type": "string", "enum": ["designed"]}, {"type": "array", "items": joint, "minItems": 1, "maxItems": MAX_POSE_JOINTS}]
+        })
+    }
+}
+
 /// The chord the lines are sampled at, in paper millimetres.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(transparent)]
@@ -415,6 +477,9 @@ pub struct ViewSet {
     /// The state of the assembly it draws.
     #[serde(deserialize_with = "super::present")]
     pub exploded: Option<Option<ExplodedParam>>,
+    /// The position of its assembly it draws.
+    #[serde(deserialize_with = "super::present")]
+    pub pose: Option<Option<PoseParam>>,
     /// How far the view's boundary grows from the model's box towards the box that also holds its
     /// reference parts, each side on its own: 0 to 100.
     #[serde(deserialize_with = "super::present")]
@@ -474,6 +539,31 @@ pub struct SettingsResult {
     pub hide: SettingResult<Option<Vec<Vec<u64>>>>,
     /// The state of the assembly it draws: `"assembled"`, or `{"view": id}` for an exploded view.
     pub exploded: SettingResult<Value>,
+    /// The position of its assembly it draws: `"designed"`, or `{"joints": [...]}` as saved (radians
+    /// and mm).
+    pub pose: PoseResult,
+}
+
+/// A view's position as inspect shows it: the setting, and for a position of its own what it draws.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PoseResult {
+    #[serde(flatten)]
+    pub setting: SettingResult<Value>,
+    /// The joints it draws, at the values they take once driven (a value past a limit draws at the
+    /// limit), in degrees and mm. Empty when the joints can't be driven.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawn: Option<Vec<DrawnJointResult>>,
+    /// The ids of the joints it names that the design no longer has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<Vec<u64>>,
+}
+
+/// One joint as a view in a position of its own draws it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DrawnJointResult {
+    pub joint: u64,
+    pub name: String,
+    pub values: Vec<f64>,
 }
 
 /// The values a window offers for a view's settings.
@@ -624,6 +714,10 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ExplodedParam")]
     pub exploded: Option<ExplodedParam>,
+    /// The position of its assembly it draws (designed when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PoseParam")]
+    pub pose: Option<PoseParam>,
 }
 
 /// What `drawing.view.projected` takes: its parent, the side of it it sits on, and where.

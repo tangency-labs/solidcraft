@@ -30,6 +30,7 @@ fn schemas_and_the_key_check_agree() {
     let base = [
         "exploded",
         "hide",
+        "pose",
         "position_mm",
         "reference_hides_model",
         "reference_shown_percent",
@@ -64,8 +65,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         hide: Some(Vec::new().into()),
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
-        // Not yet in the edit: `drawing.view.edit` takes a position in the next commit.
-        pose: None,
+        pose: Some(Default::default()),
     };
     let own = serde_json::to_value(all).unwrap_or_default();
     let named = |key: &String| if key == "occurrences" { "source".to_string() } else { key.clone() };

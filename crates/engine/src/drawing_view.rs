@@ -15,7 +15,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
 use solidcraft_doc::drawing::{Drawing, Sheet};
-use solidcraft_doc::drawing_view::Exploded;
+use solidcraft_doc::drawing_view::{Exploded, Pose};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
 use solidcraft_geom::{Aabb2, EPS};
@@ -55,6 +55,8 @@ pub enum Unmeasured {
     NothingChosen,
     /// The exploded view it draws is no longer in the design.
     NoExplodedView,
+    /// Its joints can't be driven to the position it draws.
+    NotPosed,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -69,6 +71,7 @@ impl Unmeasured {
             Unmeasured::NotPlaced => "not_placed",
             Unmeasured::NothingChosen => "nothing_chosen",
             Unmeasured::NoExplodedView => "no_exploded_view",
+            Unmeasured::NotPosed => "not_posed",
         }
     }
 }
@@ -84,6 +87,7 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
             Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
             Unmeasured::NoExplodedView => f.write_str("the exploded view it draws is no longer in the design"),
+            Unmeasured::NotPosed => f.write_str("its position can't be placed"),
         }
     }
 }
@@ -187,52 +191,97 @@ pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
     })
 }
 
+/// The state of its assembly a view draws (#13048): its exploded choice and its position, the one key
+/// of the session it draws from. A position's values are kept as their bits, by joint, so views with
+/// the same position share one copy (`-0.0` is kept as `0.0`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Choice {
+    exploded: Exploded,
+    pose: Vec<(u64, Vec<u64>)>,
+}
+
+impl Choice {
+    /// What saved view `view` draws.
+    pub fn of(view: &ResolvedView) -> Choice {
+        let mut pose: Vec<(u64, Vec<u64>)> = match &view.pose.value {
+            Pose::Designed => Vec::new(),
+            Pose::Joints(joints) => joints.iter().map(|j| (j.joint, j.values.iter().map(|v| (v + 0.0).to_bits()).collect())).collect(),
+        };
+        pose.sort();
+        Choice { exploded: view.exploded.value, pose }
+    }
+
+    /// Whether it draws the design as it places its parts, as the default choice does.
+    pub fn is_placed(&self) -> bool {
+        self.exploded == Exploded::Assembled && self.pose.is_empty()
+    }
+}
+
 /// The sessions the views of one read of a drawing draw from (#13048): the design as it places its
-/// parts, and a copy for each exploded view a view draws, made the first time a view asks for it and
-/// shared by every view that draws it. A copy costs what placing every body again costs (its world
-/// state misses the session's cache), so one read makes each at most once. The design is never
-/// changed.
+/// parts, and a copy for each other state a view draws ([`Choice`]), made the first time a view asks
+/// for it and shared by every view that draws it. A copy costs what placing every body again costs
+/// (its world state misses the session's cache), so one read makes each at most once. The design is
+/// never changed.
 pub struct ViewSessions<'a> {
     placed: &'a Session,
-    exploded: BTreeMap<u64, std::result::Result<Session, Unmeasured>>,
+    copies: BTreeMap<Choice, std::result::Result<Session, Unmeasured>>,
 }
 
 impl<'a> ViewSessions<'a> {
     /// The views' sessions, where `placed` is the design as it places its parts.
     pub fn new(placed: &'a Session) -> ViewSessions<'a> {
-        ViewSessions { placed, exploded: BTreeMap::new() }
+        ViewSessions { placed, copies: BTreeMap::new() }
     }
 
-    /// The session saved view `view` draws from, or why it can't be drawn: its exploded view is no
-    /// longer in the design, or moves a part out of range (a hostile file).
+    /// The session saved view `view` draws from, or why it can't be drawn ([`copy_for`]).
     pub fn of(&mut self, view: &ResolvedView) -> std::result::Result<&Session, Unmeasured> {
-        self.drawing(view.exploded.value)
+        self.drawing(&Choice::of(view))
     }
 
-    /// The session the views that draw `exploded` draw from.
-    pub fn drawing(&mut self, exploded: Exploded) -> std::result::Result<&Session, Unmeasured> {
-        let Exploded::View(id) = exploded else { return Ok(self.placed) };
+    /// The session the views that draw `choice` draw from.
+    pub fn drawing(&mut self, choice: &Choice) -> std::result::Result<&Session, Unmeasured> {
+        if choice.is_placed() {
+            return Ok(self.placed);
+        }
         let placed = self.placed;
-        self.exploded.entry(id).or_insert_with(|| exploded_copy(placed, id)).as_ref().map_err(|why| *why)
+        self.copies.entry(choice.clone()).or_insert_with(|| copy_for(placed, choice)).as_ref().map_err(|why| *why)
     }
 
     /// How many copies it made.
     pub fn copies(&self) -> usize {
-        self.exploded.values().filter(|copy| copy.is_ok()).count()
+        self.copies.values().filter(|copy| copy.is_ok()).count()
     }
 }
 
-/// A copy of `placed` with exploded view `id`'s parts moved out, as `explode.show` shows them: what a
-/// view drawing it draws from.
-pub fn exploded_copy(placed: &Session, id: u64) -> std::result::Result<Session, Unmeasured> {
-    use crate::cmd::motion::{explode_moves, exploded_at};
-    let view = placed.doc.assembly.exploded.iter().find(|v| v.id == id).ok_or(Unmeasured::NoExplodedView)?;
-    let moves = exploded_at(&explode_moves(placed, view), 1.0);
-    if !moves.values().all(solidcraft_doc::is_placement) {
-        return Err(Unmeasured::NotPlaced);
-    }
+/// A copy of `placed` as a view drawing `choice` draws it: its position's joints driven to their
+/// values as `joint.drive` drives them (the limits, closed loops, motion links and contact sets
+/// alike), skipping a joint the design no longer has, then its exploded view's parts moved out from
+/// there, as `explode.show` shows them. Or why it can't be: the exploded view is no longer in the
+/// design or moves a part out of range (a hostile file), or the joints can't be driven.
+pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Session, Unmeasured> {
+    use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at};
+    // From where the design places its parts: an occurrence move not captured yet is left out.
     let mut copy = placed.scratch();
-    copy.pending_moves = moves;
+    copy.pending_moves.clear();
+    let joints = &copy.doc.assembly.joints;
+    let want: Vec<(u64, Vec<f64>)> = choice
+        .pose
+        .iter()
+        .filter(|(joint, _)| joints.iter().any(|j| j.id == *joint))
+        .map(|(joint, bits)| (*joint, bits.iter().map(|b| f64::from_bits(*b)).collect()))
+        .collect();
+    if !want.is_empty() {
+        let given = want.iter().flat_map(|(joint, values)| (0..values.len()).map(move |i| (*joint, i))).collect();
+        drive_with_contact(&mut copy, &want, &given).map_err(|_| Unmeasured::NotPosed)?;
+    }
+    if let Exploded::View(id) = choice.exploded {
+        let view = copy.doc.assembly.exploded.iter().find(|v| v.id == id).ok_or(Unmeasured::NoExplodedView)?;
+        let moves = exploded_at(&explode_moves(&copy, view), 1.0);
+        if !moves.values().all(solidcraft_doc::is_placement) {
+            return Err(Unmeasured::NotPlaced);
+        }
+        copy.pending_moves = moves;
+    }
     Ok(copy)
 }
 
@@ -285,25 +334,71 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
-/// Whether view `id` of `d` draws an exploded view (#13048). Its dimensions, balloons and notes on its
-/// model read the design's placements, so they would measure its parts assembled: until they read
-/// what it draws, new ones are refused ([`refuse_on_exploded`]) and a sheet holds back those a file
-/// brings.
-pub fn draws_exploded(d: &Drawing, id: u64) -> bool {
-    d.resolve_view(id).is_ok_and(|view| view.exploded.value != Exploded::Assembled)
+/// How a view draws its parts somewhere other than where the design places them (#13048).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Apart {
+    /// An exploded view.
+    Exploded,
+    /// A position of its own.
+    Posed,
 }
 
-/// Refuses `what` (dimensions, balloons, notes) on view `view` of `d` when it draws an exploded view
-/// ([`draws_exploded`]).
-pub fn refuse_on_exploded(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
-    if draws_exploded(d, view) { Err(bad(cmd, format!("not supported yet: {what} on an exploded view"))) } else { Ok(()) }
+impl Apart {
+    /// How `view` draws its parts apart, if it does: exploded first, as an exploded view of a
+    /// position is still exploded.
+    pub fn of(view: &ResolvedView) -> Option<Apart> {
+        if view.exploded.value != Exploded::Assembled {
+            Some(Apart::Exploded)
+        } else if view.pose.value != Pose::Designed {
+            Some(Apart::Posed)
+        } else {
+            None
+        }
+    }
+
+    /// The view, as a message names it.
+    pub fn view(self) -> &'static str {
+        match self {
+            Apart::Exploded => "an exploded view",
+            Apart::Posed => "a view in a position of its own",
+        }
+    }
+
+    /// Why a sheet holds back a dimension or a note on the model of a view that draws its parts this
+    /// way: Check Drawing's words.
+    pub fn held(self) -> &'static str {
+        match self {
+            Apart::Exploded => "its view draws an exploded view: not supported yet, so it isn't drawn",
+            Apart::Posed => "its view draws a position of its own: not supported yet, so it isn't drawn",
+        }
+    }
 }
 
-/// Why saved view `view` can't be drawn yet, if it can't, as it draws an exploded view (#13048): its
+/// How view `id` of `d` draws its parts apart from where the design places them, if it does
+/// ([`Apart`]). Its dimensions, balloons and notes on its model read the design's placements, so they
+/// would measure its parts where the design places them: until they read what it draws, new ones are
+/// refused ([`refuse_apart`]) and a sheet holds back those a file brings.
+pub fn draws_apart(d: &Drawing, id: u64) -> Option<Apart> {
+    d.resolve_view(id).ok().as_ref().and_then(Apart::of)
+}
+
+/// Refuses `what` (dimensions, balloons, notes) on view `view` of `d` when it draws its parts apart
+/// ([`draws_apart`]).
+pub fn refuse_apart(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
+    match draws_apart(d, view) {
+        Some(apart) => Err(bad(cmd, format!("not supported yet: {what} on {}", apart.view()))),
+        None => Ok(()),
+    }
+}
+
+/// Why saved view `view` can't be drawn yet, if it can't, as it draws its parts apart (#13048): its
 /// shaded parts' pictures are rendered from the design as it places its parts. Its lines alone draw.
-pub fn not_drawable_exploded(view: &ResolvedView) -> Option<&'static str> {
+pub fn not_drawable_apart(view: &ResolvedView) -> Option<&'static str> {
     let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
-    (shaded && view.exploded.value != Exploded::Assembled).then_some("not supported yet: a shaded view of an exploded view")
+    Apart::of(view).filter(|_| shaded).map(|apart| match apart {
+        Apart::Exploded => "not supported yet: a shaded view of an exploded view",
+        Apart::Posed => "not supported yet: a shaded view in a position of its own",
+    })
 }
 
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
