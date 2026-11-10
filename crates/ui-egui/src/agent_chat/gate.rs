@@ -135,6 +135,12 @@ pub fn command(id: &str, params: &Value, undo_left: usize) -> Verdict {
     if id == "file.open_in_easyprint" {
         return Verdict::Ask(format!("{id}, upload the model to Printables' servers (EasyPrint)"));
     }
+    if id == "inspect.parameter_variants"
+        && let Some(export) = params.get("export").filter(|v| !v.is_null())
+    {
+        let files = names_a_file("file.export", export).unwrap_or_else(|| "export the selected variant".into());
+        return Verdict::Ask(format!("{id}: {files}"));
+    }
     if let Some(p) = names_a_file(id, params) {
         return Verdict::Ask(with_slicer(format!("{id}: {p}")));
     }
@@ -259,6 +265,11 @@ mod tests {
         assert!(matches!(exec("file.new", json!({})), Verdict::Ask(_)));
         assert!(matches!(exec("doc.open", json!({"path": "x.step"})), Verdict::Ask(_)));
         assert!(matches!(exec("file.export", json!({"path": "x.stl"})), Verdict::Ask(_)));
+        assert!(matches!(
+            exec("inspect.parameter_variants", json!({"export": {"variant": "Wide", "paths": ["wide.stl", "wide.3mf"]}})),
+            Verdict::Ask(a) if a.contains("wide.stl") && a.contains("wide.3mf")
+        ));
+        assert_eq!(exec("inspect.parameter_variants", json!({"variants": []})), Verdict::Run { change: false });
         // Any command given a file, whatever its area.
         assert!(matches!(exec("sketch.import", json!({"file": "a.dxf"})), Verdict::Ask(_)));
         let batch = json!({"commands": [{"command": "solid.box", "params": {}}, {"command": "file.save", "params": {"path": "/etc/x"}}]});

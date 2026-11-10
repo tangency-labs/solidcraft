@@ -415,6 +415,14 @@ volume, mass and body count; check `ok` and `diagnostics` before applying any ca
 Apply the selected values separately with `parameters.change {changes}` if you intend to
 edit the design. Use `describe_command` for the input and output schemas.
 
+To export a choice, add `"export": {"variant": "Wider", "paths": ["/output/wide.stl", "/output/wide.3mf"]}`
+to the command parameters. Supply either path by itself for just that format. Both exports
+use the same evaluated copy. If you already compared the candidates, send just the selected
+variant in `variants` for the export call. Use absolute paths in the MCP server's allowed folders, as with
+`file.export`. The selected result's `export.files` reports each file's size or error.
+One failed write does not undo another file that was written. A failed rebuild is never
+exported.
+
 Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
 (the catalog).
 

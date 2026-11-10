@@ -151,3 +151,8 @@ The result reports new feature, joint or sketch regressions using the same check
 Parameter Sweep. A refused expression is an error for that variant; later variants still
 run. A variant with a rebuild regression has no metrics. Open bodies do not count toward
 volume or mass. The design and its undo history are unchanged.
+
+To export one variant as STL, 3MF or both, give `export` the variant's name and one or
+two output paths. For example, add `"export": {"variant": "Wide", "paths": ["wide.stl",
+"wide.3mf"]}` to the parameters above. Both files come from the same rebuild. The selected
+variant reports which files were written and any write errors.

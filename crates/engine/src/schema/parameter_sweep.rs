@@ -22,6 +22,19 @@ pub struct ParameterVariantsParams {
     /// Candidates to evaluate, in order, each starting from the open design.
     #[schemars(length(min = 1, max = 12))]
     pub variants: Vec<ParameterVariant>,
+    /// Export a selected variant from its rebuilt copy.
+    #[serde(default)]
+    pub export: Option<VariantExportParams>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct VariantExportParams {
+    /// The name of one of the variants in this request.
+    pub variant: String,
+    /// One .stl path, one .3mf path, or one of each.
+    #[schemars(length(min = 1, max = 2))]
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -82,6 +95,24 @@ pub struct VariantResult {
     pub diagnostics: Option<SweepChanges>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metrics: Option<VariantMetrics>,
+    /// Present only for the variant selected for export.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub export: Option<VariantMeshExports>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct VariantMeshExports {
+    pub files: Vec<VariantMeshFile>,
+    /// Why no export was attempted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum VariantMeshFile {
+    Written { path: String, bytes: u64 },
+    Failed { path: String, error: String },
 }
 
 /// Rebuild the design in a copy at each value of a parameter and report what fails, turns over

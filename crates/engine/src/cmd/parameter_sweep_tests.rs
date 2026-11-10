@@ -151,3 +151,38 @@ fn variants_refuse_unknown_names_and_unbounded_or_ambiguous_input() {
     }
     assert_eq!(s.doc.param("span").map(|p| p.expr.as_str()), Some("40 mm"));
 }
+
+#[test]
+fn a_selected_variant_exports_both_mesh_formats_without_editing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": "span", "width": 10, "height": 5}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-variant-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("wide.stl");
+    let three_mf = dir.join("wide.3mf");
+    let unknown = json!({
+        "variants": [{"name": "Wide", "set": {"span": 60}}],
+        "export": {"variant": "Missing", "paths": [&stl, &three_mf]}
+    });
+    assert!(s.execute("inspect.parameter_variants", &unknown).is_err());
+    let r = run(
+        &mut s,
+        "inspect.parameter_variants",
+        json!({
+            "variants": [{"name": "Small", "set": {"span": 20}}, {"name": "Wide", "set": {"span": 60}}],
+            "export": {"variant": "Wide", "paths": [&stl, &three_mf]}
+        }),
+    );
+    assert!(r["results"][0].get("export").is_none(), "{r}");
+    let files = r["results"][1]["export"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{r}");
+    for (path, reply) in [stl, three_mf].iter().zip(files) {
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(reply["bytes"].as_u64(), Some(bytes.len() as u64), "{reply}");
+        assert_eq!(solidcraft_io::mesh_import_feature(&bytes, &path.to_string_lossy()).unwrap().body_names.len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+    std::fs::remove_dir(dir).unwrap();
+    assert_eq!(s.doc.param("span").map(|p| p.expr.as_str()), Some("40 mm"));
+}

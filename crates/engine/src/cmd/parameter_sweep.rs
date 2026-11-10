@@ -15,7 +15,7 @@ use crate::params::{bad, num, str_};
 use crate::schema::parameter_sweep::{
     FeatureFailed, FeatureWarned, JointFlipped, JointLost, JointSide, MAX_VALUES, MAX_VARIANT_PARAMETERS, MAX_VARIANTS, ParameterSweep,
     ParameterSweepParams, ParameterVariants, ParameterVariantsParams, SketchFailed, SketchFlipped, SweepChanges, SweepResult, SweepSummary,
-    VariantMetrics, VariantResult, VariantValue,
+    VariantExportParams, VariantMeshExports, VariantMeshFile, VariantMetrics, VariantResult, VariantValue,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -44,7 +44,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&VARIANTS_CONTRACT)
         .output(output_schema_for::<ParameterVariants>)
-        .params("variants: [{name, set: {parameter: number | expression}}] (1 to 12; up to 16 existing parameters each). Rebuild each set together in a separate copy of the open design. Returns baseline and ordered results with volume, mass, body counts and rebuild regressions. No edits are kept."),
+        .params("variants: [{name, set: {parameter: number | expression}}] (1 to 12; up to 16 existing parameters each); export?: {variant: name, paths: [one .stl, one .3mf, or both]}. Rebuild each set together in a separate copy of the open design. Returns baseline and ordered results with volume, mass, body counts and rebuild regressions. Export uses the selected copy without rebuilding it again. No edits are kept."),
 ];
 
 /// A frame's origin and z axis, in its occurrence's coordinates.
@@ -176,6 +176,44 @@ fn metrics(s: &mut Session) -> Result<VariantMetrics> {
     })
 }
 
+fn validate_export(export: &VariantExportParams, labels: &BTreeSet<&str>) -> Result<()> {
+    if !labels.contains(export.variant.trim()) {
+        return Err(bad(VARIANTS_CMD, "`export.variant` must name a variant in this request"));
+    }
+    if !(1..=2).contains(&export.paths.len()) {
+        return Err(bad(VARIANTS_CMD, "`export.paths` must contain one STL or 3MF path, or one of each"));
+    }
+    let mut formats = BTreeSet::new();
+    for path in &export.paths {
+        if path.len() >= 4096 || path.contains('\0') {
+            return Err(bad(VARIANTS_CMD, "invalid mesh output path"));
+        }
+        let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        if !matches!(ext.as_str(), "stl" | "3mf") || !formats.insert(ext) {
+            return Err(bad(VARIANTS_CMD, "`export.paths` must name at most one .stl and one .3mf file"));
+        }
+        solidcraft_io::vfs::check(path).map_err(|e| bad(VARIANTS_CMD, format!("{path}: {e}")))?;
+    }
+    Ok(())
+}
+
+fn export_variant(trial: &mut Session, result: &VariantResult, paths: &[String]) -> VariantMeshExports {
+    if !result.ok || result.metrics.as_ref().is_none_or(|m| m.bodies == 0) || trial.model.results.iter().any(|feature| feature.error.is_some()) {
+        return VariantMeshExports { files: Vec::new(), error: Some("the selected variant needs a successful rebuild and at least one body".into()) };
+    }
+    let files = paths
+        .iter()
+        .map(|path| match trial.execute("file.export", &json!({"path": path})) {
+            Ok(reply) => match reply["bytes"].as_u64() {
+                Some(bytes) => VariantMeshFile::Written { path: path.clone(), bytes },
+                None => VariantMeshFile::Failed { path: path.clone(), error: "export did not return a file size".into() },
+            },
+            Err(e) => VariantMeshFile::Failed { path: path.clone(), error: e.to_string() },
+        })
+        .collect();
+    VariantMeshExports { files, error: None }
+}
+
 fn variants(s: &mut Session, p: &Value) -> Result<Value> {
     let input: ParameterVariantsParams = serde_json::from_value(p.clone()).map_err(|e| bad(VARIANTS_CMD, e.to_string()))?;
     if input.variants.is_empty() || input.variants.len() > MAX_VARIANTS {
@@ -204,6 +242,9 @@ fn variants(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
 
+    if let Some(export) = &input.export {
+        validate_export(export, &labels)?;
+    }
     let base = look(s);
     let baseline = metrics(&mut s.scratch())?;
     let mut results = Vec::with_capacity(input.variants.len());
@@ -212,7 +253,7 @@ fn variants(s: &mut Session, p: &Value) -> Result<Value> {
         let start = web_time::Instant::now();
         let changed = trial.execute("parameters.change", &json!({"changes": variant.set}));
         let ms = (start.elapsed().as_secs_f64() * 1e4).round() / 10.0;
-        let mut result = VariantResult { name: variant.name, ms, ok: false, error: None, diagnostics: None, metrics: None };
+        let mut result = VariantResult { name: variant.name, ms, ok: false, error: None, diagnostics: None, metrics: None, export: None };
         match changed {
             Ok(_) => {
                 let diagnostics = compare(&base, &look(&trial));
@@ -228,6 +269,11 @@ fn variants(s: &mut Session, p: &Value) -> Result<Value> {
                 result.diagnostics = Some(diagnostics);
             }
             Err(e) => result.error = Some(e.to_string()),
+        }
+        if let Some(export) = &input.export
+            && result.name.trim() == export.variant.trim()
+        {
+            result.export = Some(export_variant(&mut trial, &result, &export.paths));
         }
         results.push(result);
     }

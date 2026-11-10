@@ -117,6 +117,10 @@ fn executed(params: &Value) -> Option<(&str, Value)> {
     Some((command, params.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
 }
 
+fn writes_on_a_copy(id: &str, params: &Value) -> bool {
+    ANSWERED_ON_A_COPY.contains(&id) || (id == "inspect.parameter_variants" && params.get("export").is_some_and(|v| !v.is_null()))
+}
+
 /// A request that only reads the design and can take long ([`READ_ON_A_COPY`]): an
 /// `engine.execute` of such a command, or the `document.inspect` method. The command and its
 /// parameters.
@@ -125,7 +129,7 @@ fn reading(req: &ControlRequest) -> Option<(&'static str, Value)> {
         "document.inspect" => Some(("document.inspect", req.params.clone())),
         "engine.execute" | "command" => {
             let (command, params) = executed(&req.params)?;
-            spec_id(command).filter(|id| READ_ON_A_COPY.contains(id)).map(|id| (id, params))
+            spec_id(command).filter(|id| READ_ON_A_COPY.contains(id) && !writes_on_a_copy(id, &params)).map(|id| (id, params))
         }
         _ => None,
     }
@@ -406,7 +410,7 @@ impl SolveApp {
         if matches!(req.method.as_str(), "engine.execute" | "command")
             && self.control_answering.len() < MAX_ANSWERING
             && let Some((command, params)) = executed(&req.params)
-            && let Some(id) = spec_id(command).filter(|id| ANSWERED_ON_A_COPY.contains(id))
+            && let Some(id) = spec_id(command).filter(|id| writes_on_a_copy(id, &params))
         {
             return self.answer_on_a_copy(req, id, params);
         }
@@ -472,7 +476,7 @@ impl SolveApp {
             return;
         }
         let reply = reply.unwrap_or_else(|| json!({"ok": false, "error": format!("`{}` ended without a reply", job.label)}));
-        let export = executed(&job.req.params).and_then(|(command, _)| spec_id(command)).is_some_and(|id| ANSWERED_ON_A_COPY.contains(&id));
+        let export = executed(&job.req.params).is_some_and(|(command, params)| spec_id(command).is_some_and(|id| writes_on_a_copy(id, &params)));
         if reply["ok"] == true && export {
             let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
             self.session.echo(language.format("ui.command_done", &[("command", job.label.as_str())]));
