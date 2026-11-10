@@ -73,7 +73,13 @@ fn the_top_rim_round_turns_the_right_way_round_the_corners_with_the_fix() {
         "{rounded} {after}"
     );
 
-    // upstream: the torus turns the long way round and the rollover test fails
-    let (_, _, r) = rounded_block(false);
-    assert!(r.is_err(), "upstream should fail: {r:?}");
+    // Without the fix the torus turned the long way round on upstream's fitted circles and the
+    // rollover test failed. With the corner rounds' circles made from their control points
+    // (#13536) the same rim builds there too, at the closed form.
+    let (rounded, after, r) = rounded_block(false);
+    r.unwrap();
+    assert!(
+        (after - (rounded - removed)).abs() < 1e-7 * rounded,
+        "{rounded} {after}"
+    );
 }
