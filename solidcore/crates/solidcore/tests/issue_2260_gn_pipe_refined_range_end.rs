@@ -227,7 +227,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "proto_vertex_miss_is_false",
     "query_statuses_pass_on",
     "refine_cc_range_ends",
-    "remove_slit_loops_where_solids_touch",
     "revolution_offset_axis_both_sides",
     "revolution_round_offset_collapses",
     "revolve_analytic_profile_faces",

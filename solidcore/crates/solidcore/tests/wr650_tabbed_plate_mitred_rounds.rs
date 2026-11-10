@@ -272,7 +272,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.refine_cc_range_ends = true;
-    k.fixes.remove_slit_loops_where_solids_touch = true;
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;

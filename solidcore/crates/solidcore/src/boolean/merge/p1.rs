@@ -1679,17 +1679,15 @@ mod tests {
                 }
             }
         }
-        TemporaryBrepTransform {
-            inverse: None,
-        }
-        .run(
-            &mut Some(Brep::new()),
-            &mut Some(Brep::new()),
-            &mut (),
-            |(), _, _| Ok(()),
-            |(), _, _, _, _, _| panic!("identity scope must not transform"),
-        )
-        .unwrap();
+        TemporaryBrepTransform { inverse: None }
+            .run(
+                &mut Some(Brep::new()),
+                &mut Some(Brep::new()),
+                &mut (),
+                |(), _, _| Ok(()),
+                |(), _, _, _, _, _| panic!("identity scope must not transform"),
+            )
+            .unwrap();
     }
 
     #[test]
