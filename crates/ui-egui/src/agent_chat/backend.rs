@@ -149,9 +149,15 @@ pub trait ChatBackend {
     /// A message being answered is cancelled first.
     fn new_session(&mut self);
     /// Whether the next session may use the computer (`agent_computer_access`) and where it
-    /// starts, so New chat follows the preference as it is then. Backends without their own
+    /// starts, so New chat follows the preference as it is then. The agent's process keeps the
+    /// folder it was started in; a session's `cwd` is what changes. Backends without their own
     /// tools ignore it.
     fn set_computer(&mut self, _computer: bool, _cwd: &std::path::Path) {}
+    /// Whether the session that is running was opened with the computer (`set_computer` or the
+    /// start context): then the chat does not confine its tool requests to its own folder.
+    fn session_computer(&self) -> bool {
+        false
+    }
     /// The user's custom instructions (#8220), added to the system note of every session that
     /// starts after this call. The panel sets them before the first session and before New chat.
     fn set_instructions(&mut self, _text: &str) {}

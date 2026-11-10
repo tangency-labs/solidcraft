@@ -667,6 +667,9 @@ pub struct ApiBackend {
     events: Receiver<Event>,
     cancel: Arc<AtomicBool>,
     mcp: Option<ProcessHandle>,
+    /// The user lets the agent use the computer (`agent_computer_access`) as this backend was
+    /// started: its MCP server has no folder limits then. A change applies at the next connection.
+    computer: bool,
 }
 
 impl ApiBackend {
@@ -679,7 +682,10 @@ impl ApiBackend {
         // The same MCP server an ACP agent would get.
         let mcp = match &ctx.bridge {
             Some(b) => {
-                let argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
+                let mut argv = vec![b.cli.to_string_lossy().into_owned(), "mcp".into(), "--connect".into(), format!("127.0.0.1:{}", b.port)];
+                if ctx.computer {
+                    argv.push("--allow-any-path".into());
+                }
                 Some(AgentProcess::spawn(&argv, &ctx.cwd, &["SOLIDCRAFT_CONTROL_TOKEN"], || {})?)
             }
             None => None,
@@ -708,13 +714,16 @@ impl ApiBackend {
             };
             w.run(cmd_rx);
         });
-        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle })
+        Ok(ApiBackend { cmds: Some(cmd_tx), events, cancel, mcp: handle, computer: ctx.computer })
     }
 }
 
 impl ChatBackend for ApiBackend {
     fn poll(&mut self) -> Vec<Event> {
         self.events.try_iter().take(512).collect()
+    }
+    fn session_computer(&self) -> bool {
+        self.computer
     }
     fn prompt(&mut self, parts: &[PromptPart]) {
         self.cancel.store(false, Ordering::Relaxed);

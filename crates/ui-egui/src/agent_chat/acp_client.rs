@@ -37,6 +37,8 @@ pub struct AcpBackend {
     init: Value,
     /// The user lets the agent use the computer (`agent_computer_access`), as of the next session.
     computer: bool,
+    /// What the running session was opened with (`computer` at its `session/new`).
+    session_computer: bool,
     /// Started through wsl.exe: folders are handed over as WSL shows them (#5546).
     wsl: bool,
     /// The user's custom instructions (#8220): with `computer` they make the system note the
@@ -72,6 +74,7 @@ impl AcpBackend {
             bridge,
             init: Value::Null,
             computer: ctx.computer,
+            session_computer: false,
             wsl,
             instructions: String::new(),
             next_id: 0,
@@ -101,6 +104,7 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
+        self.session_computer = self.computer;
         let note = acp::session_note(&self.instructions, self.computer);
         let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init, &note, self.computer);
         self.request(Pending::SessionNew, "session/new", params);
@@ -302,6 +306,10 @@ impl ChatBackend for AcpBackend {
     fn set_computer(&mut self, computer: bool, cwd: &std::path::Path) {
         self.computer = computer;
         self.cwd = if self.wsl { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
+    }
+
+    fn session_computer(&self) -> bool {
+        self.session_computer
     }
 
     fn set_instructions(&mut self, text: &str) {

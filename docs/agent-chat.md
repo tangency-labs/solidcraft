@@ -499,13 +499,17 @@ saves, opens or inserts. A sweep's or pattern's `path` (curve ids) and an occurr
 **Let the agent use this computer** (off by default, on the same page) is for when you want the
 agent in the panel to work like Claude Code in a terminal: it keeps its own shell, file and web
 tools, starts in your home folder, and SolidCraft's file commands reach any folder (the MCP server
-runs with `--allow-any-path`). It still changes the open design through SolidCraft's tools.
-It takes effect with the next conversation.
+runs with `--allow-any-path`, and the panel no longer confines its requests to the chat's own
+folder). It still changes the open design through SolidCraft's tools. It takes effect with the
+next conversation, on and off alike: start a new chat. An agent connected with an API key
+(no ACP) gets it from its next connection.
 
-Its own tools then ask through the panel as described above, and Claude Code's own permission
-settings (`~/.claude/settings.json`) apply as in a terminal. With **Allow everything** nothing
-asks: the agent can read, change and delete whatever your user account can. Other agents keep
-their own tools as they are; for them the switch only lifts the folder limits.
+Its own tools then ask through the panel as the agent's own mode has it, and Claude Code's own
+permission settings (`~/.claude/settings.json`) apply as in a terminal. With **Do everything**
+(the page's permission mode, called **Allow everything** above) nothing asks: the agent can read,
+change and delete whatever your user account can. Other ACP agents keep their own tools as they
+are; for them the switch lifts the folder limits, starts them in your home folder and no longer
+tells them to stay off their own tools.
 
 ## What it can't do
 
