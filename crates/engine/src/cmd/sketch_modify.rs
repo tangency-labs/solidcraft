@@ -509,29 +509,40 @@ fn bracket(sk: &Sketch, ci: usize, tq: f64) -> (Vec<(f64, Vec2, usize)>, bool) {
 /// each mouse move.
 #[derive(Clone, Debug)]
 pub struct TrimHover {
-    sh: Shape,
-    cuts: TrimCuts,
+    how: TrimHoverOf,
 }
 
-/// The [`TrimHover`] of `curve`. `None` where trim works otherwise (a free-form or infinite
-/// curve) or the curve isn't in the sketch: the tool shows the curve.
+#[derive(Clone, Debug)]
+enum TrimHoverOf {
+    Analytic { sh: Shape, cuts: TrimCuts },
+    Freeform(super::sketch_freeform::FreeformTrim),
+}
+
+/// The [`TrimHover`] of `curve`. `None` where trim refuses (an infinite curve) or the curve isn't
+/// in the sketch: the tool shows the curve.
 pub fn trim_hover(sk: &Sketch, curve: &str) -> Option<TrimHover> {
     let ci = sk.curve_index(curve)?;
     let c = sk.curves.get(ci)?;
-    if c.infinite || c.kind.is_freeform() {
+    if c.infinite {
         return None;
     }
+    if c.kind.is_freeform() {
+        return Some(TrimHover { how: TrimHoverOf::Freeform(super::sketch_freeform::FreeformTrim::new(sk, ci)?) });
+    }
     let sh = sk.shape(ci)?;
-    Some(TrimHover { sh, cuts: trim_cuts(sk, ci) })
+    Some(TrimHover { how: TrimHoverOf::Analytic { sh, cuts: trim_cuts(sk, ci) } })
 }
 
 impl TrimHover {
     /// The piece a trim at `at` takes away, as [`trim_piece`] answers it.
     pub fn piece(&self, at: Vec2) -> Option<Vec<Vec2>> {
-        let sh = &self.sh;
+        let (sh, cuts) = match &self.how {
+            TrimHoverOf::Analytic { sh, cuts } => (sh, cuts),
+            TrimHoverOf::Freeform(curve) => return curve.piece(at),
+        };
         let tq = sh.param(sh.project(at));
         let (t0, t1) = sh.range();
-        let (cuts, full) = self.cuts.around(tq);
+        let (cuts, full) = cuts.around(tq);
         let (a, b) = match (cuts.as_slice(), full) {
             ([], _) => (t0, t1),
             // A whole circle: the arc between the two crossings round `at`.
@@ -552,8 +563,8 @@ impl TrimHover {
 
 /// The piece of `curve` a trim at `at` takes away, as points along it, for the Trim tool to show
 /// under the cursor (#3052): the part between the crossings either side of `at`, as `sketch.trim`
-/// cuts it, or the whole curve where nothing crosses it. `None` where trim works otherwise (a
-/// free-form or infinite curve) or the curve isn't in the sketch: the tool shows the curve.
+/// cuts it, or the whole curve where nothing crosses it. `None` where trim refuses (an infinite
+/// curve) or the curve isn't in the sketch: the tool shows the curve.
 pub fn trim_piece(sk: &Sketch, curve: &str, at: Vec2) -> Option<Vec<Vec2>> {
     trim_hover(sk, curve)?.piece(at)
 }

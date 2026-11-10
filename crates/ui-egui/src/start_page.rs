@@ -465,8 +465,12 @@ mod tests {
 
     impl Drive {
         fn new(size: egui::Vec2, recent: usize) -> Drive {
-            let mut drive =
-                Drive { ctx: crate::fonts::test_context(), screen: egui::Rect::from_min_size(egui::Pos2::ZERO, size), recent, chosen: Vec::new() };
+            let mut drive = Drive {
+                ctx: crate::ui_kit::test_support::context(),
+                screen: egui::Rect::from_min_size(egui::Pos2::ZERO, size),
+                recent,
+                chosen: Vec::new(),
+            };
             drive.frame(Vec::new());
             drive
         }
@@ -476,7 +480,7 @@ mod tests {
             let input = egui::RawInput { screen_rect: Some(self.screen), focused: true, events, ..Default::default() };
             let recent = self.recent;
             let chosen = &mut self.chosen;
-            crate::test_support::frame(&self.ctx, input, |ui| chosen.extend(show(ui, page(recent))))
+            crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| chosen.extend(show(ui, page(recent))))
         }
 
         fn at(name: &str) -> egui::Pos2 {
@@ -541,7 +545,7 @@ mod tests {
         let tile = solidcraft_ui_registry::rect_of("start:second").unwrap();
         let mut drawn = false;
         for clipped in &output.shapes {
-            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| {
                 if let egui::Shape::Mesh(mesh) = shape {
                     drawn |= mesh.texture_id == HOST_ICON && tile.contains_rect(mesh.calc_bounds());
                 }
