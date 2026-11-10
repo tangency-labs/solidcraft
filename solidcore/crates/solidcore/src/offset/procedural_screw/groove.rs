@@ -16,7 +16,7 @@ pub(super) mod cell;
 mod family;
 
 use super::{bad, Ivl, Result, ScrewOffsetSection, Vec3};
-use crate::kernel::Kernel;
+use crate::kernel::{CancelToken, Kernel};
 use crate::surface::procedural_sweep::screw_offset::MeridianFamilyBounds;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::topology_traverser::face_edges;
@@ -47,6 +47,15 @@ pub(super) struct Flank {
     pub radius: Affine,
     pub distance: Affine,
     pub radial: Vec3,
+    /// The operation's cancel token, checked in each budgeted search.
+    pub cancel: Option<CancelToken>,
+}
+
+const OP: &str = "offset::procedural_screw::groove";
+
+/// Stops a budgeted search when the operation is cancelled.
+fn cancelled(cancel: Option<&CancelToken>) -> Result<()> {
+    cancel.map_or(Ok(()), |token| token.check(OP))
 }
 
 struct Inverse {
@@ -79,6 +88,7 @@ impl Flank {
         let mut budget = 4096_usize;
         let mut result: Option<GraphDerivative> = None;
         while let Some((cell, depth)) = pending.pop() {
+            cancelled(self.cancel.as_ref())?;
             budget = budget
                 .checked_sub(1)
                 .ok_or_else(|| bad("thread graph certificate budget exceeded"))?;
@@ -217,6 +227,8 @@ pub(super) struct Band {
     pub pitch: f64,
     /// Integer pitch translate putting the second section above the first.
     pub winding: i64,
+    /// The operation's cancel token, checked in each budgeted search.
+    pub cancel: Option<CancelToken>,
 }
 
 /// Boundary of the retained section after the cylinder lands are clipped by
@@ -461,6 +473,7 @@ impl Band {
         let mut pending = vec![(Ivl::new(0.0, end), 0_u32)];
         let mut budget = 4096_usize;
         while let Some((family, depth)) = pending.pop() {
+            cancelled(self.cancel.as_ref())?;
             budget = budget
                 .checked_sub(1)
                 .ok_or_else(|| bad("thread gap positivity budget exceeded"))?;
@@ -490,6 +503,7 @@ impl Band {
         let mut budget = 4096_usize;
         let mut result: Option<State> = None;
         while let Some((cell, depth)) = pending.pop() {
+            cancelled(self.cancel.as_ref())?;
             budget = budget
                 .checked_sub(1)
                 .ok_or_else(|| bad("thread family chart budget exceeded"))?;
@@ -607,6 +621,7 @@ impl Band {
         let mut pending = vec![(Ivl::new(0.0, 1.0), 0_u32)];
         let mut budget = 4096_usize;
         while let Some((family, depth)) = pending.pop() {
+            cancelled(self.cancel.as_ref())?;
             budget = budget
                 .checked_sub(1)
                 .ok_or_else(|| bad("thread ordering certificate budget exceeded"))?;
@@ -686,6 +701,7 @@ impl Band {
         let mut budget = 4096_usize;
         let mut result: Option<Ivl> = None;
         while let Some((family, depth)) = pending.pop() {
+            cancelled(self.cancel.as_ref())?;
             budget = budget
                 .checked_sub(1)
                 .ok_or_else(|| bad("thread event derivative budget exceeded"))?;
@@ -1016,6 +1032,7 @@ pub(crate) fn operation_reach(
                 rate: Ivl::from(d1) - Ivl::from(d0),
             },
             radial,
+            cancel: k.cancel.clone(),
         })
     });
     let [a, b] = flanks;
@@ -1024,6 +1041,7 @@ pub(crate) fn operation_reach(
         radii,
         pitch: motion.pitch().abs(),
         winding: 0,
+        cancel: k.cancel.clone(),
     };
     let [a, b] = &band.flanks;
     let x = a.domain(radii, family)?;

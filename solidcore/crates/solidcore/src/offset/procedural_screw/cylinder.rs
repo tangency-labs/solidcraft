@@ -1413,14 +1413,6 @@ mod tests {
         let candidate = intersect_candidate(&k, &wall, &domain, &cylinder, &cylinder_domain, 1e-5)
             .unwrap()
             .unwrap();
-        if let Candidate::Curves(result) = &candidate {
-            let intervals = result
-                .surface1_uv_curves
-                .iter()
-                .map(|c| c.as_ref().unwrap().natural_interval())
-                .collect::<Vec<_>>();
-            eprintln!("incomplete multi-turn partition: {intervals:?}");
-        }
         assert!(matches!(candidate, Candidate::Complete(_)));
     }
 

@@ -786,7 +786,7 @@ mod tests {
     #[test]
     fn segmented_m20_family_reach_keeps_each_continuation_inside_its_budget() {
         use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-        let (k, body) = native_m20_candidate_body(true);
+        let (mut k, body) = native_m20_candidate_body(true);
         let ids: Vec<_> = body.faces().ids().collect();
         let tolerance = body.tolerance();
         let mut replacements = Vec::new();
@@ -812,10 +812,18 @@ mod tests {
             replacements.push(new);
         }
         assert_eq!(flank_indices.len(), 10);
+        // The groove certificate's budgeted searches stop when the operation is cancelled.
+        let token = crate::kernel::CancelToken::default();
+        k.set_cancel_token(token.clone());
+        token.cancel();
+        assert!(matches!(
+            operation_reach(&k, &body, &ids, &replacements),
+            Err(SolidError::Cancelled { .. })
+        ));
+        k.set_cancel_token(crate::kernel::CancelToken::default());
         let margin = operation_reach(&k, &body, &ids, &replacements)
             .unwrap()
             .expect("two complete compatible screw families");
-        eprintln!("SEGMENT certified family continuation margin={margin:.17e}");
         for &index in &flank_indices {
             let sweep = replacements[index].procedural_sweep().unwrap();
             let continued = sweep
@@ -826,19 +834,6 @@ mod tests {
             assert!(sweep
                 .definition()
                 .same_screw_parameterization(continued.definition()));
-            eprintln!(
-                "SEGMENT continued face={:?} profile_rows={} stations={} net_points={}",
-                ids[index],
-                continued
-                    .definition()
-                    .profile()
-                    .canonical()
-                    .unwrap()
-                    .control_points
-                    .len(),
-                continued.definition().stations().len(),
-                continued.net().canonical().unwrap().control_points.len()
-            );
         }
         // Omitting an interior member leaves a genuine turn gap; it is not
         // filled by a hull of the remaining support ranges.
@@ -891,7 +886,6 @@ mod tests {
             let curve = body.edge(id).unwrap().curve.as_ref().unwrap();
             *edge_kinds.entry(curve.type_string()).or_insert(0_usize) += 1;
         }
-        eprintln!("M20 original edge representations: {edge_kinds:?}");
         let mut walls = Vec::new();
         let mut cylinders: BTreeMap<u64, Vec<_>> = BTreeMap::new();
         let mut caps = Vec::new();
@@ -960,9 +954,6 @@ mod tests {
         }
         assert!(groove::cell::disk_boundary(&body, &walls).is_err());
         assert!(groove::cell::disk_boundary(&body, &[walls[0], walls[0]]).is_err());
-        eprintln!(
-            "M20 candidate: two flank disks, two seam-cancelled land disks, four alternating chains per flank"
-        );
     }
 
     #[test]
@@ -1058,6 +1049,7 @@ mod tests {
                     rate: Ivl::from(rate),
                 },
                 radial: Vec3::X,
+                cancel: None,
             });
             let mut band = Band {
                 flanks,
@@ -1067,6 +1059,7 @@ mod tests {
                 }),
                 pitch: 2.5,
                 winding: 0,
+                cancel: None,
             };
             let roots = band
                 .certify()
@@ -1155,9 +1148,6 @@ mod tests {
             assert!(
                 distance.hi < closure.lo,
                 "land={distance:?}, final={closure:?}"
-            );
-            eprintln!(
-                "M20 section sign={sign} cylinders_move={cylinders_move}: first_land={distance:?}, surviving_crossing_radius={radius:?}, final_boundary={closure:?}"
             );
             // The same physical event is found when the requested operation
             // itself passes the limit; it cannot be accepted as an ordered band.
@@ -1547,13 +1537,6 @@ mod tests {
         ];
         let good =
             good_drop_result(&k, &surface, &domain, point, guess, &r.solution.start).unwrap();
-        eprintln!(
-            "M20_LOCAL found={} reason={:?} iterations={} uv={uv:?} gap={gap:?} residual={residual:?} good={good} tight={}",
-            r.found,
-            r.reason,
-            r.iterations,
-            1e-12 * (1.0 + point.max_dimension())
-        );
         assert!(
             good,
             "a converged local foot must satisfy the existing S normal residual: {residual:?}"
