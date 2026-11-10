@@ -1134,12 +1134,15 @@ impl JsonSchema for RailFitParam {
     }
 }
 
-/// What `features::guide_rails` says about a sweep's or a loft's (`what`) `rails`, as given (not
-/// `null`), before it looks a sketch up: its message, or `None`. `default_sketch`: a rail may
+/// What `features::guide_rails` says about a sweep's or a loft's `rails`, as given (not `null`),
+/// before it looks a sketch up: its message, or `None`. `count_for`: the command whose one or two
+/// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
-fn guide_rails_problem(v: &Value, what: &str, default_sketch: bool) -> Option<String> {
+pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
     let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
-    if !(1..=2).contains(&given.len()) {
+    if let Some(what) = count_for
+        && !(1..=2).contains(&given.len())
+    {
         return Some(whole(format!("a {what} takes one or two guide rails")));
     }
     for (i, rail) in given.iter().enumerate() {
@@ -1174,7 +1177,7 @@ pub struct SweepRails(pub Value);
 impl<'de> Deserialize<'de> for SweepRails {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
-        match guide_rails_problem(&v, "sweep", true) {
+        match guide_rails_problem(&v, Some("sweep"), true) {
             Some(why) => Err(D::Error::custom(why)),
             None => Ok(SweepRails(v)),
         }

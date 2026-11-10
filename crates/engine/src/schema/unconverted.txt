@@ -23,7 +23,6 @@ solid.pattern.rectangular
 solid.shell
 solid.thread
 surface.extrude
-surface.loft
 surface.patch
 surface.revolve
 surface.ruled
