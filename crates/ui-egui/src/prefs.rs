@@ -8027,7 +8027,7 @@ mod tests {
     fn tabs_preferences_validate_atomically_restore_safely_and_preserve_export_defaults() {
         crate::test_support::host_data();
         for base in ["dark", "light"] {
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             let source = serde_json::to_value(&file).unwrap();
             let mut h = crate::scenario::Harness::new();
             for invalid in [json!(false), json!({"sketch":{}}), json!({"SKETCH":{"error":"#ffffff"}}), json!({"SKETCH":{"panel":"bad"}})] {
@@ -8060,7 +8060,7 @@ mod tests {
     #[test]
     fn tabs_followed_reload_updates_surfaces_without_losing_saved_options() {
         let mut h = crate::scenario::Harness::new();
-        let mut source = crate::theme_files::export_file(&crate::theme_files::tab_fixture("dark"));
+        let mut source = crate::theme_files::export_file(&crate::test_support::tab_fixture("dark"));
         let path = h.dir.join("tabs.json");
         std::fs::write(&path, source.to_string()).unwrap();
         control(&mut h.app, &json!({"theme_follow":path,"theme_options":{"file-tabs-dark":{"tab_fade_ms":0}}})).unwrap();
