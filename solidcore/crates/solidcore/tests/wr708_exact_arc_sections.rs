@@ -182,11 +182,11 @@ fn the_round_ends_on_the_exact_section_it_joins() {
 
 /// The box 20 x 30 x 20 on the given kernel, its edge y = 30, z = 20 rounded by the linear
 /// law 1 to 5 along x (a variable round, so its face stays a B-spline whichever kernel builds
-/// it): how far its end sections lie off the ball's circle. Each end section is a station of
-/// the skin, in its end plane x = 0 or 20: the quarter circle tangent to the top z = 20 and
-/// the back y = 30, of the radius r its end point on the top gives (30 - y there), about
-/// (30 - r, 20 - r) in that plane. Each boundary iso of the face's domain whose 17 points
-/// share one x is such a section.
+/// it): how far its end sections lie off a circle. Each end section is a station of the skin,
+/// the circle along which the end ball touches the balls' envelope (WR-685), square to the
+/// centre line and so not in the end plane: each boundary iso of the face's domain from the
+/// top z = 20 to the back y = 30 is such a section, and its 17 points are measured off the
+/// circle through its ends and middle.
 fn variable_round_end_sections_off_their_circles(k: &mut Kernel) -> f64 {
     let mut b = create_box(k, Point3::ZERO, 20.0, 30.0, 20.0).unwrap();
     let e = pick(k, &b, [10.0, 30.0, 20.0]);
@@ -230,17 +230,22 @@ fn variable_round_end_sections_off_their_circles(k: &mut Kernel) -> f64 {
                     surface.evaluate_point(k, uv).unwrap()
                 })
                 .collect();
-            let x = points[0].x;
-            if points.iter().any(|q| (q.x - x).abs() > 1e-9) {
+            let (p0, pm, p1) = (points[0], points[8], points[16]);
+            let on = |p: Point3, q: Point3| (p.z - 20.0).abs() < 1e-9 && (q.y - 30.0).abs() < 1e-9;
+            if !on(p0, p1) && !on(p1, p0) {
                 continue; // along the edge, not a section
             }
-            let on_top = points
-                .iter()
-                .min_by(|a, b| (a.z - 20.0).abs().total_cmp(&(b.z - 20.0).abs()))
-                .unwrap();
-            let r = 30.0 - on_top.y;
+            // the circle through p0, pm and p1
+            let (ab, ac) = (pm - p0, p1 - p0);
+            let n = ab.cross(ac);
+            let centre = p0
+                + (n.cross(ab) * ac.length_squared() + ac.cross(n) * ab.length_squared())
+                    / (2.0 * n.length_squared());
+            let (radius, n) = (centre.distance(p0), n.unitize().unwrap());
             for q in &points {
-                off = off.max(((q.y - 30.0 + r).hypot(q.z - 20.0 + r) - r).abs());
+                let h = (*q - centre).dot(n);
+                let rho = (*q - centre - n * h).length();
+                off = off.max(h.hypot(rho - radius));
             }
         }
     }
@@ -250,11 +255,12 @@ fn variable_round_end_sections_off_their_circles(k: &mut Kernel) -> f64 {
 
 /// The default kernel (every fix off) rounds on the ball's exact circle: the exact section is
 /// the default, with no flag (WR-708 addendum 2026-11-06, #2330). Before, only the retired
-/// `fillet_exact_arc_sections` gave it, and the default kernel's end sections here were
-/// upstream's polynomial arcs, 2.34e-4 off the circle.
+/// `fillet_exact_arc_sections` gave it: on SolidCraft's 52ea418 the default kernel's end
+/// sections here were upstream's polynomial arcs, 3.26e-4 off a circle, and with the flag
+/// 1.36e-11 off, as here (the residual of the touch circle's skin).
 #[test]
 fn the_default_kernel_rounds_on_the_exact_circle() {
     let off = variable_round_end_sections_off_their_circles(&mut Kernel::default());
     eprintln!("default kernel: end sections off their circles by {off:e}");
-    assert!(off < 1e-12, "off the ball's circle by {off:e}");
+    assert!(off < 1e-10, "off the ball's circle by {off:e}");
 }
