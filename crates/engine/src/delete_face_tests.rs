@@ -73,3 +73,19 @@ fn delete_a_round_on_a_cylinder_edge() {
     assert!(r["feature"].is_u64(), "{r}");
     assert!((volume(&mut s, "Post") - full).abs() < 1e-3 * full, "{} vs {full}", volume(&mut s, "Post"));
 }
+
+/// A deleted face whose stored name no longer finds a face (a design saved by an older version
+/// names merged faces differently) is still deleted by the point it was picked at (#14206).
+#[test]
+fn a_deleted_face_with_a_stale_name_is_found_by_its_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 20]], "radius": 5}));
+    let h = 5.0 * std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "face.delete", json!({"faces": [[35.0 + h, 15, 15.0 + h]]}));
+    assert!((volume(&mut s, "B") - 24000.0).abs() < 1e-3 * 24000.0);
+    let id = s.doc.features.last().map(|f| f.id).unwrap_or_default();
+    s.doc_mut().feature_mut(id).unwrap().face_names = vec!["F99:side:l9".to_string()];
+    s.refresh();
+    assert!((volume(&mut s, "B") - 24000.0).abs() < 1e-3 * 24000.0, "{}", volume(&mut s, "B"));
+}
