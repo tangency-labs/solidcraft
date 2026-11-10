@@ -53,6 +53,11 @@ Files from different systems differ in which way is up and in what they call the
 {"command": "file.insert_step", "params": {"path": "frame.step", "up": "y", "names": "instance"}}
 ```
 
+In automatic naming, a body labelled `NONE` uses its original face label when every imported
+face shares one meaningful label. Mixed or missing face labels keep the original body name;
+an explicit `names: "solid"` always keeps it. This only chooses the displayed body name: the
+source STEP is never rewritten.
+
 ## Imported appearances
 
 Imported body colours and face colours are retained through later features. Body
