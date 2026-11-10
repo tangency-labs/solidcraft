@@ -231,6 +231,45 @@ impl JsonSchema for LineGroupParam {
     }
 }
 
+/// Which state of the assembly a view draws (#13048), as given: `"assembled"`, or one of the
+/// design's exploded views by its name or id.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExplodedParam {
+    Assembled,
+    Id(u64),
+    Name(String),
+}
+
+impl<'de> Deserialize<'de> for ExplodedParam {
+    /// One message for anything that is neither, rather than serde's "did not match any variant".
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<ExplodedParam, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Either {
+            Id(u64),
+            Name(String),
+        }
+        let message = "exploded is \"assembled\", or an exploded view of the design by its name or id";
+        Ok(match Either::deserialize(d).map_err(|_| serde::de::Error::custom(message))? {
+            Either::Id(id) => ExplodedParam::Id(id),
+            Either::Name(name) if name.eq_ignore_ascii_case("assembled") => ExplodedParam::Assembled,
+            Either::Name(name) => ExplodedParam::Name(name),
+        })
+    }
+}
+
+impl JsonSchema for ExplodedParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewExploded".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Which state of the assembly the view draws: \"assembled\" (as the design places its parts), or one of the design's exploded views by its name or id. \"assembled\" in any case is the assembly: choose an exploded view of that name by its id. The design never changes.",
+            "oneOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
 /// The chord the lines are sampled at, in paper millimetres.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(transparent)]
@@ -373,6 +412,9 @@ pub struct ViewSet {
     /// Occurrence paths it leaves out, with everything under them.
     #[serde(deserialize_with = "super::present")]
     pub hide: Option<Option<Vec<Vec<u64>>>>,
+    /// The state of the assembly it draws.
+    #[serde(deserialize_with = "super::present")]
+    pub exploded: Option<Option<ExplodedParam>>,
     /// How far the view's boundary grows from the model's box towards the box that also holds its
     /// reference parts, each side on its own: 0 to 100.
     #[serde(deserialize_with = "super::present")]
@@ -430,6 +472,8 @@ pub struct SettingsResult {
     pub occurrences: SettingResult<Option<Vec<Vec<u64>>>>,
     /// Occurrence paths it leaves out, with everything under them: none when null.
     pub hide: SettingResult<Option<Vec<Vec<u64>>>>,
+    /// The state of the assembly it draws: `"assembled"`, or `{"view": id}` for an exploded view.
+    pub exploded: SettingResult<Value>,
 }
 
 /// The values a window offers for a view's settings.
@@ -576,6 +620,10 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Vec<Vec<u64>>")]
     pub hide: Option<Vec<Vec<u64>>>,
+    /// The state of the assembly it draws (assembled when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExplodedParam")]
+    pub exploded: Option<ExplodedParam>,
 }
 
 /// What `drawing.view.projected` takes: its parent, the side of it it sits on, and where.

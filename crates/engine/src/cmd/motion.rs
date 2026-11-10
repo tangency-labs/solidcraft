@@ -1177,13 +1177,13 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
 /// What exploded view `v` moves: (occurrence, its placement, the translation the view adds). Moves
 /// of occurrences no longer in the design, or not finite (a hostile design file), are left out;
 /// a later move of one occurrence replaces an earlier one.
-fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
+pub(crate) fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
     let placed: std::collections::BTreeMap<u64, Mat> = s.doc.occurrences.iter().map(|o| (o.id, o.transform)).collect();
     v.moves.iter().filter(|(_, t)| t.len() < 1e7).filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect()
 }
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.
-fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
+pub(crate) fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTreeMap<u64, Mat> {
     let mut out = std::collections::BTreeMap::new();
     for (o, m, t) in moves {
         let mut m = *m;

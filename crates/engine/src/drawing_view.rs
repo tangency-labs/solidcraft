@@ -15,6 +15,7 @@ use std::sync::Arc;
 use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy};
 use solidcraft_doc::drawing::{Drawing, Sheet};
+use solidcraft_doc::drawing_view::Exploded;
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
 use solidcraft_geom::{Aabb2, EPS};
@@ -52,6 +53,8 @@ pub enum Unmeasured {
     NotPlaced,
     /// The view's `source` and `hide` leave nothing, as when the occurrences it drew were deleted.
     NothingChosen,
+    /// The exploded view it draws is no longer in the design.
+    NoExplodedView,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -65,6 +68,7 @@ impl Unmeasured {
             Unmeasured::NoBodies => "no_bodies",
             Unmeasured::NotPlaced => "not_placed",
             Unmeasured::NothingChosen => "nothing_chosen",
+            Unmeasured::NoExplodedView => "no_exploded_view",
         }
     }
 }
@@ -79,6 +83,7 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NoBodies => f.write_str("the view's source has no bodies"),
             Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
             Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
+            Unmeasured::NoExplodedView => f.write_str("the exploded view it draws is no longer in the design"),
         }
     }
 }
@@ -182,6 +187,61 @@ pub fn left_out(view: &ResolvedView, path: &[u64]) -> Option<LeftOut> {
     })
 }
 
+/// The sessions the views of one read of a drawing draw from (#13048): the design as it places its
+/// parts, and a copy for each exploded view a view draws, made the first time a view asks for it and
+/// shared by every view that draws it. A copy costs what placing every body again costs (its world
+/// state misses the session's cache), so one read makes each at most once. The design is never
+/// changed.
+pub struct ViewSessions<'a> {
+    placed: &'a Session,
+    exploded: BTreeMap<u64, std::result::Result<Session, Unmeasured>>,
+}
+
+impl<'a> ViewSessions<'a> {
+    /// The views' sessions, where `placed` is the design as it places its parts.
+    pub fn new(placed: &'a Session) -> ViewSessions<'a> {
+        ViewSessions { placed, exploded: BTreeMap::new() }
+    }
+
+    /// The session saved view `view` draws from, or why it can't be drawn: its exploded view is no
+    /// longer in the design, or moves a part out of range (a hostile file).
+    pub fn of(&mut self, view: &ResolvedView) -> std::result::Result<&Session, Unmeasured> {
+        self.drawing(view.exploded.value)
+    }
+
+    /// The session the views that draw `exploded` draw from.
+    pub fn drawing(&mut self, exploded: Exploded) -> std::result::Result<&Session, Unmeasured> {
+        let Exploded::View(id) = exploded else { return Ok(self.placed) };
+        let placed = self.placed;
+        self.exploded.entry(id).or_insert_with(|| exploded_copy(placed, id)).as_ref().map_err(|why| *why)
+    }
+
+    /// How many copies it made.
+    pub fn copies(&self) -> usize {
+        self.exploded.values().filter(|copy| copy.is_ok()).count()
+    }
+}
+
+/// A copy of `placed` with exploded view `id`'s parts moved out, as `explode.show` shows them: what a
+/// view drawing it draws from.
+pub fn exploded_copy(placed: &Session, id: u64) -> std::result::Result<Session, Unmeasured> {
+    use crate::cmd::motion::{explode_moves, exploded_at};
+    let view = placed.doc.assembly.exploded.iter().find(|v| v.id == id).ok_or(Unmeasured::NoExplodedView)?;
+    let moves = exploded_at(&explode_moves(placed, view), 1.0);
+    if !moves.values().all(solidcraft_doc::is_placement) {
+        return Err(Unmeasured::NotPlaced);
+    }
+    let mut copy = placed.scratch();
+    copy.pending_moves = moves;
+    Ok(copy)
+}
+
+/// What saved view `view` draws from `sessions`: every body its session places ([`shown`]), or why
+/// there's nothing to show.
+pub fn shown_by(sessions: &mut ViewSessions, view: &ResolvedView) -> std::result::Result<ShownSet, Unmeasured> {
+    shown(sessions.of(view)?)
+}
+
 /// Every body the design places, or why there's nothing to show: the assembly places more than a
 /// view walks, or it has no bodies.
 pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
@@ -223,6 +283,27 @@ pub struct OnSheet {
 pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'static str> {
     let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
+}
+
+/// Whether view `id` of `d` draws an exploded view (#13048). Its dimensions, balloons and notes on its
+/// model read the design's placements, so they would measure its parts assembled: until they read
+/// what it draws, new ones are refused ([`refuse_on_exploded`]) and a sheet holds back those a file
+/// brings.
+pub fn draws_exploded(d: &Drawing, id: u64) -> bool {
+    d.resolve_view(id).is_ok_and(|view| view.exploded.value != Exploded::Assembled)
+}
+
+/// Refuses `what` (dimensions, balloons, notes) on view `view` of `d` when it draws an exploded view
+/// ([`draws_exploded`]).
+pub fn refuse_on_exploded(d: &Drawing, view: u64, what: &str, cmd: &str) -> Result<()> {
+    if draws_exploded(d, view) { Err(bad(cmd, format!("not supported yet: {what} on an exploded view"))) } else { Ok(()) }
+}
+
+/// Why saved view `view` can't be drawn yet, if it can't, as it draws an exploded view (#13048): its
+/// shaded parts' pictures are rendered from the design as it places its parts. Its lines alone draw.
+pub fn not_drawable_exploded(view: &ResolvedView) -> Option<&'static str> {
+    let shaded = view.visual_style.value.is_shaded() || view.reference_style.value.is_shaded();
+    (shaded && view.exploded.value != Exploded::Assembled).then_some("not supported yet: a shaded view of an exploded view")
 }
 
 /// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
@@ -284,9 +365,14 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 /// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
 /// is evaluated: no model is evaluated.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
+    on_sheet_from(&mut ViewSessions::new(s), drawing, id, cmd)
+}
+
+/// [`on_sheet`], drawn from `sessions`: one read of several views makes each copy once.
+pub fn on_sheet_from(sessions: &mut ViewSessions, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
-    let shown = shown(s);
+    let shown = shown_by(sessions, &view);
     let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
 }
@@ -311,10 +397,10 @@ pub fn placed(view: &ResolvedView, measured: std::result::Result<(Extents, Aabb2
 /// space ([`Sheet::drawing_space`]), sides included, or lies over its title block, with where it
 /// sits: what a change of paper or block, or a move to another sheet, leaves outside. Nothing is moved.
 pub fn outside(s: &Session, drawing: &Drawing, views: &[u64], cmd: &str) -> Result<Vec<(u64, OnSheet)>> {
-    let mut out = Vec::new();
+    let (mut out, mut sessions) = (Vec::new(), ViewSessions::new(s));
     for &id in views {
         let view = drawing.view(id).ok_or_else(|| bad(cmd, format!("no view {}", ids::encode(id))))?;
-        let placed = on_sheet(s, drawing, id, cmd)?;
+        let placed = on_sheet_from(&mut sessions, drawing, id, cmd)?;
         if leaves(sheet(drawing, view.sheet, cmd)?, &placed, cmd)? {
             out.push((id, placed));
         }

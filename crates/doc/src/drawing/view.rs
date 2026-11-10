@@ -28,7 +28,7 @@ use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
 use super::{Drawing, add_by_id, in_id_order, require};
-use crate::drawing_view::{MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
+use crate::drawing_view::{Exploded, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
 /// The most views a drawing may have.
@@ -129,6 +129,8 @@ pub struct ResolvedView {
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
+    /// The state of its assembly it draws: assembled, or an exploded view of the design.
+    pub exploded: Setting<Exploded>,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -299,6 +301,7 @@ impl Drawing {
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
+            exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
         })
     }
 
