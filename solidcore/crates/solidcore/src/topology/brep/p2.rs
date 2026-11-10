@@ -852,25 +852,40 @@ impl ArenaNotifyState {
 
     /// [`Self::with_attributes_of`] reusing the records of an earlier state
     /// ([`Self::into_records`]): they end exactly as [`Self::new`] makes them, a default
-    /// record for every object of `b` and the B-rep and no other, but only the records
-    /// the earlier edit changed are reset and only the difference in keys is removed or
-    /// added. For a caller that makes many edits of a large B-rep in a row (the stitch's
-    /// glues), where a fresh map per edit is quadratic.
+    /// record for every object of `b` and the B-rep and no other
+    /// ([`Self::reusing`]). For a caller that makes many edits of a large B-rep in a row
+    /// (the stitch's glues), where a fresh map per edit is quadratic.
     pub(crate) fn with_attributes_of_reusing(
+        records: crate::topology::topology::NotifyRecords,
+        b: &mut Brep,
+        serial: Option<u64>,
+    ) -> Self {
+        let mut state = Self::reusing(records, b, serial);
+        state.attributes = b.take_attributes();
+        state
+    }
+
+    /// [`Self::new`] reusing the records of an earlier state ([`Self::into_records`]):
+    /// they end exactly as [`Self::new`] makes them, but only what changed since they
+    /// were last made so for `b` is visited
+    /// ([`reseed_records`](crate::topology::brep::p3::reseed_records)). `serial` is `b`'s
+    /// serial in the context the edit notifies through, if it has one.
+    pub(crate) fn reusing(
         mut records: crate::topology::topology::NotifyRecords,
         b: &mut Brep,
+        serial: Option<u64>,
     ) -> Self {
-        use crate::topology::loopuse::notify_ref;
-        let mut keys: Vec<_> = brep_entities(b)
-            .into_iter()
-            .map(|e| notify_ref(e).key)
-            .collect();
-        keys.sort_unstable();
-        keys.dedup();
-        records.reset_to_keys(&keys);
+        use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
+        let scheme = crate::topology::brep::p3::KeyScheme {
+            key_of: &notify_ref,
+            entity_of: &entity_of_notify_key,
+            brep_key: notify_ref(EntityRef::Brep(BrepId::from_index(0))).key,
+            serial,
+        };
+        crate::topology::brep::p3::reseed_records(&mut records, b, &scheme);
         Self {
             records,
-            attributes: b.take_attributes(),
+            attributes: AttributeStore::default(),
         }
     }
 
