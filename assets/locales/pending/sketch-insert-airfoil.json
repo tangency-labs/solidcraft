@@ -1,0 +1,38 @@
+{
+  "ar": {
+    "cmd.sketch_insert_airfoil": "إدراج مقطع جناح",
+    "help.sketch.insert_airfoil": "يقرأ ملف إحداثيات مقطع جناح (.dat، بتنسيق Selig أو Lednicer) إلى رسم كمنحنى واحد يمر بكل نقطة، بطول الوتر الذي تحدده. استخدمه لرسم قطاعات الجناح لتشكيل جناح بالانتقال بينها."
+  },
+  "de": {
+    "cmd.sketch_insert_airfoil": "Tragflächenprofil einfügen",
+    "help.sketch.insert_airfoil": "Liest die Koordinatendatei eines Tragflächenprofils (.dat, Selig oder Lednicer) als eine Kurve durch jeden Punkt in eine Skizze ein, in der gewünschten Profiltiefe. Damit zeichnen Sie Flügelschnitte, aus denen ein Loft die Tragfläche bildet."
+  },
+  "en": {
+    "cmd.sketch_insert_airfoil": "Insert Airfoil",
+    "help.sketch.insert_airfoil": "Reads an airfoil coordinate file (.dat, Selig or Lednicer) into a sketch as one curve through every point, at the chord you set. Use it to draw wing sections that a loft turns into a wing."
+  },
+  "en-GB": {
+    "cmd.sketch_insert_airfoil": "Insert Aerofoil",
+    "help.sketch.insert_airfoil": "Reads an aerofoil coordinate file (.dat, Selig or Lednicer) into a sketch as one curve through every point, at the chord you set. Use it to draw wing sections that a loft turns into a wing."
+  },
+  "he": {
+    "cmd.sketch_insert_airfoil": "הוספת פרופיל כנף",
+    "help.sketch.insert_airfoil": "קורא קובץ קואורדינטות של פרופיל כנף (‎.dat, בתבנית Selig או Lednicer) לתוך סקיצה כעקומה אחת העוברת דרך כל נקודה, באורך המיתר שנקבע. משמש לשרטוט חתכי כנף שמהם לופט בונה כנף."
+  },
+  "ja": {
+    "cmd.sketch_insert_airfoil": "翼型を挿入",
+    "help.sketch.insert_airfoil": "翼型の座標ファイル (.dat、Selig または Lednicer 形式) を、指定した翼弦長で、すべての点を通る 1 本の曲線としてスケッチに読み込みます。ロフトで翼にする翼断面を描くときに使います。"
+  },
+  "ko": {
+    "cmd.sketch_insert_airfoil": "에어포일 삽입",
+    "help.sketch.insert_airfoil": "에어포일 좌표 파일(.dat, Selig 또는 Lednicer 형식)을 지정한 시위 길이로, 모든 점을 지나는 곡선 하나로 스케치에 읽어 들입니다. 로프트로 날개를 만들 날개 단면을 그릴 때 사용합니다."
+  },
+  "vi": {
+    "cmd.sketch_insert_airfoil": "Chèn biên dạng cánh",
+    "help.sketch.insert_airfoil": "Đọc tệp tọa độ biên dạng cánh (.dat, định dạng Selig hoặc Lednicer) vào phác thảo thành một đường cong đi qua mọi điểm, theo dây cung bạn đặt. Dùng để vẽ các mặt cắt cánh mà lệnh loft dựng thành cánh."
+  },
+  "zh": {
+    "cmd.sketch_insert_airfoil": "插入翼型",
+    "help.sketch.insert_airfoil": "将翼型坐标文件（.dat，Selig 或 Lednicer 格式）按设定的弦长读入草图，成为一条经过每个点的曲线。用于绘制翼剖面，再用放样生成机翼。"
+  }
+}
