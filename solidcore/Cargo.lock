@@ -333,6 +333,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-step"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-tess"
 version = "0.1.0"
 dependencies = [
@@ -364,24 +374,19 @@ name = "ssi"
 version = "0.1.0"
 
 [[package]]
-name = "step-brep"
-version = "0.1.0"
-dependencies = [
- "solidcore",
- "step-export",
- "step-import",
-]
-
-[[package]]
 name = "step-export"
 version = "0.1.0"
 dependencies = [
+ "solidcore",
  "step-import",
 ]
 
 [[package]]
 name = "step-import"
 version = "0.1.0"
+dependencies = [
+ "solidcore",
+]
 
 [[package]]
 name = "syn"

@@ -917,6 +917,25 @@ crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::implant_vertexuse	V
 crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::subdivide_node	Vec::insert	1	proven	insert(0, pe)	index 0 is never past the end
 crates/solidcore/src/surface/volume/p2.rs	Volume::is_box_in_param_domain	chunks	1	proven	chunks_exact(2)	constant non-zero size
 crates/solidcore/src/surface/volume/p2.rs	Volume::is_pseudo_box_in_in_space_domain	chunks	1	proven	chunks_exact(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	Loft::anchor_rails	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	windows	2	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	with_capacity	1	proven	Vec::with_capacity(count)	count is sources.len(), checked to be 2..=MAX_SECTIONS (100) just before
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	with_capacity	2	proven	Vec::with_capacity(count)	count is sources.len(), checked to be 2..=MAX_SECTIONS (100) just before
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	with_capacity	3	proven	Vec::with_capacity(count)	count is sources.len(), checked to be 2..=MAX_SECTIONS (100) just before
+crates/solidcore/src/sweep/loft_rails.rs	Loft::plain	with_capacity	1	proven	Vec::with_capacity(lead.len())	the length of an existing Vec (the first section's curves)
+crates/solidcore/src/sweep/loft_rails.rs	Loft::plain	with_capacity	2	proven	Vec::with_capacity(per.len())	the length of an existing Vec (a control point's curves across the sections)
+crates/solidcore/src/sweep/loft_rails.rs	Plain::nurb	with_capacity	1	proven	Vec::with_capacity(self.points.len())	the length of an existing Vec (the curve's control points)
+crates/solidcore/src/sweep/loft_rails.rs	Plain::point_at	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_rails.rs	centroid	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	certify	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	1	proven	Vec::with_capacity(wires.len())	the length of an existing Vec (the wires made)
+crates/solidcore/src/sweep/loft_rails.rs	interpolate_g	f64::clamp	1	proven	clamp(0.0, n)	n is a usize cast to f64: never NaN and never below 0.0, so min <= max
+crates/solidcore/src/sweep/loft_rails.rs	loft_rails	Vec::drain	1	proven	drain(..)	a full range, never out of bounds
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	1	proven	Vec::with_capacity(4)	constant capacity
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	2	proven	Vec::with_capacity(4)	constant capacity
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	3	proven	Vec::with_capacity(4)	constant capacity
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	1	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	2	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	3	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
@@ -1083,17 +1102,9 @@ crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	
 crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	2	proven	found_index % 2	constant non-zero divisor
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	1	proven	insert(idx + 1, new_curve)	idx is position() in self.curves, so idx + 1 <= len()
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	2	proven	insert(idx + 1, o)	returns Err when idx + 1 > self.orients.len()
-crates/step-brep/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
-crates/step-brep/src/constructor.rs	remove_face	Vec::remove	1	proven	remove(slot)	slot is enumerate() over the same shell's faces
-crates/step-brep/src/constructor.rs	skip_limit	int-div	1	proven	faces / 100	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	Piece::trim_curve	windows	1	proven	windows(2)	constant non-zero size
-crates/step-brep/src/pcurves.rs	chain	int-div	1	proven	piece.samples.len() / 2	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	chain	rotate	1	proven	rotate_right(anchor)	anchor < pieces.len() == shifts.len()
-crates/step-brep/src/pcurves.rs	clamp	f64::clamp	1	proven	clamp(low, low + period)	period is 360; low a periodic STEP domain low: 0, or finite from script::axis_range
-crates/step-brep/src/pcurves.rs	edge_use	windows	1	proven	windows(2)	constant non-zero size
-crates/step-brep/src/pcurves.rs	edge_use	windows	2	proven	windows(2)	constant non-zero size
+crates/step-export/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
+crates/step-export/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
+crates/step-export/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
 crates/step-export/src/lib.rs	faceted_shell	int-rem	1	open	(index + 1) % len	
 crates/step-export/src/lib.rs	faceted_shell	with_capacity	1	open	Vec::with_capacity(face_indices.len())	
 crates/step-export/src/lib.rs	faceted_shell	with_capacity	2	open	Vec::with_capacity(face.loops.len())	

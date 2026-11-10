@@ -469,7 +469,23 @@ pub fn notify(
         N::PostEdit | N::SplitInBrep | N::ChangeGeometry | N::Split => {
             // pass the notify call along to all Vertexuses, Edgeuses, and
             // Edgeuse->Vertexuses so that those can clean up their cached gaps
-            let eus = upward_edgeuses(b, f)?;
+            //
+            // (not upstream, #14329) An edge use's `PostEdit` changes nothing of it and
+            // no record or attribute (`SmTopology` and `SmAObject` act on other
+            // operations only), so with no notify callback in the context to see it,
+            // the walk over the face's edge uses is skipped. It ran once per edge added
+            // to a face, over every edge use of that face: building the cap of an
+            // outline of N lines cost O(N²).
+            let listened = env.context.as_deref().is_some_and(|c| {
+                c.user_notify_callback().is_some() || c.sys_notify_callback().is_some()
+            });
+            let eus = if operation == N::PostEdit && !listened {
+                Vec::new()
+            } else {
+                #[cfg(test)]
+                tests::EDGE_USE_WALKS.with(|n| n.set(n.get() + 1));
+                upward_edgeuses(b, f)?
+            };
             let vus = upward_vertexuses(b, f)?;
             for eu in eus {
                 let this = (env.key_of)(EntityRef::Edgeuse(eu));
@@ -2771,4 +2787,88 @@ pub fn face_intersect_breps_cached(
         out.cc_other_uv_curves = Some(uv_curves2);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use crate::curve::curve::Curve;
+    use crate::error::EntityRef;
+    use crate::geom::attribute::AttributeStore;
+    use crate::geom::context::{Context, NotifyCallback};
+    use crate::geom::object::{NotifyOperation, ObjectRef};
+    use crate::kernel::Kernel;
+    use crate::primitive::api_curves::create_line_segment;
+    use crate::primitive::api_trim_ops::create_planar_faces;
+    use crate::topology::edge::NotifyEnv;
+    use crate::topology::loopuse::notify_ref;
+    use crate::topology::topology::NotifyRecords;
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    thread_local! {
+        /// Walks over a face's edge uses for its notifications ([`super::notify`]).
+        pub(super) static EDGE_USE_WALKS: Cell<u64> = const { Cell::new(0) };
+    }
+
+    #[derive(Debug)]
+    struct Listener(Arc<AtomicU64>);
+    impl NotifyCallback for Listener {
+        fn execute(
+            &mut self,
+            _: NotifyOperation,
+            _: ObjectRef,
+            _: Option<ObjectRef>,
+            _: Option<ObjectRef>,
+            _: Option<ObjectRef>,
+        ) -> crate::Result<()> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// A face's edit notification walks the face's edge uses only for someone to hear
+    /// it (#14329). An edge use's `PostEdit` changes nothing of it and no record or
+    /// attribute; only a notify callback sees it. Each edge added to a face notifies the
+    /// face, so building the cap of an outline of N lines walked O(N²) edge uses. Other
+    /// operations, which clear the edge uses' UV trims and gaps, still walk them.
+    #[test]
+    fn an_unheard_face_edit_does_not_walk_the_edge_uses() {
+        let n = 24;
+        let point = |i: usize| {
+            let t = core::f64::consts::TAU * i as f64 / n as f64;
+            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), 0.0)
+        };
+        let curves: Vec<Curve> = (0..n)
+            .map(|i| Curve::from(create_line_segment(point(i), point(i + 1)).unwrap()))
+            .collect();
+        let mut k = Kernel::default();
+        let mut b = create_planar_faces(&mut k, &curves).unwrap();
+        let face = b.faces().ids().next().unwrap();
+        let key_of = |e: EntityRef| notify_ref(e);
+        let heard = Arc::new(AtomicU64::new(0));
+        let mut notify = |operation, context: Option<&mut Context>| {
+            let mut records = NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let mut env = NotifyEnv {
+                records: &mut records,
+                attributes: &mut attributes,
+                context,
+                key_of: &key_of,
+            };
+            EDGE_USE_WALKS.with(|w| w.set(0));
+            super::notify(&mut b, face, &mut env, None, operation, [None; 3]).unwrap();
+            EDGE_USE_WALKS.with(Cell::get)
+        };
+        let mut quiet = Context::default();
+        let mut listened = Context::default();
+        listened.set_user_notify_callback(Some(Box::new(Listener(heard.clone()))));
+        assert_eq!(notify(NotifyOperation::PostEdit, None), 0);
+        assert_eq!(notify(NotifyOperation::PostEdit, Some(&mut quiet)), 0);
+        assert_eq!(notify(NotifyOperation::PostEdit, Some(&mut listened)), 1);
+        // the face, each of its edge uses and each of its vertex uses
+        assert!(heard.load(Ordering::Relaxed) > 2 * n as u64);
+        assert_eq!(notify(NotifyOperation::ChangeGeometry, Some(&mut quiet)), 1);
+    }
 }

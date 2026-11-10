@@ -22,18 +22,29 @@ fn button(id: &'static str, enabled: bool, wide_only: bool) -> BarButton<'static
 struct BarRig {
     ctx: egui::Context,
     width: f32,
+    name: &'static str,
     time: std::cell::Cell<f64>,
     out: std::cell::RefCell<Option<BarOut>>,
 }
 
 impl BarRig {
     fn new(width: f32) -> BarRig {
-        let rig = BarRig { ctx: crate::test_support::context(), width, time: std::cell::Cell::new(0.0), out: Default::default() };
+        BarRig::named(width, "App")
+    }
+
+    /// The bar with the app's name `name`.
+    fn named(width: f32, name: &'static str) -> BarRig {
+        let rig = BarRig { ctx: crate::test_support::context(), width, name, time: std::cell::Cell::new(0.0), out: Default::default() };
         rig.frame(Vec::new());
         rig
     }
 
     fn frame(&self, events: Vec<egui::Event>) -> Vec<BarAction> {
+        self.frame_output(events).0
+    }
+
+    /// A frame: what was chosen, and what was drawn.
+    fn frame_output(&self, events: Vec<egui::Event>) -> (Vec<BarAction>, egui::FullOutput) {
         solidcraft_ui_registry::clear_handles();
         self.time.set(self.time.get() + 1.0 / 60.0);
         let input = egui::RawInput {
@@ -45,7 +56,7 @@ impl BarRig {
         };
         let bar = AppBar {
             mark: &|_, _| {},
-            name: "App",
+            name: self.name,
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
@@ -61,13 +72,13 @@ impl BarRig {
             handles: HANDLES,
         };
         let mut actions = Vec::new();
-        crate::test_support::raw_frame(&self.ctx, input, |ui| {
+        let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(self.width, HEIGHT));
             let out = show(ui, &bar, rect, rect);
             actions = out.actions.clone();
             *self.out.borrow_mut() = Some(out);
         });
-        actions
+        (actions, output)
     }
 
     fn click(&self, name: &str) -> Vec<BarAction> {
@@ -112,6 +123,21 @@ fn a_compact_bar_keeps_only_what_fits() {
     assert!(solidcraft_ui_registry::rect_of("t:undo").is_none(), "Undo is left out");
     assert!(rig.out.borrow().as_ref().is_some_and(|out| out.quick.is_none()));
     assert!(solidcraft_ui_registry::handle_at("t:version").is_none(), "no version on a narrow bar");
+}
+
+/// A long app name ends before Home: Home follows the name as drawn, not a place sized for one
+/// name.
+#[test]
+fn home_follows_a_long_app_name() {
+    let name = "A Considerably Longer Application";
+    let rig = BarRig::named(1200.0, name);
+    let (_, output) = rig.frame_output(Vec::new());
+    let text = crate::test_support::text_shapes(&output)
+        .find(|shape| shape.galley.text() == name)
+        .map(|shape| shape.visual_bounding_rect())
+        .expect("the name is drawn");
+    let home = solidcraft_ui_registry::rect_of("t:home").expect("Home is drawn");
+    assert!(text.right() < home.left(), "the name ends at {}, Home starts at {}", text.right(), home.left());
 }
 
 const TAB_HANDLES: TabHandles<'static> =

@@ -219,7 +219,7 @@ fn benchmark_independent_step_solids() {
     let mut items: Vec<_> = ex.entities.iter().filter(|(_, e)| e.name() == "MANIFOLD_SOLID_BREP").map(|(id, _)| *id).collect();
     items.sort();
     let start = std::time::Instant::now();
-    let solids: Vec<_> = items.iter().map(|id| solidcraft_step::topology::read_solid(&ex, *id, Units::default()).unwrap()).collect();
+    let solids: Vec<_> = items.iter().map(|id| solidcore_step::topology::read_solid(&ex, *id, Units::default()).unwrap()).collect();
     let read = start.elapsed();
     let start = std::time::Instant::now();
     for solid in solids {
@@ -1675,7 +1675,7 @@ fn knot_multiplicities_are_checked_before_they_are_expanded() {
     };
     let read = |text: &str| {
         let ex = p21::parse(text).unwrap();
-        solidcraft_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
+        solidcore_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
     };
     // These diagnostics come from the checks before expansion; wall-clock time depends on CI load.
     let error = read(&curve(1_000_000, 64)).unwrap_err();
@@ -2120,11 +2120,11 @@ fn step_conformance_parts_read_back_their_exact_shape() {
     }
 }
 
-/// The volume of the one solid `solidcraft_step::topology` reads from `text` into schema 4,
+/// The volume of the one solid `solidcore_step::topology` reads from `text` into schema 4,
 /// measured as the body of that record.
 pub(super) fn schema_4_volume(text: &str) -> f64 {
-    let ex = solidcraft_step::p21::parse(text).unwrap();
-    let r = solidcraft_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
+    let ex = solidcore_step::p21::parse(text).unwrap();
+    let r = solidcore_step::topology::read_solids_with(&ex, &solidcraft_smlib::pcurves::SmlibTrims);
     assert!(r.failures.is_empty() && r.solids.len() == 1, "{:?}", r.failures);
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
@@ -2149,7 +2149,7 @@ fn step_conformance_parts_read_into_smlib() {
     ];
     for (name, volume, faces) in parts {
         let text = std::fs::read_to_string(dir.join(format!("{name}.step"))).unwrap();
-        let ex = solidcraft_step::p21::parse(&text).unwrap();
+        let ex = solidcore_step::p21::parse(&text).unwrap();
         // The file's one representation context, as the import reads it.
         let ctx = ex.entities.iter().find(|(_, e)| e.record("GLOBAL_UNIT_ASSIGNED_CONTEXT").is_some()).map(|(id, _)| *id);
         let units = context_units(&ex, ctx, &mut HashMap::new());
@@ -2430,6 +2430,92 @@ fn can_with_its_lid_at(lid_z: f64) -> String {
 #23=SHAPE_REPRESENTATION('',(#22),$);
 {TAIL}"
     )
+}
+
+/// A file whose only face cannot be made (its circle 1.5 mm off its plane) gives nothing to
+/// open; the error names the face, why and how far, not only that the import failed.
+#[test]
+fn a_file_whose_only_face_cannot_be_made_names_it_and_how_far_off() {
+    let text = format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,10.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#5=CARTESIAN_POINT('',(5.,0.,10.));
+#6=VERTEX_POINT('',#5);
+#7=CIRCLE('',#4,5.);
+#8=EDGE_CURVE('',#6,#6,#7,.T.);
+#9=ORIENTED_EDGE('',*,*,#8,.T.);
+#10=EDGE_LOOP('',(#9));
+#11=FACE_OUTER_BOUND('',#10,.T.);
+#12=CARTESIAN_POINT('',(0.,0.,11.5));
+#13=AXIS2_PLACEMENT_3D('',#12,#2,#3);
+#14=PLANE('',#13);
+#15=ADVANCED_FACE('Lid',(#11),#14,.T.);
+#16=OPEN_SHELL('',(#15));
+#17=SHELL_BASED_SURFACE_MODEL('Sheet',(#16));
+#18=SHAPE_REPRESENTATION('',(#17),$);
+{TAIL}"
+    );
+    let err = step_import(&text).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(err.contains("only face, #15") && err.contains("1.5") && err.contains("off the face's surface"), "{err}");
+}
+
+/// solidcore's step-brep read this Discord fillet operand (a reported part, its fillet the
+/// subject of #2595) as one closed solid; SolidCraft's reader does too, its spline faces trimmed
+/// by SMLib. Ported from step-brep's `tests/discord_fillet.rs`, with its fixture, now
+/// solidcore-step's.
+#[test]
+fn discord_fillet_operand_reads_as_one_closed_solid() {
+    let text = include_str!("../../../../solidcore/crates/solidcore-step/tests/fixtures/discord-2026-10-30-fillet.step");
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.closed && b.refused.is_none(), "{:?}", imp.warnings);
+    assert_eq!(b.body.face_count(), b.file_faces, "{:?}", imp.warnings);
+}
+
+/// A face no shell lists (a file of a bare face, as cadmpeg's root fixtures and STEP Tools'
+/// faceted samples hold) is a one-face sheet. Ported from step-brep's
+/// `tests/issue_2581_faceted_brep.rs` (`standalone_face_without_shell_is_single_face_sheet`).
+#[test]
+fn a_face_no_shell_lists_is_a_one_face_sheet() {
+    let text = format!(
+        "{HEAD}
+#1=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#2=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#1)) REPRESENTATION_CONTEXT('model','3D'));
+#3=CARTESIAN_POINT('',(0.,0.,0.));
+#4=CARTESIAN_POINT('',(9.,0.,0.));
+#5=CARTESIAN_POINT('',(0.,7.,0.));
+#6=POLY_LOOP('',(#3,#4,#5));
+#7=FACE_OUTER_BOUND('',#6,.T.);
+#8=DIRECTION('',(0.,0.,1.));
+#9=DIRECTION('',(1.,0.,0.));
+#10=AXIS2_PLACEMENT_3D('',#3,#8,#9);
+#11=PLANE('',#10);
+#12=FACE_SURFACE('',(#7),#11,.T.);
+{TAIL}"
+    );
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(!b.closed && b.body.face_count() == 1, "{:?}", imp.warnings);
+    assert!(rel(measure(&b.body).unwrap().area, 31.5) < 1e-9, "{}", measure(&b.body).unwrap().area);
+}
+
+/// SMLib's refusal of a face by its index in the record (NIST CTC 02's face whose NURBS form is
+/// not its analytic surface, which SMLib numbers 90) names the file's face, so the face is left
+/// out and the import's warning says which: "face #1202".
+#[test]
+fn a_face_smlib_refuses_by_its_index_is_named_as_the_files_face() {
+    let msg = "SMLib: solidcore: flat arrays: face 2: a NURBS form that is not its analytic surface";
+    let named = super::parallel::name_record_face(msg, &[15, 20, 1202]);
+    assert_eq!(named, format!("face #1202: {msg}"));
+    assert_eq!(solidcore_step::topology::named_face(&named), Some(1202));
+    // An index past the record's faces, or no index, leaves the message as it is.
+    assert_eq!(super::parallel::name_record_face(msg, &[15]), msg);
+    assert_eq!(super::parallel::name_record_face("SMLib: no face here", &[15]), "SMLib: no face here");
 }
 
 /// A solid no B-rep can be made of comes in as an open surface body of its exact faces, the
