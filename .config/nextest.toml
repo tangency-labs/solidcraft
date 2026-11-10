@@ -48,13 +48,6 @@ filter = "binary(action_matrix) & test(=action_matrix_sample)"
 threads-required = 12
 priority = 100
 
-# The longest test by far (a median of 950 s on the 32 vCPU runner, #14362) starts at once, beside
-# the action matrix sample. In the list below it would wait behind the tests that sort before it,
-# and the run ends when it does.
-[[profile.ci.overrides]]
-filter = "package(solidcraft-kernel) & test(=thread_tests::a_long_thread_cuts_without_a_deep_tree)"
-priority = 100
-
 # The slowest tests start first, so a shard does not end with one of them running alone on a
 # core while the others sit idle. Medians from the CI test timings (the junit artifacts), slowest
 # first; a test over ~100 s belongs here (the medians of 24 full runs added the last ones, #14362).
