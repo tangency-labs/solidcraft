@@ -271,7 +271,7 @@ fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let typed = typed.filter(|_| key.2);
-    let stored = stored.filter(|_| key.2).and_then(|agent| app.services.secrets.clone().map(|secrets| (secrets, agent)));
+    let stored = app.services.secrets.clone().zip(stored.filter(|_| key.2));
     start_listing(app, ctx, key, move || match stored {
         Some((secrets, agent)) => secrets.get(&agent).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)])),
         None => Ok(typed),

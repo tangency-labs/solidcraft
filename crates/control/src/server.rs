@@ -734,7 +734,7 @@ impl Hub {
                 }
             };
             // Subscribed once the window named the design (not when it refused or timed out).
-            let sent = match joining.and_then(|counted| document_of(&reply).map(|seen| (counted, seen))) {
+            let sent = match joining.zip(document_of(&reply)) {
                 Some((counted, seen)) => match Subscription::start(documents, self.protocol.change_event(), counted, &out, seen, &reply) {
                     Some((subscription, sent)) => {
                         events = Some(subscription);
