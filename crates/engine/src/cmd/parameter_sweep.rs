@@ -5,7 +5,7 @@
 //! report says what moved where, so a lost face or a flipped joint is found before a part is.
 
 use solidcraft_geom::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
@@ -13,15 +13,19 @@ use solidcore_record::Vec3;
 use super::CommandSpec;
 use crate::params::{bad, num, str_};
 use crate::schema::parameter_sweep::{
-    FeatureFailed, FeatureWarned, JointFlipped, JointLost, JointSide, MAX_VALUES, ParameterSweep, ParameterSweepParams, SketchFailed, SketchFlipped,
-    SweepChanges, SweepResult, SweepSummary,
+    FeatureFailed, FeatureWarned, JointFlipped, JointLost, JointSide, MAX_VALUES, MAX_VARIANT_PARAMETERS, MAX_VARIANTS, ParameterSweep,
+    ParameterSweepParams, ParameterVariants, ParameterVariantsParams, SketchFailed, SketchFlipped, SweepChanges, SweepResult, SweepSummary,
+    VariantExportParams, VariantMeshExports, VariantMeshFile, VariantMetrics, VariantResult, VariantValue,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CONTRACT: TypedContract<ParameterSweepParams> = TypedContract::new();
+const VARIANTS_CONTRACT: TypedContract<ParameterVariantsParams> = TypedContract::new();
+const VARIANTS_CMD: &str = "inspect.parameter_variants";
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.parameter_sweep", "Parameter Sweep", crate::checked!("inspect.parameter_sweep", sweep))
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("inspect.parameter_sweep", "Parameter Sweep", crate::checked!("inspect.parameter_sweep", sweep))
     .icon("params")
     .noundo()
     .contract(&CONTRACT)
@@ -34,7 +38,14 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.parameter_swee
      sketches_failed: [{sketch, name, failing, folded}] (a solve that fails, or keeps a triangle's turn or an offset's side only by flipping it)} \
      (or {value, ms, ok: false, error} where the parameter takes no such value); \
      summary: {values, ok, slowest_ms, failed, joints_lost, joints_flipped, sketches_flipped, sketches_failed} (how many values show each)",
-)];
+    ),
+    CommandSpec::new("inspect.parameter_variants", "Compare Parameter Variants", crate::checked!("inspect.parameter_variants", variants))
+        .icon("params")
+        .noundo()
+        .contract(&VARIANTS_CONTRACT)
+        .output(output_schema_for::<ParameterVariants>)
+        .params("variants: [{name, set: {parameter: number | expression}}] (1 to 12; up to 16 existing parameters each); export?: {variant: name, paths: [one .stl, one .3mf, or both]}. Rebuild each set together in a separate copy of the open design. Returns baseline and ordered results with volume, mass, body counts and rebuild regressions. Export uses the selected copy without rebuilding it again. No edits are kept."),
+];
 
 /// A frame's origin and z axis, in its occurrence's coordinates.
 type Frame = (Vec3, Vec3);
@@ -143,6 +154,132 @@ fn compare(base: &Look, at: &Look) -> SweepChanges {
     SweepChanges { failed, warned, joints_lost, joints_flipped, sketches_flipped, sketches_failed }
 }
 
+fn has_regressions(c: &SweepChanges) -> bool {
+    !c.failed.is_empty()
+        || !c.joints_lost.is_empty()
+        || !c.joints_flipped.is_empty()
+        || !c.sketches_flipped.is_empty()
+        || !c.sketches_failed.is_empty()
+}
+
+fn metrics(s: &mut Session) -> Result<VariantMetrics> {
+    let m = s.execute("inspect.measure", &json!({}))?;
+    let invalid = || bad(VARIANTS_CMD, "could not read the design's measurements");
+    let total = &m["total"];
+    let unmeasured_bodies = m["bodies"].as_array().ok_or_else(invalid)?.iter().filter(|b| b["error"].is_string()).count();
+    Ok(VariantMetrics {
+        bodies: m["body_count"].as_u64().ok_or_else(invalid)?,
+        open_bodies_skipped: total["open_bodies_skipped"].as_u64().ok_or_else(invalid)?,
+        unmeasured_bodies,
+        volume_mm3: total["volume_mm3"].as_f64().ok_or_else(invalid)?,
+        mass_g: total["mass_g"].as_f64().ok_or_else(invalid)?,
+    })
+}
+
+fn validate_export(export: &VariantExportParams, labels: &BTreeSet<&str>) -> Result<()> {
+    if !labels.contains(export.variant.trim()) {
+        return Err(bad(VARIANTS_CMD, "`export.variant` must name a variant in this request"));
+    }
+    if !(1..=2).contains(&export.paths.len()) {
+        return Err(bad(VARIANTS_CMD, "`export.paths` must contain one STL or 3MF path, or one of each"));
+    }
+    let mut formats = BTreeSet::new();
+    for path in &export.paths {
+        if path.len() >= 4096 || path.contains('\0') {
+            return Err(bad(VARIANTS_CMD, "invalid mesh output path"));
+        }
+        let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+        if !matches!(ext.as_str(), "stl" | "3mf") || !formats.insert(ext) {
+            return Err(bad(VARIANTS_CMD, "`export.paths` must name at most one .stl and one .3mf file"));
+        }
+        solidcraft_io::vfs::check(path).map_err(|e| bad(VARIANTS_CMD, format!("{path}: {e}")))?;
+    }
+    Ok(())
+}
+
+fn export_variant(trial: &mut Session, result: &VariantResult, paths: &[String]) -> VariantMeshExports {
+    if !result.ok || result.metrics.as_ref().is_none_or(|m| m.bodies == 0) || trial.model.results.iter().any(|feature| feature.error.is_some()) {
+        return VariantMeshExports { files: Vec::new(), error: Some("the selected variant needs a successful rebuild and at least one body".into()) };
+    }
+    let files = paths
+        .iter()
+        .map(|path| match trial.execute("file.export", &json!({"path": path})) {
+            Ok(reply) => match reply["bytes"].as_u64() {
+                Some(bytes) => VariantMeshFile::Written { path: path.clone(), bytes },
+                None => VariantMeshFile::Failed { path: path.clone(), error: "export did not return a file size".into() },
+            },
+            Err(e) => VariantMeshFile::Failed { path: path.clone(), error: e.to_string() },
+        })
+        .collect();
+    VariantMeshExports { files, error: None }
+}
+
+fn variants(s: &mut Session, p: &Value) -> Result<Value> {
+    let input: ParameterVariantsParams = serde_json::from_value(p.clone()).map_err(|e| bad(VARIANTS_CMD, e.to_string()))?;
+    if input.variants.is_empty() || input.variants.len() > MAX_VARIANTS {
+        return Err(bad(VARIANTS_CMD, format!("`variants` must list 1…{MAX_VARIANTS} candidates")));
+    }
+    let mut labels = BTreeSet::new();
+    for variant in &input.variants {
+        let label = variant.name.trim();
+        if label.is_empty() || variant.name.len() > 80 || !labels.insert(label) {
+            return Err(bad(VARIANTS_CMD, "each variant needs a distinct nonblank name (at most 80 bytes)"));
+        }
+        if variant.set.is_empty() || variant.set.len() > MAX_VARIANT_PARAMETERS {
+            return Err(bad(VARIANTS_CMD, format!("`set` must contain 1…{MAX_VARIANT_PARAMETERS} parameters")));
+        }
+        for (name, value) in &variant.set {
+            if name != name.trim() || !super::parameters::known(s, name) {
+                return Err(bad(VARIANTS_CMD, format!("no parameter `{name}` (parameters.list)")));
+            }
+            let usable = match value {
+                VariantValue::Number(n) => n.is_finite(),
+                VariantValue::Expression(e) => !e.trim().is_empty() && e.len() <= 1000,
+            };
+            if !usable {
+                return Err(bad(VARIANTS_CMD, "each value must be a finite number or a nonblank expression of at most 1000 bytes"));
+            }
+        }
+    }
+
+    if let Some(export) = &input.export {
+        validate_export(export, &labels)?;
+    }
+    let base = look(s);
+    let baseline = metrics(&mut s.scratch())?;
+    let mut results = Vec::with_capacity(input.variants.len());
+    for variant in input.variants {
+        let mut trial = s.scratch();
+        let start = web_time::Instant::now();
+        let changed = trial.execute("parameters.change", &json!({"changes": variant.set}));
+        let ms = (start.elapsed().as_secs_f64() * 1e4).round() / 10.0;
+        let mut result = VariantResult { name: variant.name, ms, ok: false, error: None, diagnostics: None, metrics: None, export: None };
+        match changed {
+            Ok(_) => {
+                let diagnostics = compare(&base, &look(&trial));
+                if !has_regressions(&diagnostics) {
+                    match metrics(&mut trial) {
+                        Ok(m) => {
+                            result.ok = m.unmeasured_bodies == 0;
+                            result.metrics = Some(m);
+                        }
+                        Err(e) => result.error = Some(e.to_string()),
+                    }
+                }
+                result.diagnostics = Some(diagnostics);
+            }
+            Err(e) => result.error = Some(e.to_string()),
+        }
+        if let Some(export) = &input.export
+            && result.name.trim() == export.variant.trim()
+        {
+            result.export = Some(export_variant(&mut trial, &result, &export.paths));
+        }
+        results.push(result);
+    }
+    serde_json::to_value(ParameterVariants { baseline, results }).map_err(|e| bad(VARIANTS_CMD, e.to_string()))
+}
+
 /// The values to sweep.
 fn values(p: &Value, cmd: &str) -> Result<Vec<Value>> {
     match (p.get("values"), p.get("from"), p.get("to")) {
@@ -198,11 +335,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
                 summary.joints_flipped += usize::from(!c.joints_flipped.is_empty());
                 summary.sketches_flipped += usize::from(!c.sketches_flipped.is_empty());
                 summary.sketches_failed += usize::from(!c.sketches_failed.is_empty());
-                let ok = c.failed.is_empty()
-                    && c.joints_lost.is_empty()
-                    && c.joints_flipped.is_empty()
-                    && c.sketches_flipped.is_empty()
-                    && c.sketches_failed.is_empty();
+                let ok = !has_regressions(&c);
                 SweepResult { value, ms, ok, error: None, changes: Some(c) }
             }
             Err(e) => SweepResult { value, ms, ok: false, error: Some(e.to_string()), changes: None },

@@ -399,6 +399,30 @@ To tell whether the design changed since a call, without reading all of it again
 changes, and `document_id` names the open design (another one after `new_design` or `open`).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
+To compare design proposals with several parameter edits each, call `execute` with
+`inspect.parameter_variants`. It rebuilds a separate copy for each candidate. A direct call
+connected to the desktop window can run on a worker, like a long measurement. Use the
+baseline and each result's `metrics` to compare
+volume, mass and body count; check `ok` and `diagnostics` before applying any candidate.
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Lighter", "set": {"width": "45 mm", "thickness": "4 mm"}},
+  {"name": "Wider", "set": {"width": "75 mm", "thickness": "6 mm"}}
+]}}
+```
+
+Apply the selected values separately with `parameters.change {changes}` if you intend to
+edit the design. Use `describe_command` for the input and output schemas.
+
+To export a choice, add `"export": {"variant": "Wider", "paths": ["/output/wide.stl", "/output/wide.3mf"]}`
+to the command parameters. Supply either path by itself for just that format. Both exports
+use the same evaluated copy. If you already compared the candidates, send just the selected
+variant in `variants` for the export call. Use absolute paths in the MCP server's allowed folders, as with
+`file.export`. The selected result's `export.files` reports each file's size or error.
+One failed write does not undo another file that was written. A failed rebuild is never
+exported.
+
 Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
 (the catalog).
 

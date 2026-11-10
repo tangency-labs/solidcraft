@@ -87,3 +87,102 @@ fn a_sweep_refuses_what_it_cannot_sweep() {
         assert!(s.execute("inspect.parameter_sweep", &bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn variants_rebuild_together_start_from_the_original_and_report_regressions() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "40 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "depth", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": "span", "width": "depth", "height": 5}));
+    run(&mut s, "parameters.change", json!({"name": "depth", "expression": "15 mm"}));
+    run(&mut s, "edit.undo", json!({}));
+    let dirty = s.is_dirty();
+    let inspect = json!({"measure": false});
+    let before = run(&mut s, "document.inspect", inspect.clone());
+    let r = run(
+        &mut s,
+        "inspect.parameter_variants",
+        json!({"variants": [
+            {"name": "Wide", "set": {"span": 60, "depth": "span / 2"}},
+            {"name": "Invalid expression", "set": {"span": "1 +"}},
+            {"name": "Broken solid", "set": {"span": 0}},
+            {"name": "Deep", "set": {"depth": "20 mm"}}
+        ]}),
+    );
+    let assert_volume = |m: &Value, expected: f64| {
+        assert!((m["volume_mm3"].as_f64().unwrap_or_default() - expected).abs() < 0.01, "{m}");
+        assert_eq!(m["bodies"], 1, "{m}");
+        assert!(m["mass_g"].as_f64().is_some_and(|x| x > 0.0), "{m}");
+    };
+    assert_volume(&r["baseline"], 2000.0);
+    assert_eq!(r["results"][0]["ok"], true, "{r}");
+    assert_volume(&r["results"][0]["metrics"], 9000.0);
+    assert_eq!(r["results"][1]["ok"], false, "{r}");
+    assert!(r["results"][1]["error"].is_string(), "{r}");
+    assert_eq!(r["results"][2]["ok"], false, "{r}");
+    assert_eq!(len(&r["results"][2]["diagnostics"]["failed"]), 1, "{r}");
+    assert!(r["results"][2].get("metrics").is_none(), "{r}");
+    assert_eq!(r["results"][3]["name"], "Deep", "{r}");
+    assert_eq!(r["results"][3]["ok"], true, "{r}");
+    assert_volume(&r["results"][3]["metrics"], 4000.0);
+
+    let after = run(&mut s, "document.inspect", inspect);
+    assert_eq!(before["redo"], 1, "{before}");
+    for field in ["params", "bodies", "timeline", "undo", "redo"] {
+        assert_eq!(before[field], after[field], "{field}");
+    }
+    assert_eq!(s.is_dirty(), dirty);
+}
+
+#[test]
+fn variants_refuse_unknown_names_and_unbounded_or_ambiguous_input() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "40 mm"}));
+    let candidate = json!({"name": "Wide", "set": {"span": 60}});
+    for p in [
+        json!({"variants": []}),
+        json!({"variants": vec![candidate.clone(); 13]}),
+        json!({"variants": [candidate.clone(), {"name": " Wide ", "set": {"span": 70}}]}),
+        json!({"variants": [candidate, {"name": "Unknown", "set": {"missing": 2}}]}),
+        json!({"variants": [{"name": "Blank", "set": {"span": " "}}]}),
+        json!({"variants": [{"name": "Extra", "set": {"span": 60}, "typo": true}]}),
+    ] {
+        assert!(s.execute("inspect.parameter_variants", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.doc.param("span").map(|p| p.expr.as_str()), Some("40 mm"));
+}
+
+#[test]
+fn a_selected_variant_exports_both_mesh_formats_without_editing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": "span", "width": 10, "height": 5}));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-variant-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("wide.stl");
+    let three_mf = dir.join("wide.3mf");
+    let unknown = json!({
+        "variants": [{"name": "Wide", "set": {"span": 60}}],
+        "export": {"variant": "Missing", "paths": [&stl, &three_mf]}
+    });
+    assert!(s.execute("inspect.parameter_variants", &unknown).is_err());
+    let r = run(
+        &mut s,
+        "inspect.parameter_variants",
+        json!({
+            "variants": [{"name": "Small", "set": {"span": 20}}, {"name": "Wide", "set": {"span": 60}}],
+            "export": {"variant": "Wide", "paths": [&stl, &three_mf]}
+        }),
+    );
+    assert!(r["results"][0].get("export").is_none(), "{r}");
+    let files = r["results"][1]["export"]["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2, "{r}");
+    for (path, reply) in [stl, three_mf].iter().zip(files) {
+        let bytes = std::fs::read(path).unwrap();
+        assert_eq!(reply["bytes"].as_u64(), Some(bytes.len() as u64), "{reply}");
+        assert_eq!(solidcraft_io::mesh_import_feature(&bytes, &path.to_string_lossy()).unwrap().body_names.len(), 1);
+        std::fs::remove_file(path).unwrap();
+    }
+    std::fs::remove_dir(dir).unwrap();
+    assert_eq!(s.doc.param("span").map(|p| p.expr.as_str()), Some("40 mm"));
+}
