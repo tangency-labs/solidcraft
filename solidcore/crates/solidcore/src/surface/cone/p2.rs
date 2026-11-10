@@ -334,6 +334,20 @@ fn end_circles(
     }
 }
 
+/// The angle tolerance (degrees) of the circle checks, `ang_tol`, at least the angle the
+/// rounding of the circles' stored points can turn a circle's plane or frame by (not upstream):
+/// points of size `size` (`1 + |min corner| + |max corner|`, as `scaled_zero` sizes them) are
+/// known to `8 ε size`, which over the larger circle's `radius` turns its normal by up to
+/// `8 ε size / radius`. A tolerance scaled below that (a cylinder at ±1.2e6 checked at a
+/// thousandth of the default) would decide on the rounding of the input, not its shape.
+fn circle_angle_tol(ang_tol: f64, size: f64, top: &IsoArc, bot: &IsoArc) -> f64 {
+    let radius = top.radius.max(bot.radius);
+    if !(radius > 0.0) {
+        return ang_tol;
+    }
+    ang_tol.max((8.0 * f64::EPSILON * size / radius).to_degrees())
+}
+
 /// Top/bot start angles, end angles or x axes vary by more than `ang_tol`.
 fn twisted(top: &IsoArc, bot: &IsoArc, ang_tol: f64) -> Result<bool> {
     // (AngleBetween's status is ignored upstream: its angle is then 0)
@@ -816,6 +830,12 @@ impl Cone {
         else {
             return Ok(None);
         };
+        let ang_tol = circle_angle_tol(
+            ang_tol,
+            1.0 + min_pnt.max_dimension() + max_pnt.max_dimension(),
+            &top,
+            &bot,
+        );
 
         // check for not a cone - top/bot start angles or top/bot end angles vary
         if twisted(&top, &bot, ang_tol)? {
@@ -1174,6 +1194,12 @@ impl Cone {
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
             return Err(SolidError::sm_err(OP_REBUILD));
         };
+        let ang_tol = circle_angle_tol(
+            ang_tol,
+            1.0 + nurb_min_point.max_dimension() + nurb_max_point.max_dimension(),
+            &top,
+            &bot,
+        );
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
         // tolerance
