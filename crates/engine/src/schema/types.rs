@@ -1428,6 +1428,42 @@ impl JsonSchema for AxisLine {
     }
 }
 
+/// Circular Pattern's `axis`, as `features::pattern_axis` reads it: an [`AxisLine`], except that
+/// the coordinates of `{origin, dir}`'s origin may be expressions. Kept as given, for the handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternAxis(pub Value);
+
+impl<'de> Deserialize<'de> for PatternAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let Some(origin) = v.get("origin").filter(|_| v.is_object() && !crate::cmd::is_model_axis(&v)) else {
+            return AxisLine::deserialize(v).map(|axis| PatternAxis(axis.0)).map_err(D::Error::custom);
+        };
+        if serde_json::from_value::<PointExpr3>(origin.clone()).is_err() {
+            return Err(D::Error::custom(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions")));
+        }
+        if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
+            return Err(D::Error::custom(whole("axis needs a non-zero `dir`")));
+        }
+        Ok(PatternAxis(v))
+    }
+}
+
+impl JsonSchema for PatternAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "PatternAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let origin = generator.subschema_for::<PointExpr3>();
+        let mut schema = AxisLine::json_schema(generator);
+        let slot = schema.as_object_mut().and_then(|o| o.get_mut("anyOf")).and_then(|forms| forms.pointer_mut("/1/properties/origin"));
+        if let Some(slot) = slot {
+            *slot = json!(origin);
+        }
+        schema
+    }
+}
+
 /// What `features::axis_param` says to an `axis` that is none of its forms.
 const REVOLVE_AXIS_MESSAGE: &str =
     "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}";
