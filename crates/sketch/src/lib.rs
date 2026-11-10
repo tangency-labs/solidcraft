@@ -34,8 +34,8 @@ mod offset;
 mod offset_topology;
 mod pattern;
 mod periodic;
-mod pocket_profile;
 pub mod pierce;
+mod pocket_profile;
 mod profiles;
 #[cfg(feature = "solver-profiling")]
 pub mod profiling;

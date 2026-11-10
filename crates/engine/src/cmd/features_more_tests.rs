@@ -2789,6 +2789,10 @@ fn plate_volume(s: &Session) -> f64 {
     solidcraft_kernel::measure(&s.model.state().body("Plate").unwrap().body).unwrap().volume
 }
 
+fn holds(body: &solidcraft_kernel::Body, point: solidcore_record::Vec3) -> bool {
+    matches!(body.classify_point(point), Ok(solidcraft_kernel::PointClass::Inside))
+}
+
 fn lighten_plate(s: &mut Session) {
     run(s, "solid.box", json!({"length": 100, "width": 80, "height": 20, "body_name": "Plate"}));
     run(s, "sketch.create", json!({"plane": {"face": [50, 40, 20]}, "project_edges": false}));
@@ -2810,9 +2814,9 @@ fn lighten_leaves_the_full_wall_between_touching_profiles() {
     assert!((volume - (160_000.0 - removed)).abs() < 1e-2, "{volume}");
     let state = s.model.state();
     let body = &state.body("Plate").unwrap().body;
-    assert!(body.contains(solidcraft_geom::Vec3::new(50.0, 40.0, 16.0)), "the wall between the pockets stays");
-    assert!(!body.contains(solidcraft_geom::Vec3::new(30.0, 40.0, 16.0)), "the left pocket is open");
-    assert!(body.contains(solidcraft_geom::Vec3::new(30.0, 40.0, 10.0)), "the floor stays");
+    assert!(holds(body, solidcore_record::Vec3::new(50.0, 40.0, 16.0)), "the wall between the pockets stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(30.0, 40.0, 16.0)), "the left pocket is open");
+    assert!(holds(body, solidcore_record::Vec3::new(30.0, 40.0, 10.0)), "the floor stays");
 }
 
 /// A profile that covers the whole face is clipped to a full wall inside the part outline.
@@ -2829,8 +2833,8 @@ fn lighten_trims_a_covering_profile_to_the_part_outline() {
     assert!((volume - (160_000.0 - removed)).abs() < 1e-2, "{volume}");
     let state = s.model.state();
     let body = &state.body("Plate").unwrap().body;
-    assert!(body.contains(solidcraft_geom::Vec3::new(2.0, 2.0, 16.0)), "the outline wall stays");
-    assert!(!body.contains(solidcraft_geom::Vec3::new(6.0, 6.0, 16.0)), "inside the trimmed pocket");
+    assert!(holds(body, solidcore_record::Vec3::new(2.0, 2.0, 16.0)), "the outline wall stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(6.0, 6.0, 16.0)), "inside the trimmed pocket");
 }
 
 /// A 90° corner loses a square of the tool radius minus a quarter circle.
@@ -2849,8 +2853,8 @@ fn lighten_rounds_only_the_corners_a_tool_cannot_reach() {
     assert!((volume - (160_000.0 - area * 8.0)).abs() < 0.1, "{volume}");
     let state = s.model.state();
     let body = &state.body("Plate").unwrap().body;
-    assert!(body.contains(solidcraft_geom::Vec3::new(12.1, 22.1, 16.0)), "the sharp corner remains");
-    assert!(!body.contains(solidcraft_geom::Vec3::new(30.0, 40.0, 16.0)), "the pocket centre is open");
+    assert!(holds(body, solidcore_record::Vec3::new(12.1, 22.1, 16.0)), "the sharp corner remains");
+    assert!(!holds(body, solidcore_record::Vec3::new(30.0, 40.0, 16.0)), "the pocket centre is open");
 }
 
 /// The shell fillets a concave corner of the tool at half the wall, even with no tool radius.
@@ -2865,8 +2869,8 @@ fn lighten_fillets_the_concave_corner_the_shell_makes() {
     run(&mut s, "solid.lighten", json!({"thickness": "4 mm", "depth": "8 mm", "tool_radius": "0 mm"}));
     let state = s.model.state();
     let body = &state.body("Plate").unwrap().body;
-    assert!(!body.contains(solidcraft_geom::Vec3::new(28.2, 38.2, 16.0)), "the concave fillet cuts the notch");
-    assert!(body.contains(solidcraft_geom::Vec3::new(29.2, 39.2, 16.0)), "past the fillet the notch stays");
-    assert!(!body.contains(solidcraft_geom::Vec3::new(20.0, 30.0, 16.0)), "the pocket is open");
-    assert!(body.contains(solidcraft_geom::Vec3::new(20.0, 30.0, 10.0)), "the floor stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(28.2, 38.2, 16.0)), "the concave fillet cuts the notch");
+    assert!(holds(body, solidcore_record::Vec3::new(29.2, 39.2, 16.0)), "past the fillet the notch stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(20.0, 30.0, 16.0)), "the pocket is open");
+    assert!(holds(body, solidcore_record::Vec3::new(20.0, 30.0, 10.0)), "the floor stays");
 }

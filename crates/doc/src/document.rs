@@ -2909,6 +2909,7 @@ impl FeatureKind {
             FeatureKind::FrameEndCap { .. } => "frame_end_cap",
             FeatureKind::FrameMember { .. } => "frame_member",
             FeatureKind::Emboss { .. } => "emboss",
+            FeatureKind::Lighten { .. } => "lighten",
             FeatureKind::Rib { .. } => "rib",
             FeatureKind::ReplaceFace { .. } => "replace_face",
             FeatureKind::Align { .. } => "align",

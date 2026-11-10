@@ -11,7 +11,8 @@
 //! concave edges at `wall/2` (the shell), and convex edges that do not bound a cap at the
 //! tool radius (the expand). Cap rims stay sharp, as the script's `noEditFaces` requires.
 
-use solidcraft_geom::{Loop2, Mesh, Region2, Seg2, Vec3};
+use solidcore_record::{Loop2, Region2, Seg2, Vec3};
+use solidcraft_geom::Mesh;
 use solidcraft_sketch::inset_region;
 
 use super::*;
@@ -160,7 +161,7 @@ fn smooth_edge_at(msg: &str) -> Option<Vec3> {
 fn corner_edges(body: &Body, convex: bool, skip_caps: bool, axis: Vec3) -> Result<Vec<Vec3>> {
     // Fine enough that a small node circle on a large plate is not faceted into a false corner.
     let tol = (body.size() * 1e-4).clamp(1e-3, 5e-2);
-    let mesh = body.tessellate(tol)?;
+    let mesh = body.mesh(&kernel::MeshTolerance::chord(tol))?;
     let mut tris: Vec<Vec<usize>> = vec![Vec::new(); mesh.tri_face.iter().copied().max().map(|f| f as usize + 1).unwrap_or(0)];
     for (index, face) in mesh.tri_face.iter().enumerate() {
         if let Some(bucket) = tris.get_mut(*face as usize) {
@@ -373,7 +374,14 @@ fn coincident_faces(st: &ModelState, names: &[String], plane: &Plane, trim: bool
                 let Some(part) = part else {
                     return Err(DocError::Invalid("the part outline is not lines and arcs".into()));
                 };
-                segs.extend(part.iter().copied());
+                for piece in part {
+                    match piece {
+                        kernel::PlanarPiece::Seg(seg) => segs.push(*seg),
+                        kernel::PlanarPiece::Spline(_) => {
+                            return Err(DocError::Invalid("the part outline is not lines and arcs".into()));
+                        }
+                    }
+                }
             }
             regions.extend(regions_from_loops(loops_from_segments(&segs)?)?);
         }
@@ -392,10 +400,10 @@ fn probe_sign(plane: &Plane, profiles: &[Region2], st: &ModelState, names: &[Str
     for profile in profiles {
         let at = plane.to_world(profile.interior_point());
         for body in st.bodies.iter().filter(|body| names.iter().any(|name| name == &body.name)) {
-            if body.body.contains(at + normal * 0.2) {
+            if matches!(body.body.classify_point(at + normal * 0.2), Ok(kernel::PointClass::Inside)) {
                 plus += 1;
             }
-            if body.body.contains(at - normal * 0.2) {
+            if matches!(body.body.classify_point(at - normal * 0.2), Ok(kernel::PointClass::Inside)) {
                 minus += 1;
             }
         }

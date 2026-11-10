@@ -753,7 +753,6 @@ pub struct FilletParams {
     pub common: FeatureCommon,
 }
 
-
 /// Cut pockets from sketch profiles, leaving a wall between profiles that meet.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]

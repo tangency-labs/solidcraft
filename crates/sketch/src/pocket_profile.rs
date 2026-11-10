@@ -5,7 +5,8 @@
 //! Only a left turn between two lines is rounded. A right turn, the outside of an island, stays
 //! sharp.
 
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 use crate::SketchError;
 
@@ -54,6 +55,7 @@ fn offset_holes(holes: &[Loop2], distance: f64) -> Result<Vec<Loop2>> {
     holes.iter().map(|hole| offset_loop(hole, distance)).collect()
 }
 
+#[derive(Clone, Copy)]
 enum Carrier {
     Line { origin: Vec2, dir: Vec2 },
     Arc { center: Vec2, radius: f64 },
@@ -91,8 +93,8 @@ enum OffsetFail {
 fn offset_kept(segs: &[Seg2], distance: f64) -> std::result::Result<Loop2, OffsetFail> {
     let fatal = |err| OffsetFail::Fatal(err);
     for (index, seg) in segs.iter().enumerate() {
-        if let Seg2::Arc { radius, sweep, .. } = seg {
-            let grown = if *sweep > 0.0 { radius - distance } else { radius + distance };
+        if let Seg2::Arc { radius, sweep, .. } = *seg {
+            let grown = if sweep > 0.0 { radius - distance } else { radius + distance };
             if grown <= MIN_SPAN {
                 return Err(OffsetFail::Consume(index));
             }
@@ -149,33 +151,33 @@ fn carrier(seg: &Seg2, distance: f64) -> Result<Carrier> {
 }
 
 fn join(prev: &Carrier, next: &Carrier, near: Vec2, distance: f64) -> Result<Vec2> {
-    let point = match (prev, next) {
+    let point = match (*prev, *next) {
         (Carrier::Line { origin: o1, dir: d1 }, Carrier::Line { origin: o2, dir: d2 }) => {
-            let den = d1.cross(*d2);
+            let den = d1.cross(d2);
             if den.abs() < 1e-9 {
-                if d1.dot(*d2) <= 0.0 {
+                if d1.dot(d2) <= 0.0 {
                     return Err(invalid("the offset is larger than the profile allows (the lines fold back)"));
                 }
                 near + d1.perp() * distance
             } else {
-                let t = (*o2 - *o1).cross(*d2) / den;
-                *o1 + *d1 * t
+                let t = (o2 - o1).cross(d2) / den;
+                o1 + d1 * t
             }
         }
         (Carrier::Line { origin, dir }, Carrier::Arc { center, radius, .. })
         | (Carrier::Arc { center, radius, .. }, Carrier::Line { origin, dir }) => {
-            let hits = circle_line(*center, *radius, *origin, *dir);
-            closest(&hits, radial_hint(*center, *radius, near))
+            let hits = circle_line(center, radius, origin, dir);
+            closest(&hits, radial_hint(center, radius, near))
                 .ok_or_else(|| invalid("the offset is larger than the profile allows (a line misses its arc)"))?
         }
         (Carrier::Arc { center: c1, radius: r1, .. }, Carrier::Arc { center: c2, radius: r2, .. }) => {
-            if c1.dist(*c2) < 1e-8 && (r1 - r2).abs() < 1e-8 {
+            if c1.dist(c2) < 1e-8 && (r1 - r2).abs() < 1e-8 {
                 let dir =
-                    (near - *c1).normalized().ok_or_else(|| invalid("the offset is larger than the profile allows (the arcs have no direction)"))?;
-                *c1 + dir * *r1
+                    (near - c1).normalized().ok_or_else(|| invalid("the offset is larger than the profile allows (the arcs have no direction)"))?;
+                c1 + dir * r1
             } else {
-                let hits = circle_circle(*c1, *r1, *c2, *r2);
-                closest(&hits, radial_hint(*c2, *r2, near))
+                let hits = circle_circle(c1, r1, c2, r2);
+                closest(&hits, radial_hint(c2, r2, near))
                     .ok_or_else(|| invalid("the offset is larger than the profile allows (the arcs miss each other)"))?
             }
         }
@@ -240,9 +242,9 @@ enum Rebuild {
 }
 
 fn rebuild(original: &Seg2, carrier: &Carrier, start: Vec2, end: Vec2) -> std::result::Result<Seg2, Rebuild> {
-    match (original, carrier) {
+    match (*original, *carrier) {
         (Seg2::Line { a, b }, Carrier::Line { .. }) => {
-            let Some(old) = (*b - *a).normalized() else {
+            let Some(old) = (b - a).normalized() else {
                 return Err(Rebuild::Fatal(invalid("the profile has a zero-length edge")));
             };
             let span = end - start;
@@ -253,14 +255,14 @@ fn rebuild(original: &Seg2, carrier: &Carrier, start: Vec2, end: Vec2) -> std::r
             Ok(Seg2::Line { a: start, b: end })
         }
         (Seg2::Arc { sweep, .. }, Carrier::Arc { center, radius, .. }) => {
-            let start_angle = (start - *center).angle();
-            let end_angle = (end - *center).angle();
-            let new_sweep = sweep_near(start_angle, end_angle, *sweep);
+            let start_angle = (start - center).angle();
+            let end_angle = (end - center).angle();
+            let new_sweep = sweep_near(start_angle, end_angle, sweep);
             // The arc flipped onto the other side of its circle: this bay did not survive.
             if new_sweep.abs() <= MIN_SPAN || new_sweep.signum() != sweep.signum() || (new_sweep - sweep).abs() > std::f64::consts::PI {
                 return Err(Rebuild::Consume);
             }
-            Ok(Seg2::Arc { center: *center, radius: *radius, start: start_angle, sweep: new_sweep })
+            Ok(Seg2::Arc { center, radius, start: start_angle, sweep: new_sweep })
         }
         _ => Err(Rebuild::Fatal(invalid("profiles must be lines and circular arcs"))),
     }
@@ -428,7 +430,7 @@ fn left_turn(incoming: &Seg2, outgoing: &Seg2, radius: f64) -> Result<Option<Tur
 mod tests {
     use std::f64::consts::PI;
 
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     use super::*;
 
