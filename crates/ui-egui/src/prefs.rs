@@ -13008,6 +13008,28 @@ mod settings_search_tests {
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
     }
 
+    /// The Placed features row is found by the name of every feature that has the marker, not
+    /// only by its own label.
+    #[test]
+    fn preferences_search_finds_placement_handles_by_each_placed_feature() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_TOOLS);
+        h.frames(2);
+        let drawn = |h: &crate::scenario::Harness, label: &str| {
+            let body = crate::scenario::rect_of("dialog:page_body");
+            h.widget(label).is_some_and(|[x, y]| body.is_none_or(|body| body.contains(egui::pos2(x as f32, y as f32))))
+        };
+        for query in ["Placed features", "Rest", "Boss", "Snap Fit", "Box", "Cylinder", "Cone", "Sphere", "Torus", "Coil"] {
+            h.app.prefs_window.shell.filter = query.into();
+            h.frames(4);
+            assert!(drawn(&h, "Placement handles"), "searching '{query}' should show Placement handles");
+        }
+        h.app.prefs_window.shell.filter = "zzzz-no-setting".into();
+        h.frames(4);
+        assert!(!drawn(&h, "Placement handles"), "a miss shows nothing");
+    }
+
     #[test]
     fn design_and_tools_short_labels_keep_legacy_search_and_reveal_the_real_control() {
         for language in ["en", "ja"] {
