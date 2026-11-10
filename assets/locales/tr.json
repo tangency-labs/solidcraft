@@ -4252,6 +4252,7 @@
   "ui.agent_chat_setup_title": "Asistan ayarla",
   "ui.agent_chat_side": "Ajan sohbeti konumu",
   "ui.agent_chat_signed_in": "oturum açık",
+  "ui.agent_chat_snap_none_found": "Kodlama ajanı bulunamadı. Snap paketi yalıtılmış çalıştığı için bu bilgisayarda yüklü kodlama ajanlarını göremez ve başlatamaz. Bunları kullanmak için SolidCraft'ı bunun yerine AppImage, .deb veya .rpm paketinden yükleyin. OpenAI uyumlu API kullanan bir ajan Snap paketinde de çalışır: Ajan ekle ile ayarlayın.",
   "ui.agent_chat_state_auth": "Oturum açılması gerekiyor",
   "ui.agent_chat_state_busy": "Çalışıyor…",
   "ui.agent_chat_state_exited": "Ajan sonlandı",

@@ -4989,6 +4989,7 @@
   "ui.agent_chat_setup_title": "Nastavit asistenta",
   "ui.agent_chat_side": "Strana chatu s agentem",
   "ui.agent_chat_signed_in": "přihlášen",
+  "ui.agent_chat_snap_none_found": "Nebyl nalezen žádný kódovací agent. Balíček Snap běží v izolovaném prostředí, takže nevidí kódovací agenty nainstalované v tomto počítači a nemůže je spustit. Chcete-li je používat, nainstalujte SolidCraft z balíčku AppImage, .deb nebo .rpm. Agent, který používá API kompatibilní s OpenAI, v balíčku Snap funguje: nastavte ho přes Přidat agenta.",
   "ui.agent_chat_state_auth": "Vyžadováno přihlášení",
   "ui.agent_chat_state_busy": "Pracuje…",
   "ui.agent_chat_state_exited": "Agent zastaven",
