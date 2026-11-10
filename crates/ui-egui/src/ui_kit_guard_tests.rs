@@ -1488,8 +1488,8 @@ fn kit_code_names_no_host_message_ids() {
     }
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     scan(&src.join("ui_kit"), "ui_kit", &names, &mut failures);
-    // The theme option components that move with the kit.
-    for component in ["theme_files.rs", "theme_options.rs"] {
+    // The components that move with the kit: the theme options and the navigation bar.
+    for component in ["navigation_bar.rs", "theme_files.rs", "theme_options.rs"] {
         scan(&src.join(component), component, &names, &mut failures);
     }
     failures.sort();
