@@ -1930,7 +1930,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let events = wait_for_turn(&mut b);
@@ -1982,7 +1982,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let wait = |b: &mut ApiBackend, events: &mut Vec<Event>| {
             let start = std::time::Instant::now();
@@ -2038,7 +2038,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let run = |b: &mut ApiBackend, f: &dyn Fn(&mut ApiBackend), want: usize| {
             f(b);
@@ -2090,7 +2090,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let mut events = Vec::new();
         let start = std::time::Instant::now();
@@ -2179,7 +2179,7 @@ mod tests {
     }
 
     fn go_ctx() -> StartContext {
-        StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) }
+        StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) }
     }
 
     /// Wait until a scripted endpoint saw a request (ten seconds at most).
@@ -2625,7 +2625,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         let mut events = Vec::new();
         let start = std::time::Instant::now();
@@ -2728,7 +2728,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("go".into())]);
         let events = wait_for_turn(&mut b);
@@ -2770,7 +2770,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(config(false, Protocol::OpenAi), context()).is_err());
         assert!(ApiBackend::start(config(true, Protocol::Anthropic), context()).is_err());
         assert!(seen.lock().unwrap().is_empty(), "refusal must happen before any HTTP request");
@@ -2981,7 +2981,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("look closer".into())]);
         let events = wait_for_turn(&mut b);
@@ -3032,7 +3032,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let events = wait_for_turn(&mut b);
@@ -3084,7 +3084,7 @@ mod tests {
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         for n in 1..=3 {
             b.prompt(&[PromptPart::Text(format!("look {n}")), PromptPart::Image { mime: "image/png".into(), base64: format!("V{n}") }]);

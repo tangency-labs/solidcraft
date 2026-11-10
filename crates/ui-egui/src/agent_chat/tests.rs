@@ -1500,7 +1500,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1593,7 +1593,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -1611,6 +1611,8 @@ done
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
     assert!(!app.agent_chat.items.is_empty());
     let pid = app.agent_chat.backend.as_ref().and_then(|b| b.pid());
+    // The preference changed while the agent ran: the new session follows it.
+    app.preferences.agent_computer_access = true;
     new_chat(&mut app);
     assert!(app.agent_chat.items.is_empty());
     until(&mut app, &|a| a.agent_chat.state() == State::Ready);
@@ -1622,6 +1624,14 @@ done
         log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
     assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/new", "session/prompt"]);
     assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s2\"")), "the prompt goes to the new session: {log_text}");
+    let sessions: Vec<Value> = log_text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["method"] == "session/new")
+        .map(|v| v["params"]["_meta"]["claudeCode"]["options"]["disallowedTools"].clone())
+        .collect();
+    assert!(sessions[0].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")), "{sessions:?}");
+    assert_eq!(sessions[1], serde_json::json!([]), "the second session may use the computer");
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1646,7 +1656,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -2567,6 +2577,7 @@ done
     let start = backend::StartContext {
         cwd: dir.clone(),
         bridge: None,
+        computer: false,
         tools: None,
         wake: Box::new(move || {
             let _ = wake_tx.send(());
@@ -2738,7 +2749,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);
@@ -2795,7 +2806,7 @@ while IFS= read -r line; do
 done
 "#;
     let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
-    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, computer: false, tools: None, wake: Box::new(|| {}) };
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
     app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
     app.agent_chat.state = Some(State::Starting);

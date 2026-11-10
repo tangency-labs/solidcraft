@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.ai_computer_access": "Let the agent use this computer",
+    "ui.ai_computer_access_note": "Claude Code keeps its own shell, file and web tools and starts in your home folder, and SolidCraft's file commands reach any folder. Its own tools ask in the panel unless the mode above allows everything. Takes effect with the next conversation.",
+    "ui.ai_computer_access_warning": "With Allow everything, the agent can read, change and delete whatever your user account can, without asking."
+  },
+  "ar": {
+    "ui.ai_computer_access": "السماح للوكيل باستخدام هذا الحاسوب",
+    "ui.ai_computer_access_note": "يحتفظ Claude Code بأدواته الخاصة للصدفة والملفات والويب ويبدأ في مجلد المنزل، وتصل أوامر الملفات في SolidCraft إلى أي مجلد. تطلب أدواته الخاصة الإذن في اللوحة ما لم يسمح الوضع أعلاه بكل شيء. يسري ذلك من المحادثة التالية.",
+    "ui.ai_computer_access_warning": "مع «السماح بكل شيء» يستطيع الوكيل قراءة وتغيير وحذف كل ما يستطيعه حساب المستخدم الخاص بك، دون أن يسأل."
+  },
+  "de": {
+    "ui.ai_computer_access": "Agent darf diesen Computer benutzen",
+    "ui.ai_computer_access_note": "Claude Code behält seine eigene Shell, seine Datei- und Webwerkzeuge und startet in Ihrem Benutzerordner, und die Dateibefehle von SolidCraft erreichen jeden Ordner. Seine eigenen Werkzeuge fragen im Panel nach, außer der Modus oben erlaubt alles. Gilt ab der nächsten Unterhaltung.",
+    "ui.ai_computer_access_warning": "Mit „Alles erlauben“ kann der Agent ohne Nachfrage alles lesen, ändern und löschen, was Ihr Benutzerkonto darf."
+  },
+  "he": {
+    "ui.ai_computer_access": "לאפשר לסוכן להשתמש במחשב הזה",
+    "ui.ai_computer_access_note": "Claude Code שומר על כלי המעטפת, הקבצים והרשת שלו ומתחיל בתיקיית הבית שלך, ופקודות הקבצים של SolidCraft מגיעות לכל תיקייה. הכלים שלו מבקשים אישור בחלונית, אלא אם המצב שלמעלה מתיר הכול. ייכנס לתוקף מהשיחה הבאה.",
+    "ui.ai_computer_access_warning": "עם „התרת הכול” הסוכן יכול לקרוא, לשנות ולמחוק כל מה שחשבון המשתמש שלך יכול, בלי לשאול."
+  },
+  "ja": {
+    "ui.ai_computer_access": "エージェントにこのコンピューターの使用を許可",
+    "ui.ai_computer_access_note": "Claude Code は自身のシェル・ファイル・Web ツールを使えるままホームフォルダーで起動し、SolidCraft のファイルコマンドはどのフォルダーにも届きます。上のモードですべて許可していない限り、エージェント自身のツールはパネルで確認を求めます。次の会話から有効になります。",
+    "ui.ai_computer_access_warning": "「すべて許可」では、エージェントはユーザーアカウントで扱えるものを確認なしで読み取り・変更・削除できます。"
+  },
+  "ko": {
+    "ui.ai_computer_access": "에이전트가 이 컴퓨터를 사용하도록 허용",
+    "ui.ai_computer_access_note": "Claude Code는 자체 셸, 파일 및 웹 도구를 그대로 유지한 채 홈 폴더에서 시작하며, SolidCraft의 파일 명령은 모든 폴더에 접근합니다. 위의 모드에서 모두 허용하지 않는 한 에이전트 자체 도구는 패널에서 확인을 요청합니다. 다음 대화부터 적용됩니다.",
+    "ui.ai_computer_access_warning": "\"모두 허용\"에서는 에이전트가 사용자 계정이 할 수 있는 모든 것을 확인 없이 읽고, 변경하고, 삭제할 수 있습니다."
+  },
+  "vi": {
+    "ui.ai_computer_access": "Cho phép tác tử dùng máy tính này",
+    "ui.ai_computer_access_note": "Claude Code giữ lại shell, công cụ tệp và web của riêng nó và khởi động trong thư mục nhà của bạn, còn các lệnh tệp của SolidCraft truy cập được mọi thư mục. Các công cụ riêng của nó sẽ hỏi trong bảng điều khiển, trừ khi chế độ ở trên cho phép tất cả. Có hiệu lực từ cuộc trò chuyện tiếp theo.",
+    "ui.ai_computer_access_warning": "Với “Cho phép tất cả”, tác tử có thể đọc, thay đổi và xóa mọi thứ mà tài khoản người dùng của bạn có quyền, mà không hỏi."
+  },
+  "zh": {
+    "ui.ai_computer_access": "允许智能体使用这台电脑",
+    "ui.ai_computer_access_note": "Claude Code 保留自己的 shell、文件和网页工具，并在你的主文件夹中启动；SolidCraft 的文件命令可访问任何文件夹。除非上方的模式全部允许，否则它自己的工具会先在面板中询问。从下一次对话开始生效。",
+    "ui.ai_computer_access_warning": "在“全部允许”模式下，智能体无需询问即可读取、更改和删除你的用户账户能访问的任何内容。"
+  }
+}

@@ -1056,6 +1056,15 @@ fn working_dir() -> std::path::PathBuf {
     d
 }
 
+/// The agent's working folder: the chat's own, or the home folder, where a terminal starts, when
+/// the user lets the agent use the computer (`agent_computer_access`).
+#[cfg(not(target_arch = "wasm32"))]
+fn agent_dir(computer: bool) -> std::path::PathBuf {
+    let var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var_os(var).map(std::path::PathBuf::from).filter(|h| h.is_absolute() && h.is_dir());
+    home.filter(|_| computer).unwrap_or_else(working_dir)
+}
+
 /// Start the agent: the chat's control endpoint for its MCP bridge if needed, the process.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
@@ -1083,6 +1092,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
         None
     };
     let http = app.services.agent_http.clone();
+    let computer = app.preferences.agent_computer_access;
     let chat = &mut app.agent_chat;
     if chat.tools_port.is_none()
         && let Some(start) = chat.control_starter.as_mut()
@@ -1108,7 +1118,13 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
     chat.tools_available = Some(bridge.is_some());
     let wake = ctx.clone();
-    let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
+    let start = backend::StartContext {
+        cwd: agent_dir(computer),
+        bridge,
+        computer,
+        tools: chat.tools_tx.clone(),
+        wake: Box::new(move || wake.request_repaint()),
+    };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {
         agents::Kind::Acp if entry.argv.is_empty() => Err(tr("ui.agent_chat_none_found").to_string()),
         agents::Kind::Acp => acp_client::AcpBackend::start(&entry.argv, start).map(|b| Box::new(b) as Box<dyn ChatBackend>),
@@ -1572,6 +1588,8 @@ pub fn new_chat(app: &mut SolveApp) {
     }
     decline_all(app, "the chat was cleared");
     end_turn(app);
+    #[cfg(not(target_arch = "wasm32"))]
+    let computer = app.preferences.agent_computer_access;
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
@@ -1595,6 +1613,8 @@ pub fn new_chat(app: &mut SolveApp) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
         if let Some(b) = chat.backend.as_mut() {
+            #[cfg(not(target_arch = "wasm32"))]
+            b.set_computer(computer, &agent_dir(computer));
             // Instructions edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
             b.new_session();
