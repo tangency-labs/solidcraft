@@ -794,7 +794,7 @@ mod tests {
     fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {
         const HOST: TextureId = TextureId::User(7);
         let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
-        let output = crate::fonts::test_context().run_ui(egui::RawInput::default(), |ui| {
+        let output = crate::test_support::context().run_ui(egui::RawInput::default(), |ui| {
             MenuItem::new(&item.id, &item.label, item.icon.as_icon()).show(ui);
         });
         assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
