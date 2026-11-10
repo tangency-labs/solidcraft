@@ -162,6 +162,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    proto_edge_intersections: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -190,11 +191,20 @@ impl WorkCounters {
         self.wall_body_copies.get()
     }
 
+    /// Curve intersections a boolean ran to split its proto edges where they cross
+    /// (`SplitIntersectingProtoEdges`): pairs of lines whose boxes are apart are not
+    /// counted, as no intersection runs for them (#14329). Not the fork's.
+    #[must_use]
+    pub fn proto_edge_intersections(&self) -> u64 {
+        self.proto_edge_intersections.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.proto_edge_intersections.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -212,6 +222,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts one curve intersection of two proto edges.
+    pub(crate) fn add_proto_edge_intersection(&self) {
+        self.proto_edge_intersections
+            .set(self.proto_edge_intersections.get().saturating_add(1));
     }
 }
 
@@ -1234,32 +1250,6 @@ pub struct UpstreamFixes {
     ///
     /// Not the fork's (#2486): a chamfer (the linear section) of a constant-radius solver's two offsets between NURBS faces, or of a constant-distance solver's chord between planes, is built as its definition too, the section generator's order 0: the straight chord between the feet of the point at the two offsets off the faces, certified as any section; between planes it is the exact plane through the feet, a `Plane` at a bound of 0 carrying its definition ([`crate::surface::procedural_blend::exact::ExactClass::Chord`], reached through [`crate::surface::surface::Surface::procedural_blend`]); either way keeping the chamfer's sizes (two distances, a distance and an angle, or a chord, with the wedge angle they were converted at; [`crate::surface::procedural_blend::chamfer`], [`crate::blend::fillet_executive::session::FilletSession::prepare_chamfers`]). The record and the database carry the sizes.
     pub fillet_round_as_definition: bool,
-    /// The executive's circular rounds (`SetFilletParameters` with `SM_FSG_CIRCULAR`, and
-    /// the corners' constant rounds, `SmFilletCorner::MakeConstantRadiusFillet`) take the
-    /// ball's exact rational circle as their section, not polynomial arcs within 0.05% of
-    /// the radius; an explicit request for approximated arcs (the cross-section type of
-    /// `SmApiConstantRadiusFillet`'s options) keeps them. Upstream's approximated end
-    /// section of a round is up to 1.6e-3 (r 2) off the exact section of an analytic round
-    /// it joins (the tangent peg's concave torus and the round along the front round's end
-    /// on the cylinder), which the face shrink, keeping exact trims, and
-    /// the blend corner then leave off their edges (WR-708; the fork's
-    /// tangency-labs/smlib@523bc25, smlib#79).
-    pub fillet_exact_arc_sections: bool,
-    /// With `fillet_exact_arc_sections`, the exact circular sections of one round
-    /// (`SmCircularCrossSectionFSG::CreateSurfaceFromCurves` with `bApproximateArcs`
-    /// FALSE) all take the largest arc count among them. A section that sweeps less than
-    /// 91 degrees is one rational quadratic arc and one that sweeps more is two; the skin
-    /// made a one-arc section compatible with two-arc ones by inserting a knot, a rational
-    /// parameterisation unlike its neighbours' (middle weight `(1 + cos(a/2))/2`, not 1),
-    /// so between such stations the skin left the circles: a round whose sections sweep
-    /// across 91 degrees along it (a variable round on a square edge, where its radius law
-    /// turns) was 1.97e-3 off its balls' envelope, where approximated arcs are 1.0e-4 off.
-    /// Each circle is now built as that many equal arcs, as upstream rebuilds approximated
-    /// arcs with the most knots, and a point section where the rails meet (a point curve
-    /// of weights 1) becomes the circle nearest it collapsed onto its point, its weights
-    /// those of the circles beside it: that round is then 8.1e-5 off. Off: the fork's
-    /// 523bc25 and 5e8c9c1 (WR-711, a fix of WR-708).
-    pub fillet_exact_arc_spans: bool,
     /// With `fillet_cliff_overflow` (and its prerequisites), a blend past its faces is trimmed at its creases where it is built instead of being closed into the region it removes and subtracted (the fork's `SmFilletExecutive::TrimAtCreases`, `SmFilletOverflow.cpp`, tangency-labs/smlib#79 step 6 at 5e8c9c1, which deletes `SubtractRemovalRegion`): the open ends are cut by their end faces' planes as before; each sheet face is sectioned by every body face near it that holds none of its boundary, exactly by a plane, and split along each crease where it lies inside both faces; a piece is kept only when its inner point lies inside the body; a planar support face whose kept rail runs past its boundary into the material is carried on along its plane to the rail; the kept sheet's boundary is imprinted on the body's faces, the faces it encloses round the blended edges are deleted, the sheet is merged in and stitched, the body oriented, and the edges between faces sewn in on one surface removed. The blend keeps its radius and the sharp edge moves. Refused with `FilletErrorType::NoRoom`: a crease on a face that runs on tangentially from a face the blend rolls on (`NoRoomReason::CreaseAcrossTangentEdge`), a blend whose corners take its whole edge (`CornersTakeWholeEdge`), and a rail into the material that the support face cannot be carried on to (`RailRunsPastFaceIntoMaterial`); `BadMerge` for a sheet that does not sew into a manifold solid. Off: the subtraction, as before (WR-695, #2273).
     pub fillet_overflow_trim_at_creases: bool,
     /// With both `fillet_overflow_trim_at_creases` and `fillet_round_ends_at_tangent_continuation`, a round with a section end (WR-674: its filleted edge runs on tangentially at the vertex) is trimmed at its creases and sewn into the body as a cliff overflow is, instead of being closed into the region it removes and subtracted: each section end is cut by its plane through the vertex normal to the filleted edge and given its flat end face (the section's corner, from the section's ends to the vertex), and the sheet is trimmed and sewn in as `fillet_overflow_trim_at_creases` does it; a side of an end face that lies along an edge of the body (the seam where a corner's cylinder runs on tangentially into a flat side) is sewn to that edge's piece instead of being imprinted. So a round with a section end is built together with other rounds (an R25 rim and an R2 corner arc of a tabbed plate rounded together, which the subtraction refuses with `FilletErrorType::NoRoom`: it builds only a lone round both of whose ends are section ends). Off: the subtraction, as before (WR-706, #2223; own design, not in the fork, which at 5e8c9c1 leaves such a corner arc unrounded).
@@ -1692,18 +1682,25 @@ mod tests {
     fn work_counters_count_until_reset() {
         let k = Kernel::default();
         let w = &k.work_counters;
-        let counts =
-            |w: &WorkCounters| (w.face_pairs(), w.loops_classified(), w.wall_body_copies());
-        assert_eq!(counts(w), (0, 0, 0));
+        let counts = |w: &WorkCounters| {
+            (
+                w.face_pairs(),
+                w.loops_classified(),
+                w.wall_body_copies(),
+                w.proto_edge_intersections(),
+            )
+        };
+        assert_eq!(counts(w), (0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
         w.add_wall_body_copy();
-        assert_eq!(counts(w), (2, 1, 1));
+        w.add_proto_edge_intersection();
+        assert_eq!(counts(w), (2, 1, 1, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0));
     }
 
     #[test]

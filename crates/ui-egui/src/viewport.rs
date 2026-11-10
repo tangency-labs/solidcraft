@@ -5280,7 +5280,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
-                if let Some((hit, Some(sel))) = cand {
+                if add && crate::dialogs_move::add_body_click(app, &hits, allow_toggle) {
+                    // Ctrl/Shift+click: one more body for Move, which stays on From, Point or Axis.
+                } else if let Some((hit, Some(sel))) = cand {
                     dialog_pick(app, &hit, sel);
                 } else if let Some(mut dialog) = app.dialog.take() {
                     // A pick field clicked into says what it is for when the click is not one (#10428).
@@ -5727,10 +5729,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::viewport_status::show(app, ui.ctx(), rect);
     crate::viewport_status_fixture::show(app, ui.ctx(), rect);
-    // The notices and the agent chip first, so the 3D mouse picture can keep clear of them.
-    // The selection's measurement in the corner, before the notices so they keep clear of it.
+    // The operations under way first, then the selection's measurement in the corner (clear of
+    // them), then the notices and the agent chip above both, so the 3D mouse picture can keep
+    // clear of them all.
+    crate::operations::show(app, ui, crate::shell::bottom_overlay_rect(app, rect));
     let readout = quick_measure_readout(app, ui, rect);
-    let toasts = transient_messages(app, ui, rect, readout);
+    let mut toasts = transient_messages(app, ui, rect, readout);
+    toasts.extend(app.operations.rect);
     if app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
         && let Some(device) = &app.space_mouse.device
@@ -5817,9 +5822,9 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
         let pos = r.min;
         crate::scenario::publish_rect("agent:chip", r);
         painter.rect_filled(r, t.radius_sm, t.overlay);
-        painter.rect_stroke(r, t.radius_sm, Stroke::new(1.0, crate::icons::pointer::agent()), egui::StrokeKind::Inside);
+        painter.rect_stroke(r, t.radius_sm, Stroke::new(1.0, solidcraft_look::pointer::agent()), egui::StrokeKind::Inside);
         egui::Spinner::new()
-            .color(crate::icons::pointer::agent())
+            .color(solidcraft_look::pointer::agent())
             .size(t.space_12)
             .paint_at(ui, Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(12.0, 12.0)));
         painter.galley(pos + vec2(26.0, 4.0), galley.clone(), t.text);
@@ -5848,6 +5853,7 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
     if let Some(layout) = &app.viewport.layout {
         taken.extend([layout.navigation, layout.axis_view]);
     }
+    taken.extend(app.operations.rect);
     let view = crate::shell::content_rect(app, viewport);
     crate::quick_measure::show(app, ui, view, &taken)
 }
@@ -5857,12 +5863,18 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
 pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect, readout: Option<Rect>) -> Vec<Rect> {
     let placement_hint =
         app.tool.as_ref().filter(|tool| matches!(tool.cmd, "canvas.insert" | "canvas.decal")).map(|tool| crate::tools::hint(tool.cmd));
+    // The operations panel shows the work computing, with its Cancel, instead of the computing
+    // toast and the agent's chip — where it has rows and room to draw them. A panel that cannot
+    // fit must not take away the only control the toast and the chip still give.
+    let panel = app.preferences.operations_panel && app.operations.rect.is_some();
+    let computing_since = app.computing_since().filter(|_| !panel);
+    let agent_computing = app.agent_computing().is_some() && !panel;
     // Nothing to show or time: an idle window skips the layout. The offer is checked too, as its clock
     // runs from the frames `due` sees.
     if placement_hint.is_none()
         && app.status.is_none()
-        && app.computing_since().is_none()
-        && app.agent_computing().is_none()
+        && computing_since.is_none()
+        && !agent_computing
         && crate::space_mouse_offer::offerable(app).is_none()
         && !crate::stand_up::note_pending(app)
     {
@@ -5875,6 +5887,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         obstacles.extend([layout.navigation, layout.axis_view]);
     }
     obstacles.extend(readout);
+    obstacles.extend(app.operations.rect);
     let view = crate::shell::content_rect(app, viewport);
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
@@ -5992,7 +6005,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             app.status = None;
         }
     }
-    if let Some(since) = app.computing_since() {
+    if let Some(since) = computing_since {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let text = solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
         // A history command or a delete's check can be given up on (#8266); a feature edit
@@ -6018,7 +6031,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     // The navigation bar is the chip's anchor, so it doesn't count as something to move past.
     let nav = app.viewport.layout.as_ref().map(|l| l.navigation);
     obstacles.retain(|o| Some(*o) != nav);
-    shown.extend(agent_chip(app, ui, view, &obstacles));
+    if agent_computing {
+        shown.extend(agent_chip(app, ui, view, &obstacles));
+    }
     shown
 }
 

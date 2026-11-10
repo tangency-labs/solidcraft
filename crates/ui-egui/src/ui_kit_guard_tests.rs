@@ -791,7 +791,7 @@ fn all_disclosures_use_the_one_kit_chevron_without_allowances() {
     scan(&root.join("src"), &kit, &mut failures, &mut definitions);
     scan(&kit, &kit, &mut failures, &mut definitions);
     scan(&root.join("../../apps"), &kit, &mut failures, &mut definitions);
-    scan(&root.join("../../assets/icons/ui/source"), &kit, &mut failures, &mut definitions);
+    scan(&root.join("../look/src"), &kit, &mut failures, &mut definitions);
     assert!(failures.is_empty(), "Disclosures only through ui_kit::disclosure:\n{}", failures.join("\n"));
     assert_eq!(definitions, 1, "Exactly one disclosure painter, including inside ui_kit");
 }

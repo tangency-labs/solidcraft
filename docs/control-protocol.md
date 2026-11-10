@@ -624,6 +624,8 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 | `document.import` | `text`: a design's JSON; `name?`: the name it takes | `{name, features, errors, revision}`: replaces the active design with `text`, timeline and parameters as saved; it opens saved, with a new `document_id` and nothing to undo. It does not ask about unsaved changes in the design it replaces: that is the caller's to decide. A text that does not read changes nothing. Waits behind a file loading or a design change, and evaluates on the window thread in the frame it runs |
 | `document.saved` | `revision`: as `document.export` gave it | `{revision, dirty}`: the host saved the design at that revision, so it counts as saved from there. Refused when the design has changed since |
 
+The selection alone is the engine command `selection.get` (run it with `engine.execute`; read-only, no undo step, headless too): `{count, items}`, each item as `select.set` takes it (`type`, `body`, `index`, `point`, `id`, `sketch`, `path`…) with `kind` and, unless `detail: false`, what it resolves to: a face's persistent `name`, `surface` (`plane` with `normal`, `cylinder` with `origin`, `axis` and `radius`, `cone`, `sphere`, `torus`, or `other`) and `area_mm2`; an edge's persistent `name`, `curve` (`line`, `circle`, `arc`, `other`), `length_mm`, `start`, `end` and, when round, `center`, `axis` and `radius`; a body's `volume_mm3`, `feature` and `visible`; a body item's `component` and `occurrence_path` in an assembly; a sketch item's `sketch` (its id, so the item can go back to `select.set`), `sketch_name` and `entity` (a line's `sketch_midpoint` gives `midpoint` and its `position`). `ui.selection` (below) reports the window's view of it with the open dialog's inputs and the hovered item.
+
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
 
 `document.export`, `document.import` and `document.saved` are control methods, not commands: they
@@ -739,9 +741,11 @@ drawing and answering while it runs:
   design as it is and lands after that edit, never in the middle of it. If the design was replaced
   (another tab made active, a new file opened, its tab closed), the request fails at once with
   `… the design was replaced … nothing was applied`, and the requests behind it go on.
-- A chip in the view names the command, with **Stop**. Stop answers
-  `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and the requests
-  waiting behind it go on. The computation finishes unseen in the background.
+- A row of the operations panel in the view's bottom-right corner names the command, with how
+  many of a batch's steps are done and a red X (with **Preferences > Layout > Show operations
+  in the view** off, a chip with **Stop** instead; `ui.operations` lists and cancels the rows).
+  The X answers `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and
+  the requests waiting behind it go on. The computation finishes unseen in the background.
 - `file.export` and `file.save_mesh` change nothing in the design. They run on a copy of the
   design as it was when they were asked for, and nothing waits behind them.
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
@@ -833,6 +837,7 @@ no box selection.
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.messages` | `clear?`: `true` (empty the list), `open?`: bool (show or hide the Messages window) | every status message of this run, oldest first (the last 200; a message repeated in a row is one entry with a `count`): `messages` `[{text, error, at, count}]` (`at` in ms since the Unix epoch), and whether the window is `open` (#2763) |
 | `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `save_row?`, `discard_row?`: tab index to save or discard and close in that prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
+| `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them), `queued`, `cancelling`, `cancellable`, and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); an error when no such operation is under way or it can't be cancelled (a save being written) |
 | `ui.file` | `path`; `insert?`: bool | starts an interactive background Open or Insert; poll `ui.inspect.file_busy` for completion; the window stays responsive |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `slot?`, `replace?` | a command's keys (`key`: the first, shown in menus; `keys`: all), or rebinds it: `key` becomes its only key, or with `slot` replaces its key there (one past the last adds a key, `""` there removes that key); `""` without `slot` clears them; key names are case-insensitive and modifiers are normalized (`shift+ctrl+t` becomes `Ctrl+Shift+T`); unknown and reserved keys are refused; a key another command uses is refused unless `replace` |
@@ -899,6 +904,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
+- `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
@@ -906,6 +912,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
 - `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
 - `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
+- `export_name` (string, default empty: each export offers the design's name, or a mesh its body's; otherwise the name File › Export and Save As Mesh offer, with `{design}`, `{body}` (the exported body's name) and the design properties (`{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}`) replaced; [export file names](book/src/guide/files.md#export-file-names))
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `fillet_legacy_radius` (default false: a new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's units ("0.07874 in" in an inch design); true: it opens at the number 2 read in the design's units ("2 in"), as before, #12418)

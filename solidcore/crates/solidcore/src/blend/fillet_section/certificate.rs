@@ -35,6 +35,7 @@
 //! | [`arc_row_terms_over`]            | `sm_ArcRowTermsOver` (cc08236; its terms the tighter of two, #14405) |
 //! | [`ArcTerms`], [`ArcTermsBoth`], [`arc_terms_over`], [`centred_tm`] | — (not the fork's: the arc's row terms from interval series and from Taylor models, #14405) |
 //! | `PieceRows`, `tighten_level` (private) | — (not the fork's: a level's Taylor models taken only where they can change its verdict, #14405) |
+//! | [`TightPiece`], [`PieceInputs`], `resolve_pending`, `tighten_feet`, `gate` (private) | — (not the fork's: the feet's Taylor models, [`super::feet_tm`], taken only where they can change a level's verdict, #14405) |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
 //!
 //! Deviations:
@@ -98,6 +99,23 @@
 //!   tighter terms everywhere, and a bound at the target can be the interval terms' (no
 //!   larger than the fork's). A span's first level follows the levels these certified
 //!   ([`SpanReuse`]), so the spans' sequence can differ from the fork's terms'.
+//! - **The feet's Taylor models (#14405, not the fork's).** The same for the feet: a
+//!   piece's feet are also enclosed as Taylor models in `s - m` over it
+//!   ([`super::feet_tm::gn_enclose_tm`]), whose top coefficient is not the interval
+//!   enclosure's overestimate (the faces' rational quotient and the feet's common motion
+//!   taken as independent ranges); each fourth term is the tighter of the two
+//!   ([`TightPiece`]), and the arc's rows are taken from the tighter series met with the
+//!   interval ones'. Only on NURBS faces (not a blend by its definition), and not where
+//!   the equal area thumbweight varies: those rows' own interval terms keep its levels
+//!   over the target with the tighter feet or without. A piece whose interval enclosure
+//!   does not prove it takes them once the level's other pieces are in
+//!   (`resolve_pending`), and a level whose bound is still over the target after the
+//!   arc's takes them for its other pieces (`tighten_feet`); neither where a lower bound
+//!   on the level's bound whatever its pieces take (`gate`: the least values at the
+//!   span's pieces' middles so far, `piece_least`, and the pieces' terms without the
+//!   remainder over them, `floor_terms`) is over the target, where they could not bring
+//!   the level to it. The levels are steered by the fork's terms as above, so the
+//!   verdicts go only from reject to accept.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
@@ -950,6 +968,14 @@ pub fn gn_enclose(
     law: Option<&GnLaw<'_>>,
     defs: Option<&mut GnDefs<'_>>,
 ) -> Result<Option<Enclosure>> {
+    let at = span_at(faces_n, a, b);
+    gn_enclose_over(k, faces_n, leader_n, &at, r, side, n, order_s, law, defs)
+}
+
+/// The span `[a.s, b.s]` as [`gn_enclose`] encloses the feet over it ([`SpanAt`]): the
+/// stations' feet as the guesses, each face's polynomial piece the one the guesses' middle
+/// lies in, the leader's the one the span's middle lies in, continued.
+pub(crate) fn span_at(faces_n: [&Nurbs; 2], a: &GnStation, b: &GnStation) -> SpanAt {
     let ax = |c: usize| a.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
     let bx = |c: usize| b.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
     let mut at = SpanAt {
@@ -980,7 +1006,7 @@ pub fn gn_enclose(
             *v = sv;
         }
     }
-    gn_enclose_over(k, faces_n, leader_n, &at, r, side, n, order_s, law, defs)
+    at
 }
 
 /// `sm_GnEncloseOver` (c5b6bb7): the feet's series over `at.s`, to order `order_s` in s and
@@ -1449,20 +1475,62 @@ pub fn gn_fourth_over_series(
     extra: usize,
     defs: Option<&mut GnDefs<'_>>,
 ) -> Result<(Fourth, Option<PieceSeries>)> {
-    let mut defs = defs;
-    let none: (Fourth, Option<PieceSeries>) = (
-        (
-            [[f64::INFINITY; MAX_E + 1]; 2],
-            [f64::INFINITY; 2],
-            [[0.0; MAX_E + 1]; 2],
-            [0.0; 2],
-            [f64::INFINITY; 2],
-            [0.0; 2],
-        ),
-        None,
-    );
+    let pe = piece_enclosures(
+        k, faces_n, leader_n, faces, center, a, b, r, side, n, law, extra, defs, false,
+    )?;
     let h = b.s - a.s;
-    let Some(e5) = gn_enclose(
+    Ok(match (pe.e5, pe.mid) {
+        (Some(e5), Some((mid, e4))) => fourth_of(&e5, &e4, h, n, mid),
+        _ => (UNPROVED_FOURTH, None),
+    })
+}
+
+/// No fourth derivative proved ([`gn_fourth_over_series`]'s outputs as the fork leaves
+/// them where an enclosure fails): infinite bounds, zero least values.
+const UNPROVED_FOURTH: Fourth = (
+    [[f64::INFINITY; MAX_E + 1]; 2],
+    [f64::INFINITY; 2],
+    [[0.0; MAX_E + 1]; 2],
+    [0.0; 2],
+    [f64::INFINITY; 2],
+    [0.0; 2],
+);
+
+/// A piece's enclosures ([`gn_fourth_over_series`]'s): the feet over it (`e5`, to order
+/// `4 + SM_GN_TAYLOR + extra`, `None` where not proved), and its middle with the feet's
+/// point enclosure there (`e4`, one order less).
+struct PieceEnclosures {
+    e5: Option<Enclosure>,
+    mid: Option<(f64, Enclosure)>,
+}
+
+/// The enclosures of [`gn_fourth_over_series`], in its order: the piece's, then the middle's
+/// station and its point enclosure, the latter (`always` false) only where the piece's is
+/// proved, as the fork; `always`, also where it is not (the feet's Taylor models start from
+/// the middle's).
+#[allow(clippy::too_many_arguments)]
+fn piece_enclosures(
+    k: &Kernel,
+    faces_n: [&Nurbs; 2],
+    leader_n: &NurbsCurve,
+    faces: [&Surface; 2],
+    center: &BSplineCurve,
+    a: &GnStation,
+    b: &GnStation,
+    r: [f64; 2],
+    side: [f64; 2],
+    n: usize,
+    law: Option<&GnLaw<'_>>,
+    extra: usize,
+    defs: Option<&mut GnDefs<'_>>,
+    always: bool,
+) -> Result<PieceEnclosures> {
+    let mut defs = defs;
+    let mut out = PieceEnclosures {
+        e5: None,
+        mid: None,
+    };
+    out.e5 = gn_enclose(
         k,
         faces_n,
         leader_n,
@@ -1474,10 +1542,10 @@ pub fn gn_fourth_over_series(
         4 + TAYLOR + extra,
         law,
         defs.as_deref_mut(),
-    )?
-    else {
-        return Ok(none);
-    };
+    )?;
+    if out.e5.is_none() && !always {
+        return Ok(out);
+    }
     // the middle's station, and the series there
     let mid = 0.5 * (a.s + b.s);
     let mut seed = [0.0_f64; 4];
@@ -1486,10 +1554,10 @@ pub fn gn_fourth_over_series(
         let bc = b.x.get(c).map_or(f64::NAN, |x| x.at(0, 0));
         *sc = 0.5 * (ac + bc);
     }
-    let sm = gn_try!(center.evaluate_point(mid), none);
+    let sm = gn_try!(center.evaluate_point(mid), out);
     let point = Trunc::new(0, 0)?;
     let tol = 1.0e-9 * smax(1.0, sm.length());
-    let mid_r = gn_try!(law_series(law, mid, 0, false), none);
+    let mid_r = gn_try!(law_series(law, mid, 0, false), out);
     let smid = gn_try!(
         gn_solve_station_counted(
             k,
@@ -1504,9 +1572,9 @@ pub fn gn_fourth_over_series(
             mid_r.as_ref()
         )
         .0,
-        none
+        out
     );
-    let Some(e4) = gn_enclose(
+    let e4 = gn_enclose(
         k,
         faces_n,
         leader_n,
@@ -1518,10 +1586,20 @@ pub fn gn_fourth_over_series(
         4 + TAYLOR - 1 + extra,
         law,
         defs,
-    )?
-    else {
-        return Ok(none);
-    };
+    )?;
+    out.mid = e4.map(|e| (mid, e));
+    Ok(out)
+}
+
+/// [`gn_fourth_over_series`]'s terms from a piece's enclosure `e5` (over it, length h) and
+/// its middle's `e4` (at `mid`): its body after the enclosures.
+fn fourth_of(
+    e5: &Enclosure,
+    e4: &Enclosure,
+    h: f64,
+    n: usize,
+    mid: f64,
+) -> (Fourth, Option<PieceSeries>) {
     let series = PieceSeries {
         f: e5.f,
         v: e5.v,
@@ -1529,7 +1607,7 @@ pub fn gn_fourth_over_series(
         vm: e4.v,
         mid,
     };
-    let (mut m4, mut uv4, mut m4_lo, mut uv4_lo, mut uv4_fork, mut uv4_lo_fork) = none.0;
+    let (mut m4, mut uv4, mut m4_lo, mut uv4_lo, mut uv4_fork, mut uv4_lo_fork) = UNPROVED_FOURTH;
     // the uv curves' fourth derivatives, in the same Taylor form, each times the face's
     // partial in its parameter over the span's box (#2690)
     for (f, ((uvf, uvk), dsf)) in uv4
@@ -1541,7 +1619,7 @@ pub fn gn_fourth_over_series(
         let (mut sum, mut dmax) = (0.0_f64, 0.0_f64);
         for (c, &dsc) in ((2 * f)..(2 * f + 2)).zip(dsf) {
             let (Some(x4), Some(x5)) = (e4.x.get(c), e5.x.get(c)) else {
-                return Ok((none.0, Some(series)));
+                return (UNPROVED_FOURTH, Some(series));
             };
             let m = taylor_bound(|i| x4.at(i, 0).mag(), x5.at(4 + TAYLOR, 0).mag(), h);
             sum += m * dsc;
@@ -1561,7 +1639,7 @@ pub fn gn_fourth_over_series(
         let (mut sum, mut dlo) = (0.0_f64, 0.0_f64);
         for (c, &dsc) in ((2 * f)..(2 * f + 2)).zip(dsl) {
             let Some(x4) = e4.x.get(c) else {
-                return Ok((none.0, Some(series)));
+                return (UNPROVED_FOURTH, Some(series));
             };
             sum += 24.0 * x4.at(4, 0).mig() * dsc;
             dlo = cmax(dlo, 24.0 * x4.at(4, 0).mig());
@@ -1591,10 +1669,10 @@ pub fn gn_fourth_over_series(
             *m4lfk = crate::geom::vector3d::sqrt(sq);
         }
     }
-    Ok((
+    (
         (m4, uv4, m4_lo, uv4_lo, uv4_fork, uv4_lo_fork),
         Some(series),
-    ))
+    )
 }
 
 /// `sm_GnVarying`: a section whose thumbweight varies along s (the equal area one,
@@ -2182,6 +2260,48 @@ pub fn arc_terms_over(
     }
 }
 
+/// The arc's rows' least terms at a piece's middle, from the series there (`fm`, `vm`, a
+/// point enclosure): per row the least `24 |H_j''''|` and `24 |W_j''''|` and the greatest
+/// `W_j` at the middle; `None` where the arc is not proved there. Every piece holding the
+/// middle bounds the rows there, so no level's terms are below these (#14405).
+fn arc_least_at(ps: &PieceSeries, o: [f64; 3], touch: bool) -> Option<[[f64; 3]; 3]> {
+    let (rho, mut mc, dm) = piece_series(&ps.f, &ps.v, &ps.fm, &ps.vm, touch, IZ, |mid, _| {
+        centred(mid, IZ, ARC_K, IZ)
+    });
+    let [rho0, rho1] = &rho;
+    if let Some(dm) = &dm {
+        let mut dd = Tay::<Ivl>::zero();
+        let mut bd = Tay::<Ivl>::zero();
+        for ((&dq, &mq), &r0q) in dm.iter().zip(&mc).zip(rho0) {
+            dd = dd + dq * dq;
+            bd = bd + (r0q - mq) * dq;
+        }
+        if !dd.at(0).is_positive() {
+            return None;
+        }
+        let kk = bd / dd;
+        for (mq, &dq) in mc.iter_mut().zip(dm) {
+            *mq = *mq + kk * dq;
+        }
+    }
+    let (h, w) = arc_rows(rho0, rho1, &mc, o)?;
+    let mut out = [[0.0_f64; 3]; 3];
+    let [xl, yl, wh] = &mut out;
+    for (j, (hj, wj)) in h.iter().zip(&w).enumerate() {
+        let mut sq = 0.0_f64;
+        for hq in hj {
+            let m = hq.at(TAY).mig();
+            sq += m * m;
+        }
+        if let (Some(x), Some(y), Some(ww)) = (xl.get_mut(j), yl.get_mut(j), wh.get_mut(j)) {
+            *x = 24.0 * crate::geom::vector3d::sqrt(sq);
+            *y = 24.0 * wj.at(TAY).mig();
+            *ww = wj.at(0).hi;
+        }
+    }
+    Some(out)
+}
+
 /// `sm_ArcRowTermsOver` (cc08236): the arc's row terms over one piece
 /// ([`gn_row_terms_over`]'s, every row varying), folded into `rt`; `false` where they are
 /// not proved. Not the fork's: the terms are the tighter of the fork's interval ones and
@@ -2205,15 +2325,186 @@ pub fn arc_row_terms_over(
 
 /// One piece of a level [`gn_certify_span`] proved: its parameter range, its
 /// [`gn_fourth_over_series`] terms, and its series where the span's rows vary (the ball's
-/// circle, or a varying thumbweight: their row terms are taken from them). Not upstream.
+/// circle, or a varying thumbweight: their row terms are taken from them); and, where
+/// taken, the tighter terms of the feet's Taylor models (#14405). Not upstream.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CertifiedPiece {
     /// The piece's first and last parameter.
     pub s: [f64; 2],
-    /// The piece's fourth s-derivative terms ([`Fourth`]).
+    /// The piece's fourth s-derivative terms ([`Fourth`]) from the interval enclosure (the
+    /// fork's): they steer the levels.
     pub fourth: Fourth,
-    /// The piece's series, kept only where the span's rows vary.
+    /// The piece's series from the interval enclosure, kept only where the span's rows vary.
     pub series: Option<Box<PieceSeries>>,
+    /// The feet's Taylor models' terms met with the interval enclosure's, where taken.
+    pub tight: Option<Box<TightPiece>>,
+    /// What taking them needs, until they are taken (`None`: taken, or none to take).
+    pub inputs: Option<Box<PieceInputs>>,
+}
+
+/// A piece's terms from the feet's Taylor models over it
+/// ([`super::feet_tm::gn_enclose_tm`]) met with the interval enclosure's, term by term
+/// (#14405): each holds over the piece, so the tighter one does.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TightPiece {
+    /// The fourth s-derivative terms, each no larger than the interval enclosure's.
+    pub fourth: Fourth,
+    /// The series, kept only where the span's rows vary: each coefficient's enclosure
+    /// within the interval enclosure's.
+    pub series: Option<PieceSeries>,
+}
+
+/// What the feet's Taylor models over a piece start from: the piece as the interval
+/// enclosure takes it ([`SpanAt`]), its middle and the feet's point enclosure there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PieceInputs {
+    /// The piece.
+    pub at: SpanAt,
+    /// Its middle.
+    pub mid: f64,
+    /// The feet's point enclosure at the middle.
+    pub e4: Enclosure,
+}
+
+/// What a piece's feet Taylor models take from its span: the faces, the leader, the
+/// offsets and sides, the jets graded and the series' order, the radius law, whether the
+/// span's rows vary, and whether they are taken at all (#14405).
+struct FeetCtx<'a, 'l> {
+    k: &'a Kernel,
+    faces_n: [&'a Nurbs; 2],
+    leader_n: &'a NurbsCurve,
+    r: [f64; 2],
+    side: [f64; 2],
+    n: usize,
+    order: usize,
+    law: Option<&'a GnLaw<'l>>,
+    rows_vary: bool,
+    /// Whether the feet's Taylor models are taken at all (NURBS faces, not a blend's
+    /// definition, and a thumbweight that does not vary).
+    on: bool,
+}
+
+/// The lesser of two upper bounds (a NaN is no bound).
+fn upper_meet(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b < a {
+        b
+    } else {
+        a
+    }
+}
+
+/// Two enclosures' [`Fourth`] terms of the same piece met: the lesser bound of each, the
+/// least values `tm`'s (both are the middle's).
+fn meet_fourth(old: &Fourth, tm: &Fourth) -> Fourth {
+    let (m4o, uv4o, _, _, uvfo, _) = old;
+    let (m4t, uv4t, m4_lo, uv4_lo, uvft, uv4_lo_fork) = tm;
+    let mut m4 = *m4t;
+    for (mf, of) in m4.iter_mut().zip(m4o) {
+        for (m, &o) in mf.iter_mut().zip(of) {
+            *m = upper_meet(o, *m);
+        }
+    }
+    let mut uv4 = *uv4t;
+    for (u, &o) in uv4.iter_mut().zip(uv4o) {
+        *u = upper_meet(o, *u);
+    }
+    let mut uvf = *uvft;
+    for (u, &o) in uvf.iter_mut().zip(uvfo) {
+        *u = upper_meet(o, *u);
+    }
+    (m4, uv4, *m4_lo, *uv4_lo, uvf, *uv4_lo_fork)
+}
+
+/// Two enclosures of the same series met coefficient by coefficient into `a`; `false`
+/// where one is empty (they do not both hold the same function).
+fn meet_vser(a: &mut VSer<Ivl>, b: &VSer<Ivl>) -> bool {
+    for (sa, sb) in a.a.iter_mut().zip(&b.a) {
+        for (ra, rb) in sa.c.iter_mut().zip(&sb.c) {
+            for (x, y) in ra.iter_mut().zip(rb) {
+                let (lo, hi) = (cmax(x.lo, y.lo), cmin(x.hi, y.hi));
+                let common = lo <= hi;
+                if !common {
+                    return false;
+                }
+                *x = Ivl::new(lo, hi);
+            }
+        }
+    }
+    true
+}
+
+/// Two enclosures' varying-row terms of the same piece met: the lesser `X`, `Y`, `R`, the
+/// greater least `W`, and the thumbweights' enclosures' common part.
+fn meet_rows(a: &GnRowTerms, b: &GnRowTerms) -> GnRowTerms {
+    let mut m = a.clone();
+    for (x, &y) in m.x.iter_mut().zip(&b.x) {
+        *x = upper_meet(*x, y);
+    }
+    for (x, &y) in m.y.iter_mut().zip(&b.y) {
+        *x = upper_meet(*x, y);
+    }
+    for (x, &y) in m.w_lo.iter_mut().zip(&b.w_lo) {
+        if x.is_nan() || y > *x {
+            *x = y;
+        }
+    }
+    m.r = upper_meet(m.r, b.r);
+    let ([alo, ahi], [blo, bhi]) = (a.w, b.w);
+    let (lo, hi) = (cmax(alo, blo), cmin(ahi, bhi));
+    if lo <= hi {
+        m.w = [lo, hi];
+    }
+    m
+}
+
+/// Takes piece `p`'s feet Taylor models ([`super::feet_tm::gn_enclose_tm`]) where they are
+/// still to take: its terms from them met with the interval enclosure's ([`TightPiece`]).
+/// Where they are not proved, or a series' enclosure misses the interval one's (which
+/// cannot be for the same feet), the piece keeps its interval terms; either way there is
+/// nothing more to take.
+fn take_tight(p: &mut CertifiedPiece, fc: &FeetCtx<'_, '_>) -> Result<()> {
+    let Some(inp) = p.inputs.take() else {
+        return Ok(());
+    };
+    let Some(e5) = super::feet_tm::gn_enclose_tm(
+        fc.k,
+        fc.faces_n,
+        fc.leader_n,
+        &inp.at,
+        fc.r,
+        fc.side,
+        fc.n,
+        fc.order,
+        fc.law,
+        inp.mid,
+        &inp.e4.x,
+    )?
+    else {
+        return Ok(());
+    };
+    let [s0, s1] = p.s;
+    let (fourth_tm, series_tm) = fourth_of(&e5, &inp.e4, s1 - s0, fc.n, inp.mid);
+    let series = if fc.rows_vary {
+        let Some(mut t) = series_tm else {
+            return Ok(());
+        };
+        if let Some(o) = p.series.as_deref() {
+            if !(meet_vser(&mut t.f[0], &o.f[0])
+                && meet_vser(&mut t.f[1], &o.f[1])
+                && meet_vser(&mut t.v, &o.v))
+            {
+                return Ok(());
+            }
+        }
+        Some(t)
+    } else {
+        None
+    };
+    p.tight = Some(Box::new(TightPiece {
+        fourth: meet_fourth(&p.fourth, &fourth_tm),
+        series,
+    }));
+    Ok(())
 }
 
 /// A span's finest level [`gn_certify_span_reusing`] proved: its pieces, in order, cover
@@ -2267,35 +2558,58 @@ enum Halving {
     Ignored,
 }
 
-/// One piece's row terms as a level holds them ([`absorb_piece`]): its varying rows'
-/// terms, and the arc's, which are the interval series' alone (`tight` false) where those
-/// prove the piece, until the level needs the tighter ones ([`tighten_level`]).
+/// One piece's row terms as a level holds them ([`absorb_piece`]): its varying rows' terms
+/// and the arc's, from the series the level holds for the piece (the feet's Taylor models'
+/// where taken, else the interval enclosure's). The arc's are the interval series' alone
+/// (`tight` false) where those prove the piece, until the level needs the tighter ones
+/// ([`tighten_level`]). A piece whose feet's Taylor models are still to take before it is
+/// proved at all (`pending`) holds its interval rows' terms until they are taken.
 struct PieceRows {
     vary: Option<GnRowTerms>,
     arc: Option<ArcTerms>,
     tight: bool,
+    pending: bool,
 }
 
 /// A level's terms, folded in piece by piece ([`absorb_piece`]): the jets' and the uv
 /// curves' largest fourth derivatives (per parameter and the fork's), their least values
 /// at the pieces' middles, the varying rows' terms, and whether every piece so far is
-/// proved; the rows' terms and that both with the arc's certifying terms (`rows`,
-/// `proved`) and with the fork's interval ones (`rows_old`, `proved_old`: they steer the
-/// levels, #14405). The certifying terms are each piece's tighter ones where the interval
-/// terms do not prove it, and the interval ones otherwise until the level is tightened
-/// (`lazy` while any is).
+/// proved. The certifying terms (`m4`, `uv4`, `uv4_fork`, `rows`, `proved`) are each
+/// piece's as the level holds it; the interval enclosure's and the fork's interval row
+/// terms (`m4_old`, `uv4_old`, `uv4_fork_old`, `rows_old`, `proved_old`, and the least
+/// values) steer the levels (#14405). A piece holds its tighter terms (the arc's Taylor
+/// models, the feet's) where the interval ones do not prove it, and the interval ones
+/// otherwise until the level is tightened ([`Lazy`]). The floor terms (`m4_floor`,
+/// `uv4_floor`) are below every piece's certifying terms, whichever it takes
+/// ([`piece_floor`]).
 struct LevelAcc {
     m4: [[f64; MAX_E + 1]; 2],
     uv4: [f64; 2],
-    m4_lo: [[f64; MAX_E + 1]; 2],
     uv4_fork: [f64; 2],
+    m4_old: [[f64; MAX_E + 1]; 2],
+    uv4_old: [f64; 2],
+    uv4_fork_old: [f64; 2],
+    m4_lo: [[f64; MAX_E + 1]; 2],
     uv4_lo_fork: [f64; 2],
+    m4_floor: [[f64; MAX_E + 1]; 2],
+    uv4_floor: [f64; 2],
     proved: bool,
     rows: GnRowTerms,
     proved_old: bool,
     rows_old: GnRowTerms,
     pieces: Vec<PieceRows>,
-    lazy: bool,
+    lazy: Lazy,
+}
+
+/// What a level's pieces have still to take (#14405): an arc's Taylor models for a piece
+/// that holds its interval arc terms alone (`arc`, [`tighten_level`]), the feet's for a
+/// piece the interval enclosure proves (`feet`, [`tighten_feet`]), and the feet's for a
+/// piece it does not, before the level is proved at all (`pending`, [`resolve_pending`]).
+#[derive(Clone, Copy, Default)]
+struct Lazy {
+    arc: bool,
+    feet: bool,
+    pending: bool,
 }
 
 /// No row terms folded in, for `ld` rows.
@@ -2316,15 +2630,20 @@ impl LevelAcc {
         Self {
             m4: [[0.0_f64; MAX_E + 1]; 2],
             uv4: [0.0_f64; 2],
-            m4_lo: [[0.0_f64; MAX_E + 1]; 2],
             uv4_fork: [0.0_f64; 2],
+            m4_old: [[0.0_f64; MAX_E + 1]; 2],
+            uv4_old: [0.0_f64; 2],
+            uv4_fork_old: [0.0_f64; 2],
+            m4_lo: [[0.0_f64; MAX_E + 1]; 2],
             uv4_lo_fork: [0.0_f64; 2],
+            m4_floor: [[0.0_f64; MAX_E + 1]; 2],
+            uv4_floor: [0.0_f64; 2],
             proved: true,
             proved_old: true,
             rows_old: rows.clone(),
             rows,
             pieces: Vec::new(),
-            lazy: false,
+            lazy: Lazy::default(),
         }
     }
 }
@@ -2346,123 +2665,498 @@ fn fold_rows(rt: &mut GnRowTerms, p: &GnRowTerms) {
     rt.w = [cmin(lo, plo), cmax(hi, phi)];
 }
 
-/// Folds piece `p` of the span `[a, b]` into `acc`: its largest terms always, its least
-/// ones (at its middle) only where `steer` (the middle lies in the span), and its row terms
-/// about the span's first station (`bar`, `o`) where the rows vary.
+/// Folds a piece's feet terms `f` into the largest `m4` (its first `l_jets + 1` jets),
+/// `uv4` and `uv4_fork`; `false` where one is not finite (not proved).
+fn fold_feet(
+    m4: &mut [[f64; MAX_E + 1]; 2],
+    uv4: &mut [f64; 2],
+    uv4_fork: &mut [f64; 2],
+    f: &Fourth,
+    l_jets: usize,
+) -> bool {
+    let (pm, puv, _, _, puv_fork, _) = f;
+    let mut finite = true;
+    for (((m4f, pmf), uvf), &puvf) in m4.iter_mut().zip(pm).zip(uv4.iter_mut()).zip(puv) {
+        for (m4fk, &pmfk) in m4f.iter_mut().zip(pmf).take(l_jets + 1) {
+            finite &= pmfk < f64::INFINITY;
+            *m4fk = cmax(*m4fk, pmfk);
+        }
+        finite &= puvf < f64::INFINITY;
+        *uvf = cmax(*uvf, puvf);
+    }
+    for (u, &pu) in uv4_fork.iter_mut().zip(puv_fork) {
+        *u = cmax(*u, pu);
+    }
+    finite
+}
+
+/// What a span's levels share: its stations, the varying thumbweight's fixed form and the
+/// point O the rows are taken about, what it knows for every level, and what its pieces'
+/// feet Taylor models take.
+struct SpanCtx<'s, 'a, 'l> {
+    a: &'s GnStation,
+    b: &'s GnStation,
+    bar: &'s GnSectionFormT<Ivl>,
+    o: [f64; 3],
+    level: &'s LevelCtx,
+    feet: &'s FeetCtx<'a, 'l>,
+}
+
+/// The varying rows' terms of the piece `[s0, s1]` from its series `ps` (`None` where not
+/// proved), about the span's first station.
+fn vary_terms(
+    k: &Kernel,
+    v: &mut GnVarying,
+    sc: &SpanCtx<'_, '_, '_>,
+    s01: [f64; 2],
+    ps: &PieceSeries,
+    ld: usize,
+) -> Option<GnRowTerms> {
+    // the root's guess at the piece's middle: the stations' thumbweights, linearly
+    let t = (ps.mid - sc.a.s) / sc.level.h;
+    let d = Ivl::new(s01[0], s01[1]) - Ivl::from(ps.mid);
+    let guess = (1.0 - t) * sc.a.w + t * sc.b.w;
+    let mut terms = no_rows(ld);
+    let proved = gn_row_terms_over(
+        k, v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, sc.bar, sc.o, &mut terms,
+    );
+    proved.then_some(terms)
+}
+
+/// The rows a piece holds from its feet Taylor models' series `ps` (the piece's tighter
+/// terms, met with those it held: `held`): the varying rows' and the arc's, both ways.
 #[allow(clippy::too_many_arguments)]
+fn tight_rows(
+    k: &Kernel,
+    vary: Option<&mut GnVarying>,
+    sc: &SpanCtx<'_, '_, '_>,
+    s01: [f64; 2],
+    ps: &PieceSeries,
+    ld: usize,
+    held: Option<&PieceRows>,
+) -> Option<PieceRows> {
+    let mut pr = PieceRows {
+        vary: None,
+        arc: None,
+        tight: true,
+        pending: false,
+    };
+    if let Some(v) = vary {
+        let t = vary_terms(k, v, sc, s01, ps, ld);
+        let h = held.and_then(|h| h.vary.as_ref());
+        pr.vary = match (t, h) {
+            (Some(t), Some(h)) => Some(meet_rows(&t, h)),
+            (Some(t), None) => Some(t),
+            (None, Some(h)) => Some(h.clone()),
+            (None, None) => return None,
+        };
+    }
+    if sc.level.arc {
+        let d = Ivl::new(s01[0], s01[1]) - Ivl::from(ps.mid);
+        let t = arc_terms_over(&ps.f, &ps.v, &ps.fm, &ps.vm, d, sc.o, sc.level.touch).tight;
+        let t = match held.and_then(|h| h.arc) {
+            Some(h) => h.meet(t),
+            None => t,
+        };
+        if !t.proves() {
+            return None;
+        }
+        pr.arc = Some(t);
+    }
+    Some(pr)
+}
+
+/// The jets' and the uv curves' part of a level's bound (as [`close_level`] takes it) from
+/// the terms `m4` and `uv`: the varying rows' and the arc's terms only raise the bound.
+fn jets_uv_bound(ctx: &LevelCtx, m4: &[[f64; MAX_E + 1]; 2], uv: &[f64; 2]) -> f64 {
+    let h = ctx.h;
+    let k4 = h * h * h * h / 384.0;
+    let mut bound = 0.0_f64;
+    for (m4f, &uvf) in m4.iter().zip(uv) {
+        let mut sum = 0.0_f64;
+        for &m in m4f.iter().take(ctx.l_jets + 1) {
+            sum += k4 * m;
+        }
+        bound = cmax(bound, cmax(if ctx.rows_vary { 0.0 } else { sum }, k4 * uvf));
+    }
+    bound
+}
+
+/// The floor of a piece's jets' and uv curves' fourth terms from its middle's point
+/// enclosure `e4` (the piece of length `h`, `n` jets): [`fourth_of`]'s bounds without the
+/// remainder over the piece, which is the only part an enclosure over the piece adds (the
+/// interval one's and the Taylor models' alike, each with the same `e4`), and the faces'
+/// least partials at the middle for their partials over the piece. Every piece's terms are
+/// at least these, whichever enclosure it takes.
+fn floor_terms(e4: &Enclosure, h: f64, n: usize) -> ([[f64; MAX_E + 1]; 2], [f64; 2]) {
+    let mut m4 = [[0.0_f64; MAX_E + 1]; 2];
+    let mut uv = [0.0_f64; 2];
+    for (f, (uvf, dsl)) in uv.iter_mut().zip(&e4.ds_lo).enumerate() {
+        let mut sum = 0.0_f64;
+        for (c, &dsc) in ((2 * f)..(2 * f + 2)).zip(dsl) {
+            let Some(x4) = e4.x.get(c) else {
+                return ([[0.0_f64; MAX_E + 1]; 2], [0.0_f64; 2]);
+            };
+            sum += taylor_bound(|i| x4.at(i, 0).mag(), 0.0, h) * dsc;
+        }
+        *uvf = sum;
+    }
+    for (m4f, f4) in m4.iter_mut().zip(&e4.f) {
+        for (kk, m4fk) in m4f.iter_mut().enumerate().take(n + 1) {
+            let mut sq = 0.0_f64;
+            for s4 in &f4.a {
+                let m = taylor_bound(|i| s4.at(i, kk).mag(), 0.0, h);
+                sq += m * m;
+            }
+            *m4fk = crate::geom::vector3d::sqrt(sq);
+        }
+    }
+    (m4, uv)
+}
+
+/// Folds piece `p`'s floor terms into the level's (#14405): its terms as held where they
+/// are final (its feet's Taylor models taken, or none to take), else [`floor_terms`] from
+/// its middle's point enclosure.
+fn piece_floor(acc: &mut LevelAcc, p: &CertifiedPiece, l_jets: usize) {
+    let (m4, uv) = if let Some(inp) = p.inputs.as_deref() {
+        let [s0, s1] = p.s;
+        floor_terms(&inp.e4, s1 - s0, l_jets)
+    } else {
+        let (m4, uv, _, _, _, _) = p.tight.as_deref().map_or(&p.fourth, |t| &t.fourth);
+        (*m4, *uv)
+    };
+    for (af, pf) in acc.m4_floor.iter_mut().zip(&m4) {
+        for (a, &v) in af.iter_mut().zip(pf).take(l_jets + 1) {
+            *a = cmax(*a, v);
+        }
+    }
+    for (a, &v) in acc.uv4_floor.iter_mut().zip(&uv) {
+        *a = cmax(*a, v);
+    }
+}
+
+/// A lower bound on the level's certified bound whatever its pieces take (#14405): the
+/// span's least values (`lb`, [`piece_least`]) and the level's floor terms'. Over the
+/// target, the feet's Taylor models cannot bring the level to it, and are not taken.
+fn gate(acc: &LevelAcc, ctx: &LevelCtx, lb: f64) -> f64 {
+    let floor = jets_uv_bound(ctx, &acc.m4_floor, &acc.uv4_floor);
+    cmax(lb, round_down(floor * (1.0 - 1.0e-12)))
+}
+
+/// A lower bound on every level's certified bound for the span, from piece `p`'s middle
+/// (#14405): every piece holding the middle bounds the jets', the feet's and the arc rows'
+/// fourth derivatives there from above, so each level's bound is at least the bound of
+/// their least values there (the varying thumbweight's rows are not counted). It decides
+/// only whether the feet's Taylor models are taken: over the target, no terms certify the
+/// span, and taking them could not change its verdict.
+fn piece_least(p: &CertifiedPiece, sc: &SpanCtx<'_, '_, '_>) -> f64 {
+    let ctx = sc.level;
+    let h = ctx.h;
+    let k4 = h * h * h * h / 384.0;
+    // the least values from the middle's point enclosure (the fourth terms' least parts)
+    let from_e4 = p.inputs.as_deref().map(|inp| {
+        let [s0, s1] = p.s;
+        fourth_of(&inp.e4, &inp.e4, s1 - s0, ctx.l_jets, inp.mid)
+    });
+    let (fourth, series) = match (&from_e4, p.tight.as_deref()) {
+        (Some((f, s)), _) => (f, s.as_ref()),
+        (None, Some(t)) => (&t.fourth, t.series.as_ref()),
+        (None, None) => (&p.fourth, p.series.as_deref()),
+    };
+    let (_, _, m4_lo, uv4_lo, _, _) = fourth;
+    let mut lb = jets_uv_bound(ctx, m4_lo, uv4_lo);
+    if ctx.arc {
+        if let Some([xl, yl, wh]) = series.and_then(|ps| arc_least_at(ps, sc.o, ctx.touch)) {
+            for ((&x, &y), &w) in xl.iter().zip(&yl).zip(&wh) {
+                // den = w_lo - kh y is at most w_hi - kh y_lo, num at least kh x_lo
+                let den = round_up(w - k4 * y);
+                if den > 0.0 {
+                    lb = cmax(lb, round_down(k4 * x / den));
+                }
+            }
+        }
+    }
+    round_down(lb * (1.0 - 1.0e-12))
+}
+
+/// Folds piece `p` of the span into `acc`: its interval terms into the steering ones
+/// (their least values at its middle only where `steer`: the middle lies in the span), and
+/// the terms it holds into the certifying ones. It holds the interval terms where they
+/// prove it (the arc's Taylor models at once where only those prove its rows, #14405), or
+/// its feet's Taylor models' where already taken; otherwise it is pending (its feet's
+/// Taylor models taken once the level's pieces are in, [`resolve_pending`]) where those can
+/// still bring the level to the target ([`gate`]), and not proved where not. Its floor
+/// terms go into the level's ([`piece_floor`]).
 fn absorb_piece(
     k: &Kernel,
     acc: &mut LevelAcc,
-    p: &CertifiedPiece,
+    p: &mut CertifiedPiece,
     steer: bool,
-    a: &GnStation,
-    b: &GnStation,
-    ctx: &LevelCtx,
+    sc: &SpanCtx<'_, '_, '_>,
     vary: Option<&mut GnVarying>,
-    bar: &GnSectionFormT<Ivl>,
-    o: [f64; 3],
+    lb: &mut f64,
 ) {
-    let (pm, puv, pm_lo, _, puv_fork, puv_lo_fork) = &p.fourth;
-    for (((m4f, pmf), uvf), &puvf) in acc.m4.iter_mut().zip(pm).zip(acc.uv4.iter_mut()).zip(puv) {
-        for (m4fk, &pmfk) in m4f.iter_mut().zip(pmf).take(ctx.l_jets + 1) {
-            let finite = pmfk < f64::INFINITY;
-            if !finite {
-                acc.proved = false;
-            }
-            *m4fk = cmax(*m4fk, pmfk);
-        }
-        let finite = puvf < f64::INFINITY;
-        if !finite {
-            acc.proved = false;
-        }
-        *uvf = cmax(*uvf, puvf);
+    let mut vary = vary;
+    if steer && sc.feet.on {
+        *lb = cmax(*lb, piece_least(p, sc));
     }
+    let ctx = sc.level;
+    let ld = acc.rows.x.len();
+    // the interval enclosure's terms: they steer
+    let old_feet = fold_feet(
+        &mut acc.m4_old,
+        &mut acc.uv4_old,
+        &mut acc.uv4_fork_old,
+        &p.fourth,
+        ctx.l_jets,
+    );
+    let (_, _, pm_lo, _, _, puv_lo_fork) = &p.fourth;
     if steer {
         for (lf, plf) in acc.m4_lo.iter_mut().zip(pm_lo) {
             for (l, &pl) in lf.iter_mut().zip(plf) {
                 *l = cmax(*l, pl);
             }
         }
-    }
-    for (u, &pu) in acc.uv4_fork.iter_mut().zip(puv_fork) {
-        *u = cmax(*u, pu);
-    }
-    if steer {
         for (l, &pl) in acc.uv4_lo_fork.iter_mut().zip(puv_lo_fork) {
             *l = cmax(*l, pl);
         }
     }
-    let series = p.series.as_deref();
-    let mut held = PieceRows {
-        vary: None,
-        arc: None,
-        tight: false,
+    let ps_old = p.series.as_deref().filter(|_| old_feet);
+    let vary_old: Option<GnRowTerms> = match (vary.as_deref_mut(), ps_old) {
+        (Some(v), Some(ps)) => vary_terms(k, v, sc, p.s, ps, ld),
+        _ => None,
     };
-    if acc.proved {
-        if let Some(v) = vary {
-            // the root's guess at the piece's middle: the stations' thumbweights, linearly
-            let mut terms = no_rows(acc.rows.x.len());
-            acc.proved = match series {
-                Some(ps) => {
-                    let t = (ps.mid - a.s) / ctx.h;
-                    let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
-                    let guess = (1.0 - t) * a.w + t * b.w;
-                    gn_row_terms_over(
-                        k, v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, bar, o, &mut terms,
-                    )
-                }
-                None => false,
-            };
-            if acc.proved {
-                fold_rows(&mut acc.rows, &terms);
-                fold_rows(&mut acc.rows_old, &terms);
-                held.vary = Some(terms);
-            }
+    let arc_old = match ps_old {
+        Some(ps) if ctx.arc => {
+            let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
+            Some(arc_terms_interval(
+                &ps.f, &ps.v, &ps.fm, &ps.vm, d, sc.o, ctx.touch,
+            ))
+        }
+        _ => None,
+    };
+    let mut old_ok = old_feet;
+    if vary.is_some() {
+        match &vary_old {
+            Some(t) => fold_rows(&mut acc.rows_old, t),
+            None => old_ok = false,
         }
     }
-    if acc.proved && ctx.arc {
-        match series {
-            Some(ps) => {
-                let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
-                let old = arc_terms_interval(&ps.f, &ps.v, &ps.fm, &ps.vm, d, o, ctx.touch);
-                acc.proved_old = acc.proved_old && old.fold(&mut acc.rows_old);
-                // the interval terms where they prove the piece (the Taylor models' only
-                // when the level needs them), else the tighter terms at once
-                let terms = if old.proves() {
-                    acc.lazy = true;
-                    old
-                } else {
-                    held.tight = true;
-                    old.meet(arc_terms_taylor(
-                        &ps.f, &ps.v, &ps.fm, &ps.vm, d, o, ctx.touch,
-                    ))
-                };
-                acc.proved = terms.fold(&mut acc.rows);
-                held.arc = Some(terms);
+    if ctx.arc {
+        old_ok = old_ok && arc_old.is_some_and(|t| t.fold(&mut acc.rows_old));
+    }
+    if !old_ok {
+        acc.proved_old = false;
+    }
+    // the terms it holds: the interval ones where they prove it, else the tighter ones
+    let mut held: Option<PieceRows> = None;
+    let prev = old_feet.then(|| PieceRows {
+        vary: vary_old.clone(),
+        arc: arc_old,
+        tight: false,
+        pending: false,
+    });
+    if p.tight.is_none() && old_feet {
+        let mut pr = PieceRows {
+            vary: None,
+            arc: None,
+            tight: false,
+            pending: false,
+        };
+        let mut ok = vary.is_none() || vary_old.is_some();
+        pr.vary = vary_old;
+        if ok && ctx.arc {
+            match (arc_old, ps_old) {
+                (Some(t), _) if t.proves() => pr.arc = Some(t),
+                (Some(t), Some(ps)) => {
+                    // the arc's Taylor models where only they prove its rows
+                    let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
+                    let tt = t.meet(arc_terms_taylor(
+                        &ps.f, &ps.v, &ps.fm, &ps.vm, d, sc.o, ctx.touch,
+                    ));
+                    pr.tight = true;
+                    ok = tt.proves();
+                    pr.arc = Some(tt);
+                }
+                _ => ok = false,
             }
-            None => acc.proved = false,
         }
+        if ok {
+            held = Some(pr);
+        }
+    }
+    piece_floor(acc, p, ctx.l_jets);
+    if held.is_none() && p.tight.is_some() {
+        // its feet's Taylor models already taken (a halved span's piece): their rows
+        held = held_tight(k, vary, sc, p, ld, prev.as_ref());
+    }
+    if held.is_none()
+        && p.tight.is_none()
+        && p.inputs.is_some()
+        && gate(acc, ctx, *lb) <= ctx.target
+    {
+        // the interval terms do not prove it: its feet's Taylor models, once the level's
+        // other pieces are in, where they can still bring it to the target
+        let (vary, arc) = prev.map_or((None, None), |pr| (pr.vary, pr.arc));
+        acc.pieces.push(PieceRows {
+            vary,
+            arc,
+            tight: true,
+            pending: true,
+        });
+        acc.lazy.pending = true;
+        return;
+    }
+    let Some(pr) = held else {
+        acc.proved = false;
+        acc.proved_old = false;
+        acc.pieces.push(PieceRows {
+            vary: None,
+            arc: None,
+            tight: true,
+            pending: false,
+        });
+        return;
+    };
+    let fourth = p.tight.as_deref().map_or(&p.fourth, |t| &t.fourth);
+    acc.proved &= fold_feet(
+        &mut acc.m4,
+        &mut acc.uv4,
+        &mut acc.uv4_fork,
+        fourth,
+        ctx.l_jets,
+    );
+    if let Some(t) = &pr.vary {
+        fold_rows(&mut acc.rows, t);
+    }
+    if let Some(t) = &pr.arc {
+        acc.proved = acc.proved && t.fold(&mut acc.rows);
+        if !pr.tight {
+            acc.lazy.arc = true;
+        }
+    }
+    if p.tight.is_none() && p.inputs.is_some() {
+        acc.lazy.feet = true;
     }
     if !acc.proved {
         acc.proved_old = false;
     }
-    acc.pieces.push(held);
+    acc.pieces.push(pr);
+    if acc.lazy.pending && gate(acc, ctx, *lb) > ctx.target {
+        // over the target whatever the pending pieces take: not proved, as the interval
+        // terms leave it
+        acc.proved = false;
+    }
+}
+
+/// The rows piece `p` holds from its feet's Taylor models where taken ([`tight_rows`], met
+/// with `held`); with rows that do not vary, none to take. `None` where not proved.
+fn held_tight(
+    k: &Kernel,
+    vary: Option<&mut GnVarying>,
+    sc: &SpanCtx<'_, '_, '_>,
+    p: &CertifiedPiece,
+    ld: usize,
+    held: Option<&PieceRows>,
+) -> Option<PieceRows> {
+    let t = p.tight.as_deref()?;
+    match &t.series {
+        Some(ps) => tight_rows(k, vary, sc, p.s, ps, ld, held),
+        None if !sc.level.rows_vary => Some(PieceRows {
+            vary: None,
+            arc: None,
+            tight: true,
+            pending: false,
+        }),
+        None => None,
+    }
+}
+
+/// Takes the feet's Taylor models of the level's pending pieces ([`absorb_piece`]) where
+/// the level's floor ([`gate`]) is at most the target, their rows from them met with the
+/// interval ones they held, and folds the level's certifying terms again. A pending piece
+/// they do not prove leaves the level unproved, as does a floor over the target (as the
+/// interval terms leave it). `pieces`: the level's, in the order they were folded in.
+///
+/// # Errors
+///
+/// A cancel.
+fn resolve_pending(
+    k: &Kernel,
+    acc: &mut LevelAcc,
+    pieces: &mut [CertifiedPiece],
+    sc: &SpanCtx<'_, '_, '_>,
+    vary: Option<&mut GnVarying>,
+    lb: f64,
+) -> Result<()> {
+    acc.lazy.pending = false;
+    if gate(acc, sc.level, lb) > sc.level.target {
+        acc.proved = false;
+        acc.proved_old = false;
+        return Ok(());
+    }
+    let mut vary = vary;
+    let ld = acc.rows.x.len();
+    for (held, p) in acc.pieces.iter_mut().zip(pieces.iter_mut()) {
+        if !held.pending {
+            continue;
+        }
+        k.check_cancelled(OP_CERTIFY_SPAN)?;
+        take_tight(p, sc.feet)?;
+        let Some(pr) = held_tight(k, vary.as_deref_mut(), sc, p, ld, Some(held)) else {
+            acc.proved = false;
+            acc.proved_old = false;
+            return Ok(());
+        };
+        *held = pr;
+    }
+    refold(acc, pieces, sc.level.l_jets);
+    Ok(())
+}
+
+/// Folds the level's certifying terms again from what its pieces hold (`pieces`: the
+/// level's, in the order they were folded in).
+fn refold(acc: &mut LevelAcc, pieces: &[CertifiedPiece], l_jets: usize) {
+    let mut m4 = [[0.0_f64; MAX_E + 1]; 2];
+    let (mut uv4, mut uv4_fork) = ([0.0_f64; 2], [0.0_f64; 2]);
+    let mut rows = no_rows(acc.rows.x.len());
+    let mut proved = true;
+    for (held, p) in acc.pieces.iter().zip(pieces) {
+        let fourth = p.tight.as_deref().map_or(&p.fourth, |t| &t.fourth);
+        proved &= fold_feet(&mut m4, &mut uv4, &mut uv4_fork, fourth, l_jets);
+        if let Some(v) = &held.vary {
+            fold_rows(&mut rows, v);
+        }
+        if let Some(arc) = &held.arc {
+            proved = proved && arc.fold(&mut rows);
+        }
+    }
+    acc.m4 = m4;
+    acc.uv4 = uv4;
+    acc.uv4_fork = uv4_fork;
+    acc.rows = rows;
+    if !proved {
+        // not reached (the tighter terms prove what the held ones did); a level whose
+        // terms do not hold certifies nothing
+        acc.proved = false;
+        acc.proved_old = false;
+    }
 }
 
 /// Takes the arc's tighter terms ([`arc_terms_over`]'s, #14405) for every piece of the
-/// level whose interval terms were held alone, and folds the level's certifying row terms
+/// level whose interval terms were held alone, and folds the level's certifying terms
 /// again from its pieces': as though each piece had taken its tighter terms at once. A
 /// piece proved stays proved (the tighter terms are never looser). `pieces`: the level's,
 /// in the order they were folded in.
 fn tighten_level(acc: &mut LevelAcc, pieces: &[CertifiedPiece], ctx: &LevelCtx, o: [f64; 3]) {
-    let mut rows = no_rows(acc.rows.x.len());
     for (held, p) in acc.pieces.iter_mut().zip(pieces) {
-        if let Some(v) = &held.vary {
-            fold_rows(&mut rows, v);
-        }
         if let Some(arc) = held.arc.as_mut() {
             if !held.tight {
-                if let Some(ps) = p.series.as_deref() {
+                let ps = match p.tight.as_deref() {
+                    Some(t) => t.series.as_ref(),
+                    None => p.series.as_deref(),
+                };
+                if let Some(ps) = ps {
                     let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
                     *arc = arc.meet(arc_terms_taylor(
                         &ps.f, &ps.v, &ps.fm, &ps.vm, d, o, ctx.touch,
@@ -2470,17 +3164,44 @@ fn tighten_level(acc: &mut LevelAcc, pieces: &[CertifiedPiece], ctx: &LevelCtx, 
                 }
                 held.tight = true;
             }
-            if !arc.fold(&mut rows) {
-                // not reached (the tighter terms prove what the interval ones did); a
-                // level whose terms do not hold certifies nothing
-                acc.proved = false;
-                acc.proved_old = false;
-                break;
+        }
+    }
+    refold(acc, pieces, ctx.l_jets);
+    acc.lazy.arc = false;
+}
+
+/// Takes the feet's Taylor models ([`take_tight`], #14405) for every piece of the level
+/// that holds the interval enclosure's terms, its rows' terms from their series met with
+/// those it held, and folds the level's certifying terms again: as though each piece had
+/// taken them at once. A piece proved stays proved (its terms are never looser).
+///
+/// # Errors
+///
+/// A cancel.
+fn tighten_feet(
+    k: &Kernel,
+    acc: &mut LevelAcc,
+    pieces: &mut [CertifiedPiece],
+    sc: &SpanCtx<'_, '_, '_>,
+    vary: Option<&mut GnVarying>,
+) -> Result<()> {
+    let mut vary = vary;
+    let ld = acc.rows.x.len();
+    for (held, p) in acc.pieces.iter_mut().zip(pieces.iter_mut()) {
+        if p.tight.is_some() || p.inputs.is_none() {
+            continue;
+        }
+        k.check_cancelled(OP_CERTIFY_SPAN)?;
+        take_tight(p, sc.feet)?;
+        if let Some(ps) = p.tight.as_deref().and_then(|t| t.series.as_ref()) {
+            if let Some(pr) = tight_rows(k, vary.as_deref_mut(), sc, p.s, ps, ld, Some(held)) {
+                *held = pr;
             }
         }
     }
-    acc.rows = rows;
-    acc.lazy = false;
+    refold(acc, pieces, sc.level.l_jets);
+    acc.lazy.feet = false;
+    Ok(())
 }
 
 /// What a level tells [`gn_certify_span_reusing`]: go on to the next level, stop there, or
@@ -2497,31 +3218,38 @@ enum Flow {
 /// level certified (its bound finite). `pieces`: the level's, as folded into `acc`.
 ///
 /// The bound is first the one of the pieces' terms as held (the interval ones where they
-/// prove a piece); where that is not at the target, the level is tightened
-/// ([`tighten_level`]: every piece's tighter terms, the Taylor models' too) and bounded
+/// prove a piece); where that is not at the target, the level is tightened, the arc's
+/// rows first ([`tighten_level`]: their Taylor models), then the feet ([`tighten_feet`]:
+/// the feet's Taylor models, and the rows from their series), each followed by the bound
 /// again. A level the held terms certify the tighter ones certify (their bound is no
 /// larger), so the level's verdict, and `bound_out` wherever it is over the target, are
-/// those of every piece's tighter terms; the Taylor models are only taken where they can
+/// those of every piece's tightest terms; the Taylor models are only taken where they can
 /// change it.
 ///
-/// The levels are steered as before #14405, by the fork's interval terms
-/// (`acc.rows_old`): a level they do not prove goes on to the next one, the fork's term's
+/// The levels are steered as before #14405, by the interval enclosure's terms and the
+/// fork's interval row terms (`acc.m4_old`, `acc.uv4_old`, `acc.uv4_fork_old`,
+/// `acc.rows_old`): a level they do not prove goes on to the next one, the fork's term's
 /// bound not finite skips it, and the halving that decides whether a finer level is worth
 /// its cost compares their bounds. Only the stop at the target reads the certificate's
 /// bound, which is never over theirs (each term is the tighter of the two, or theirs): so
 /// a span the interval terms certify from a given level, these certify at the same level
 /// or a coarser one, and a span takes no more levels than it did.
+///
+/// # Errors
+///
+/// A cancel while taking the feet's Taylor models.
 #[allow(clippy::too_many_arguments)]
 fn close_level(
+    k: &Kernel,
     acc: &mut LevelAcc,
-    pieces: &[CertifiedPiece],
-    ctx: &LevelCtx,
-    bar: &GnSectionFormT<Ivl>,
-    o: [f64; 3],
+    pieces: &mut [CertifiedPiece],
+    sc: &SpanCtx<'_, '_, '_>,
     bound_out: &mut f64,
     last: &mut f64,
     mut vary: Option<&mut GnVarying>,
-) -> (Flow, bool) {
+    lb: f64,
+) -> Result<(Flow, bool)> {
+    let (ctx, bar, o) = (sc.level, sc.bar, sc.o);
     let (h, l_jets, arc, rows_vary) = (ctx.h, ctx.l_jets, ctx.arc, ctx.rows_vary);
     // the level's bound with the varying rows' terms `rows` and the uv curves' term `uv`
     // (#2690: taken with each parameter's own term, `uv4`, to certify, and with the
@@ -2590,25 +3318,30 @@ fn close_level(
             }
             *bound_out = cmin(*bound_out, bound);
             if *bound_out <= ctx.target {
-                return (Flow::Stop, true);
+                return Ok((Flow::Stop, true));
             }
         }
-        if !acc.lazy {
+        // the tighter terms where the held ones are not at the target: the arc's first,
+        // then the feet's (#14405)
+        if acc.lazy.arc {
+            tighten_level(acc, pieces, ctx, o);
+        } else if acc.lazy.feet && gate(acc, ctx, lb) <= ctx.target {
+            tighten_feet(k, acc, pieces, sc, vary.as_deref_mut())?;
+        } else {
             break;
         }
-        tighten_level(acc, pieces, ctx, o);
         if !acc.proved {
-            return (Flow::Next, certified);
+            return Ok((Flow::Next, certified));
         }
     }
     // steered by the fork's interval terms: a level they do not prove goes on
     if !acc.proved_old {
-        return (Flow::Next, certified);
+        return Ok((Flow::Next, certified));
     }
-    if !level_bound(&acc.m4, &acc.rows_old, &acc.uv4_fork).is_finite() {
-        return (Flow::Skip, certified);
+    if !level_bound(&acc.m4_old, &acc.rows_old, &acc.uv4_fork_old).is_finite() {
+        return Ok((Flow::Skip, certified));
     }
-    let bound = round_up(level_bound(&acc.m4, &acc.rows_old, &acc.uv4) * (1.0 + 1.0e-12));
+    let bound = round_up(level_bound(&acc.m4_old, &acc.rows_old, &acc.uv4_old) * (1.0 + 1.0e-12));
     // the bound no finer level goes under: over the target, no level certifies the span
     // (the jets' least terms only where the bound takes the jets' sum, not with
     // varying rows, whose own least terms are not ported: the fork's f916a8d)
@@ -2622,15 +3355,15 @@ fn close_level(
         lower = cmax(lower, cmax(if rows_vary { 0.0 } else { sum }, k4 * uvl));
     }
     if round_down(lower * (1.0 - 1.0e-12)) > ctx.target {
-        return (Flow::Stop, certified);
+        return Ok((Flow::Stop, certified));
     }
     // once proved, one finer level more only where the last one halved the bound (or, to
     // the target, while over it)
     if ctx.halving == Halving::Steers && bound > 0.5 * *last {
-        return (Flow::Stop, certified);
+        return Ok((Flow::Stop, certified));
     }
     *last = bound;
-    (Flow::Next, certified)
+    Ok((Flow::Next, certified))
 }
 
 /// `sm_GnCertifySpan`: the certified bound on the Hermite span between two stations, or
@@ -2779,46 +3512,72 @@ pub fn gn_certify_span_reusing(
             Halving::Steers
         },
     };
+    // the touch circle of a varying ball takes the centre's s-derivative: one order more
+    let extra = usize::from(arc && law.is_some());
+    // the feet's Taylor models (#14405) enclose NURBS faces only, not a blend by its
+    // definition; and not where the thumbweight varies, whose rows' interval terms, not the
+    // feet's, keep its levels over the target (the tilted pipe's round of
+    // wr698_gn_round_is_its_definition took 2.7 times as long with them)
+    let tm_faces = vary.is_none()
+        && defs
+            .as_deref()
+            .is_none_or(|d| d.faces.iter().all(Option::is_none));
+    let feet = FeetCtx {
+        k,
+        faces_n,
+        leader_n,
+        r,
+        side,
+        n: l_jets,
+        order: 4 + TAYLOR + extra,
+        law,
+        rows_vary,
+        on: tm_faces,
+    };
+    let sc = SpanCtx {
+        a,
+        b,
+        bar: &bar,
+        o,
+        level: &ctx,
+        feet: &feet,
+    };
+    // a lower bound on every level's certified bound, from the pieces' middles so far: the
+    // feet's Taylor models are taken only while it is at most the target (#14405)
+    let mut lb = 0.0_f64;
     // a halved span's pieces over this half: its level one coarser than theirs
     let mut start = reuse.start.min(6);
     let inherit = reuse.inherit;
     if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
         start = inherit.map_or(1, |l| l.level.max(1));
         let mut acc = LevelAcc::new(bar.w.len());
-        for p in &pieces {
+        let mut own_pieces: Vec<CertifiedPiece> = pieces.into_iter().cloned().collect();
+        for p in &mut own_pieces {
             // a piece's least terms are at its middle: only a piece inside the span steers
             let steer = p.s[0] >= a.s && p.s[1] <= b.s;
-            absorb_piece(
-                k,
-                &mut acc,
-                p,
-                steer,
-                a,
-                b,
-                &ctx,
-                vary.as_deref_mut(),
-                &bar,
-                o,
-            );
+            absorb_piece(k, &mut acc, p, steer, &sc, vary.as_deref_mut(), &mut lb);
             if !acc.proved {
                 break;
             }
         }
+        if acc.proved && acc.lazy.pending {
+            resolve_pending(k, &mut acc, &mut own_pieces, &sc, vary.as_deref_mut(), lb)?;
+        }
         if acc.proved {
-            let own = CertifiedLevel {
+            let mut own = CertifiedLevel {
                 level: start - 1,
-                pieces: pieces.into_iter().cloned().collect(),
+                pieces: own_pieces,
             };
             let (flow, certified) = close_level(
+                k,
                 &mut acc,
-                &own.pieces,
-                &ctx,
-                &bar,
-                o,
+                &mut own.pieces,
+                &sc,
                 &mut bound_out,
                 &mut last,
                 vary.as_deref_mut(),
-            );
+                lb,
+            )?;
             if certified {
                 reuse.first = reuse.first.or(Some(own.level));
                 reuse.kept = Some(own);
@@ -2899,8 +3658,10 @@ pub fn gn_certify_span_reusing(
             let [ea, eb] = pair else {
                 return Err(SolidError::sm_err(OP));
             };
-            let (fourth, series) = gn_try!(
-                gn_fourth_over_series(
+            // the piece's enclosures ([`gn_fourth_over_series`]'s); the middle's also where
+            // the piece's is not proved, for its feet's Taylor models (#14405)
+            let pe = gn_try!(
+                piece_enclosures(
                     k,
                     faces_n,
                     leader_n,
@@ -2912,14 +3673,25 @@ pub fn gn_certify_span_reusing(
                     side,
                     l_jets,
                     law,
-                    // the touch circle of a varying ball takes the centre's
-                    // s-derivative: one order more
-                    usize::from(arc && law.is_some()),
+                    extra,
                     defs.as_deref_mut(),
+                    tm_faces && gate(&acc, &ctx, lb) <= target,
                 ),
                 bound_out
             );
-            let piece = CertifiedPiece {
+            let (fourth, series) = match (&pe.e5, &pe.mid) {
+                (Some(e5), Some((mid, e4))) => fourth_of(e5, e4, eb.s - ea.s, l_jets, *mid),
+                _ => (UNPROVED_FOURTH, None),
+            };
+            let inputs = match pe.mid {
+                Some((mid, e4)) if tm_faces => Some(Box::new(PieceInputs {
+                    at: span_at(faces_n, ea, eb),
+                    mid,
+                    e4,
+                })),
+                _ => None,
+            };
+            let mut piece = CertifiedPiece {
                 s: [ea.s, eb.s],
                 fourth,
                 series: if rows_vary {
@@ -2927,38 +3699,40 @@ pub fn gn_certify_span_reusing(
                 } else {
                     None
                 },
+                tight: None,
+                inputs,
             };
             absorb_piece(
                 k,
                 &mut acc,
-                &piece,
+                &mut piece,
                 true,
-                a,
-                b,
-                &ctx,
+                &sc,
                 vary.as_deref_mut(),
-                &bar,
-                o,
+                &mut lb,
             );
             level_pieces.push(piece);
+        }
+        if acc.proved && acc.lazy.pending {
+            resolve_pending(k, &mut acc, &mut level_pieces, &sc, vary.as_deref_mut(), lb)?;
         }
         if !acc.proved {
             continue;
         }
-        let own = CertifiedLevel {
+        let mut own = CertifiedLevel {
             level,
             pieces: level_pieces,
         };
         let (flow, certified) = close_level(
+            k,
             &mut acc,
-            &own.pieces,
-            &ctx,
-            &bar,
-            o,
+            &mut own.pieces,
+            &sc,
             &mut bound_out,
             &mut last,
             vary.as_deref_mut(),
-        );
+            lb,
+        )?;
         if certified {
             reuse.first = reuse.first.or(Some(own.level));
             reuse.kept = Some(own);
@@ -3888,5 +4662,296 @@ mod tests {
         assert_eq!(unenclosed, 0);
         assert_eq!(judged, 48 * 101);
         assert!(2 * old_unproved > wedges, "{old_unproved} of {wedges}");
+    }
+
+    /// A ball rolled outside a curved face standing on the plane through `o` (normal z):
+    /// a cylinder of radius `big_r` about the vertical through `o`, or a sphere of radius
+    /// `big_r` resting on the plane there. The ball's centre line is a circle about that
+    /// vertical at height r (a rational quadratic arc from `deg[0]` to `deg[1]`), and the
+    /// feet are in closed form: on the plane below the centre, on the curved face along
+    /// the line from the axis (cylinder) or the sphere's centre to it. Returns the faces,
+    /// their nets, the leader, the sides and the closed-form feet's points.
+    #[allow(clippy::type_complexity)]
+    fn rolled_ball(
+        k: &Kernel,
+        sphere: bool,
+        o: Vec3,
+        big_r: f64,
+        r: f64,
+        deg: [f64; 2],
+    ) -> (
+        [Surface; 2],
+        [Nurbs; 2],
+        BSplineCurve,
+        [f64; 2],
+        Box<dyn Fn(f64) -> [Vec3; 2]>,
+    ) {
+        use crate::surface::sphere::{Sphere, SphereOptions};
+        let fp = plane(o, Vec3::X, Vec3::Y);
+        let (fc, rho, centre) = if sphere {
+            let c = o + Vec3::new(0.0, 0.0, big_r);
+            let mut sp = Sphere::new(
+                k,
+                c,
+                Vec3::X,
+                Vec3::Y,
+                Extent2d::from_bounds(deg[0] - 10.0, -85.0, deg[1] + 10.0, 20.0),
+                big_r,
+                SphereOptions::default(),
+            )
+            .unwrap();
+            sp.make_nurb(k).unwrap();
+            (Surface::from(sp), 2.0 * (big_r * r).sqrt(), c)
+        } else {
+            let mut cyl = Cone::new_cylinder_bounded(
+                o + Vec3::new(0.0, 0.0, -2.0),
+                Vec3::X,
+                Vec3::Y,
+                big_r,
+                0.0,
+                360.0,
+                10.0,
+                false,
+                false,
+                false,
+            );
+            cyl.make_nurb(k).unwrap();
+            (Surface::from(cyl), big_r + r, o)
+        };
+        let frame = Axis2Placement::new(o + Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            rho,
+            deg[0],
+            deg[1],
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let lc = leader.clone();
+        let feet = move |s: f64| {
+            let l = lc.evaluate_point(s).unwrap();
+            let on_plane = Vec3::new(l.x, l.y, o.z);
+            let on_face = if sphere {
+                let d = l - centre;
+                centre + d * (big_r / d.length())
+            } else {
+                let d = Vec3::new(l.x - o.x, l.y - o.y, 0.0);
+                Vec3::new(o.x, o.y, l.z) + d * (big_r / d.length())
+            };
+            [on_plane, on_face]
+        };
+        let nc = nurbs(k, &fc);
+        let [_, fm] = feet(0.5);
+        let (cu, cv) = nearest_uv(&nc, fm);
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = leader.evaluate_point(0.5).unwrap() - fm;
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        (
+            [fp.clone(), fc.clone()],
+            [nurbs(k, &fp), nc],
+            leader,
+            [1.0, side_c],
+            Box::new(feet),
+        )
+    }
+
+    /// The feet's Taylor models over a piece (`super::feet_tm::gn_enclose_tm`) hold every
+    /// station sampled over it, on curved faces far from the origin (fixed seed): balls
+    /// rolled between a plane and a rational cylinder or sphere (doubly curved), each
+    /// moved up to 60 from the origin, on pieces of 0.0003 to 0.25 of the leader (an arc of
+    /// up to 80 degrees), the arc's order (n = 0) and a G2 section's (n = 2). At 101 stations
+    /// solved in floating point along each piece, the feet's parameters and their Taylor
+    /// coefficients in s and eps (and for n = 0 the feet's points and the ball's centre)
+    /// lie in the models' ranges. The models are proved on every piece; the interval
+    /// enclosure fails on many of them, and where it holds, its top coefficients (order 6,
+    /// the Hermite remainder's) are orders of magnitude wider.
+    #[test]
+    fn feet_taylor_models_hold_every_sampled_station_on_curved_faces() {
+        let k = Kernel::default();
+        let mut next = rng(0x5bd1_e995_a3c6_4f2b);
+        let order = 4 + TAYLOR;
+        let (mut judged, mut old_failed, mut cases) = (0, 0, 0);
+        let mut ratios = Vec::new();
+        for case in 0..24 {
+            let sphere = case % 2 == 1;
+            let n = if case % 4 < 2 { 0 } else { 2 };
+            let o = Vec3::new(
+                120.0 * next() - 60.0,
+                120.0 * next() - 60.0,
+                40.0 * next() - 20.0,
+            );
+            let big_r = 2.0 + 3.0 * next();
+            let r = 0.4 + 1.1 * next();
+            let d0 = 10.0 + 10.0 * next();
+            let deg = [d0, d0 + 50.0 + 30.0 * next()];
+            let (faces, nets, leader, side, feet) = rolled_ball(&k, sphere, o, big_r, r, deg);
+            let [f0, f1] = &faces;
+            let [n0, n1] = &nets;
+            let ln = NurbsCurve::of(&leader).unwrap();
+            assert_eq!(ln.u.len(), 6, "one quadratic arc: {:?}", ln.u);
+            let rr = [r, r];
+            // every third piece narrow, where the interval enclosure holds too
+            let width = if case % 3 == 0 {
+                0.0003 + 0.0012 * next()
+            } else {
+                0.02 + 0.23 * next()
+            };
+            let sa = next() * (1.0 - width);
+            let sb = sa + width;
+            let seed_at = |s: f64| {
+                let [fp, fc] = feet(s);
+                let (pu, pv) = nearest_uv(n0, fp);
+                let (u, v) = nearest_uv(n1, fc);
+                [pu, pv, u, v]
+            };
+            let solve = |s: f64, seed: [f64; 4], tr: Trunc| {
+                super::super::station::gn_solve_station(
+                    &k,
+                    [f0, f1],
+                    &leader,
+                    s,
+                    seed,
+                    rr,
+                    side,
+                    tr,
+                    1e-12,
+                )
+            };
+            let point = Trunc::new(0, 0).unwrap();
+            let x_of = |st: &GnStation| [0, 1, 2, 3].map(|c| st.x[c].c[0][0]);
+            let a = solve(sa, seed_at(sa), point).unwrap();
+            let b = solve(sb, seed_at(sb), point).unwrap();
+            let m = 0.5 * (sa + sb);
+            let smid = solve(m, seed_at(m), point).unwrap();
+            let e4 = gn_enclose(
+                &k,
+                [n0, n1],
+                &ln,
+                &smid,
+                &smid,
+                rr,
+                side,
+                n,
+                order - 1,
+                None,
+                None,
+            )
+            .unwrap()
+            .expect("the middle's point enclosure");
+            let at = span_at([n0, n1], &a, &b);
+            let tm = super::super::feet_tm::gn_enclose_tm(
+                &k,
+                [n0, n1],
+                &ln,
+                &at,
+                rr,
+                side,
+                n,
+                order,
+                None,
+                m,
+                &e4.x,
+            )
+            .unwrap()
+            .unwrap_or_else(|| panic!("{case}: the models over [{sa}, {sb}] not proved"));
+            cases += 1;
+            // the fourth terms the piece takes: finite from the models, and where the
+            // interval enclosure holds too, met with its terms, never above them
+            let (ft, _) = fourth_of(&tm, &e4, sb - sa, n, m);
+            let (tm4, tuv4, _, _, tuvf, _) = ft;
+            let finite = |v: f64| v.is_finite() && v >= 0.0;
+            assert!(
+                tuv4.iter().chain(&tuvf).all(|&v| finite(v)),
+                "{case}: {ft:?}"
+            );
+            assert!(tm4.iter().all(|f| f.iter().take(n + 1).all(|&v| finite(v))));
+            match gn_enclose(&k, [n0, n1], &ln, &a, &b, rr, side, n, order, None, None).unwrap() {
+                Some(old) => {
+                    for c in 0..4 {
+                        let (wo, wt) = (old.x[c].c[order][0].mag(), tm.x[c].c[order][0].mag());
+                        if wt > 0.0 {
+                            ratios.push(wo / wt);
+                        }
+                    }
+                    let (fo, _) = fourth_of(&old, &e4, sb - sa, n, m);
+                    let met = meet_fourth(&fo, &ft);
+                    let (om4, ouv4, om4_lo, ouv4_lo, ouvf, ouvf_lo) = fo;
+                    let (mm4, muv4, mm4_lo, muv4_lo, muvf, muvf_lo) = met;
+                    let upper = om4.iter().flatten().zip(mm4.iter().flatten());
+                    let upper = upper
+                        .chain(ouv4.iter().zip(&muv4))
+                        .chain(ouvf.iter().zip(&muvf));
+                    for (&o, &t) in upper {
+                        assert!(
+                            t <= o || o.is_nan(),
+                            "{case}: met {t:e} over the interval {o:e}"
+                        );
+                    }
+                    // the least values are the middle's, both ways
+                    assert_eq!((om4_lo, ouv4_lo, ouvf_lo), (mm4_lo, muv4_lo, muvf_lo));
+                }
+                None => old_failed += 1,
+            }
+            // the floating solve's jets go as far as the leader's evaluation does
+            let kk_max = n.saturating_sub(1);
+            let top = (0..=order)
+                .rev()
+                .find(|&o| solve(sa, x_of(&a), Trunc::new(o, kk_max).unwrap()).is_ok())
+                .unwrap();
+            assert!(top >= 3, "{top}");
+            let jets = Trunc::new(top, kk_max).unwrap();
+            let mut seed = x_of(&a);
+            for i in 0..=100 {
+                let s = sa + (sb - sa) * f64::from(i) / 100.0;
+                let st = solve(s, seed, jets).unwrap();
+                seed = x_of(&st);
+                // the floating solve's own error (its residual within 1e-12)
+                let slack = |x: f64| 1e-8 * (1.0 + x.abs());
+                let holds = |iv: Ivl, x: f64| iv.lo - slack(x) <= x && x <= iv.hi + slack(x);
+                for (q, (xs, xe)) in st.x.iter().zip(&tm.x).enumerate() {
+                    for o in 0..=top {
+                        for kk in 0..=kk_max {
+                            let (x, iv) = (xs.c[o][kk], xe.c[o][kk]);
+                            assert!(
+                                holds(iv, x),
+                                "{case} s {s}: x{q} c[{o}][{kk}] {x:e} outside {iv:?}"
+                            );
+                            judged += 1;
+                        }
+                    }
+                }
+                if n == 0 {
+                    let pts = st.f.iter().chain([&st.v]).zip(tm.f.iter().chain([&tm.v]));
+                    for (vs, ve) in pts {
+                        for (cs, ce) in vs.a.iter().zip(&ve.a) {
+                            for o in 0..=top {
+                                let (x, iv) = (cs.c[o][0], ce.c[o][0]);
+                                assert!(holds(iv, x), "{case} s {s}: point c[{o}] {x:e} {iv:?}");
+                                judged += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ratios.sort_by(f64::total_cmp);
+        let median = ratios.get(ratios.len() / 2).copied().unwrap_or(f64::NAN);
+        eprintln!(
+            "{cases} pieces, {judged} coefficients judged; the interval enclosure failed on \
+             {old_failed}, elsewhere its top coefficients {median:e} times the models' (median)"
+        );
+        assert_eq!(cases, 24);
+        assert!(old_failed >= 8, "{old_failed}");
+        assert!(ratios.len() >= 4 * 4, "{}", ratios.len());
+        assert!(median > 100.0, "{median}");
     }
 }

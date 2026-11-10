@@ -321,7 +321,7 @@ and a fresh CI run:
 - **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
   length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
   of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
-  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  Built-in themes need only a JSON file in `crates/look/themes/`, with a unique nonnegative
   integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
@@ -518,4 +518,6 @@ about 250 KB and a clip under about 1 MB.
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).
+of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
+`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+[LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).

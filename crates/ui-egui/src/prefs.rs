@@ -1235,11 +1235,16 @@ preference_settings! {
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
     /// centre, as before #7893.
     toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_LAYOUT;
+    /// The operations under way, with their progress and Cancel, in a panel in the view's
+    /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
+    operations_panel: bool = true, PAGE_LAYOUT;
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
     hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
     /// instead of a list of small icons with names (#4739).
     ribbon_icon_grid: bool = false, PAGE_LAYOUT;
+    /// Opt in to entity headings in Construct menus; off keeps the original command order.
+    construct_menu_groups: bool = false, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
     /// After a ribbon panel menu is open, hover another panel to switch to its menu.
     ribbon_menus_follow_hover: bool = false, PAGE_LAYOUT;
     /// Leave the commands the ribbon shows as buttons (pinned ones) out of its panel drop-downs,
@@ -1457,6 +1462,10 @@ preference_settings! {
     /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
     /// (#9346). No page reset discards this user-authored library.
     personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
+    /// The file name File › Export and Save As Mesh offer: `{design}` and `{body}` stand for the
+    /// design's and the exported body's names (`export_name`). Empty: each export offers the name
+    /// it did before (the design's, or the first body's for a mesh).
+    export_name: String = String::new(), PAGE_DESIGN;
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -1654,6 +1663,9 @@ preference_settings! {
     /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
     /// Off: only a sketch tool shows them, while it places a point, as before.
     sketch_cursor_coordinates: bool = true, PAGE_SKETCH;
+    /// How large constraint glyphs are drawn: a multiple of their 15-pixel badge, letter and icon
+    /// included, so they can be read at any zoom (#10794). 1 (the default) is the size they always had.
+    constraint_glyph_scale: f32 = 1.0, PAGE_SKETCH, accept(crate::sketch_tools::GLYPH_SCALES) => slider("prefs.constraint_glyph_size", crate::sketch_tools::GLYPH_SCALES, 0.25, |v| format!("{:.0}%", v * 100.0), "prefs:constraint_glyph_size");
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -3975,6 +3987,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::home_fit_size(&p) {
         p.home_fit_size = Prefs::default().home_fit_size;
     }
+    if !accepted::constraint_glyph_scale(&p) {
+        p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4151,6 +4166,9 @@ fn prepare_preferences(
     }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
+    }
+    if !accepted::constraint_glyph_scale(&new) {
+        return Err("`constraint_glyph_scale` must be 1…3".into());
     }
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -6476,7 +6494,9 @@ mod tests {
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
+            ("operations_panel", json!(false), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
+            ("construct_menu_groups", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
             ("timeline_left", json!(true), PAGE_LAYOUT),
@@ -6528,6 +6548,7 @@ mod tests {
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
+            ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
@@ -10480,6 +10501,29 @@ mod tests {
         assert_eq!(app.session.undo.len(), undo);
     }
 
+    /// Construct grouping is opt-in, survives Apply, and follows Layout Cancel and Defaults.
+    #[test]
+    fn construct_menu_groups_preference_persists_cancels_and_resets() {
+        assert!(!Prefs::default().construct_menu_groups);
+        assert!(!lenient(&json!({"theme":"light"})).construct_menu_groups);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        super::reveal_preference(&mut h, "prefs:construct_menu_groups");
+        let checkbox = crate::scenario::handle_at("prefs:construct_menu_groups").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(h.app.preferences.construct_menu_groups);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.construct_menu_groups);
+        h.call("ui.prefs", json!({"open":"Layout","construct_menu_groups":true,"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.construct_menu_groups);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.construct_menu_groups);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.construct_menu_groups);
+    }
+
     #[test]
     fn persistent_ribbon_pressed_preference_checkbox_control_persists_cancels_and_resets() {
         assert!(Prefs::default().persistent_ribbon_pressed);
@@ -11414,6 +11458,21 @@ mod tests {
         set(&mut app, &json!({"orbit_cursor": true})).unwrap();
         assert_eq!(app.preferences.orbit_around, OrbitAround::Cursor, "the old key still moves the choice");
         assert!(!app.preferences.orbit_cursor, "and is folded away");
+    }
+
+    /// Constraint glyphs keep their size unless a larger one is chosen (#10794); `ui.prefs` takes
+    /// only the offered range, and a hand-edited file out of it reads as the default.
+    #[test]
+    fn constraint_glyph_size_defaults_to_the_old_size_and_stays_in_range() {
+        assert_eq!(Prefs::default().constraint_glyph_scale, 1.0);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        set(&mut app, &json!({"constraint_glyph_scale": 2.0})).unwrap();
+        assert_eq!(app.preferences.constraint_glyph_scale, 2.0);
+        for bad in [0.5, 3.5, -1.0] {
+            assert!(set(&mut app, &json!({"constraint_glyph_scale": bad})).is_err(), "{bad} is refused");
+        }
+        assert_eq!(app.preferences.constraint_glyph_scale, 2.0, "a refused value changes nothing");
+        assert_eq!(migrate(lenient(&json!({"constraint_glyph_scale": 40.0}))).constraint_glyph_scale, 1.0);
     }
 
     #[test]

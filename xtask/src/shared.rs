@@ -181,14 +181,20 @@ fn static_rules(name: &str, dir: &Path) -> Result<Vec<String>, String> {
     if !lints_from_workspace {
         out.push(format!("{name}: Cargo.toml must use the workspace lints (`[lints] workspace = true`)"));
     }
-    let licence = manifest.get("package").and_then(|p| p.get("license"));
+    let package = manifest.get("package");
+    let licence = package.and_then(|p| p.get("license"));
     let has_licence = match licence {
         Some(toml::Value::String(s)) => !s.trim().is_empty(),
         Some(v) => v.get("workspace").and_then(toml::Value::as_bool) == Some(true),
         None => false,
     };
-    if !has_licence {
-        out.push(format!("{name}: Cargo.toml must state a licence (`license = \"...\"` or `license.workspace = true`)"));
+    // A licence file travels with the crate, so it must sit inside the crate's own folder.
+    let licence_file = package.and_then(|p| p.get("license-file")).and_then(toml::Value::as_str);
+    let has_licence_file = licence_file.is_some_and(|file| !file.contains("..") && dir.join(file).is_file());
+    if !has_licence && !has_licence_file {
+        out.push(format!(
+            "{name}: Cargo.toml must state a licence (`license = \"...\"`, `license.workspace = true`, or `license-file` naming a file inside the crate)"
+        ));
     }
     if !dir.join("README.md").is_file() {
         out.push(format!("{name}: needs a README.md beside its Cargo.toml stating its public API"));

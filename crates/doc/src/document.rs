@@ -45,6 +45,9 @@ pub enum PlaneRef {
     Origin { name: String },
     /// An explicit plane (e.g. picked from a planar face).
     Custom { plane: Plane },
+    /// An origin datum of an exact placement (its XY, XZ or YZ), found again on each evaluation
+    /// so it follows the component the way a named plane does.
+    Datum { datum: crate::construct::DatumRef },
     /// An explicit plane whose origin is given as length expressions
     /// (`{origin: ["half", 0, 0], normal: [1, 0, 0]}`), so it follows parameter changes.
     Placed {
@@ -540,30 +543,67 @@ impl EmbossFace {
 
     /// Resolve one saved component path without expanding other occurrences.
     pub fn component_frame(doc: &Document, owner: u64, path: &[u64]) -> Result<crate::Mat> {
-        if path.len() > 64 || doc.occurrences.len() > 100_000 {
-            return Err(DocError::Invalid("selected cylinder path exceeds work limits".into()));
+        let frame = doc.placement_frame(path)?;
+        match path.split_last() {
+            None => Ok(doc.component_transform(owner)),
+            Some((last, _)) => {
+                let component = doc.occurrences.iter().find(|o| o.id == *last).map(|o| o.component);
+                if component == Some(owner) {
+                    Ok(frame)
+                } else {
+                    Err(DocError::Invalid("selected cylinder path belongs to another component".into()))
+                }
+            }
+        }
+    }
+}
+
+impl Document {
+    /// The world frame of one exact placement, without expanding every occurrence: the frame
+    /// every origin datum of the placement resolves in ([`crate::construct::resolve_datum`]).
+    /// The empty path is the root design frame. The shared walk of an exact placement (the
+    /// Emboss selection's `component_frame` delegates to it): depth at most 64, non-zero
+    /// canonical ids, no id repeated in a path, at most 100 000 occurrences.
+    pub fn placement_frame(&self, path: &[u64]) -> Result<crate::Mat> {
+        if path.len() > 64 || self.occurrences.len() > 100_000 {
+            return Err(DocError::Invalid("the placement path exceeds work limits".into()));
         }
         let mut frame = crate::IDENTITY;
         let mut component = 0;
         let mut seen = std::collections::BTreeSet::new();
         for id in path {
             if *id == 0 || !seen.insert(*id) {
-                return Err(DocError::Invalid("invalid selected cylinder path".into()));
+                return Err(DocError::Invalid("invalid placement path".into()));
             }
-            let occurrence = doc
+            let occurrence = self
                 .occurrences
                 .iter()
                 .find(|o| o.id == *id && o.parent == component)
-                .ok_or_else(|| DocError::Invalid("selected cylinder placement no longer exists".into()))?;
+                .ok_or_else(|| DocError::Invalid("the placement no longer exists".into()))?;
             frame = crate::mat_mul(&frame, &occurrence.transform);
             component = occurrence.component;
         }
-        if path.is_empty() {
-            frame = doc.component_transform(owner);
-        } else if component != owner {
-            return Err(DocError::Invalid("selected cylinder path belongs to another component".into()));
-        }
         Ok(frame)
+    }
+
+    /// The complete occurrence path of one occurrence, root first (the ids
+    /// [`Self::placement_frame`] walks): the occurrence itself, then its ancestors, each stepped
+    /// through its parent component's first occurrence, as `occurrence_world` reads a parent.
+    /// `None` when the occurrence is missing or its chain is broken, cyclic or deeper than 64.
+    pub fn occurrence_path(&self, occurrence: u64) -> Option<Vec<u64>> {
+        let mut path = Vec::new();
+        let mut cur = occurrence;
+        while let Some(o) = self.occurrences.iter().find(|o| o.id == cur) {
+            if path.len() >= 64 {
+                return None;
+            }
+            path.insert(0, o.id);
+            if o.parent == 0 {
+                return Some(path);
+            }
+            cur = self.occurrence_of(o.parent)?.id;
+        }
+        None
     }
 }
 
@@ -4535,18 +4575,22 @@ impl Document {
         expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))))?.to_kind(kind)
     }
 
-    /// Resolve a plane reference.
+    /// Resolve a plane reference (in the world: the root's frame).
     pub fn resolve_plane(&self, vals: &std::collections::BTreeMap<String, expr::Value>, p: &PlaneRef, depth: usize) -> Result<Plane> {
-        self.resolve_plane_in(vals, p, depth, None)
+        self.resolve_plane_in(vals, p, depth, 0, None)
     }
 
     /// Resolve a plane; planes built from model geometry (edges, faces, construction axes and
     /// points) need the model state `st`, and construction planes are read from it when given.
+    /// `component` is the frame the plane is read for: a component origin datum resolves as
+    /// that component sees it ([`crate::construct::resolve_datum_in`]), since a feature places
+    /// what it read into the world again through its own frame. The root (0) is the world.
     pub fn resolve_plane_in(
         &self,
         vals: &std::collections::BTreeMap<String, expr::Value>,
         p: &PlaneRef,
         depth: usize,
+        component: u64,
         st: Option<&crate::ModelState>,
     ) -> Result<Plane> {
         if depth > 32 {
@@ -4566,17 +4610,21 @@ impl Document {
                 }
                 Plane::new(o, *x_dir, *y_dir).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
+            PlaneRef::Datum { datum } => match crate::construct::resolve_datum_in(self, datum, component)? {
+                crate::construct::ConstructGeom::Plane(p) => Ok(p),
+                _ => Err(DocError::Invalid("the datum is not a plane (pick the XY, XZ or YZ of a component)".into())),
+            },
             PlaneRef::Offset { base, distance } => {
-                let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
+                let b = self.resolve_plane_in(vals, base, depth + 1, component, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
             PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => {
-                let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
+                let b = self.resolve_plane_in(vals, base, depth + 1, component, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let (axis_origin, axis_dir) = match line {
                     Some(g) => {
                         let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
-                        crate::construct::model_axis(st, g)?
+                        crate::construct::model_axis_in(Some(self), st, g, component)?
                     }
                     None => (*axis_origin, *axis_dir),
                 };
@@ -4589,7 +4637,7 @@ impl Document {
                     let pivot = match pivot {
                         Some(g) => {
                             let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
-                            crate::construct::point(&crate::construct::Ctx { doc: self, vals, st, depth }, g)?
+                            crate::construct::point(&crate::construct::Ctx { doc: self, vals, st, depth, component }, g)?
                         }
                         None => b.origin,
                     };
@@ -4604,7 +4652,7 @@ impl Document {
                 let o = axis_origin + rot(b.origin - axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
             }
-            PlaneRef::Flipped { base, about_y } => Ok(self.resolve_plane_in(vals, base, depth + 1, st)?.flipped(*about_y)),
+            PlaneRef::Flipped { base, about_y } => Ok(self.resolve_plane_in(vals, base, depth + 1, component, st)?.flipped(*about_y)),
             PlaneRef::Construction { feature } => {
                 // Evaluated already: as it came out.
                 if let Some(c) = st.and_then(|st| st.construct.iter().find(|c| c.feature == feature.0))
@@ -4613,7 +4661,7 @@ impl Document {
                     return Ok(*pl);
                 }
                 match self.feature(feature.0).map(|f| &f.kind) {
-                    Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane_in(vals, plane, depth + 1, st),
+                    Some(FeatureKind::ConstructionPlane { plane }) => self.resolve_plane_in(vals, plane, depth + 1, component, st),
                     // A name that could not be resolved when an older design opened keeps id 0,
                     // which no feature has (#1134): the reference dangles, as it always did.
                     _ => {
@@ -4631,7 +4679,7 @@ impl Document {
             | PlaneRef::Perpendicular { .. }
             | PlaneRef::ThroughPoint { .. } => {
                 let st = st.ok_or_else(|| DocError::Invalid("this plane is built from the model: evaluate first".into()))?;
-                crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st, depth }, p)
+                crate::construct::resolve_geo_plane(&crate::construct::Ctx { doc: self, vals, st, depth, component }, p)
             }
         }
     }

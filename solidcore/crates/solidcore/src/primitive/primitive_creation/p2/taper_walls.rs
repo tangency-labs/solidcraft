@@ -164,12 +164,15 @@ struct Seam {
 
 /// Element `i`, or `SM_ERR` (upstream indexes unchecked).
 fn at<T: Copy>(v: &[T], i: usize) -> Result<T> {
-    v.get(i).copied().ok_or_else(|| SolidError::sm_err(OP))
+    v.get(i)
+        .copied()
+        .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))
 }
 
 /// Element `i` by reference, or `SM_ERR`.
 fn at_ref<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i).ok_or_else(|| SolidError::sm_err(OP))
+    v.get(i)
+        .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))
 }
 
 /// The section of `w` at fraction `f` of the height, in the profile's plane: a line
@@ -518,7 +521,10 @@ fn seam_pcurve(
     // span's end (a quadratic's root) (the fork's tangency-labs/smlib@3ae7bfa)
     let nb = w.breaks.len();
     if nb < 2 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::primitive_failed(
+            OP,
+            "a seam span has fewer than two breaks",
+        ));
     }
     // the seam's homogeneous control points and their height fractions
     let swh = sw;
@@ -590,7 +596,7 @@ fn seam_pcurve(
     let mut prev_w = 0.0;
     for (piece, pair) in cuts.windows(2).enumerate() {
         let (Some(&c0), Some(&c1)) = (pair.first(), pair.get(1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(OP, "a seam cut is missing"));
         };
         // the piece as a rational quadratic: its ends and the crossing of their tangents,
         // by blossoming the homogeneous curve: B(t0, t0), B(t0, t1), B(t1, t1)
@@ -641,12 +647,18 @@ fn seam_pcurve(
         };
         for (k, ((dk, uk), tk)) in d4.iter().zip(u4).zip(t4).enumerate() {
             if !(*dk > 0.0) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "a seam span weight is not positive",
+                ));
             }
             let tau = tk / dk;
             if tau < -EFF_ZERO_SQRT || tau > 1.0 + EFF_ZERO_SQRT {
                 // the piece leaves its span
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "a seam piece leaves its span",
+                ));
             }
             let t = s0 + (s1 - s0) * tau;
             if piece > 0 && k == 0 {
@@ -1242,10 +1254,9 @@ impl Sections<'_> {
     /// Piece `p` ends at `f`, at the point `q` of the profile's plane.
     fn end(&mut self, p: usize, f: f64, q: Point3) -> Result<()> {
         let h = self.h;
-        let piece = self
-            .pieces
-            .get_mut(p)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let piece = self.pieces.get_mut(p).ok_or_else(|| {
+            SolidError::primitive_failed(OP, "a wall piece index is out of range")
+        })?;
         piece.seam.x = q + f * h;
         piece.seam.f1 = f;
         Ok(())
@@ -1406,16 +1417,23 @@ fn walls_closing_at_apexes(
         *sections
             .ins
             .get_mut(i)
-            .ok_or_else(|| SolidError::sm_err(OP))? = i;
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? = i;
         *sections
             .outs
             .get_mut(before)
-            .ok_or_else(|| SolidError::sm_err(OP))? = i;
-        *prev.get_mut(i).ok_or_else(|| SolidError::sm_err(OP))? = before;
-        *next.get_mut(i).ok_or_else(|| SolidError::sm_err(OP))? = (i + 1) % count;
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? = i;
+        *prev
+            .get_mut(i)
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? =
+            before;
+        *next
+            .get_mut(i)
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? =
+            (i + 1) % count;
     }
     let set = |v: &mut Vec<usize>, i: usize, x: usize| -> Result<()> {
-        *v.get_mut(i).ok_or_else(|| SolidError::sm_err(OP))? = x;
+        *v.get_mut(i)
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? = x;
         Ok(())
     };
     let mut f_cur = 0.0;
@@ -1518,7 +1536,10 @@ fn walls_closing_at_apexes(
         sections.end(at(&sections.outs, w)?, f, apex)?;
         let mut wa = at(&prev, w)?;
         let mut wb = at(&next, w)?;
-        *live.get_mut(w).ok_or_else(|| SolidError::sm_err(OP))? = false;
+        *live
+            .get_mut(w)
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? =
+            false;
         live_count -= 1;
         set(&mut next, wa, wb)?;
         set(&mut prev, wb, wa)?;
@@ -1561,8 +1582,12 @@ fn walls_closing_at_apexes(
                 sections.end(at(&sections.outs, wb)?, f, end)?;
                 let c = at(&prev, wa)?;
                 let d = at(&next, wb)?;
-                *live.get_mut(wa).ok_or_else(|| SolidError::sm_err(OP))? = false;
-                *live.get_mut(wb).ok_or_else(|| SolidError::sm_err(OP))? = false;
+                *live.get_mut(wa).ok_or_else(|| {
+                    SolidError::primitive_failed(OP, "a wall index is out of range")
+                })? = false;
+                *live.get_mut(wb).ok_or_else(|| {
+                    SolidError::primitive_failed(OP, "a wall index is out of range")
+                })? = false;
                 live_count -= 2;
                 if live_count < 3 || c == wb || d == wa {
                     return sections.refuse(TaperCornerRefusal::WallCloses, w_in);
@@ -1643,11 +1668,11 @@ fn walls_closing_at_apexes(
             continue;
         }
         ends.get_mut(piece.a)
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a seam piece's wall is out of range"))?
             .push(piece.seam);
         starts
             .get_mut(piece.b)
-            .ok_or_else(|| SolidError::sm_err(OP))?
+            .ok_or_else(|| SolidError::primitive_failed(OP, "a seam piece's wall is out of range"))?
             .push(piece.seam);
     }
     for (i, (s, e)) in starts.iter().zip(&ends).enumerate() {
@@ -1715,7 +1740,10 @@ fn walls_closing_at_apexes(
                 None,
             )?;
             if v_knots.len() < 2 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "the wall surface has fewer than two V knots",
+                ));
             }
             let spans = v_knots.len() - 1;
             for k in 0..=spans {
@@ -1797,8 +1825,12 @@ fn walls_closing_at_apexes(
             };
             let mut edges = EdgeLoop::default();
             if !w.point {
-                let s0 = *w_starts.first().ok_or_else(|| SolidError::sm_err(OP))?;
-                let e0 = *w_ends.first().ok_or_else(|| SolidError::sm_err(OP))?;
+                let s0 = *w_starts
+                    .first()
+                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
+                let e0 = *w_ends
+                    .first()
+                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
                 let tp0 = param(w, s0.p, 0.0, near0)?;
                 let tp1 = param(w, e0.p, 0.0, near1)?;
                 let mut bottom = low.copy();
@@ -1821,8 +1853,12 @@ fn walls_closing_at_apexes(
             }
             let mut top_curve = None;
             if at(&live, i)? {
-                let last_start = *w_starts.last().ok_or_else(|| SolidError::sm_err(OP))?;
-                let last_end = *w_ends.last().ok_or_else(|| SolidError::sm_err(OP))?;
+                let last_start = *w_starts
+                    .last()
+                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
+                let last_end = *w_ends
+                    .last()
+                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
                 let tx0 = param(w, last_start.x - h, 1.0, near0)?;
                 let tx1 = param(w, last_end.x - h, 1.0, near1)?;
                 let mut top = high.copy();

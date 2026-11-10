@@ -658,7 +658,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     universal_panel_host_menus(&mut requested);
     icon_svg::audit::stop();
     let manifest = requested.iter().map(|(name, placeholder)| format!("{name}\t{placeholder}\n")).collect::<String>();
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt");
     if std::env::var("UPDATE_ICON_MANIFEST").as_deref() == Ok("1") {
         std::fs::write(&path, &manifest).unwrap();
     } else {
@@ -735,8 +735,7 @@ fn overflow_icons_with_many_pins_at_200_points() {
     }
     let requested = icon_svg::audit::take();
     icon_svg::audit::stop();
-    let manifest =
-        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt")).unwrap();
+    let manifest = std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/icons/design/requested_icons.txt")).unwrap();
     for icon in requested {
         assert!(!icon.placeholder, "{}", icon.name);
         assert!(manifest.lines().any(|line| line == format!("{}\tfalse", icon.name)), "{} is absent from runtime discovery", icon.name);

@@ -67,6 +67,11 @@ bottom edge and hold it there: the conversation scrolls, faster the further past
 go, and the selection grows with it. It stays when its start scrolls out of view, and Copy takes
 all of it.
 
+In Assistant, outside the message box, Ctrl+A (Cmd+A on macOS) selects the whole conversation:
+every prompt and answer, including those scrolled out of view, but not thoughts, tool cards, plans or
+notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
+click ends the selection; in the message box Ctrl+A selects only the draft.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick
@@ -446,8 +451,11 @@ The agent reaches the open design only through SolidCraft's own tools (the
   a message that waits in the queue.
 - **Pick context:** press it to choose what the message is about on purpose. A picker opens with
   three lists, **Elements** (faces, edges, vertices), **Features** (steps of the timeline) and
-  **Bodies**; click things in the model, the timeline or the browser to put them in the list that
-  is active (click a list to make it active; click a picked thing again to take it out). **OK**
+  **Bodies**. A click in the model goes into the list that is active (click a list to make it
+  active). A step clicked in the History or the Browser goes into Features, and a body clicked in
+  the Browser into Bodies, whichever list is active. Click a picked thing again to take it out.
+  The arrow beside a list shows what it holds by name, as in every dialog; the × on a name takes
+  it out. **OK**
   puts the pick into the message as a **pill**, `«1: Plate · 3 faces»`, at the text cursor (at the
   end when the box was never used). Typing `@` where a word starts does the same: the `@` is
   taken out and the picker opens, and the pill goes where it was. Pick as often as you like; each

@@ -30,6 +30,7 @@
 //! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
 //! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
+//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses (#3140)         |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -81,6 +82,8 @@ pub mod defeature;
 pub mod intersect;
 pub mod nurbs;
 pub mod offset;
+pub mod primitive;
+pub mod sweep;
 
 use crate::topology::{
     BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
@@ -729,6 +732,10 @@ pub enum Reason {
     Defeature(defeature::DefeatureFailure),
     /// An intersection or classification failed.
     Intersect(intersect::IntersectFailure),
+    /// A primitive, extrusion, revolution, skin or taper failed.
+    Primitive(primitive::PrimitiveFailure),
+    /// A sweep or loft refused (#3140).
+    Sweep(sweep::SweepFailure),
 }
 
 impl Reason {
@@ -736,7 +743,12 @@ impl Reason {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::Failed(_) | Self::Nurbs(_) | Self::Defeature(_) | Self::Intersect(_) => None,
+            Self::Failed(_)
+            | Self::Nurbs(_)
+            | Self::Defeature(_)
+            | Self::Intersect(_)
+            | Self::Primitive(_)
+            | Self::Sweep(_) => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -752,6 +764,8 @@ impl Reason {
             Self::Boolean(b) => b.comparison_status(),
             Self::Defeature(d) => d.comparison_status(),
             Self::Intersect(i) => i.comparison_status(),
+            Self::Primitive(p) => p.comparison_status(),
+            Self::Sweep(w) => w.comparison_status(),
         }
     }
 
@@ -765,6 +779,8 @@ impl Reason {
             Self::Boolean(b) => b.kind(),
             Self::Defeature(d) => d.kind(),
             Self::Intersect(i) => i.kind(),
+            Self::Primitive(p) => p.kind(),
+            Self::Sweep(w) => w.kind(),
         }
     }
 }
@@ -778,6 +794,8 @@ impl core::fmt::Display for Reason {
             Self::Boolean(b) => b.fmt(f),
             Self::Defeature(d) => d.fmt(f),
             Self::Intersect(i) => i.fmt(f),
+            Self::Primitive(p) => p.fmt(f),
+            Self::Sweep(w) => w.fmt(f),
         }
     }
 }
@@ -806,9 +824,21 @@ impl From<intersect::IntersectFailure> for Reason {
     }
 }
 
+impl From<primitive::PrimitiveFailure> for Reason {
+    fn from(p: primitive::PrimitiveFailure) -> Self {
+        Self::Primitive(p)
+    }
+}
+
 impl From<offset::OffsetFailure> for Reason {
     fn from(o: offset::OffsetFailure) -> Self {
         Self::Offset(o)
+    }
+}
+
+impl From<sweep::SweepFailure> for Reason {
+    fn from(w: sweep::SweepFailure) -> Self {
+        Self::Sweep(w)
     }
 }
 
@@ -1042,17 +1072,18 @@ impl SolidError {
 
     /// The status of an error that answers with an `SmStatus` the way a
     /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
-    /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`]).
-    /// The callers that branch on an upstream status use it so that they treat both
-    /// alike; it goes with `Upstream` in the last PR of the typed-errors work.
+    /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+    /// [`primitive::PrimitiveFailure`]). The callers that branch on an upstream status
+    /// use it so that they treat both alike; it goes with `Upstream` in the last PR of
+    /// the typed-errors work.
     #[must_use]
     pub(crate) fn upstream_status(&self) -> Option<i32> {
         match self {
             Self::Upstream { code, .. } => Some(*code),
             Self::Failed(f) => match &f.reason {
-                Reason::Nurbs(nurbs::NurbsFailure::BSpline(_)) | Reason::Intersect(_) => {
-                    Some(f.status)
-                }
+                Reason::Nurbs(nurbs::NurbsFailure::BSpline(_))
+                | Reason::Intersect(_)
+                | Reason::Primitive(_) => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1284,7 +1315,8 @@ impl SolidError {
 
 /// The status `error` answers with the way a [`SolidError::Upstream`] does: an
 /// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
-/// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`]).
+/// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+/// [`primitive::PrimitiveFailure`]).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the

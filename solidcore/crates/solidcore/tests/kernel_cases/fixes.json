@@ -245,8 +245,6 @@
   "ascii_doubles_round_trip",
   "fillet_round_ends_at_tangent_continuation",
   "fillet_round_as_definition",
-  "fillet_exact_arc_sections",
-  "fillet_exact_arc_spans",
   "fillet_overflow_trim_at_creases",
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",

@@ -176,6 +176,7 @@ mod status_tests {
 }
 #[cfg(test)]
 mod apply_off_thread_tests;
+mod export_name;
 mod expression_complete;
 #[cfg(test)]
 mod extrude_auto_to_object_tests;
@@ -214,6 +215,7 @@ pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
 pub(crate) mod open_meshing;
+pub mod operations;
 pub mod panel_runtime;
 pub mod params_dialog;
 pub mod personal_sheet_rules;
@@ -678,7 +680,8 @@ pub struct SolveApp {
     /// A command recomputing the history (the marker moved, undo) computing off the window
     /// thread, and those asked for meanwhile ([`deferred`]).
     pub deferred: Option<deferred::Deferred>,
-    pub deferred_queue: Vec<(String, Value)>,
+    /// Commands waiting their turn, each with its operation's serial ([`operations::serial`]).
+    pub deferred_queue: Vec<(String, Value, u64)>,
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
     pub start_after_roll: Option<(String, u64)>,
@@ -796,6 +799,8 @@ pub struct SolveApp {
     pub frame_ms: f64,
     /// The viewport's frame-rate readout ([`frame_rate`]).
     pub frame_rate: frame_rate::FrameRate,
+    /// The operations under way, in the view's corner ([`operations`]).
+    pub operations: operations::Panel,
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
@@ -869,14 +874,12 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
-        // The app's icons, likewise, before the first frame.
-        icon_svg::install();
+        // The app's look (icons, glyphs and built-in theme files), likewise, before the first frame.
+        solidcraft_look::install_tables();
         // The tab table theme files are read against, likewise.
         workspace::install_tabs();
         // The navigation slots stored bars are read against, likewise.
         navigation_slots::install();
-        // The built-in theme files, likewise.
-        theme::install_builtin_themes();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -1004,6 +1007,7 @@ impl SolveApp {
             cpu_meshing: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),

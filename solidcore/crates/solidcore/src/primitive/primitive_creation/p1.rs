@@ -257,8 +257,12 @@ pub(super) fn position_profile_curves_impl(
         // Preserve upstream arithmetic for paths in or parallel to XY,
         // regardless of the direction in which the path turns.
         if normal.x.abs() > crate::math::EFF_ZERO || normal.y.abs() > crate::math::EFF_ZERO {
-            let no_start =
-                || crate::error::SolidError::sm_err("primitive::position_profile_curves");
+            let no_start = || {
+                crate::error::SolidError::primitive_failed(
+                    "primitive::position_profile_curves",
+                    "the path has no start point and tangent",
+                )
+            };
             let first = whole_path.first().ok_or_else(no_start)?;
             let start = first.evaluate(k, first.natural_interval().min(), 1, true, true)?;
             let origin = start.first().copied().ok_or_else(no_start)?;

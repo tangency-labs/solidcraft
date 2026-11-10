@@ -376,8 +376,8 @@ fn feature_row(
         // active before comes back when the editor ends (#12720).
         app.edit_feature_in(id, Some((component, path)));
     } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
-        // An open dialog whose active input takes features gets the row, as in the other
-        // History layouts (#13170).
+        // An open dialog whose active input takes features (a pattern, the chat's picker) gets the
+        // row, as in the other History layouts (#13170).
         click_select(app, ui, order_key, Some(Sel::Feature { id }));
     }
     if r.hovered {
@@ -1491,5 +1491,26 @@ mod tests {
         h.step(&json!({"click": [block_at.x, block_at.y]})).unwrap();
         h.step(&json!({"click": [groove_at.x, groove_at.y], "shift": true})).unwrap();
         assert_eq!(h.app.session.selection, [Sel::Feature { id: block }, Sel::Feature { id: groove }], "only the rows under Other");
+    }
+
+    /// #11318: a feature row's click goes into a dialog whose active input takes features (a
+    /// pattern's Objects list), as a History row's click already did; the ordinary selection is
+    /// left alone.
+    #[test]
+    fn a_feature_row_clicked_while_a_pattern_takes_features_goes_into_the_dialog() {
+        let mut h = Harness::new();
+        let r = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block","body_name":"Block"})).unwrap();
+        let id = r["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.app.run("select.clear", json!({})).unwrap();
+        h.settle();
+        h.app.start("solid.pattern.rectangular");
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "dialog:Object Type"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Object Type:Features"}})).unwrap();
+        h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
+        let picked = h.app.dialog.as_ref().map(|dialog| dialog.inputs[0].items.clone());
+        assert_eq!(picked, Some(vec![Sel::Feature { id }]), "the row's click goes to the dialog");
+        assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
     }
 }

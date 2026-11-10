@@ -121,6 +121,147 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
     }
 }
 
+/// `c` is `reference`, or `reference` faded: a window floating inside the app fades its shapes.
+fn same_colour(c: egui::Color32, reference: egui::Color32) -> bool {
+    let k = f32::from(c.a()) / f32::from(reference.a().max(1));
+    c.a() > 0
+        && [(c.r(), reference.r()), (c.g(), reference.g()), (c.b(), reference.b())]
+            .iter()
+            .all(|&(x, y)| (f32::from(x) - f32::from(y) * k).abs() <= 2.0)
+}
+
+/// The filled rectangles outlined outside, as text selection marks are, drawn this frame, with
+/// their outline colour.
+fn outlined_rects(h: &crate::scenario::Harness) -> Vec<(egui::Rect, egui::Color32)> {
+    let mut rects = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Rect(r) = shape
+                && r.stroke.width > 0.0
+                && r.stroke.color.a() > 0
+                && r.fill.a() > 0
+                && r.stroke_kind == egui::StrokeKind::Outside
+            {
+                rects.push((r.rect, r.stroke.color));
+            }
+        });
+    }
+    rects
+}
+
+/// The transcript's selection highlights (#10676), the outlined rectangles not drawn in `base`:
+/// how many, and the outline colour of the one that covers `text`'s first line.
+fn transcript_highlights(h: &crate::scenario::Harness, base: &[(egui::Rect, egui::Color32)], text: &str) -> (usize, Option<egui::Color32>) {
+    let rects: Vec<_> = outlined_rects(h).into_iter().filter(|r| !base.contains(r)).collect();
+    let mut at = None;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                at = Some(t.pos + egui::vec2(4.0, 4.0));
+            }
+        });
+    }
+    let at = at.unwrap_or_else(|| panic!("{text:?} is drawn"));
+    (rects.len(), rects.iter().find(|(r, _)| r.contains(at)).map(|(_, c)| *c))
+}
+
+/// #10676: Ctrl+A in the transcript selects every prompt and answer of the conversation, not
+/// the one Markdown block the selection was in, and Copy copies them in order as they read.
+/// Thoughts and notices are left out; Esc ends it; a focused composer keeps its own Ctrl+A.
+#[test]
+fn select_all_in_the_transcript_takes_the_whole_conversation() {
+    let reply = "# Clipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n- List item one\n- List item two\n\n```text\nCODE BLOCK GAMMA\nsecond code line\n```\n\nFINAL PARAGRAPH OMEGA.";
+    let expected = "User:\nMake a plate\n\nAssistant:\nClipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n• List item one\n• List item two\n\nCODE BLOCK GAMMA\nsecond code line\n\nFINAL PARAGRAPH OMEGA.\n\nUser:\nThanks\n\nAssistant:\nTranscript clipboard sentinel";
+    let ctrl =
+        |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND };
+    let copied = |h: &crate::scenario::Harness| {
+        h.output.commands.iter().find_map(|c| if let egui::OutputCommand::CopyText(t) = c { Some(t.clone()) } else { None })
+    };
+    let layouts =
+        [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
+    for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
+        let mut h = transcript_clipboard_harness(layout);
+        h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
+        h.app.ui.dark = dark;
+        if popped {
+            h.call("ui.resize", json!({"width": 1600, "height": 1000}));
+            h.app.preferences.agent_chat_popped = true;
+        }
+        // Before the sentinel, so the reply is partly scrolled away above it.
+        h.app.agent_chat.items.splice(
+            0..0,
+            [
+                Item::User { text: "Make a plate".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+                Item::Agent { thought: false, text: reply.into() },
+                Item::Agent { thought: true, text: "THOUGHT DELTA".into() },
+                Item::Notice { text: "NOTICE EPSILON".into(), error: false },
+                Item::User { text: "Thanks".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+            ],
+        );
+        h.frames(4);
+        // A double-click selects a word of one block, as in the report.
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let undo = h.app.session.undo.len();
+        let base = outlined_rects(&h);
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A selects the conversation");
+        assert!(!h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the block selection gives way");
+        let (after, thought) = transcript_highlights(&h, &base, "THOUGHT DELTA");
+        // The prompts and one-block answers in view, and the reply's seven blocks.
+        assert!(after >= 9, "{layout:?} popped {popped}: every message block is highlighted ({after})");
+        assert!(thought.is_none(), "a thought is not highlighted");
+        // The prompt's bubble is filled with the selection colour itself: the outline must show
+        // on it, as on the reply's text and code backgrounds, in either theme.
+        let t = solidcraft_theme::Tokens::get();
+        assert_eq!(h.ctx.style_of(h.ctx.theme()).visuals.dark_mode, dark, "the theme took effect");
+        for text in ["Thanks", "Transcript clipboard sentinel", "FINAL PARAGRAPH OMEGA.", "CODE BLOCK GAMMA\nsecond code line"] {
+            let outline = transcript_highlights(&h, &base, text).1.unwrap_or_else(|| panic!("{text:?} is highlighted"));
+            for (name, under) in [("bubble", t.accent_soft), ("panel", t.panel), ("dialog body", t.dialog_body), ("code", t.field)] {
+                assert!(
+                    !same_colour(outline, under),
+                    "dark {dark} {layout:?} popped {popped}: {text:?} outline {outline:?} vanishes on the {name} {under:?}"
+                );
+            }
+        }
+        h.frame_with(vec![egui::Event::Copy]);
+        assert_eq!(copied(&h).as_deref(), Some(expected), "{layout:?} popped {popped}: Copy takes the whole conversation");
+        assert!(h.app.copied_bodies.is_empty(), "the CAD body is not copied");
+        assert!(h.app.dialog.is_none(), "Ctrl+A opens nothing in CAD");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected, "still selected");
+        h.frame_with(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!h.app.agent_chat.all_selected, "Esc ends it");
+        assert_eq!(transcript_highlights(&h, &base, "THOUGHT DELTA").0, 0, "and its highlight");
+        // An ordinary selection works again afterwards.
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        assert!(!h.app.agent_chat.all_selected, "a click ends it");
+        h.frame_with(vec![egui::Event::Copy]);
+        // (The clicks follow the earlier double-click at once: a word or the block, as egui counts them.)
+        let part = copied(&h).unwrap_or_default();
+        assert!(!part.is_empty() && "Transcript clipboard sentinel".contains(&part), "a block selection copies only itself: {part:?}");
+        // The composer keeps its own Select All.
+        h.app.agent_chat.input = "draft".into();
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_agent_chat_input")));
+        h.frame();
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(!h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A in the composer selects only the draft");
+    }
+}
+
 fn chat() -> AgentChat {
     let mut c = AgentChat::default();
     c.state = Some(State::Ready);
@@ -4543,6 +4684,134 @@ fn a_split_wall_clicked_once_is_one_item() {
     send(&mut app, &ctx, "this wall".into());
     let prompt = script.calls().pop().expect("a prompt");
     assert!(prompt.contains("1 item(s)") && prompt.contains("Round face r10"), "{prompt}");
+}
+
+/// The chat open over `boxes` boxes, and the picker open with Elements active: the harness and the
+/// boxes' feature ids and names, in order.
+fn picker_over_boxes(boxes: usize, timeline_left: bool) -> (crate::scenario::Harness, Vec<(u64, String)>) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.timeline_left = timeline_left;
+    h.call("ui.agent_chat", json!({"open": true}));
+    for i in 0..boxes {
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": format!("Body{}", i + 1)})).expect("a box");
+    }
+    let features = h.app.session.doc.features.iter().map(|f| (f.id, f.name.clone())).collect();
+    start_pick(&mut h.app, None);
+    h.frames(3);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(0), "the picker opens with Elements active");
+    (h, features)
+}
+
+fn click_handle(h: &mut crate::scenario::Harness, handle: &str) {
+    h.step(&json!({"click": {"handle": handle}})).unwrap_or_else(|e| panic!("{handle}: {e}"));
+    h.frames(3);
+}
+
+/// What the picker's inputs hold: Elements, Features, Bodies.
+fn picked(h: &crate::scenario::Harness) -> Vec<Vec<solidcraft_engine::Sel>> {
+    h.app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| i.items.clone()).collect()).unwrap_or_default()
+}
+
+/// OK makes one pill that holds what is named here, and nothing else.
+fn ok_makes_one_pill_of(h: &mut crate::scenario::Harness, kind: context::Kind, label: &str) {
+    click_handle(h, "dialog:ok");
+    assert!(h.app.dialog.is_none(), "OK closed the picker");
+    assert_eq!(h.app.agent_chat.pills.len(), 1);
+    let items: Vec<_> = h.app.agent_chat.pills[0].context.items.iter().map(|e| (e.kind, e.label.clone())).collect();
+    assert_eq!(items, [(kind, label.to_string())]);
+}
+
+/// A step clicked in either History bar goes into Features while Elements is active, and the edit
+/// selection is left alone (#11318).
+#[test]
+fn a_history_step_clicked_while_picking_lands_in_features_and_leaves_the_selection_alone() {
+    use solidcraft_engine::Sel;
+    for left in [false, true] {
+        let (mut h, features) = picker_over_boxes(1, left);
+        let (id, name) = features[0].clone();
+        let selection = h.app.session.selection.clone();
+        click_handle(&mut h, &format!("timeline:{name}"));
+        assert_eq!(picked(&h), [vec![], vec![Sel::Feature { id }], vec![]], "left={left}");
+        assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "Features is the active list now; left={left}");
+        assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged; left={left}");
+        // A second click takes the step out again (after the double-click time: a double click edits).
+        h.frames(30);
+        click_handle(&mut h, &format!("timeline:{name}"));
+        assert_eq!(picked(&h), [vec![], vec![], vec![]], "a second click takes it out; left={left}");
+        assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged; left={left}");
+        h.frames(30);
+        click_handle(&mut h, &format!("timeline:{name}"));
+        ok_makes_one_pill_of(&mut h, context::Kind::Feature, &name);
+    }
+}
+
+/// The same for a step in the Browser's Features folder, and a body in its Bodies folder goes into
+/// Bodies (#11318).
+#[test]
+fn a_browser_row_clicked_while_picking_lands_in_the_list_that_takes_it() {
+    use solidcraft_engine::Sel;
+    let (mut h, features) = picker_over_boxes(1, false);
+    let (id, name) = features[0].clone();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.frames(3);
+    let selection = h.app.session.selection.clone();
+    let row = format!("row:browser-feature:c0:{id}");
+    click_handle(&mut h, &row);
+    assert_eq!(picked(&h), [vec![], vec![Sel::Feature { id }], vec![]]);
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    h.frames(30);
+    click_handle(&mut h, &row);
+    assert_eq!(picked(&h), [vec![], vec![], vec![]], "a second click takes it out");
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    h.frames(30);
+    click_handle(&mut h, &row);
+    ok_makes_one_pill_of(&mut h, context::Kind::Feature, &name);
+
+    h.app.agent_chat.pills.clear();
+    start_pick(&mut h.app, None);
+    h.frames(3);
+    click_handle(&mut h, "row:Body1");
+    assert_eq!(picked(&h), [vec![], vec![], vec![Sel::Body { name: "Body1".into() }]]);
+    assert_eq!(h.app.session.selection, selection, "the edit selection is unchanged");
+    ok_makes_one_pill_of(&mut h, context::Kind::Body, "Body1");
+}
+
+/// The Features field says to click steps, not faces (#11318).
+#[test]
+fn the_features_field_says_what_to_click() {
+    let d = crate::dialogs::Dialog::chat_context();
+    let hints: Vec<_> = d.inputs.iter().map(|i| (i.label, crate::dialogs::hint(i))).collect();
+    let features = hints.iter().find(|(label, _)| *label == "Features").map(|(_, hint)| *hint).unwrap_or_default();
+    assert!(!features.contains("click faces") && features.contains("History"), "{hints:?}");
+}
+
+/// The picker lists each picked step under its field, and the × on one takes it out (#11318).
+#[test]
+fn the_picker_lists_what_was_picked_and_takes_one_out() {
+    use solidcraft_engine::Sel;
+    let (mut h, features) = picker_over_boxes(2, false);
+    click_handle(&mut h, "dialog:Features");
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.active), Some(1), "a click on the field makes it active");
+    for (_, name) in &features {
+        click_handle(&mut h, &format!("timeline:{name}"));
+    }
+    let ids: Vec<Sel> = features.iter().map(|(id, _)| Sel::Feature { id: *id }).collect();
+    assert_eq!(picked(&h).get(1), Some(&ids));
+    // Each listed item is a row with a × of its own (`ui_kit::list_row`). The list starts folded,
+    // as in every dialog (#3683); the arrow beside the field opens it.
+    let rows = || {
+        let mut rows: Vec<_> = solidcraft_ui_registry::handles("dialog:list:Features:").into_iter().map(|(name, _)| name).collect();
+        rows.sort();
+        rows.dedup();
+        rows
+    };
+    assert!(rows().is_empty(), "the list starts folded");
+    click_handle(&mut h, "dialog:list_toggle:Features");
+    assert_eq!(rows(), ["dialog:list:Features:0:remove", "dialog:list:Features:1:remove"], "one row per picked step");
+    assert!(solidcraft_ui_registry::rect_of("dialog:list:Features:1").is_some());
+    click_handle(&mut h, "dialog:list:Features:0:remove");
+    assert_eq!(picked(&h).get(1).map(Vec::as_slice), ids.get(1..), "the first step was taken out");
+    assert_eq!(rows(), ["dialog:list:Features:0:remove"], "one row is left");
 }
 
 // ---- Chips: hover and things that are gone (#2286) ----

@@ -1112,7 +1112,7 @@ fn flip_param(s: &Session, p: &Value, plane: &PlaneRef, cmd: &str) -> Result<Opt
         Some(Value::String(a)) if a.eq_ignore_ascii_case("y") => true,
         Some(Value::Bool(true)) => {
             let (vals, _) = s.doc.param_values();
-            let resolved = s.doc.resolve_plane_in(&vals, plane, 0, Some(&s.model.state()))?;
+            let resolved = s.doc.resolve_plane_in(&vals, plane, 0, s.active_component, Some(&s.model.state()))?;
             resolved.y.z > 1e-9
         }
         Some(_) => return Err(bad(cmd, "`flip` must be true, false, \"x\" or \"y\"")),
@@ -1142,7 +1142,7 @@ fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: O
     }
     // Validate the plane resolves.
     let (vals, _) = s.doc.param_values();
-    s.doc.resolve_plane_in(&vals, &plane, 0, Some(&s.model.state()))?;
+    s.doc.resolve_plane_in(&vals, &plane, 0, s.active_component, Some(&s.model.state()))?;
     let name = str_(p, "name");
     let mut kind = FeatureKind::Sketch { plane, sketch: Sketch::new() };
     if !face::is_face(p) {
@@ -3678,13 +3678,20 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             && !is_angle
             && let Some(want) = want
             && let Some(factor) = Some(want / cur).filter(|f| f.is_finite() && (f - 1.0).abs() > 1e-9)
-            && let Some(big) = sk.scaled_for_first_dimension(factor, scale_about_origin)
-            && (sk.links.is_empty()
-                || solidcraft_sketch::measure_dimension(&big, &k).is_some_and(|v| (v - want).abs() <= solidcraft_sketch::CONSISTENT))
         {
-            *sk = big;
-            scaled = Some(factor);
-            residual = Some(0.0);
+            if let Some(big) = sk.scaled_for_first_dimension(factor, &k, scale_about_origin).filter(|big| {
+                sk.links.is_empty()
+                    || solidcraft_sketch::measure_dimension(big, &k).is_some_and(|v| (v - want).abs() <= solidcraft_sketch::CONSISTENT)
+            }) {
+                *sk = big;
+                scaled = Some(factor);
+                residual = Some(0.0);
+            } else if let Some(sized) = sk.lone_circle_sized_for_first_dimension(factor, &k) {
+                // A lone circle's radius or diameter changes only its radius (#11438), seeded
+                // here so even a size far from the drawn one solves with the centre in place.
+                *sk = sized;
+                residual = Some(0.0);
+            }
         }
         let name = k.name();
         let id = sk.add_constraint(k, Some(pname.clone()))?;

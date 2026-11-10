@@ -24,7 +24,8 @@ use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, field, form_row};
 use crate::preview::{Built, Colors};
 use crate::selection::{
-    BODIES, EDGES, FACES, ORIGIN, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items, point_value as pt, polyline_mid,
+    AXES, BODIES, CONSTRUCTION_POINTS, EDGES, FACES, ORIGIN, PLANES, POINTS, SelInput, SelectionExt as _, VERTICES, items as sel_items,
+    point_value as pt, polyline_mid,
 };
 use solidcraft_theme::Tokens;
 
@@ -76,9 +77,10 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
     format!("{name} ({})", solidcraft_ui_text::tr_label(kind_label(kind)))
 }
 
-/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, and
-/// a sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's).
-pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS;
+/// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
+/// sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's),
+/// and the design's planes, axes and construction points.
+pub const SNAPS: u16 = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -397,14 +399,60 @@ fn side_inputs() -> Vec<SelInput> {
     vec![SelInput::new("Component 1", SNAPS, false), SelInput::new("Component 2", SNAPS, false)]
 }
 
-/// The pick a joint side shows in the side inputs: the face or edge of its own occurrence that
-/// the side's snap names (the piece nearest its pick, when the name has several), else the face
-/// or edge nearest the pick. A point or frame side names no face, so it shows its component.
+/// The pick a joint side shows in the side inputs: the face, edge, plane, or axis of its own
+/// occurrence that the side's snap names (the piece nearest its pick, when the name has
+/// several), else the face or edge nearest the pick. A point or frame side names no face, so it
+/// shows its component.
 fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let s = &app.session;
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
         Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
+        Snap::Plane { plane, .. } => {
+            let name = match plane.as_ref() {
+                solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
+                solidcraft_engine::doc::PlaneRef::Datum { datum } => Some(datum.key()),
+                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                    let id = feature.0;
+                    s.doc
+                        .feature(id)
+                        .map(|f| f.name.clone())
+                        .or_else(|| s.model.state().construct.iter().find(|c| c.feature == id).map(|c| c.name.clone()))
+                }
+                _ => None,
+            }?;
+            if matches!(plane.as_ref(), solidcraft_engine::doc::PlaneRef::Datum { .. }) {
+                return Some(Sel::Plane { name });
+            }
+            let name = if o.occurrence == 0 {
+                name
+            } else {
+                let occ_name = s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str()).unwrap_or("");
+                if occ_name.is_empty() { name } else { format!("{occ_name}/{name}") }
+            };
+            return Some(Sel::Plane { name });
+        }
+        Snap::Axis { axis, .. } => {
+            let name = match axis.as_ref() {
+                solidcraft_engine::doc::joints::AxisRef::Name(name) => Some(name.clone()),
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Origin { axis }) => Some(axis.clone()),
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Construction { name }) => {
+                    Some(name.clone())
+                }
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Datum { datum }) => Some(datum.key()),
+                _ => None,
+            }?;
+            if matches!(axis.as_ref(), solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Datum { .. })) {
+                return Some(Sel::Axis { name });
+            }
+            let name = if o.occurrence == 0 {
+                name
+            } else {
+                let occ_name = s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str()).unwrap_or("");
+                if occ_name.is_empty() { name } else { format!("{occ_name}/{name}") }
+            };
+            return Some(Sel::Axis { name });
+        }
         Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
     // The pick is in its part's coordinates; the placed bodies are in the world.
@@ -677,10 +725,147 @@ pub(crate) fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
         .and_then(|[a, b, c]| (b - a).cross(c - a).normalized())
 }
 
+/// The hover label tag: "Plane" or "Axis" when picking planes or axes, else the snap kind's name.
+pub(crate) fn snap_tag(s: &SnapPt) -> &'static str {
+    if s.param.get("plane").is_some() {
+        solidcraft_ui_text::tr("ui.plane")
+    } else if s.param.get("axis").is_some() {
+        solidcraft_ui_text::tr("ui.axis")
+    } else {
+        snap_name(s.kind)
+    }
+}
+
 /// The snap a picked item stands for (world coordinates, as the viewport shows them).
 pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
+    let model_st = s.model.state();
     let st = crate::open_meshing::session_world(s);
     let (body, mut snap) = match sel {
+        Sel::Plane { name } => {
+            // A datum side round-trips through its key: the pick stands for that placement's datum.
+            if let Some(datum) = solidcraft_engine::doc::construct::DatumRef::parse_key(name) {
+                let occ = datum.path.last().copied().unwrap_or(0);
+                let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+                let (at, z) = match datum.item.geom() {
+                    solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => (
+                        solidcraft_engine::doc::apply_point(&t, p.origin),
+                        solidcraft_engine::doc::apply_vector(&t, p.normal()).normalized().unwrap_or(Vec3::Z),
+                    ),
+                    _ => return None,
+                };
+                return Some(SnapPt { at, z, kind: SnapKind::FaceCenter, param: json!({"occurrence": occ, "plane": name}) });
+            }
+            let (occ, plane_name) = if let Some((prefix, plane_name)) = name.rsplit_once('/') {
+                let occ = s
+                    .doc
+                    .occurrences
+                    .iter()
+                    .find(|o| o.name == prefix || o.id.to_string() == prefix)
+                    .map(|o| o.id)
+                    .or_else(|| s.doc.find_component(prefix).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id))
+                    .unwrap_or(0);
+                (occ, plane_name)
+            } else {
+                let occ = model_st
+                    .construct
+                    .iter()
+                    .find(|c| c.name == *name)
+                    .and_then(|c| {
+                        let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                        if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+                    })
+                    .unwrap_or(0);
+                (occ, name.as_str())
+            };
+            let upper = plane_name.to_ascii_uppercase();
+            let (local_origin, local_normal) = if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+                let p = solidcore_record::Plane::named(&upper)?;
+                (p.origin, p.normal().normalized().unwrap_or(Vec3::Z))
+            } else {
+                let selected_component = if occ == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0) };
+                let c = model_st.construct.iter().find(|c| {
+                    c.name == plane_name
+                        && s.doc.feature(c.feature).map(|f| f.component) == Some(selected_component)
+                        && matches!(&c.geom, solidcraft_engine::doc::construct::ConstructGeom::Plane(_))
+                })?;
+                match &c.geom {
+                    solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => (p.origin, p.normal().normalized().unwrap_or(Vec3::Z)),
+                    _ => return None,
+                }
+            };
+            let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+            let at = solidcraft_engine::doc::apply_point(&t, local_origin);
+            let z = solidcraft_engine::doc::apply_vector(&t, local_normal).normalized().unwrap_or(Vec3::Z);
+            ("", SnapPt { at, z, kind: SnapKind::FaceCenter, param: json!({"occurrence": occ, "plane": plane_name}) })
+        }
+        Sel::Axis { name } => {
+            if let Some(datum) = solidcraft_engine::doc::construct::DatumRef::parse_key(name) {
+                let occ = datum.path.last().copied().unwrap_or(0);
+                let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+                let (at, z) = match datum.item.geom() {
+                    solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => (
+                        solidcraft_engine::doc::apply_point(&t, origin),
+                        solidcraft_engine::doc::apply_vector(&t, dir).normalized().unwrap_or(Vec3::Z),
+                    ),
+                    _ => return None,
+                };
+                return Some(SnapPt { at, z, kind: SnapKind::EdgeMid, param: json!({"occurrence": occ, "axis": name}) });
+            }
+            let (occ, axis_name) = if let Some((prefix, axis_name)) = name.rsplit_once('/') {
+                let occ = s
+                    .doc
+                    .occurrences
+                    .iter()
+                    .find(|o| o.name == prefix || o.id.to_string() == prefix)
+                    .map(|o| o.id)
+                    .or_else(|| s.doc.find_component(prefix).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id))
+                    .unwrap_or(0);
+                (occ, axis_name)
+            } else {
+                let occ = model_st
+                    .construct
+                    .iter()
+                    .find(|c| c.name == *name)
+                    .and_then(|c| {
+                        let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                        if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+                    })
+                    .unwrap_or(0);
+                (occ, name.as_str())
+            };
+            let upper = axis_name.to_ascii_uppercase();
+            let (local_origin, local_dir) = if matches!(upper.as_str(), "X" | "Y" | "Z") {
+                let d = match upper.as_str() {
+                    "X" => Vec3::X,
+                    "Y" => Vec3::Y,
+                    _ => Vec3::Z,
+                };
+                (Vec3::ZERO, d)
+            } else {
+                let c = model_st.construct.iter().find(|c| c.name == axis_name)?;
+                match &c.geom {
+                    solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => (*origin, dir.normalized().unwrap_or(Vec3::Z)),
+                    _ => return None,
+                }
+            };
+            let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+            let at = solidcraft_engine::doc::apply_point(&t, local_origin);
+            let z = solidcraft_engine::doc::apply_vector(&t, local_dir).normalized().unwrap_or(Vec3::Z);
+            ("", SnapPt { at, z, kind: SnapKind::EdgeMid, param: json!({"occurrence": occ, "axis": axis_name}) })
+        }
+        Sel::ConstructionPoint { name } => {
+            let c = model_st.construct.iter().find(|c| c.name == *name)?;
+            let p = match &c.geom {
+                solidcraft_engine::doc::construct::ConstructGeom::Point(p) => *p,
+                _ => return None,
+            };
+            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+            let occ = if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) };
+            let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
+            let at = solidcraft_engine::doc::apply_point(&t, p);
+            let z = solidcraft_engine::doc::apply_vector(&t, Vec3::Z).normalized().unwrap_or(Vec3::Z);
+            ("", SnapPt { at, z, kind: SnapKind::Vertex, param: json!({"occurrence": occ, "point": pt(at), "z": pt(z)}) })
+        }
         Sel::Face { body, index, point } => {
             let b = st.body(body)?;
             let faces = b.joint_faces().ok()?;
@@ -1495,7 +1680,10 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     let doc = &app.session.doc;
     let occs: Vec<Option<u64>> =
         bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
-    if occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
+    // Only every pick naming a body makes the one-component case a problem: a datum plane or axis
+    // side names its placement's origin, not a body, so a datum of one part against a face of
+    // another is still a two-part joint.
+    if picks.iter().all(|p| body_of(p).is_some()) && occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
         return Some(match bodies.as_slice() {
             [body] => (solidcraft_ui_text::format("joint.one_body", &[("body", body.as_str())]), Vec::new()),
             _ => (solidcraft_ui_text::format("joint.one_component", &[("bodies", &bodies.join(", "))]), bodies),
@@ -1838,7 +2026,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
                 *hover = Some((sel.clone(), picked_snap(app, &sel)));
             }
             if let Some((_, Some(s))) = hover.as_ref() {
-                glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_name(s.kind)));
+                glyph(painter, proj, s, t.hover_profile_edge, app.cam.half_height(), Some(snap_tag(s)));
             }
         }
         None => *hover = None,
