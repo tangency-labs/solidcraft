@@ -684,7 +684,7 @@ impl<O: ClassObject> CurveClassification<O> {
     /// classification has a surface 1 and a UV curve 1 on it ([`Self::gap_across_curve`]),
     /// and is a near miss only when that gap reaches the threshold too: an offset along
     /// the curve or off the surface leaves no sliver beside the curve (deviation, see the
-    /// file header).
+    /// file header). A coincident edge's gap is counted as upstream.
     ///
     /// # Errors
     ///
