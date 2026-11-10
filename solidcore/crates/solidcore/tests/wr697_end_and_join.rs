@@ -522,11 +522,15 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 /// run on past the teardrop's tip on the wall's extension, is its definition, the round
 /// of the wall and the plate to rounding (#13774; before, the trace's skinned B-spline,
 /// off that round by 1.5e-4 at its 90th percentile, and the volumes 3.1e-4 and 4.9e-4
-/// less).
+/// less). Since #14405 the r 1 round's net has fewer spans (the arc's rows over a piece
+/// bounded by Taylor models too), and its volume moved by 2.9e-7 (from
+/// 7140.722593621167): both nets lie within their certified bounds of the same definition,
+/// so the volumes differ by at most the round's area (68.2 over its two faces) times the
+/// two bounds, which the new bound alone (4.0e-6) puts at 2.7e-4.
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
-    for (r, want) in [(0.5, 7133.840421559223614), (1.0, 7140.722593621167)] {
+    for (r, want) in [(0.5, 7133.840421559223614), (1.0, 7140.722593330715)] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
         let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);

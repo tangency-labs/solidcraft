@@ -32,6 +32,9 @@
 //! | [`gn_fourth_over`]                | `sm_GnFourthOver`                       |
 //! | [`gn_certify_span`]               | `sm_GnCertifySpan`                      |
 //! | [`gn_certify_span_reusing`], [`SpanReuse`], [`CertifiedLevel`], [`CertifiedPiece`] | — (not the fork's: a halved span's halves start from its pieces) |
+//! | [`arc_row_terms_over`]            | `sm_ArcRowTermsOver` (cc08236; its terms the tighter of two, #14405) |
+//! | [`ArcTerms`], [`ArcTermsBoth`], [`arc_terms_over`], [`centred_tm`] | — (not the fork's: the arc's row terms from interval series and from Taylor models, #14405) |
+//! | `PieceRows`, `tighten_level` (private) | — (not the fork's: a level's Taylor models taken only where they can change its verdict, #14405) |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
 //!
 //! Deviations:
@@ -76,6 +79,25 @@
 //!   sound as the fork's, but it can be another level's. A level's end stations that the
 //!   level before solved (every other one: the same s from the same seed) are taken from
 //!   it, bit for bit what solving them again gives.
+//! - **The arc's row terms (#14405, not the fork's).** A piece's arc rows (the ball's
+//!   circle, n = 1) are bounded from interval series over the piece, as the fork bounds
+//!   them, and from Taylor models in `s - m` over it ([`super::taylor_model`],
+//!   [`arc_terms_over`]); each term is the tighter of the two, so no bound is looser. The
+//!   interval series take the rails and the centre, which move together, as independent
+//!   ranges over the piece: on a long piece the circle's radii reach length 0 or the rows'
+//!   fourth derivatives come out orders of magnitude over their true values, and a long
+//!   variable round proved only on pieces some hundredths of it long. The levels are
+//!   steered by the fork's terms (a level they do not prove goes on, a bound not finite by
+//!   the fork's uv term skips, the halving compares their bounds), and only the stop at the
+//!   target reads the tighter bound: from a given first level, a span the fork's terms
+//!   certify these certify at the same level or a coarser one, and a span they leave over
+//!   the target these leave with a bound no larger, or certify. A piece takes its Taylor
+//!   models at once only where its interval terms do not prove it; elsewhere the level
+//!   takes them only when its bound with the interval terms is not at the target
+//!   (`tighten_level`), so the verdicts and the bounds over the target are those of the
+//!   tighter terms everywhere, and a bound at the target can be the interval terms' (no
+//!   larger than the fork's). A span's first level follows the levels these certified
+//!   ([`SpanReuse`]), so the spans' sequence can differ from the fork's terms'.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
@@ -90,6 +112,7 @@ use super::station::{
 use super::tay::{
     gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar, TAY,
 };
+use super::taylor_model::Tm;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -1836,13 +1859,333 @@ pub fn arc_rows<S: TayScalar + GnScalar>(
     Some((h, ws))
 }
 
+/// A piece's arc row terms ([`arc_terms_over`]): per row the largest `24 |H_j''''|` (`x`)
+/// and `24 |W_j''''|` (`y`) and the least `W_j` (`w_lo`), and the largest `|S - O|` (`r`),
+/// over the piece. A term not proved is infinite (`w_lo` minus infinity). Not upstream.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArcTerms {
+    /// `24 |H_j''''|`, per row.
+    pub x: [f64; 3],
+    /// `24 |W_j''''|`, per row.
+    pub y: [f64; 3],
+    /// The least `W_j`, per row.
+    pub w_lo: [f64; 3],
+    /// The largest `|S - O|`.
+    pub r: f64,
+}
+
+impl ArcTerms {
+    /// Nothing proved.
+    pub const UNPROVED: Self = Self {
+        x: [f64::INFINITY; 3],
+        y: [f64::INFINITY; 3],
+        w_lo: [f64::NEG_INFINITY; 3],
+        r: f64::INFINITY,
+    };
+
+    /// Both terms' tighter bound, term by term: each holds over the piece, so the tighter
+    /// one does (a NaN is not a bound).
+    #[must_use]
+    pub fn meet(self, o: Self) -> Self {
+        let upper = |a: f64, b: f64| if a.is_nan() || b < a { b } else { a };
+        let lower = |a: f64, b: f64| if a.is_nan() || b > a { b } else { a };
+        let mut m = self;
+        for (j, ((mx, my), mw)) in
+            m.x.iter_mut()
+                .zip(m.y.iter_mut())
+                .zip(m.w_lo.iter_mut())
+                .enumerate()
+        {
+            *mx = upper(*mx, o.x.get(j).copied().unwrap_or(f64::INFINITY));
+            *my = upper(*my, o.y.get(j).copied().unwrap_or(f64::INFINITY));
+            *mw = lower(*mw, o.w_lo.get(j).copied().unwrap_or(f64::NEG_INFINITY));
+        }
+        m.r = upper(m.r, o.r);
+        m
+    }
+
+    /// Whether the terms prove the piece's rows: every row's terms finite and its least
+    /// weight positive, and `R` finite ([`Self::fold`]'s test).
+    #[must_use]
+    pub fn proves(&self) -> bool {
+        self.x.iter().chain(&self.y).all(|v| v.is_finite())
+            && self.w_lo.iter().all(|&w| w > 0.0)
+            && self.r.is_finite()
+    }
+
+    /// Folds the terms into `rt` (largest X, Y, R; least W), as `sm_ArcRowTermsOver` does;
+    /// `false` where a row's term is not finite or its least weight not positive, or `R` is
+    /// not finite.
+    pub fn fold(&self, rt: &mut GnRowTerms) -> bool {
+        for (j, ((&dx, &dy), &dwlo)) in self.x.iter().zip(&self.y).zip(&self.w_lo).enumerate() {
+            if !(dx.is_finite() && dy.is_finite() && dwlo > 0.0) {
+                return false;
+            }
+            let (Some(xj), Some(yj), Some(lj)) =
+                (rt.x.get_mut(j), rt.y.get_mut(j), rt.w_lo.get_mut(j))
+            else {
+                return false;
+            };
+            *xj = cmax(*xj, dx);
+            *yj = cmax(*yj, dy);
+            *lj = cmin(*lj, dwlo);
+        }
+        if !self.r.is_finite() {
+            return false;
+        }
+        rt.r = cmax(rt.r, self.r);
+        true
+    }
+}
+
+/// A piece's arc row terms both ways: `old` from interval series over the piece (the
+/// fork's `sm_ArcRowTermsOver`), and `tight`, the tighter of those and the same terms from
+/// Taylor models in s over the piece ([`super::taylor_model`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArcTermsBoth {
+    /// The interval series' terms (the fork's).
+    pub old: ArcTerms,
+    /// Term by term the tighter of `old` and the Taylor models' terms.
+    pub tight: ArcTerms,
+}
+
+/// The range a series coefficient's enclosure takes over the piece: an interval's own, a
+/// Taylor model's bounded over `[-1, 1]`.
+trait OverPiece: TayScalar + GnScalar {
+    fn over_piece(&self) -> Ivl;
+}
+
+impl OverPiece for Ivl {
+    fn over_piece(&self) -> Ivl {
+        *self
+    }
+}
+
+impl OverPiece for Tm {
+    fn over_piece(&self) -> Ivl {
+        self.range()
+    }
+}
+
+/// The arc row terms from the rails' and the centre's series over a piece (`rho`, `mc`)
+/// and, for a varying ball (`dm`), the centre's s-derivative: the touch circle about
+/// `m + ((rho1 - m) . m' / m' . m') m'`, its rows ([`arc_rows`]) and their terms. One
+/// formula for both rings, so the interval terms are the fork's operation for operation.
+fn arc_terms_of<S: OverPiece>(
+    rho: &[[Tay<S>; 3]; 2],
+    mut mc: [Tay<S>; 3],
+    dm: Option<&[Tay<S>; 3]>,
+    o: [f64; 3],
+) -> ArcTerms {
+    let [rho0, rho1] = rho;
+    if let Some(dm) = dm {
+        let mut dd = Tay::<S>::zero();
+        let mut bd = Tay::<S>::zero();
+        for ((&dq, &mq), &r0q) in dm.iter().zip(&mc).zip(rho0) {
+            dd = dd + dq * dq;
+            bd = bd + (r0q - mq) * dq;
+        }
+        if !dd.at(0).is_positive() {
+            return ArcTerms::UNPROVED;
+        }
+        let kk = bd / dd;
+        for (mq, &dq) in mc.iter_mut().zip(dm) {
+            *mq = *mq + kk * dq;
+        }
+    }
+    let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
+        return ArcTerms::UNPROVED;
+    };
+    // |S - O| <= |m - O| + the ball's radius over the piece
+    let mut d_mo = 0.0_f64;
+    let mut d_rad = 0.0_f64;
+    for ((mq, &oq), r0q) in mc.iter().zip(&o).zip(rho0) {
+        let dd = (mq.at(0) - S::lift(oq)).over_piece().mag();
+        d_mo += dd * dd;
+        let b = (r0q.at(0) - mq.at(0)).over_piece().mag();
+        d_rad += b * b;
+    }
+    let mut t = ArcTerms::UNPROVED;
+    t.r = crate::geom::vector3d::sqrt(d_mo) + crate::geom::vector3d::sqrt(d_rad);
+    for (((hj, wj), (tx, ty)), tw) in h
+        .iter()
+        .zip(&w)
+        .zip(t.x.iter_mut().zip(t.y.iter_mut()))
+        .zip(t.w_lo.iter_mut())
+    {
+        let mut sq = 0.0_f64;
+        for hq in hj {
+            let m = hq.at(TAY).over_piece().mag();
+            sq += m * m;
+        }
+        *tx = 24.0 * crate::geom::vector3d::sqrt(sq);
+        *ty = 24.0 * wj.at(TAY).over_piece().mag();
+        *tw = wj.at(0).over_piece().lo;
+    }
+    t
+}
+
+/// [`centred`] as Taylor models in `t = (s - m) / delta` on `[-1, 1]`, `delta` at least
+/// `|s - m|` over the piece (#14405): coefficient i is
+/// `sum_{j < K - i} C(i + j, i) c_(i+j)(m) delta^j t^j + C(K, i) c_K(xi) delta^(K - i) t^(K - i)`,
+/// the middle's coefficients and the piece's `top` kept as the polynomial's (a power past
+/// the model's degree bounded into its remainder). The interval form is this one bounded
+/// over `[-1, 1]` term by term.
+#[must_use]
+pub fn centred_tm(mid: &[Ivl], top: Ivl, kk: usize, delta: f64) -> Tay<Tm> {
+    let mut r = Tay::<Tm>::zero();
+    let dl = Ivl::from(delta);
+    let mut coeffs = [IZ; MAX_S + 2];
+    for i in 0..=TAY {
+        let mut pow = Ivl::from(1.0);
+        let mut j = 0;
+        while i + j < kk {
+            if j > 0 {
+                pow = pow * dl;
+            }
+            let m = mid.get(i + j).copied().unwrap_or(IZ);
+            if let Some(c) = coeffs.get_mut(j) {
+                *c = Ivl::from(binom(i + j, i)) * m * pow;
+            }
+            j += 1;
+        }
+        pow = pow * dl;
+        if let Some(c) = coeffs.get_mut(j) {
+            *c = Ivl::from(binom(kk, i)) * top * pow;
+        }
+        r.set(i, Tm::from_poly(coeffs.get(..=j).unwrap_or(&[]), IZ));
+    }
+    r
+}
+
+/// The order of the rails' and the centre's series over a piece (`K = 4 + SM_GN_TAYLOR`).
+const ARC_K: usize = 4 + TAYLOR;
+
+/// A piece's series for the arc: the rails', the centre's, and (a varying ball) the centre's
+/// s-derivative.
+type ArcSeries<S> = ([[Tay<S>; 3]; 2], [Tay<S>; 3], Option<[Tay<S>; 3]>);
+
+/// The rails' and the centre's coefficient series over a piece, centred at its middle by
+/// `centre_of` ([`centred`] for intervals, [`centred_tm`] for Taylor models) from the
+/// middle's coefficients and the piece's top one; and, `touch`, the centre's s-derivative.
+fn piece_series<S: Copy>(
+    f: &[VSer<Ivl>; 2],
+    centre: &VSer<Ivl>,
+    fm: &[VSer<Ivl>; 2],
+    cm: &VSer<Ivl>,
+    touch: bool,
+    zero: S,
+    centre_of: impl Fn(&[Ivl], Ivl) -> Tay<S>,
+) -> ArcSeries<S> {
+    let z = Tay { c: [zero; TAY + 1] };
+    let mut rho = [[z; 3]; 2];
+    let mut mc = [z; 3];
+    for q in 0..3 {
+        let mut ac_mid = [IZ; ARC_K];
+        for (rf, (ff, ffm)) in rho.iter_mut().zip(f.iter().zip(fm)) {
+            for (i, a) in ac_mid.iter_mut().enumerate() {
+                *a = vat(ffm, q, i, 0);
+            }
+            if let Some(x) = rf.get_mut(q) {
+                *x = centre_of(&ac_mid, vat(ff, q, ARC_K, 0));
+            }
+        }
+        for (i, a) in ac_mid.iter_mut().enumerate() {
+            *a = vat(cm, q, i, 0);
+        }
+        if let Some(x) = mc.get_mut(q) {
+            *x = centre_of(&ac_mid, vat(centre, q, ARC_K, 0));
+        }
+    }
+    let dm = touch.then(|| {
+        // m' from the centre's coefficients one order up: (i + 1) c_(i+1)
+        let mut dm = [z; 3];
+        for (q, dq) in dm.iter_mut().enumerate() {
+            let mut ac_mid = [IZ; ARC_K];
+            for (i, a) in ac_mid.iter_mut().enumerate() {
+                *a = vat(cm, q, i + 1, 0) * Ivl::from((i + 1) as f64);
+            }
+            *dq = centre_of(
+                &ac_mid,
+                vat(centre, q, ARC_K + 1, 0) * Ivl::from((ARC_K + 1) as f64),
+            );
+        }
+        dm
+    });
+    (rho, mc, dm)
+}
+
+/// The arc's row terms over one piece from interval series (the fork's
+/// `sm_ArcRowTermsOver`): every coefficient taken over the whole piece. Arguments as
+/// [`arc_terms_over`]'s.
+fn arc_terms_interval(
+    f: &[VSer<Ivl>; 2],
+    centre: &VSer<Ivl>,
+    fm: &[VSer<Ivl>; 2],
+    cm: &VSer<Ivl>,
+    d: Ivl,
+    o: [f64; 3],
+    touch: bool,
+) -> ArcTerms {
+    let (rho, mc, dm) = piece_series(f, centre, fm, cm, touch, IZ, |mid, top| {
+        centred(mid, top, ARC_K, d)
+    });
+    arc_terms_of(&rho, mc, dm.as_ref(), o)
+}
+
+/// The arc's row terms over one piece from Taylor models in `s - m` over it
+/// ([`centred_tm`]). Arguments as [`arc_terms_over`]'s.
+fn arc_terms_taylor(
+    f: &[VSer<Ivl>; 2],
+    centre: &VSer<Ivl>,
+    fm: &[VSer<Ivl>; 2],
+    cm: &VSer<Ivl>,
+    d: Ivl,
+    o: [f64; 3],
+    touch: bool,
+) -> ArcTerms {
+    let delta = d.mag();
+    let zero = Tm::constant(IZ);
+    let (rho, mc, dm) = piece_series(f, centre, fm, cm, touch, zero, |mid, top| {
+        centred_tm(mid, top, ARC_K, delta)
+    });
+    arc_terms_of(&rho, mc, dm.as_ref(), o)
+}
+
+/// The arc's row terms over one piece, both ways ([`ArcTermsBoth`]). `f`, `centre`: the
+/// rails' and the centre's series over the piece (to order `K = 4 + SM_GN_TAYLOR`); `fm`,
+/// `cm`: at its middle (to K - 1); `d`: s less the middle over the piece. `touch`
+/// (0d43b4c): the ball's radius varies, and the circle is the one it touches the envelope
+/// along (`centre` and `cm` one order more, for m').
+///
+/// The interval terms (`old`) take every coefficient over the whole piece, so the rails
+/// and the centre, which move together, enter the circle's radii, their lengths and the
+/// rational rows as independent ranges: on a long piece the radii's squared lengths reach
+/// 0 or the rows' fourth derivatives are orders of magnitude over their true values. The
+/// Taylor models keep each coefficient a polynomial in `s - m` (plus a remainder), so the
+/// common motion cancels; the tighter of the two is taken term by term (#14405).
+#[must_use]
+pub fn arc_terms_over(
+    f: &[VSer<Ivl>; 2],
+    centre: &VSer<Ivl>,
+    fm: &[VSer<Ivl>; 2],
+    cm: &VSer<Ivl>,
+    d: Ivl,
+    o: [f64; 3],
+    touch: bool,
+) -> ArcTermsBoth {
+    let old = arc_terms_interval(f, centre, fm, cm, d, o, touch);
+    let tm = arc_terms_taylor(f, centre, fm, cm, d, o, touch);
+    ArcTermsBoth {
+        old,
+        tight: old.meet(tm),
+    }
+}
+
 /// `sm_ArcRowTermsOver` (cc08236): the arc's row terms over one piece
 /// ([`gn_row_terms_over`]'s, every row varying), folded into `rt`; `false` where they are
-/// not proved. `f`, `centre`: the rails' and the centre's series over the piece (to order
-/// `K = 4 + SM_GN_TAYLOR`); `fm`, `cm`: at its middle (to K - 1); `d`: s less the middle
-/// over the piece. `touch` (0d43b4c): the ball's radius varies, and the circle is the one
-/// it touches the envelope along, about `m + ((rho1 - m) . m' / m' . m') m'` (`centre` and
-/// `cm` one order more, for m').
+/// not proved. Not the fork's: the terms are the tighter of the fork's interval ones and
+/// the Taylor models' ([`arc_terms_over`], #14405).
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn arc_row_terms_over(
@@ -1855,93 +2198,9 @@ pub fn arc_row_terms_over(
     rt: &mut GnRowTerms,
     touch: bool,
 ) -> bool {
-    const K: usize = 4 + TAYLOR;
-    let mut rho = [[Tay::<Ivl>::zero(); 3]; 2];
-    let mut mc = [Tay::<Ivl>::zero(); 3];
-    for q in 0..3 {
-        let mut ac_mid = [IZ; K];
-        for (rf, (ff, ffm)) in rho.iter_mut().zip(f.iter().zip(fm)) {
-            for (i, a) in ac_mid.iter_mut().enumerate() {
-                *a = vat(ffm, q, i, 0);
-            }
-            if let Some(x) = rf.get_mut(q) {
-                *x = centred(&ac_mid, vat(ff, q, K, 0), K, d);
-            }
-        }
-        for (i, a) in ac_mid.iter_mut().enumerate() {
-            *a = vat(cm, q, i, 0);
-        }
-        if let Some(x) = mc.get_mut(q) {
-            *x = centred(&ac_mid, vat(centre, q, K, 0), K, d);
-        }
-    }
-    if touch {
-        // m' from the centre's coefficients one order up: (i + 1) c_(i+1)
-        let mut dm = [Tay::<Ivl>::zero(); 3];
-        for (q, dq) in dm.iter_mut().enumerate() {
-            let mut ac_mid = [IZ; K];
-            for (i, a) in ac_mid.iter_mut().enumerate() {
-                *a = vat(cm, q, i + 1, 0) * Ivl::from((i + 1) as f64);
-            }
-            *dq = centred(
-                &ac_mid,
-                vat(centre, q, K + 1, 0) * Ivl::from((K + 1) as f64),
-                K,
-                d,
-            );
-        }
-        let mut dd = Tay::<Ivl>::zero();
-        let mut bd = Tay::<Ivl>::zero();
-        for ((&dq, &mq), &r0q) in dm.iter().zip(&mc).zip(&rho[0]) {
-            dd = dd + dq * dq;
-            bd = bd + (r0q - mq) * dq;
-        }
-        if !dd.at(0).is_positive() {
-            return false;
-        }
-        let kk = bd / dd;
-        for (mq, &dq) in mc.iter_mut().zip(&dm) {
-            *mq = *mq + kk * dq;
-        }
-    }
-    let [rho0, rho1] = &rho;
-    let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
-        return false;
-    };
-    // |S - O| <= |m - O| + the ball's radius over the piece
-    let mut d_mo = 0.0_f64;
-    let mut d_rad = 0.0_f64;
-    for ((mq, &oq), r0q) in mc.iter().zip(&o).zip(rho0) {
-        let dd = (mq.at(0) - Ivl::from(oq)).mag();
-        d_mo += dd * dd;
-        let b = (r0q.at(0) - mq.at(0)).mag();
-        d_rad += b * b;
-    }
-    let d_r = crate::geom::vector3d::sqrt(d_mo) + crate::geom::vector3d::sqrt(d_rad);
-    for (j, (hj, wj)) in h.iter().zip(&w).enumerate() {
-        let mut sq = 0.0_f64;
-        for hq in hj {
-            sq += hq.at(TAY).mag() * hq.at(TAY).mag();
-        }
-        let dx = 24.0 * crate::geom::vector3d::sqrt(sq);
-        let dy = 24.0 * wj.at(TAY).mag();
-        let dwlo = wj.at(0).lo;
-        if !(dx.is_finite() && dy.is_finite() && dwlo > 0.0) {
-            return false;
-        }
-        let (Some(xj), Some(yj), Some(lj)) = (rt.x.get_mut(j), rt.y.get_mut(j), rt.w_lo.get_mut(j))
-        else {
-            return false;
-        };
-        *xj = cmax(*xj, dx);
-        *yj = cmax(*yj, dy);
-        *lj = cmin(*lj, dwlo);
-    }
-    if !d_r.is_finite() {
-        return false;
-    }
-    rt.r = cmax(rt.r, d_r);
-    true
+    arc_terms_over(f, centre, fm, cm, d, o, touch)
+        .tight
+        .fold(rt)
 }
 
 /// One piece of a level [`gn_certify_span`] proved: its parameter range, its
@@ -2008,10 +2267,23 @@ enum Halving {
     Ignored,
 }
 
+/// One piece's row terms as a level holds them ([`absorb_piece`]): its varying rows'
+/// terms, and the arc's, which are the interval series' alone (`tight` false) where those
+/// prove the piece, until the level needs the tighter ones ([`tighten_level`]).
+struct PieceRows {
+    vary: Option<GnRowTerms>,
+    arc: Option<ArcTerms>,
+    tight: bool,
+}
+
 /// A level's terms, folded in piece by piece ([`absorb_piece`]): the jets' and the uv
 /// curves' largest fourth derivatives (per parameter and the fork's), their least values
 /// at the pieces' middles, the varying rows' terms, and whether every piece so far is
-/// proved.
+/// proved; the rows' terms and that both with the arc's certifying terms (`rows`,
+/// `proved`) and with the fork's interval ones (`rows_old`, `proved_old`: they steer the
+/// levels, #14405). The certifying terms are each piece's tighter ones where the interval
+/// terms do not prove it, and the interval ones otherwise until the level is tightened
+/// (`lazy` while any is).
 struct LevelAcc {
     m4: [[f64; MAX_E + 1]; 2],
     uv4: [f64; 2],
@@ -2020,11 +2292,27 @@ struct LevelAcc {
     uv4_lo_fork: [f64; 2],
     proved: bool,
     rows: GnRowTerms,
+    proved_old: bool,
+    rows_old: GnRowTerms,
+    pieces: Vec<PieceRows>,
+    lazy: bool,
+}
+
+/// No row terms folded in, for `ld` rows.
+fn no_rows(ld: usize) -> GnRowTerms {
+    GnRowTerms {
+        x: vec![0.0; ld],
+        y: vec![0.0; ld],
+        w_lo: vec![f64::INFINITY; ld],
+        r: 0.0,
+        w: [f64::INFINITY, f64::NEG_INFINITY],
+    }
 }
 
 impl LevelAcc {
     /// No piece folded in, for `ld` rows.
     fn new(ld: usize) -> Self {
+        let rows = no_rows(ld);
         Self {
             m4: [[0.0_f64; MAX_E + 1]; 2],
             uv4: [0.0_f64; 2],
@@ -2032,15 +2320,30 @@ impl LevelAcc {
             uv4_fork: [0.0_f64; 2],
             uv4_lo_fork: [0.0_f64; 2],
             proved: true,
-            rows: GnRowTerms {
-                x: vec![0.0; ld],
-                y: vec![0.0; ld],
-                w_lo: vec![f64::INFINITY; ld],
-                r: 0.0,
-                w: [f64::INFINITY, f64::NEG_INFINITY],
-            },
+            proved_old: true,
+            rows_old: rows.clone(),
+            rows,
+            pieces: Vec::new(),
+            lazy: false,
         }
     }
+}
+
+/// Folds one piece's varying-row terms `p` (folded into fresh terms) into `rt`: largest
+/// X, Y and R, least W, and the union of the thumbweights.
+fn fold_rows(rt: &mut GnRowTerms, p: &GnRowTerms) {
+    for (a, &b) in rt.x.iter_mut().zip(&p.x) {
+        *a = cmax(*a, b);
+    }
+    for (a, &b) in rt.y.iter_mut().zip(&p.y) {
+        *a = cmax(*a, b);
+    }
+    for (a, &b) in rt.w_lo.iter_mut().zip(&p.w_lo) {
+        *a = cmin(*a, b);
+    }
+    rt.r = cmax(rt.r, p.r);
+    let ([lo, hi], [plo, phi]) = (rt.w, p.w);
+    rt.w = [cmin(lo, plo), cmax(hi, phi)];
 }
 
 /// Folds piece `p` of the span `[a, b]` into `acc`: its largest terms always, its least
@@ -2090,69 +2393,141 @@ fn absorb_piece(
         }
     }
     let series = p.series.as_deref();
+    let mut held = PieceRows {
+        vary: None,
+        arc: None,
+        tight: false,
+    };
     if acc.proved {
         if let Some(v) = vary {
             // the root's guess at the piece's middle: the stations' thumbweights, linearly
+            let mut terms = no_rows(acc.rows.x.len());
             acc.proved = match series {
                 Some(ps) => {
                     let t = (ps.mid - a.s) / ctx.h;
                     let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
                     let guess = (1.0 - t) * a.w + t * b.w;
                     gn_row_terms_over(
-                        k,
-                        v,
-                        &ps.f,
-                        &ps.v,
-                        &ps.fm,
-                        &ps.vm,
-                        d,
-                        guess,
-                        bar,
-                        o,
-                        &mut acc.rows,
+                        k, v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, bar, o, &mut terms,
                     )
                 }
                 None => false,
             };
+            if acc.proved {
+                fold_rows(&mut acc.rows, &terms);
+                fold_rows(&mut acc.rows_old, &terms);
+                held.vary = Some(terms);
+            }
         }
     }
     if acc.proved && ctx.arc {
-        acc.proved = match series {
+        match series {
             Some(ps) => {
                 let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
-                arc_row_terms_over(&ps.f, &ps.v, &ps.fm, &ps.vm, d, o, &mut acc.rows, ctx.touch)
+                let old = arc_terms_interval(&ps.f, &ps.v, &ps.fm, &ps.vm, d, o, ctx.touch);
+                acc.proved_old = acc.proved_old && old.fold(&mut acc.rows_old);
+                // the interval terms where they prove the piece (the Taylor models' only
+                // when the level needs them), else the tighter terms at once
+                let terms = if old.proves() {
+                    acc.lazy = true;
+                    old
+                } else {
+                    held.tight = true;
+                    old.meet(arc_terms_taylor(
+                        &ps.f, &ps.v, &ps.fm, &ps.vm, d, o, ctx.touch,
+                    ))
+                };
+                acc.proved = terms.fold(&mut acc.rows);
+                held.arc = Some(terms);
             }
-            None => false,
-        };
+            None => acc.proved = false,
+        }
     }
+    if !acc.proved {
+        acc.proved_old = false;
+    }
+    acc.pieces.push(held);
 }
 
-/// What a proved level tells [`gn_certify_span_reusing`]: go on to the next level, stop
-/// there, or skip this level (its bound by the fork's term is not finite).
+/// Takes the arc's tighter terms ([`arc_terms_over`]'s, #14405) for every piece of the
+/// level whose interval terms were held alone, and folds the level's certifying row terms
+/// again from its pieces': as though each piece had taken its tighter terms at once. A
+/// piece proved stays proved (the tighter terms are never looser). `pieces`: the level's,
+/// in the order they were folded in.
+fn tighten_level(acc: &mut LevelAcc, pieces: &[CertifiedPiece], ctx: &LevelCtx, o: [f64; 3]) {
+    let mut rows = no_rows(acc.rows.x.len());
+    for (held, p) in acc.pieces.iter_mut().zip(pieces) {
+        if let Some(v) = &held.vary {
+            fold_rows(&mut rows, v);
+        }
+        if let Some(arc) = held.arc.as_mut() {
+            if !held.tight {
+                if let Some(ps) = p.series.as_deref() {
+                    let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
+                    *arc = arc.meet(arc_terms_taylor(
+                        &ps.f, &ps.v, &ps.fm, &ps.vm, d, o, ctx.touch,
+                    ));
+                }
+                held.tight = true;
+            }
+            if !arc.fold(&mut rows) {
+                // not reached (the tighter terms prove what the interval ones did); a
+                // level whose terms do not hold certifies nothing
+                acc.proved = false;
+                acc.proved_old = false;
+                break;
+            }
+        }
+    }
+    acc.rows = rows;
+    acc.lazy = false;
+}
+
+/// What a level tells [`gn_certify_span_reusing`]: go on to the next level, stop there, or
+/// skip this level (its bound by the fork's term is not finite).
 enum Flow {
     Next,
     Stop,
     Skip,
 }
 
-/// Closes a level whose pieces are all proved: its bound folded into `bound_out` (and the
-/// thumbweight over the span into `vary` where it lowers that), and whether a finer level
-/// goes on ([`gn_certify_span`]).
+/// Closes a level whose pieces are all proved by the certificate's terms (`acc.proved`):
+/// its bound folded into `bound_out` (and the thumbweight over the span into `vary` where
+/// it lowers that), and whether a finer level goes on ([`gn_certify_span`]); with the
+/// level certified (its bound finite). `pieces`: the level's, as folded into `acc`.
+///
+/// The bound is first the one of the pieces' terms as held (the interval ones where they
+/// prove a piece); where that is not at the target, the level is tightened
+/// ([`tighten_level`]: every piece's tighter terms, the Taylor models' too) and bounded
+/// again. A level the held terms certify the tighter ones certify (their bound is no
+/// larger), so the level's verdict, and `bound_out` wherever it is over the target, are
+/// those of every piece's tighter terms; the Taylor models are only taken where they can
+/// change it.
+///
+/// The levels are steered as before #14405, by the fork's interval terms
+/// (`acc.rows_old`): a level they do not prove goes on to the next one, the fork's term's
+/// bound not finite skips it, and the halving that decides whether a finer level is worth
+/// its cost compares their bounds. Only the stop at the target reads the certificate's
+/// bound, which is never over theirs (each term is the tighter of the two, or theirs): so
+/// a span the interval terms certify from a given level, these certify at the same level
+/// or a coarser one, and a span takes no more levels than it did.
+#[allow(clippy::too_many_arguments)]
 fn close_level(
-    acc: &LevelAcc,
+    acc: &mut LevelAcc,
+    pieces: &[CertifiedPiece],
     ctx: &LevelCtx,
     bar: &GnSectionFormT<Ivl>,
+    o: [f64; 3],
     bound_out: &mut f64,
     last: &mut f64,
-    vary: Option<&mut GnVarying>,
-) -> Flow {
+    mut vary: Option<&mut GnVarying>,
+) -> (Flow, bool) {
     let (h, l_jets, arc, rows_vary) = (ctx.h, ctx.l_jets, ctx.arc, ctx.rows_vary);
-    let (m4, rows) = (&acc.m4, &acc.rows);
-    // the level's bound with the uv curves' term `uv` (#2690: taken with each
-    // parameter's own term, `uv4`, to certify, and with the fork's, `uv4_fork`, to steer
-    // the levels as the fork does, so that no span takes more levels or pieces than
-    // there)
-    let level_bound = |uv: &[f64; 2]| -> f64 {
+    // the level's bound with the varying rows' terms `rows` and the uv curves' term `uv`
+    // (#2690: taken with each parameter's own term, `uv4`, to certify, and with the
+    // fork's, `uv4_fork`, to steer the levels as the fork does, so that no span takes more
+    // levels or pieces than there)
+    let level_bound = |m4: &[[f64; MAX_E + 1]; 2], rows: &GnRowTerms, uv: &[f64; 2]| -> f64 {
         let mut bound = 0.0_f64;
         let mut da = 0.0_f64;
         for (m4f, &uvf) in m4.iter().zip(uv) {
@@ -2197,23 +2572,43 @@ fn close_level(
         }
         bound
     };
-    let bound = level_bound(&acc.uv4_fork);
-    if !bound.is_finite() {
-        return Flow::Skip;
-    }
-    // certified by each parameter's own term, never larger than the fork's
-    let bound = round_up(level_bound(&acc.uv4) * (1.0 + 1.0e-12));
-    if bound < *bound_out {
-        // the thumbweight over the span, proved at the level whose bound is returned
-        if let Some(v) = vary {
-            let ([lo, hi], [rlo, rhi]) = (v.w, rows.w);
-            v.w = [cmin(lo, rlo), cmax(hi, rhi)];
+    // the certificate's bound (#14405): with the pieces' terms as held, and where that is
+    // not at the target, with every piece's tighter terms (the bound and the level's
+    // verdict then as though every piece had taken them at once)
+    let mut certified = false;
+    loop {
+        if level_bound(&acc.m4, &acc.rows, &acc.uv4_fork).is_finite() {
+            certified = true;
+            // certified by each parameter's own term, never larger than the fork's
+            let bound = round_up(level_bound(&acc.m4, &acc.rows, &acc.uv4) * (1.0 + 1.0e-12));
+            if bound < *bound_out {
+                // the thumbweight over the span, proved at the level whose bound is returned
+                if let Some(v) = vary.as_deref_mut() {
+                    let ([lo, hi], [rlo, rhi]) = (v.w, acc.rows.w);
+                    v.w = [cmin(lo, rlo), cmax(hi, rhi)];
+                }
+            }
+            *bound_out = cmin(*bound_out, bound);
+            if *bound_out <= ctx.target {
+                return (Flow::Stop, true);
+            }
+        }
+        if !acc.lazy {
+            break;
+        }
+        tighten_level(acc, pieces, ctx, o);
+        if !acc.proved {
+            return (Flow::Next, certified);
         }
     }
-    *bound_out = cmin(*bound_out, bound);
-    if *bound_out <= ctx.target {
-        return Flow::Stop;
+    // steered by the fork's interval terms: a level they do not prove goes on
+    if !acc.proved_old {
+        return (Flow::Next, certified);
     }
+    if !level_bound(&acc.m4, &acc.rows_old, &acc.uv4_fork).is_finite() {
+        return (Flow::Skip, certified);
+    }
+    let bound = round_up(level_bound(&acc.m4, &acc.rows_old, &acc.uv4) * (1.0 + 1.0e-12));
     // the bound no finer level goes under: over the target, no level certifies the span
     // (the jets' least terms only where the bound takes the jets' sum, not with
     // varying rows, whose own least terms are not ported: the fork's f916a8d)
@@ -2227,15 +2622,15 @@ fn close_level(
         lower = cmax(lower, cmax(if rows_vary { 0.0 } else { sum }, k4 * uvl));
     }
     if round_down(lower * (1.0 - 1.0e-12)) > ctx.target {
-        return Flow::Stop;
+        return (Flow::Stop, certified);
     }
     // once proved, one finer level more only where the last one halved the bound (or, to
     // the target, while over it)
     if ctx.halving == Halving::Steers && bound > 0.5 * *last {
-        return Flow::Stop;
+        return (Flow::Stop, certified);
     }
     *last = bound;
-    Flow::Next
+    (Flow::Next, certified)
 }
 
 /// `sm_GnCertifySpan`: the certified bound on the Hermite span between two stations, or
@@ -2414,24 +2809,22 @@ pub fn gn_certify_span_reusing(
                 level: start - 1,
                 pieces: pieces.into_iter().cloned().collect(),
             };
-            let flow = close_level(
-                &acc,
+            let (flow, certified) = close_level(
+                &mut acc,
+                &own.pieces,
                 &ctx,
                 &bar,
+                o,
                 &mut bound_out,
                 &mut last,
                 vary.as_deref_mut(),
             );
-            if !matches!(flow, Flow::Skip) {
+            if certified {
                 reuse.first = reuse.first.or(Some(own.level));
+                reuse.kept = Some(own);
             }
-            match flow {
-                Flow::Skip => {}
-                Flow::Next => reuse.kept = Some(own),
-                Flow::Stop => {
-                    reuse.kept = Some(own);
-                    return Ok(bound_out);
-                }
+            if matches!(flow, Flow::Stop) {
+                return Ok(bound_out);
             }
         }
     }
@@ -2556,24 +2949,22 @@ pub fn gn_certify_span_reusing(
             level,
             pieces: level_pieces,
         };
-        let flow = close_level(
-            &acc,
+        let (flow, certified) = close_level(
+            &mut acc,
+            &own.pieces,
             &ctx,
             &bar,
+            o,
             &mut bound_out,
             &mut last,
             vary.as_deref_mut(),
         );
-        if !matches!(flow, Flow::Skip) {
+        if certified {
             reuse.first = reuse.first.or(Some(own.level));
+            reuse.kept = Some(own);
         }
-        match flow {
-            Flow::Skip => {}
-            Flow::Next => reuse.kept = Some(own),
-            Flow::Stop => {
-                reuse.kept = Some(own);
-                break;
-            }
+        if matches!(flow, Flow::Stop) {
+            break;
         }
     }
     Ok(bound_out)
@@ -3165,5 +3556,337 @@ mod tests {
             long.is_finite() && long < target && long >= jl,
             "{long} {jl}"
         );
+    }
+
+    use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData, KnotType};
+
+    /// A fixed-seed generator in `[0, 1)`.
+    fn rng(seed: u64) -> impl FnMut() -> f64 {
+        let mut s = seed;
+        move || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 11) as f64 / (1_u64 << 53) as f64
+        }
+    }
+
+    /// The quadratic Bezier curve on `[0, 1]` with control points `c`.
+    fn bezier2(c: [Vec3; 3]) -> BSplineCurve {
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &c,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// The faces, their nets, the leader and the radius law a piece's arc terms are taken
+    /// on, and the feet's seed at s.
+    struct ArcCase {
+        faces: [Surface; 2],
+        nets: [Nurbs; 2],
+        leader: BSplineCurve,
+        law: Option<BSplineCurve>,
+        r: [f64; 2],
+        side: [f64; 2],
+        seed: Box<dyn Fn(f64) -> [f64; 4]>,
+    }
+
+    impl ArcCase {
+        /// The wedge of the plane z = 0 and the plane through the x axis at `phi` from it
+        /// (towards (0, cos phi, sin phi)), the ball between them of radius r(s), the
+        /// quadratic Bezier law `r` over x = 10 s, s in `[0, 1]`: its centre
+        /// `r(s) / sin(phi / 2)` along the bisector, the quadratic Bezier with the same
+        /// control radii, is the leader. A constant `r` is no law.
+        fn wedge(k: &Kernel, phi: f64, r: [f64; 3]) -> Self {
+            let len = 10.0;
+            let (cp, sp) = (phi.cos(), phi.sin());
+            let f1 = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+            let f2 = plane(Vec3::ZERO, Vec3::X, Vec3::new(0.0, cp, sp));
+            let (bc, bs) = ((0.5 * phi).cos(), (0.5 * phi).sin());
+            let ctrl = |i: usize| {
+                let rho = r[i] / bs;
+                Vec3::new(len * i as f64 / 2.0, rho * bc, rho * bs)
+            };
+            let leader = bezier2([ctrl(0), ctrl(1), ctrl(2)]);
+            let constant = r[0] == r[1] && r[1] == r[2];
+            let law = (!constant).then(|| bezier2([0, 1, 2].map(|i| Vec3::new(r[i], 0.0, 0.0))));
+            let lc = leader.clone();
+            // the feet: the centre's projections, (x, rho cos(phi / 2)) on both planes
+            let seed = Box::new(move |s: f64| {
+                let p = lc.evaluate_point(s).unwrap();
+                let v = p.y * cp + p.z * sp;
+                [p.x, p.y, p.x, v]
+            });
+            Self {
+                nets: [nurbs(k, &f1), nurbs(k, &f2)],
+                faces: [f1, f2],
+                leader,
+                law,
+                r: [r[0], r[0]],
+                // the second plane's normal (0, -sin phi, cos phi) points away from the ball
+                side: [1.0, -1.0],
+                seed,
+            }
+        }
+
+        /// The cylinder of radius 3 about z standing on the plane z = 0, the ball of radius
+        /// 1 outside it, its centre line the circle of radius 4 at height 1 from 10 to 80
+        /// degrees (a rational quadratic arc): the feet's motion is curved.
+        fn cylinder(k: &Kernel) -> Self {
+            let (big_r, r) = (3.0, 1.0);
+            let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+            let mut cyl = Cone::new_cylinder_bounded(
+                Vec3::new(0.0, 0.0, -2.0),
+                Vec3::X,
+                Vec3::Y,
+                big_r,
+                0.0,
+                360.0,
+                10.0,
+                false,
+                false,
+                false,
+            );
+            cyl.make_nurb(k).unwrap();
+            let fc = Surface::from(cyl);
+            let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+            let leader = BSplineCurve::create_circle_segment(
+                3,
+                &frame,
+                big_r + r,
+                10.0,
+                80.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            let nc = nurbs(k, &fc);
+            let lc = leader.clone();
+            let foot_c = move |s: f64| {
+                let l = lc.evaluate_point(s).unwrap();
+                let q = big_r / (big_r + r);
+                Vec3::new(l.x * q, l.y * q, r)
+            };
+            let (cu, cv) = nearest_uv(&nc, foot_c(0.45));
+            let pc = nurbs_partials(
+                &nc,
+                span(&nc.u, nc.p, nc.nu, cu),
+                span(&nc.v, nc.q, nc.nv, cv),
+                cu,
+                cv,
+                1,
+            );
+            let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+            let out = foot_c(0.45) - Vec3::new(0.0, 0.0, r);
+            let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+            let lc = leader.clone();
+            let ncs = nc.clone();
+            let seed = Box::new(move |s: f64| {
+                let l = lc.evaluate_point(s).unwrap();
+                let (u, v) = nearest_uv(&ncs, foot_c(s));
+                [l.x, l.y, u, v]
+            });
+            Self {
+                nets: [nurbs(k, &fp), nc],
+                faces: [fp, fc],
+                leader,
+                law: None,
+                r: [r, r],
+                side: [1.0, side_c],
+                seed,
+            }
+        }
+
+        /// The station at s, its series to `order` in s.
+        fn station(&self, k: &Kernel, s: f64, order: usize) -> GnStation {
+            let law = self.law.as_ref().map(|c| GnLaw::of(c).unwrap());
+            let lr = law_series(law.as_ref(), s, order, false).unwrap();
+            let [f0, f1] = &self.faces;
+            gn_solve_station_counted(
+                k,
+                [f0, f1],
+                &self.leader,
+                s,
+                (self.seed)(s),
+                self.r,
+                self.side,
+                Trunc::new(order, 0).unwrap(),
+                1e-12,
+                lr.as_ref(),
+            )
+            .0
+            .unwrap()
+        }
+
+        /// A piece's arc terms both ways and the point O they are taken about (the first
+        /// station's centre); `None` where the feet over the piece are not enclosed.
+        fn terms(&self, k: &Kernel, sa: f64, sb: f64) -> Option<(ArcTermsBoth, [f64; 3])> {
+            let law = self.law.as_ref().map(|c| GnLaw::of(c).unwrap());
+            let touch = law.is_some();
+            let (a, b) = (self.station(k, sa, 0), self.station(k, sb, 0));
+            let [f0, f1] = &self.faces;
+            let [n0, n1] = &self.nets;
+            let ln = NurbsCurve::of(&self.leader).unwrap();
+            let (_, series) = gn_fourth_over_series(
+                k,
+                [n0, n1],
+                &ln,
+                [f0, f1],
+                &self.leader,
+                &a,
+                &b,
+                self.r,
+                self.side,
+                0,
+                law.as_ref(),
+                usize::from(touch),
+                None,
+            )
+            .unwrap();
+            let ps = series?;
+            let o = [0, 1, 2].map(|q| a.v.a[q].c[0][0]);
+            let d = Ivl::new(sa, sb) - Ivl::from(ps.mid);
+            Some((arc_terms_over(&ps.f, &ps.v, &ps.fm, &ps.vm, d, o, touch), o))
+        }
+
+        /// The arc terms at one station, solved in floating point: its jets in point
+        /// intervals, so the terms are the rows' values at s to their rounding.
+        fn terms_at(&self, k: &Kernel, s: f64, o: [f64; 3]) -> ArcTerms {
+            let touch = self.law.is_some();
+            let st = self.station(k, s, 4 + usize::from(touch));
+            let series = |v: &VSer<f64>, q: usize, up: usize| {
+                let mut t = Tay::<Ivl>::zero();
+                for i in 0..=TAY {
+                    t.set(
+                        i,
+                        Ivl::from(
+                            v.a[q].c[i + up][0] * (if up == 1 { (i + 1) as f64 } else { 1.0 }),
+                        ),
+                    );
+                }
+                t
+            };
+            let rho = [0, 1].map(|f| [0, 1, 2].map(|q| series(&st.f[f], q, 0)));
+            let mc = [0, 1, 2].map(|q| series(&st.v, q, 0));
+            let dm = touch.then(|| [0, 1, 2].map(|q| series(&st.v, q, 1)));
+            arc_terms_of(&rho, mc, dm.as_ref(), o)
+        }
+    }
+
+    /// The arc's row terms over a piece hold the rows sampled over it, on wide pieces
+    /// (fixed seed): at 101 stations solved in floating point, `24 |H_j''''|` and
+    /// `24 |W_j''''|` are at most the piece's terms, `W_j` at least its least weight and
+    /// `|S - O|` within its `R`. Cases: wedges of two planes at random angles with random
+    /// constant, linear and quadratic radius laws (a varying ball: the touch circle), and a
+    /// ball rolled between a plane and a cylinder (curved rails); pieces up to 0.6 of the
+    /// leader's parameter on the wedges (6 along the edge), up to 0.02 (1.4 degrees) on the
+    /// cylinder, where the feet are enclosed no wider. The tighter terms are never looser
+    /// than the fork's interval ones, term by term; on the wedges, where the rails and the
+    /// centre move together, the interval terms do not prove the rows on most of these
+    /// pieces (41 of 42), the Taylor models' do on every one.
+    #[test]
+    fn arc_terms_hold_their_sampled_rows_on_wide_pieces() {
+        let k = Kernel::default();
+        let mut next = rng(0x9e37_79b9_7f4a_7c15);
+        let (mut judged, mut unenclosed) = (0, 0);
+        let (mut old_unproved, mut wedges) = (0, 0);
+        for case in 0..48 {
+            let (c, wedge) = if case % 8 == 7 {
+                (ArcCase::cylinder(&k), false)
+            } else {
+                let phi = (60.0 + 90.0 * next()).to_radians();
+                let r0 = 1.0 + 2.0 * next();
+                let r = match case % 3 {
+                    0 => [r0; 3],
+                    1 => {
+                        let r1 = 1.0 + 2.0 * next();
+                        [r0, 0.5 * (r0 + r1), r1]
+                    }
+                    _ => [r0, 1.0 + 2.0 * next(), 1.0 + 2.0 * next()],
+                };
+                (ArcCase::wedge(&k, phi, r), true)
+            };
+            // a cylinder's pieces as wide as its feet are enclosed over (their enclosure,
+            // not the arc's terms, limits that face: 0.05 of the leader is not enclosed)
+            let width = if wedge {
+                0.05 + 0.55 * next()
+            } else {
+                0.005 + 0.015 * next()
+            };
+            let sa = next() * (1.0 - width);
+            let sb = sa + width;
+            let Some((both, o)) = c.terms(&k, sa, sb) else {
+                // the feet over the piece not enclosed: no row terms to compare
+                eprintln!("case {case} (wedge {wedge}): [{sa}, {sb}] not enclosed");
+                unenclosed += 1;
+                continue;
+            };
+            let (t, old) = (both.tight, both.old);
+            // never looser (a NaN term of the interval series is no bound)
+            let upper = |a: f64, b: f64| a <= b || b.is_nan();
+            for j in 0..3 {
+                assert!(
+                    upper(t.x[j], old.x[j]) && upper(t.y[j], old.y[j]),
+                    "{case}: {t:?} {old:?}"
+                );
+                assert!(
+                    upper(old.w_lo[j], t.w_lo[j]) || old.w_lo[j].is_nan(),
+                    "{case}: {t:?} {old:?}"
+                );
+            }
+            assert!(upper(t.r, old.r), "{case}");
+            let proved = t.fold(&mut GnRowTerms {
+                x: vec![0.0; 3],
+                y: vec![0.0; 3],
+                w_lo: vec![f64::INFINITY; 3],
+                r: 0.0,
+                w: [f64::INFINITY, f64::NEG_INFINITY],
+            });
+            if wedge {
+                wedges += 1;
+                assert!(proved, "{case}: [{sa}, {sb}] {t:?}");
+                let old_proved = old.x.iter().chain(&old.y).all(|v| v.is_finite())
+                    && old.w_lo.iter().all(|&w| w > 0.0);
+                if !old_proved {
+                    old_unproved += 1;
+                }
+            }
+            if !proved {
+                continue;
+            }
+            for i in 0..=100 {
+                let s = sa + (sb - sa) * f64::from(i) / 100.0;
+                let at = c.terms_at(&k, s, o);
+                // the floating solve's own error (its residual within 1e-12)
+                let slack = |v: f64| 1e-8 * (1.0 + v.abs());
+                for j in 0..3 {
+                    assert!(
+                        at.x[j] <= t.x[j] + slack(at.x[j]),
+                        "{case} s {s}: x {at:?} {t:?}"
+                    );
+                    assert!(
+                        at.y[j] <= t.y[j] + slack(at.y[j]),
+                        "{case} s {s}: y {at:?} {t:?}"
+                    );
+                    assert!(
+                        at.w_lo[j] >= t.w_lo[j] - slack(at.w_lo[j]),
+                        "{case} s {s}: w {at:?} {t:?}"
+                    );
+                }
+                assert!(at.r <= t.r + slack(at.r), "{case} s {s}: r {at:?} {t:?}");
+                judged += 1;
+            }
+        }
+        eprintln!("{judged} samples, {unenclosed} pieces not enclosed, {old_unproved} of {wedges} wedges unproved by the interval terms");
+        assert_eq!(unenclosed, 0);
+        assert_eq!(judged, 48 * 101);
+        assert!(2 * old_unproved > wedges, "{old_unproved} of {wedges}");
     }
 }
