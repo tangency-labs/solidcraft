@@ -88,7 +88,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
@@ -104,7 +103,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.shell_inner_shell_of_statuses = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
@@ -159,7 +157,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.found_torus_sphere_keep_tested_nurb = true;
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
-    f.loop_orientation_floor_from_loop_box = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.uv_trim_joins_drop_pieces = true;
     f.shell_edges_on_analytics_exact = true;
@@ -197,7 +194,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
-    f.imprint_extension_keeps_analytic_curve = true;
     f.fillet_trace_from_tangent_point_toward_next = true;
     f.fillet_tangent_point_one_sided_step = true;
     f.fillet_rails_meet_at_one_end_point = true;
@@ -306,7 +302,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.is_iso_curve_at_propagates_canonical_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
