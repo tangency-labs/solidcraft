@@ -153,7 +153,7 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
 /// `w1 / √(w0 w2)`, is the cosine of the half sweep `α`, the angle between the leg
 /// `Q1 − Q0` and the chord `Q2 − Q0` (The NURBS Book, Piegl and Tiller, §7.3 and §7.5). The
 /// centre is then `Q0 + r n`, `n` the unit normal into the arc in its plane and
-/// `r = |Q2 − Q0| / (2 sin α)`: the circle passes through `Q0` exactly, so an error in `r`
+/// `r = |Q1 − Q0| / tan α`: the circle passes through `Q0` exactly, so an error in `r`
 /// and the matching one in the centre cancel along the arc instead of growing with
 /// `1 / (1 − w1²)` as the centre found from the legs' meeting does. Everything is built from
 /// differences of control points, so rows that are translates of each other (an extruded
@@ -213,7 +213,11 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
             return Ok(None);
         }
         let inward = normal.cross(tangent);
-        let radius = chord.length() / (2.0 * half.sin());
+        // r = |leg| / tan α = |leg| cos α / sin α, from the leg's direction and the chord's
+        let Ok(across) = chord.unitize() else {
+            return Ok(None);
+        };
+        let radius = leg0.length() * tangent.dot(across) / tangent.cross(across).length();
         // as `IsArc`: a radius too large for the arc's length makes no accurate circle
         if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
             return Ok(None);
