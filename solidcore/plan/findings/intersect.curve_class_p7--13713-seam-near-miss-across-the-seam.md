@@ -30,8 +30,21 @@ the seam curve's end is a gap its tolerance bounds, as in the local-tolerance mo
 Solid Modeling and Applications, 1995), where an entity may lie off its geometry by up to its own
 tolerance.
 
+**Where the 1e-8 comes from.** Not from an intersection: the operands carry it. SolidCraft's
+sketch hands the kernel the arc already 1e-8 off (centre at the origin, radius 10.000000010132878,
+its end 1.01e-8 above the x axis), so no step of the boolean makes the gap, and no step of it can
+put the shared vertex on both seams.
+
 **Fix.** A vertex end whose gap reaches the threshold is measured again across the curve within
 surface 1: the component of its offset from C(t) along n × C'(t), n the surface normal at the UV
-curve 1's point. Where that direction is not defined (no UV curve 1, a vanishing tangent or
-normal) the whole gap still counts. The threshold is unchanged, and a coincident edge keeps its
-full gap: the rounded slant plane keeps face test 36, its ninth sliver face and edge test 9.
+curve 1's point (the seam's `CrvOnSurf` shares its UV curve's parameter). Where that direction is
+not available (no surface 1 or UV curve 1, a vanishing tangent or normal, an evaluation that
+fails) the whole gap counts, as before. The threshold is unchanged. A coincident edge's gap is
+counted as upstream: in both joins only vertex ends were near misses, and an edge running beside
+the seam is the sliver test 36 is for.
+
+**What does not move.** With this change on top of the construction fix for the rounded slant
+plane (the perturbation band of `issue_2538_tilted_notch_on_a_slant_edge` on that branch), all 16
+rows report exactly what they report without it, the four rows still carrying face test 36
+included: those are not near misses this change drops. `wr579_near_coincident_tube_ends_join`, which
+pins face test 36 at tube ends 1e-5 to 1e-7 apart, passes unchanged.
