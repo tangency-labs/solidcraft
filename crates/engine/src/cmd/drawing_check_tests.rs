@@ -688,3 +688,22 @@ fn a_dimension_an_exploded_view_holds_back_covers_nothing() {
     let reply = checked(&mut s, json!({}));
     assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "dimension", "id": width}]), "{reply}");
 }
+
+/// A note's branch that loses its edge is a finding of its own, naming the branch by its number; the
+/// note's anchor, on the view itself, stands.
+#[test]
+fn a_notes_lost_branch_is_listed_by_its_number() {
+    let (mut s, chamfer) = plate();
+    let (_, view) = drawn(&mut s);
+    let add =
+        json!({"anchor": {"view": ids::encode(view)}, "at": [60, 40], "content": "Break", "branches": [{"edge": [50, 0, 0]}, {"edge": [50, 0, 8]}]});
+    let note = run(&mut s, "drawing.note.add", add)["note"].clone();
+    assert!(of_kind(&checked(&mut s, json!({})), "lost").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "timeline.delete", json!({"feature": chamfer}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let lost = whys(&reply, "lost");
+    assert_eq!(lost.iter().map(|(kind, id, _)| (kind.as_str(), id.as_str())).collect::<Vec<_>>(), [("note", note.as_str().unwrap())], "{reply}");
+    assert!(lost[0].2.starts_with("branch 2: "), "{reply}");
+}

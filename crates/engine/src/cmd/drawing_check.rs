@@ -178,8 +178,17 @@ fn references(s: &Session, d: &Drawing, sheets: &[u64]) -> Result<Vec<Finding>> 
     let read_balloons = s.doc.resolve_balloons(&s.model, d, &wanted(&balloons)).map_err(|e| bad(CHECK, e.to_string()))?;
     let read_notes = s.doc.resolve_notes(&s.model, d, &wanted(&notes)).map_err(|e| bad(CHECK, e.to_string()))?;
     let balloons = balloons.iter().zip(read_balloons).map(|((id, sheet), r)| (*sheet, object(CheckedKind::Balloon, *id), r.status));
-    let notes = notes.iter().zip(read_notes).map(|((id, sheet), r)| (*sheet, object(CheckedKind::Note, *id), r.anchor.status));
-    Ok(balloons.chain(notes).filter_map(|(sheet, object, status)| status_finding(sheet, object, status)).collect())
+    let mut out: Vec<Finding> = balloons.filter_map(|(sheet, object, status)| status_finding(sheet, object, status)).collect();
+    // A note's anchor stands as a reference does; each branch that doesn't is a finding of its own, by
+    // its number, as a lost branch loses only itself.
+    for ((id, sheet), r) in notes.iter().zip(read_notes) {
+        out.extend(status_finding(*sheet, object(CheckedKind::Note, *id), r.anchor.status));
+        for (n, end) in (1..).zip(r.branches) {
+            let branch = status_finding(*sheet, object(CheckedKind::Note, *id), end.status);
+            out.extend(branch.map(|f| Finding { why: format!("branch {n}: {}", f.why), ..f }));
+        }
+    }
+    Ok(out)
 }
 
 /// The title block fields on `sheets` with no value, the cells whose typed text hides one, and the
