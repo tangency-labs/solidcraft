@@ -2422,6 +2422,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         PAGE_SKETCH => {
             app.session.auto_project = true;
             app.session.project_construction = false;
+            app.session.project_body_silhouette = false;
             app.ui.pick_bodies = false;
         }
         _ => {}

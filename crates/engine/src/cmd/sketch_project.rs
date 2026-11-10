@@ -527,6 +527,9 @@ fn link_parts(sk: &Sketch, link: &str) -> (Vec<String>, Vec<String>) {
     (curves, points)
 }
 
+/// Run a projection command (Project, Intersect, or Include 3D Geometry) on the given
+/// references, adding a link for each to the active sketch. Returns the list of
+/// projected links and any references that were already projected.
 fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_link: bool) -> Result<Value> {
     let refs: Vec<Value> = match p.get("refs").or_else(|| p.get("ref")) {
         Some(Value::Array(a)) => a.iter().take(1000).cloned().collect(),

@@ -1331,6 +1331,9 @@ impl SolveApp {
         if let Some(c) = flag("project_construction") {
             self.session.project_construction = c;
         }
+        if let Some(c) = flag("project_body_silhouette") {
+            self.session.project_body_silhouette = c;
+        }
         if let Some(m) = v.get("autosave_minutes").and_then(Value::as_f64).filter(|m| m.is_finite()) {
             self.autosave_minutes = m.clamp(0.0, 600.0);
         }

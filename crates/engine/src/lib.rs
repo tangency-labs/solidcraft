@@ -555,6 +555,7 @@ pub struct Session {
     /// Projecting a whole body (`{"body": name}`) into a sketch produces its silhouette: many
     /// curves from the whole outline. Off by default (#14190): project a single edge or face
     /// instead. Turn this on to keep the old whole-body silhouette behaviour.
+    /// A preference, kept like `auto_project` when another design is opened or started.
     pub project_body_silhouette: bool,
     /// Host preferences; never saved in a design.
     pub disabled_plugins: std::collections::BTreeSet<String>,
