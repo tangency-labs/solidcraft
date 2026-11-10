@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&MOVE3D_CONTRACT)
         .output(output_schema_for::<Move3dResult>)
-        .params("wire: drawn 3D curve or point id, index?: fit point (default 0) | point: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point of a spline, a lone point; needs 3D Sketch on); to: [x,y,z] | by: [dx,dy,dz] (world); points joined to it move too. A `point` on the plane first turns the lines and fit-point splines through it (or the lone point) into drawn 3D curves through the same places, which `curves` lists; their constraints and dimensions go. Arcs, circles, ellipses, conics and control-point or closed splines through it are refused"),
+        .params("wire: drawn 3D curve or point id, index?: fit point (default 0) | point: a point on the sketch plane (`l1.end`, `p3`: a line's end, a fit point of a spline, a lone point; needs 3D Sketch on); to: [x,y,z] | by: [dx,dy,dz] (world); points joined to it move too. A `point` on the plane first turns the lines and fit-point splines through it (or the lone point) into drawn 3D curves through the same places, which `curves` lists (`wire` and `index` say where the point is now); their constraints and dimensions go. Arcs, circles, ellipses, conics and control-point or closed splines through it are refused"),
 ];
 
 /// A command's reply as JSON: built from the type its output schema describes, so the two can't
@@ -215,7 +215,7 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         };
         Ok(sk.move_drawn_point(&wire, index, to)?)
     })?;
-    reply(cmd, Move3dResult { moved: n, curves: Vec::new(), sketch: info, param_warnings: Vec::new() })
+    reply(cmd, Move3dResult { moved: n, curves: Vec::new(), wire: None, index: None, sketch: info, param_warnings: Vec::new() })
 }
 
 /// What a plane curve through a lifted point is as a drawn 3D curve: its point indices, in the
@@ -251,7 +251,7 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
     let plane = s.model.state().sketch(id).map(|ss| ss.plane).ok_or_else(|| bad(cmd, "the sketch has not been solved"))?;
     let inverse = inverse_owner_frame(s, p, cmd)?;
     let place = |q: Vec2| plane.to_world(q);
-    let ((n, curves), info) = edit(s, p, cmd, false, |sk, _| {
+    let ((n, curves, k), info) = edit(s, p, cmd, false, |sk, _| {
         needs_3d(sk, cmd)?;
         let missing = || bad(cmd, format!("no point `{point}` in the sketch"));
         let pi = sk.resolve_point(point).filter(|i| *i != 0).ok_or_else(missing)?;
@@ -287,9 +287,10 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
         }
         let k = fits[0].iter().position(|q| q.dist(from) < 1e-9).unwrap_or(0);
         let n = sk.move_drawn_point(&made[0], k, goal)?;
-        Ok((n, made))
+        Ok((n, made, k))
     })?;
-    reply(cmd, Move3dResult { moved: n, curves, sketch: info, param_warnings: Vec::new() })
+    let wire = curves.first().cloned();
+    reply(cmd, Move3dResult { moved: n, curves, wire, index: Some(k), sketch: info, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

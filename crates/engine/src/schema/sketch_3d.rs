@@ -319,6 +319,12 @@ pub struct Move3dResult {
     /// With `point`: the drawn 3D curves the plane geometry through it became.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curves: Vec<String>,
+    /// With `point`: the drawn curve the moved point is on now (the first of `curves`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire: Option<String>,
+    /// With `point`: which fit point of `wire` it is, for moving it again with `wire` and `index`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
