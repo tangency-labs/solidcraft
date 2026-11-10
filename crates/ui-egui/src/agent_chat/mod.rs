@@ -199,6 +199,37 @@ pub struct Gallery {
     at: usize,
 }
 
+/// The design at one moment, as the host hands it to the chat. The chat keeps it and compares it
+/// with the design open now by identity (the very same design, not an equal one), and never reads
+/// it; only the host that made it gets the design back (#13438).
+#[derive(Clone)]
+pub struct Revision(Arc<dyn std::any::Any + Send + Sync>);
+
+impl Revision {
+    /// The host's `design` as it is now; the revision keeps it alive.
+    pub fn of<T: std::any::Any + Send + Sync>(design: &Arc<T>) -> Self {
+        Self(design.clone())
+    }
+    /// Whether this is the very `design`.
+    pub fn is<T: std::any::Any + Send + Sync>(&self, design: &Arc<T>) -> bool {
+        std::ptr::addr_eq(Arc::as_ptr(&self.0), Arc::as_ptr(design))
+    }
+    /// Whether both are the same design.
+    pub fn same(&self, other: &Revision) -> bool {
+        std::ptr::addr_eq(Arc::as_ptr(&self.0), Arc::as_ptr(&other.0))
+    }
+    /// The design, for the host that made the revision; `None` when it is not a `T`.
+    pub fn get<T: std::any::Any + Send + Sync>(&self) -> Option<Arc<T>> {
+        self.0.clone().downcast().ok()
+    }
+}
+
+impl std::fmt::Debug for Revision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Revision({:p})", Arc::as_ptr(&self.0).cast::<()>())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Item {
     User {
@@ -241,10 +272,10 @@ pub enum Item {
         tool: String,
         answer: Option<bool>,
     },
-    /// A message's changes, merged into one undo step; `doc`: the design right after it.
+    /// A message's changes, merged into one undo step; `revision`: the design right after it.
     Changes {
         steps: usize,
-        doc: Arc<solidcraft_engine::doc::Document>,
+        revision: Revision,
         undone: bool,
     },
     Notice {
@@ -258,7 +289,7 @@ struct Turn {
     /// Deferred requests stop being valid when this turn ends or its tab is left.
     active: Arc<std::sync::atomic::AtomicBool>,
     /// The design and the undo depth before it.
-    start_doc: Arc<solidcraft_engine::doc::Document>,
+    start: Revision,
     start_undo: usize,
     /// Requests that ran commands, and requests of any kind.
     changes: u32,
@@ -373,6 +404,10 @@ pub struct AgentChat {
     restore_mode: Option<String>,
     /// New chat is waiting for the user's yes (a message is running or queued).
     pub confirm_new: bool,
+    /// What the panel recorded this frame, run after it is drawn (`panel::run`).
+    pub actions: Vec<panel::PanelAction>,
+    /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
+    pub report: panel::ContentReport,
     /// Where the panel was drawn last (for its shortcuts).
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
@@ -431,7 +466,7 @@ pub struct AgentChat {
     turn: Option<Turn>,
     /// The design as the agent last saw it: at the end of its last turn that it answered or worked
     /// in. The next message tells it when the design is no longer that one (#10854).
-    seen: Option<Arc<solidcraft_engine::doc::Document>>,
+    seen: Option<Revision>,
     tools_available: Option<bool>,
     /// The latest completed turn's notice; older notices remain in the transcript.
     turn_warning: Option<String>,
@@ -461,6 +496,53 @@ pub struct AgentChat {
 impl Drop for AgentChat {
     fn drop(&mut self) {
         self.stop_backend(true);
+    }
+}
+
+/// What the chat panel asks of the conversation while drawing, from the chat's own state.
+impl AgentChat {
+    /// New chat would lose something: a turn running, queued messages or attached files.
+    pub fn new_chat_needs_confirm(&self) -> bool {
+        self.state() == State::Busy || !self.pending.is_empty() || self.files() > 0
+    }
+
+    /// The agent reports models and is running.
+    pub fn models_shown(&self) -> bool {
+        !self.models.is_empty() && self.state().running()
+    }
+
+    /// The providers the models come from, with how many each, when there are two or more.
+    pub fn model_providers(&self) -> Vec<(String, usize)> {
+        providers_of(&self.models)
+    }
+
+    /// The provider whose models the picker opens on: the chosen one, else the current model's, else the first.
+    pub fn shown_provider(&self) -> Option<String> {
+        let providers = self.model_providers();
+        if let Some(p) = &self.model_provider
+            && providers.iter().any(|(n, _)| n == p)
+        {
+            return Some(p.clone());
+        }
+        let current = self.models.iter().find(|m| m.id == self.model).map(provider_of);
+        current.filter(|p| providers.iter().any(|(n, _)| n == p)).or_else(|| providers.first().map(|(n, _)| n.clone()))
+    }
+
+    /// Every model with its label, provider group and tip, as the picker lists them.
+    pub fn grouped_models(&self) -> Vec<(acp::ModelInfo, String, Option<String>, String)> {
+        let rows = model_rows(&self.models);
+        self.models.iter().cloned().zip(rows).map(|(m, (label, group, tip))| (m, label, group, tip)).collect()
+    }
+
+    /// The running agent takes a model typed in rather than picked from its list.
+    pub fn custom_models_accepted(&self) -> bool {
+        if self.backend.is_none() || !self.state().running() {
+            return false;
+        }
+        match self.config_options.as_ref() {
+            Some(options) => options.iter().any(|o| o.category == "model"),
+            None => !self.running_endpoint.is_empty() || !self.models.is_empty(),
+        }
     }
 }
 
@@ -1158,16 +1240,16 @@ pub(crate) fn with_tool_request<T>(
     });
     // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
     // original undo boundary when that happens, including edits made before the batch.
-    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (app.session.doc.clone(), t.start_doc.clone(), t.start_undo));
+    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (Revision::of(&app.session.doc), t.start.clone(), t.start_undo));
     let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
     let result = run(app);
     app.agent_chat.following_document = previous;
-    if let Some((doc, start_doc, start_undo)) = before
-        && Arc::ptr_eq(&doc, &app.session.doc)
+    if let Some((doc, start, start_undo)) = before
+        && doc.is(&app.session.doc)
         && let Some(turn) = app.agent_chat.turn.as_mut()
         && active.is_some_and(|active| Arc::ptr_eq(active, &turn.active))
     {
-        turn.start_doc = start_doc;
+        turn.start = start;
         turn.start_undo = start_undo;
     }
     result
@@ -1177,7 +1259,7 @@ pub(crate) fn with_tool_request<T>(
 /// flag; subsequent edits undo in this design and picked geometry belongs to the old one.
 pub(crate) fn continue_in_document(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_mut() {
-        turn.start_doc = app.session.doc.clone();
+        turn.start = Revision::of(&app.session.doc);
         turn.start_undo = app.session.undo.len();
     }
     app.agent_chat.picked.clear();
@@ -1193,10 +1275,11 @@ pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveA
         return;
     }
     if let Some(turn) = app.agent_chat.turn.as_ref() {
-        let steps =
-            merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+        let steps = turn.start.get::<solidcraft_engine::doc::Document>().map_or(0, |start| {
+            merge_undo(&mut app.session.undo, &start, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]))
+        });
         if steps > 0 {
-            app.agent_chat.push(Item::Changes { steps, doc: app.session.doc.clone(), undone: false });
+            app.agent_chat.push(Item::Changes { steps, revision: Revision::of(&app.session.doc), undone: false });
         }
     }
     let mut chat = AgentChat::default();
@@ -1522,7 +1605,7 @@ pub fn new_chat(app: &mut SolveApp) {
 
 /// Whether New chat would throw something away that the user may want (so it asks first).
 pub fn new_chat_needs_confirm(app: &SolveApp) -> bool {
-    app.agent_chat.state() == State::Busy || !app.agent_chat.pending.is_empty() || app.agent_chat.files() > 0
+    app.agent_chat.new_chat_needs_confirm()
 }
 
 /// Take a queued message out of the queue.
@@ -1559,7 +1642,8 @@ fn start_turn(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, 
 /// that takes them. `at` is the message's place in the conversation, where its picture is kept.
 fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, files: Vec<attach::Attachment>, note: Option<&str>) {
     let (pictures, documents) = (app.agent_chat.images, app.agent_chat.documents);
-    let changed = app.agent_chat.seen.as_deref().and_then(|seen| changed_note(seen, &app.session.doc));
+    let seen = app.agent_chat.seen.as_ref().and_then(Revision::get::<solidcraft_engine::doc::Document>);
+    let changed = seen.and_then(|seen| changed_note(&seen, &app.session.doc));
     let notes: Vec<&str> = note.into_iter().chain(changed.as_deref()).collect();
     let lead = if notes.is_empty() { text.clone() } else { format!("{}\n\n{text}", notes.join("\n")) };
     // The whole message stays within the cap: the files' text gets what the words leave.
@@ -1583,7 +1667,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     app.agent_chat.turn_warning = None;
     app.agent_chat.turn = Some(Turn {
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-        start_doc: app.session.doc.clone(),
+        start: Revision::of(&app.session.doc),
         start_undo: app.session.undo.len(),
         changes: 0,
         requests: 0,
@@ -1674,7 +1758,7 @@ pub fn paste_picture(app: &mut SolveApp) -> std::result::Result<String, String> 
 /// the platform gives no position during a drag (winit 0.30), so that is the best the chat can
 /// know; the + button always works.
 pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
-    if !drop_is_ours(app, ctx) || !ctx.input(|i| !i.raw.dropped_files.is_empty()) {
+    if !drop_is_ours(&app.agent_chat, ctx) || !ctx.input(|i| !i.raw.dropped_files.is_empty()) {
         return;
     }
     let files = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
@@ -1682,8 +1766,9 @@ pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Whether files dropped now would be the chat's: the pointer was last seen over it.
-pub(crate) fn drop_is_ours(app: &SolveApp, ctx: &egui::Context) -> bool {
-    let Some(rect) = app.agent_chat.drop_rect else { return false };
+pub(crate) fn drop_is_ours(chat: &AgentChat, ctx: &egui::Context) -> bool {
+    let Some(rect) = chat.drop_rect else { return false };
+
     ctx.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p))
 }
 
@@ -1834,10 +1919,14 @@ fn end_turn(app: &mut SolveApp) {
 fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     let Some(turn) = chat.turn.take() else { return };
     turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
-    let steps = merge_undo(&mut session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    // The host keeps the designs: the one the turn began on comes back from its revision.
+    let steps = turn
+        .start
+        .get::<solidcraft_engine::doc::Document>()
+        .map_or(0, |start| merge_undo(&mut session.undo, &start, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)])));
     // A turn the agent never answered (a sign-in, an error before its reply) showed it nothing.
     if turn.replied || turn.tool_called || turn.requests > 0 {
-        chat.seen = Some(session.doc.clone());
+        chat.seen = Some(Revision::of(&session.doc));
     }
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
@@ -1846,7 +1935,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         && turn.requests == 0
         && turn.changes == 0
         && steps == 0
-        && Arc::ptr_eq(&session.doc, &turn.start_doc)
+        && turn.start.is(&session.doc)
         && (!turn.replied || turn.edit_requested)
     {
         let warning = tr("ui.agent_chat_no_tool_call").to_string();
@@ -1854,8 +1943,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         chat.notice(warning, false);
     }
     if steps > 0 {
-        let doc = session.doc.clone();
-        chat.push(Item::Changes { steps, doc, undone: false });
+        chat.push(Item::Changes { steps, revision: Revision::of(&session.doc), undone: false });
     }
 }
 
@@ -1882,8 +1970,8 @@ fn merge_undo(
 
 /// Undo a message's changes from the conversation (only while they are the last thing done).
 pub fn undo_changes(app: &mut SolveApp, index: usize) {
-    let Some(Item::Changes { doc, undone, .. }) = app.agent_chat.items.get(index) else { return };
-    if *undone || !Arc::ptr_eq(doc, &app.session.doc) {
+    let Some(Item::Changes { revision, undone, .. }) = app.agent_chat.items.get(index) else { return };
+    if *undone || !revision.is(&app.session.doc) {
         return;
     }
     if app.run("edit.undo", json!({})).is_ok()
@@ -2135,14 +2223,7 @@ pub fn set_model(app: &mut SolveApp, model: &str) {
 /// Whether a model the agent did not list can be sent: an endpoint, an ACP agent with a model
 /// option, or a legacy ACP agent that listed models.
 pub fn custom_models_accepted(app: &SolveApp) -> bool {
-    let chat = &app.agent_chat;
-    if chat.backend.is_none() || !chat.state().running() {
-        return false;
-    }
-    match chat.config_options.as_ref() {
-        Some(options) => options.iter().any(|o| o.category == "model"),
-        None => !chat.running_endpoint.is_empty() || !chat.models.is_empty(),
-    }
+    app.agent_chat.custom_models_accepted()
 }
 
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
@@ -2204,7 +2285,7 @@ fn apply_saved_model(app: &mut SolveApp) {
 
 /// Whether the model picker shows: only for an agent that reports models.
 pub fn models_shown(app: &SolveApp) -> bool {
-    !app.agent_chat.models.is_empty() && app.agent_chat.state().running()
+    app.agent_chat.models_shown()
 }
 
 /// Longest provider name kept from an agent's model list.
@@ -2285,8 +2366,13 @@ fn provider_of(m: &acp::ModelInfo) -> String {
 /// The providers of the agent's models in the order the agent lists them, each with how many
 /// models it serves. Empty when the models come from fewer than two providers: one list is enough.
 pub fn model_providers(app: &SolveApp) -> Vec<(String, usize)> {
+    app.agent_chat.model_providers()
+}
+
+/// [`AgentChat::model_providers`] of a model list.
+fn providers_of(models: &[acp::ModelInfo]) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
-    for m in &app.agent_chat.models {
+    for m in models {
         let p = provider_of(m);
         match out.iter_mut().find(|(n, _)| *n == p) {
             Some(e) => e.1 += 1,
@@ -2302,14 +2388,7 @@ pub fn model_providers(app: &SolveApp) -> Vec<(String, usize)> {
 /// The provider whose models the header lists: the one picked while the agent still offers it,
 /// else the current model's, else the first. `None` when there is no provider picker.
 pub fn shown_provider(app: &SolveApp) -> Option<String> {
-    let providers = model_providers(app);
-    if let Some(p) = &app.agent_chat.model_provider
-        && providers.iter().any(|(n, _)| n == p)
-    {
-        return Some(p.clone());
-    }
-    let current = app.agent_chat.models.iter().find(|m| m.id == app.agent_chat.model).map(provider_of);
-    current.filter(|p| providers.iter().any(|(n, _)| n == p)).or_else(|| providers.first().map(|(n, _)| n.clone()))
+    app.agent_chat.shown_provider()
 }
 
 /// The models the header's model picker lists, each with the name it shows: with a provider picker,
@@ -2331,8 +2410,7 @@ pub fn listed_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String)> {
 /// ([`model_rows`]).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn grouped_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String, Option<String>, String)> {
-    let rows = model_rows(&app.agent_chat.models);
-    app.agent_chat.models.iter().cloned().zip(rows).map(|(m, (label, group, tip))| (m, label, group, tip)).collect()
+    app.agent_chat.grouped_models()
 }
 
 /// The provider whose group the header's model picker opens first (the control channel's

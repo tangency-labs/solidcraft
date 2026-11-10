@@ -77,8 +77,28 @@ pub(super) fn status(e: SolidError) -> Error {
         SolidError::Upstream { code, .. } => Error::Status(code),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
+        e if is_boolean_failure(&e) => boolean_status(e),
         e if e.is_unported() => Error::Unsupported,
         e => Error::Solidcore(e.to_string()),
+    }
+}
+
+/// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
+/// run), which solidcore names in its own terms as a [`SolidError::Failed`] from a
+/// `boolean::` stage where it once returned [`SolidError::Upstream`].
+fn is_boolean_failure(e: &SolidError) -> bool {
+    matches!(e, SolidError::Failed(f) if f.operation.starts_with("boolean::"))
+}
+
+/// The status of a Boolean failure as the capi passes it on: the status the failure stands for
+/// ([`Error::Status`]), as the `Upstream` it replaced gave. A stage that failed because a call is
+/// not ported is not that status ([`SolidError::is_status_answer`]): it is as unported code is,
+/// not supported.
+fn boolean_status(e: SolidError) -> Error {
+    match e.sm_status() {
+        Some(code) if e.is_status_answer() => Error::Status(code),
+        _ if e.root_cause().is_unported() => Error::Unsupported,
+        _ => Error::Solidcore(e.to_string()),
     }
 }
 

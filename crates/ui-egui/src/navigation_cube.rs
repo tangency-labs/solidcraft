@@ -346,7 +346,7 @@ mod tests {
     use super::*;
     #[cfg(test)]
     use crate::icons::navigation::{LABEL_PIXELS, face_text};
-    use solidcraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_viewport::{StandardView, UpAxis};
 
     fn paint_frame(ctx: &egui::Context, paint: impl FnMut(&mut egui::Ui)) -> egui::FullOutput {
         let mut output = ctx.run_ui(egui::RawInput::default(), paint);

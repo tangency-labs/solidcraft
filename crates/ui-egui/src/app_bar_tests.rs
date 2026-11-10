@@ -28,7 +28,7 @@ struct BarRig {
 
 impl BarRig {
     fn new(width: f32) -> BarRig {
-        let rig = BarRig { ctx: crate::fonts::test_context(), width, time: std::cell::Cell::new(0.0), out: Default::default() };
+        let rig = BarRig { ctx: crate::ui_kit::test_support::context(), width, time: std::cell::Cell::new(0.0), out: Default::default() };
         rig.frame(Vec::new());
         rig
     }
@@ -61,7 +61,7 @@ impl BarRig {
             handles: HANDLES,
         };
         let mut actions = Vec::new();
-        crate::test_support::frame(&self.ctx, input, |ui| {
+        crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(self.width, HEIGHT));
             let out = show(ui, &bar, rect, rect);
             actions = out.actions.clone();
@@ -130,7 +130,7 @@ struct TabsRig {
 
 impl TabsRig {
     fn new() -> TabsRig {
-        let rig = TabsRig { ctx: crate::fonts::test_context(), time: std::cell::Cell::new(0.0) };
+        let rig = TabsRig { ctx: crate::ui_kit::test_support::context(), time: std::cell::Cell::new(0.0) };
         rig.frame(Vec::new());
         rig
     }
@@ -162,7 +162,7 @@ impl TabsRig {
             handles: TAB_HANDLES,
         };
         let mut actions = Vec::new();
-        crate::test_support::frame(&self.ctx, input, |ui| {
+        crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| {
             actions = tabs(ui, &mut strip, Rect::from_min_size(Pos2::ZERO, vec2(800.0, HEIGHT)), 100.0, 700.0);
         });
         actions
@@ -224,10 +224,10 @@ fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> 
         ..Default::default()
     };
     let mut out = FileMenuOut::default();
-    let output = crate::test_support::frame(ctx, input, |ui| {
+    let output = crate::ui_kit::test_support::raw_frame(ctx, input, |ui| {
         out = file_menu(ui.ctx(), &rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
     });
-    let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
+    let texts = crate::ui_kit::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
     (out, texts)
 }
 
@@ -235,7 +235,7 @@ fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> 
 /// a click elsewhere closes it.
 #[test]
 fn the_file_menu_returns_the_row_chosen() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut time = 0.0;
     let mut click = |at: Pos2| {
         let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
@@ -262,7 +262,7 @@ fn the_file_menu_returns_the_row_chosen() {
 /// The switcher returns its click and publishes where it is.
 #[test]
 fn the_workspace_switcher_returns_its_click() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let ws = Rect::from_min_size(Pos2::ZERO, vec2(88.0, 117.0));
     let data = Switcher {
         name: "Design",
@@ -283,7 +283,7 @@ fn the_workspace_switcher_returns_its_click() {
         [vec![egui::Event::PointerMoved(ws.center())], vec![press(ws.center(), true)], vec![press(ws.center(), false)]].into_iter().enumerate()
     {
         let input = egui::RawInput { time: Some(i as f64 * 0.1), events, focused: true, ..Default::default() };
-        crate::test_support::frame(&ctx, input, |ui| clicked.push(switcher(ui, &data, ws)));
+        crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| clicked.push(switcher(ui, &data, ws)));
     }
     assert_eq!(clicked, [false, false, true]);
     assert_eq!(solidcraft_ui_registry::rect_of("t:ws"), Some(ws));

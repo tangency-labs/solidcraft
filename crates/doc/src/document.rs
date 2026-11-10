@@ -461,8 +461,13 @@ impl ThinSide {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AxisRef {
-    /// A line of the profile's sketch.
-    SketchLine { curve: String },
+    /// A line of a sketch. `sketch` names the sketch that owns the line (#6548); without it
+    /// the line is a line of the profile's sketch, the form saved before #6548.
+    SketchLine {
+        curve: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<u64>,
+    },
     /// Sketch x or y axis through the sketch origin (`x` / `y`).
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.
@@ -1951,7 +1956,8 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skip: Vec<u64>,
     },
-    /// Rebuild an upstream constant-section mesh with analytic planar/cylindrical faces.
+    /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
+    /// constant-section part, planar facets for any other closed mesh.
     MeshConvert {
         body: BodyName,
         #[walk(length = "Tolerance")]
@@ -2294,6 +2300,10 @@ pub struct MeshData {
     pub positions: std::sync::Arc<[f64]>,
     /// Three vertex indices per triangle.
     pub triangles: std::sync::Arc<[u32]>,
+    /// Unit shading normals, x/y/z for each triangle corner. Empty means flat shading.
+    /// Independent of the welded positions and the geometric boundary certificate.
+    #[serde(default, skip_serializing_if = "<[f64]>::is_empty")]
+    pub corner_normals: std::sync::Arc<[f64]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
 }
@@ -2309,6 +2319,36 @@ impl PartialEq for MeshData {
             && self.color == other.color
             && (Arc::ptr_eq(&self.triangles, &other.triangles) || self.triangles == other.triangles)
             && (Arc::ptr_eq(&self.positions, &other.positions) || self.positions == other.positions)
+            && (Arc::ptr_eq(&self.corner_normals, &other.corner_normals) || self.corner_normals == other.corner_normals)
+    }
+}
+
+impl MeshData {
+    /// Explicitly generate crease-aware shading for an existing imported source.
+    /// Coordinates, triangle indices, topology and body identity remain unchanged.
+    pub fn generate_crease_normals(&mut self, angle_degrees: f64) -> crate::Result<()> {
+        if !angle_degrees.is_finite()
+            || !(0.0..=180.0).contains(&angle_degrees)
+            || !self.positions.len().is_multiple_of(3)
+            || !self.triangles.len().is_multiple_of(3)
+        {
+            return Err(crate::DocError::Invalid("mesh crease angle must be between 0 and 180 degrees with complete triangles".into()));
+        }
+        let allocation = |_| crate::DocError::Invalid("could not reserve mesh normal generation".into());
+        let mut positions = Vec::new();
+        positions.try_reserve_exact(self.positions.len() / 3).map_err(allocation)?;
+        positions.extend(self.positions.as_chunks::<3>().0.iter().map(|p| solidcore_record::Vec3::new(p[0], p[1], p[2])));
+        let mut triangles = Vec::new();
+        triangles.try_reserve_exact(self.triangles.len() / 3).map_err(allocation)?;
+        triangles.extend_from_slice(self.triangles.as_chunks::<3>().0);
+        let mesh = solidcraft_geom::Mesh { positions, triangles, ..Default::default() };
+        let normals = mesh.crease_corner_normals(angle_degrees.to_radians(), None).map_err(crate::DocError::Invalid)?;
+        let count = normals.len().checked_mul(9).ok_or_else(|| crate::DocError::Invalid("mesh normal count overflow".into()))?;
+        let mut values = Vec::new();
+        values.try_reserve_exact(count).map_err(allocation)?;
+        values.extend(normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]));
+        self.corner_normals = values.into();
+        Ok(())
     }
 }
 
@@ -3928,12 +3968,35 @@ impl Document {
     }
 
     /// A component by id or name (0 / "root" is the design itself). A component that carries the
-    /// design's own name is found by that name: the design is still named by 0 / "root".
+    /// design's own name is found by that name: the design is still named by 0 / "root". An
+    /// ambiguous name finds nothing; commands use [`Self::resolve_component`] to report why.
     pub fn find_component(&self, key: &str) -> Option<u64> {
+        self.resolve_component(key).ok().flatten()
+    }
+
+    /// Resolve a component reference without choosing between components with the same name.
+    /// Canonical numeric ids (including ids sent as strings by the UI) and the root aliases
+    /// take priority over names. Other numeric spellings, such as `01`, remain names.
+    pub fn resolve_component(&self, key: &str) -> Result<Option<u64>> {
         if key == "0" || key.eq_ignore_ascii_case("root") {
-            return Some(0);
+            return Ok(Some(0));
         }
-        self.components.iter().find(|c| c.id.to_string() == key || c.name == key).map(|c| c.id).or_else(|| (key == self.name).then_some(0))
+        if let Ok(id) = key.parse::<u64>()
+            && id.to_string() == key
+            && self.components.iter().any(|component| component.id == id)
+        {
+            return Ok(Some(id));
+        }
+        let mut matches = self.components.iter().filter(|component| component.name == key);
+        let Some(first) = matches.next() else { return Ok((key == self.name).then_some(0)) };
+        if let Some(second) = matches.next() {
+            let mut ids = vec![first.id, second.id];
+            ids.extend(matches.map(|component| component.id));
+            ids.sort_unstable();
+            let ids = ids.iter().map(u64::to_string).collect::<Vec<_>>().join(", ");
+            return Err(DocError::Invalid(format!("ambiguous component `{key}`; matching IDs: {ids}; use a numeric component ID")));
+        }
+        Ok(Some(first.id))
     }
 
     /// Read a design file's JSON (any format this build knows; older ones are upgraded).
@@ -4390,6 +4453,18 @@ impl Document {
         let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
         name
+    }
+
+    /// Create a model parameter with a name the caller chose (checked: valid and free).
+    pub fn new_named_model_param(&mut self, name: &str, expr_s: &str, unit: &str) -> Result<String> {
+        if let Some(why) = Self::param_name_problem(name) {
+            return Err(DocError::Invalid(why));
+        }
+        if self.name_taken(name) {
+            return Err(DocError::Invalid(format!("there is already a parameter `{name}`")));
+        }
+        self.params.push(Param { name: name.into(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
+        Ok(name.into())
     }
 
     /// Evaluate an expression against the document's parameters.

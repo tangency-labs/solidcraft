@@ -271,7 +271,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
 }
 
 /// Controls save immediately; navigation alone keeps Update/Revert.
-pub(super) fn set_camera(app: &mut SolveApp, shot: &str, camera: solidcraft_engine::render::Camera) -> Result<(), String> {
+pub(super) fn set_camera(app: &mut SolveApp, shot: &str, camera: solidcraft_viewport::Camera) -> Result<(), String> {
     if !camera.is_valid() {
         return Err(app.tr("render.shot_invalid_camera").into());
     }
@@ -355,7 +355,7 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
 
 pub(super) fn look_at_selection(app: &mut SolveApp, shot: &str) -> Result<(), String> {
     let bounds = crate::viewport::selection_bounds(app).ok_or_else(|| app.tr("render.shot_selection_reason").to_string())?;
-    set_camera(app, shot, solidcraft_engine::render::Camera { target: bounds.center(), ..app.cam })
+    set_camera(app, shot, solidcraft_viewport::Camera { target: bounds.center(), ..app.cam })
 }
 
 /// Change only saved lens intent. Camera updates keep their explicit Update shot action.

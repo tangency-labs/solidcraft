@@ -963,7 +963,7 @@ fn flat_app(preset: &str, mode: crate::ui_kit::LayoutMode) -> SolveApp {
 
 /// Same view in the flat plane: the Design viewport may anchor a zoom on the model's surface
 /// (a little out of the plane), the flat view anchors on its plane.
-fn same_view(a: &solidcraft_engine::render::Camera, b: &solidcraft_engine::render::Camera) -> bool {
+fn same_view(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
     (a.target.x - b.target.x).abs() < 1e-3
         && (a.target.y - b.target.y).abs() < 1e-3
         && (a.distance - b.distance).abs() < 1e-9

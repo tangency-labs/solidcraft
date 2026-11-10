@@ -267,6 +267,22 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
 }
 
 #[test]
+fn browser_sketches_after_history_marker_are_not_listed() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Earlier"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Later"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
+    assert!(labels.contains(&"Earlier".to_owned()), "{labels:?}");
+    assert!(!labels.contains(&"Later".to_owned()), "{labels:?}");
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
@@ -738,6 +754,7 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),

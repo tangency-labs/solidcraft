@@ -60,11 +60,64 @@ pub struct Server<T: Tools> {
     initialized: bool,
 }
 
-fn response(id: Value, result: Value) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "result": result})
-}
 fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
+}
+
+/// One message read from a newline-delimited stream by [`read_message`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum Incoming {
+    /// A line to handle ([`Server::handle_line`]), without its newline.
+    Line(String),
+    /// A line refused unread (too long, not UTF-8): the error reply to send for it.
+    Refused(String),
+}
+
+/// Read the next line of newline-delimited JSON-RPC from `input`; `None` once it closes. A line
+/// longer than `max_line` is consumed in bounded space, so a client cannot exhaust memory by
+/// sending an arbitrarily long request without a newline, and an unterminated last line counts.
+pub fn read_message(input: &mut impl BufRead, max_line: usize) -> std::io::Result<Option<Incoming>> {
+    let mut line = Vec::new();
+    let mut oversized = false;
+    let mut received = false;
+    loop {
+        let chunk = input.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        let count = chunk.iter().position(|&byte| byte == b'\n').map_or(chunk.len(), |i| i + 1);
+        let newline = chunk[count - 1] == b'\n';
+        let content_len = count - usize::from(newline);
+        if !oversized {
+            if line.len().saturating_add(content_len) > max_line {
+                oversized = true;
+                line.clear();
+            } else {
+                line.extend_from_slice(&chunk[..content_len]);
+            }
+        }
+        input.consume(count);
+        received = true;
+        if newline {
+            break;
+        }
+    }
+    if !received {
+        return Ok(None);
+    }
+    if oversized {
+        return Ok(Some(Incoming::Refused(error(Value::Null, INVALID_REQUEST, "request too large").to_string())));
+    }
+    Ok(Some(match String::from_utf8(line) {
+        Ok(line) => Incoming::Line(line),
+        // Not UTF-8: answer with a parse error and keep serving.
+        Err(_) => Incoming::Refused(error(Value::Null, PARSE_ERROR, "parse error: input is not UTF-8").to_string()),
+    }))
+}
+
+/// The JSON-RPC response to request `id`, as [`Server::handle`] sends it.
+pub fn response(id: Value, result: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
 
 impl<T: Tools> Server<T> {
@@ -82,43 +135,10 @@ impl<T: Tools> Server<T> {
     /// `output`; diagnostics belong on stderr. Consume oversized lines in bounded space so a
     /// client cannot exhaust memory by sending an arbitrarily long request without a newline.
     pub fn serve(&mut self, mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-        loop {
-            let mut line = Vec::new();
-            let mut oversized = false;
-            let mut received = false;
-            loop {
-                let chunk = input.fill_buf()?;
-                if chunk.is_empty() {
-                    break;
-                }
-                let count = chunk.iter().position(|&byte| byte == b'\n').map_or(chunk.len(), |i| i + 1);
-                let newline = chunk[count - 1] == b'\n';
-                let content_len = count - usize::from(newline);
-                if !oversized {
-                    if line.len().saturating_add(content_len) > self.info.max_line {
-                        oversized = true;
-                        line.clear();
-                    } else {
-                        line.extend_from_slice(&chunk[..content_len]);
-                    }
-                }
-                input.consume(count);
-                received = true;
-                if newline {
-                    break;
-                }
-            }
-            if !received {
-                break;
-            }
-            let reply = if oversized {
-                Some(error(Value::Null, INVALID_REQUEST, "request too large").to_string())
-            } else {
-                match String::from_utf8(line) {
-                    Ok(line) => self.handle_line(&line),
-                    // Not UTF-8: answer with a parse error and keep serving.
-                    Err(_) => Some(error(Value::Null, PARSE_ERROR, "parse error: input is not UTF-8").to_string()),
-                }
+        while let Some(incoming) = read_message(&mut input, self.info.max_line)? {
+            let reply = match incoming {
+                Incoming::Line(line) => self.handle_line(&line),
+                Incoming::Refused(reply) => Some(reply),
             };
             if let Some(reply) = reply {
                 output.write_all(reply.as_bytes())?;

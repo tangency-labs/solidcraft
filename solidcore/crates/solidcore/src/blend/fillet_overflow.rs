@@ -157,6 +157,22 @@ pub fn edge_on_surface(
     Ok(on)
 }
 
+/// Whether `curve` (over its natural interval) lies on the surface of face `f` of `fb`
+/// within `tol`, at five points ([`edge_on_surface`] for a free curve).
+///
+/// # Errors
+/// Those of the evaluation and of [`distance_to_surface`].
+pub fn curve_on_surface(k: &Kernel, curve: &Curve, fb: &Brep, f: FaceId, tol: f64) -> Result<bool> {
+    let ivl = curve.natural_interval();
+    for i in 0..=4_u32 {
+        let p = curve.evaluate_point(k, ivl.evaluate(f64::from(i) / 4.0))?;
+        if distance_to_surface(k, fb, f, p)? > tol {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// `sm_Creases`: the curves where sheet face `sheet` of `sheet_b` meets face `f` of `fb`:
 /// a planar face's plane sections it exactly (`CreatePlanarSectionCurves`), any other
 /// surface meets it by SMLib's surface intersection over both faces' domains, its touching
@@ -350,6 +366,9 @@ pub struct Extension {
     pub along: Vec<EdgeId>,
     /// Pieces of the face's edges it runs along, by their ends.
     pub along_pieces: Vec<(Point3, Point3)>,
+    /// The lines from a chain's end to its foot, along a side edge's line (the walls beside
+    /// meet the extension there): they lie on those walls, inside them.
+    pub foot_runs: Vec<Curve>,
 }
 
 impl Extension {
@@ -360,6 +379,7 @@ impl Extension {
             lp: Vec::new(),
             along: Vec::new(),
             along_pieces: Vec::new(),
+            foot_runs: Vec::new(),
         }
     }
 }
@@ -1027,11 +1047,12 @@ pub fn extend(
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
             let first_p = vertex::point(target, *first_v)?;
             if here.distance(first_p) > tol {
-                let piece = match crosses[1] {
-                    Some(c) => edge_piece(k, target, c, here, first_p, tol)?,
-                    None => Some(Curve::from(BSplineCurve::create_line_segment(
-                        3, here, first_p,
-                    )?)),
+                let piece = if let Some(c) = crosses[1] {
+                    edge_piece(k, target, c, here, first_p, tol)?
+                } else {
+                    let line = Curve::from(BSplineCurve::create_line_segment(3, here, first_p)?);
+                    ext.foot_runs.push(line.copy(k)?);
+                    Some(line)
                 };
                 if let Some(piece) = piece {
                     add_curve(k, &mut ext.lp, piece, here, first_p)?;
@@ -1061,11 +1082,12 @@ pub fn extend(
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
             let last_p = vertex::point(target, *last_v)?;
             if last_p.distance(ends[0]) > tol {
-                let piece = match crosses[0] {
-                    Some(c) => edge_piece(k, target, c, last_p, ends[0], tol)?,
-                    None => Some(Curve::from(BSplineCurve::create_line_segment(
-                        3, last_p, ends[0],
-                    )?)),
+                let piece = if let Some(c) = crosses[0] {
+                    edge_piece(k, target, c, last_p, ends[0], tol)?
+                } else {
+                    let line = Curve::from(BSplineCurve::create_line_segment(3, last_p, ends[0])?);
+                    ext.foot_runs.push(line.copy(k)?);
+                    Some(line)
                 };
                 if let Some(piece) = piece {
                     add_curve(k, &mut ext.lp, piece, last_p, ends[0])?;
@@ -1121,7 +1143,22 @@ fn takes_off(
         .unitize()
         .map_err(|_| SolidError::sm_err(OP))?; // left of the run in the plane, as the loop runs
     let side = if area > 0.0 { 1.0 } else { -1.0 };
-    let probe = p + inward * (side * 0.01 * len);
+    // the probe a hundredth of the run's length beside it lands on or past the loop's far
+    // side when the loop is narrower than that (a rail just past a wall's foot: the strip
+    // between them): keep it within half the loop's width across the run, measured on the
+    // loop's own points
+    let mut step = 0.01 * len;
+    let rel = p - at;
+    let (pu, pv) = (rel.dot(x), rel.dot(y));
+    let (iu, iv) = (inward.dot(x) * side, inward.dot(y) * side);
+    let width = uv
+        .iter()
+        .map(|q| (q.x - pu) * iu + (q.y - pv) * iv)
+        .fold(0.0_f64, f64::max);
+    if width > 0.0 {
+        step = step.min(0.5 * width);
+    }
+    let probe = p + inward * (side * step);
     let (mut inside, _) = in_material(k, target, probe)?;
     let mut nearest = BIG_DOUBLE;
     let mut toward = Vec3::UNDEF;

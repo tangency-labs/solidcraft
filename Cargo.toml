@@ -33,6 +33,9 @@ solidcraft-ui-registry = { path = "crates/ui-registry" }
 solidcraft-color = { path = "crates/color" }
 solidcraft-ui-text = { path = "crates/ui-text" }
 solidcraft-theme = { path = "crates/theme" }
+solidcraft-viewport = { path = "crates/viewport" }
+solidcraft-viewport-egui = { path = "crates/viewport-egui" }
+solidcraft-viewport-gpu = { path = "crates/viewport-gpu" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-mcp-server = { path = "crates/mcp-server" }
@@ -47,6 +50,13 @@ solidcore = { path = "solidcore/crates/solidcore" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Vendored with solidcore, in the same subtree.
 solidcore-record = { path = "solidcore/crates/solidcore-record" }
+# The modelling layer (solidcore's layers §1, "Ops"): the record-level calls SolidCraft makes into the
+# kernel, converting through solidcore-convert.
+solidcore-ops = { path = "solidcore/crates/solidcore-ops" }
+# Geometry made drawable (solidcore's layers §3): the one mesher, SolidCraft's, moved into the
+# subtree (RFC 0003, item 1.1), with the display mesh and its levels of detail, the types
+# SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
+solidcore-tess = { path = "solidcore/crates/solidcore-tess" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 
@@ -69,6 +79,8 @@ semver = "1"
 # constrained Delaunay + Ruppert refinement for trimmed faces (MIT OR Apache-2.0).
 spade = { version = "2.15", default-features = false, features = ["std"] }
 rayon = "1.12"
+# Native render-memory admission; RAM-only queries through a safe MIT-licensed API.
+sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 
 # packages (3MF)
 zip = { version = "9", default-features = false, features = ["deflate"] }

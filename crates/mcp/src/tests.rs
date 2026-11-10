@@ -44,6 +44,13 @@ fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_
     one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
     one.call("engine.execute", json!({"command":"layout.apply","params":{"name":"MCP saved"}})).unwrap();
     assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    // A layout batch refused before its first step ran nothing: `rolled_back` as a rollback that
+    // went back reports it (#10749).
+    let refused = json!([panel_mcp_steps()[1], {"command":"solid.boxx","params":{}}]);
+    let reply = one.call("engine.batch", json!({"commands":refused})).unwrap();
+    assert_eq!((&reply["completed"], &reply["rolled_back"]), (&json!(0), &json!(true)), "{reply}");
+    assert_eq!(one.call("engine.batch", json!({"commands":refused,"rollback":false})).unwrap()["rolled_back"], false);
+    assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
 }
 #[test]
 fn mcp_panel_tools_publish_structured_errors_and_committed_state_through_shared_backend() {
@@ -247,7 +254,8 @@ fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document
         assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
         assert_eq!(body["completed"], 0);
         assert_eq!(body["applied"], json!([]));
-        assert_eq!(body["rolled_back"], false);
+        // Nothing ran, so the design is where the batch started (#10749).
+        assert_eq!(body["rolled_back"], true);
         assert_eq!(backend.calls, vec![("engine.batch".into(), String::new())], "no checkpoint, inspection or single layout call");
         assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
         assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
@@ -323,14 +331,14 @@ fn document_only_atomic_tool_fallback_keeps_existing_checkpoint_rollback_behavio
 /// tests install the same one. `false`, with the reason printed, on a machine without a GPU
 /// adapter: the screenshots are then left out of the test.
 fn renders() -> bool {
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                 c.rgba(scene, cam, w, h).map(|rgba| solidcraft_engine::capture::Picture { rgba, renderer: c.renderer() }).map_err(|e| e.to_string())
             }));
             true
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("screenshots left out: {e}");
             false
         }
@@ -551,6 +559,22 @@ fn export_tool_writes_a_urdf_package() {
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
+#[test]
+fn export_tool_format_argument_accepts_iges() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-iges-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (format, expect) in [("iges", "Iges"), ("igs", "Iges"), ("stp", "Step")] {
+        let path = dir.join(format!("part-{format}.out"));
+        let r = tool(&mut s, "export", json!({"path": path.to_string_lossy(), "format": format}));
+        assert_eq!(r["format"], expect, "{format}: {r}");
+        assert!(std::fs::metadata(&path).unwrap().len() > 0, "{format}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1138,6 +1162,12 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone(), body["undone"].clone()), (json!(0), json!(20), json!(0)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("closest: `solid.extrude`")), "{body}");
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
+    // Nothing ran, so the design is where the batch started (#10749); without `rollback` the
+    // reply claims no rollback, as at a step's turn.
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps, "rollback": false}));
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["completed"], &body["rolled_back"]), (&json!(0), &json!(false)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
 }
@@ -1156,6 +1186,7 @@ fn batch_refuses_a_step_with_an_unknown_key() {
     let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(body["rolled_back"], true, "nothing ran (#10749): {body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
@@ -3273,6 +3304,90 @@ fn running_is_asked_at_once_behind_a_request_still_running() {
     assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "still outstanding: {e}");
 }
 
+/// #14007 over stdio: a `batch` the fake app holds, then a `running` call, sent once the app has
+/// the batch or (`back_to_back`) in the same write, before the server has taken the batch.
+/// Returns the reply ids in the order they came, and whether the app was asked `control.running`
+/// while it held the batch, which it can only be on a connection of its own: the fake app reads a
+/// connection's next request only after answering the last. The batch is held until the test has
+/// read the first reply (at most 10 s), so the order of the replies is not a race.
+fn running_during_a_held_batch(back_to_back: bool) -> (Vec<Value>, bool) {
+    use std::io::{BufRead, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    let asked = std::sync::Arc::new(AtomicBool::new(false));
+    let release = std::sync::Arc::new(AtomicBool::new(false));
+    let (seen_running, released) = (asked.clone(), release.clone());
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let start = Instant::now();
+            while !released.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let held = seen_running.load(Ordering::SeqCst);
+            json!({"ok": true, "result": {"ok": true, "results": [{"ok": true, "result": {"running_seen_while_held": held}}]}})
+        }
+        Some("control.running") => {
+            seen_running.store(true, Ordering::SeqCst);
+            json!({"ok": true, "result": {"running": [{"id": 1, "method": "engine.batch", "steps": 1, "self": false}]}})
+        }
+        _ => json!({"ok": true, "result": null}),
+    });
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut s = Server::new(Box::new(crate::Remote::new(&addr, None)));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+    let call =
+        |id: u64, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
+    let steps = json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}], "verbose": false});
+    if back_to_back {
+        write!(to_server, "{}\n{}\n", call(1, "batch", steps), call(2, "running", json!({}))).unwrap();
+    } else {
+        writeln!(to_server, "{}", call(1, "batch", steps)).unwrap();
+        let start = Instant::now();
+        while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        writeln!(to_server, "{}", call(2, "running", json!({}))).unwrap();
+    }
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut read = || {
+        let mut line = String::new();
+        replies.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let first = read();
+    release.store(true, Ordering::SeqCst);
+    let second = read();
+    drop(to_server);
+    server.join().unwrap();
+    for r in [&first, &second] {
+        assert_ne!(r["result"]["isError"], true, "{r}");
+    }
+    let batch = if first["id"] == 1 { &first } else { &second };
+    let held = batch["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("\"running_seen_while_held\": true");
+    (vec![first["id"].clone(), second["id"].clone()], held)
+}
+
+/// #14007: a `running` call sent while a long `batch` is in the app is answered at once, on a
+/// connection of its own, not after the batch.
+#[test]
+fn running_answers_at_once_while_a_long_batch_runs() {
+    let (order, held) = running_during_a_held_batch(false);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #14007: also when `running` comes in right behind the `batch`, before the server has taken
+/// the batch off its queue.
+#[test]
+fn running_sent_right_behind_a_batch_is_not_queued_behind_it() {
+    let (order, held) = running_during_a_held_batch(true);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
 /// A request still running after the wait is left to the `pending` tool: the error says so
 /// (and that it will still apply, or only write its file), later calls are not sent behind it, and `pending` returns
 /// its result once it lands, on the same connection.
@@ -3619,6 +3734,11 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
     assert_eq!((&reply["failed"]["index"], &reply["completed"], &reply["not_run"]), (&json!(1), &json!(0), &json!([0, 1])), "{reply}");
     assert!(reply["failed"]["error"].as_str().unwrap_or_default().contains(warning), "{reply}");
+    // Nothing was sent, so the design is where the batch started (#10749).
+    assert_eq!((&reply["rolled_back"], &reply["applied"]), (&json!(true), &json!([])), "{reply}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt], "rollback": false}));
+    let reply: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!(reply["rolled_back"], json!(false), "no rollback asked for: {reply}");
     assert_eq!(sent("engine.batch"), 0, "refused unsent");
 
     let mut s = bridged(ParamCheck::Warn);
