@@ -129,6 +129,33 @@ fn text_typed_over_a_cell_replaces_its_value_and_a_field_with_none_shows_nothing
     assert_eq!(shown(&s), [("DRW-7".to_string(), at)]);
 }
 
+/// A cell that shows a logo shows it in place of its value: its label stays, nothing typed over the
+/// cell or read by its field is drawn over the picture, and `drawing.inspect` lists no text for it.
+/// The typed text is kept, not drawn: with the logo taken off, it shows again.
+#[test]
+fn a_logo_cell_keeps_its_label_and_draws_no_value() {
+    let (mut s, sheet) = drawing();
+    typed(&mut s, json!({"legal_owner": "Acme Ltd"}));
+    let texts = |s: &Session| runs(s, sheet).into_iter().map(|r| r.text).collect::<Vec<_>>();
+    assert!(texts(&s).iter().any(|t| t == "Acme Ltd") && texts(&s).iter().any(|t| t == "Legal owner"));
+    let dir = std::env::temp_dir().join(format!("solidcraft-title-block-text-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("logo.png");
+    std::fs::write(&file, crate::drawing_pictures::tests::png(320, 80)).unwrap();
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": file.to_string_lossy()}));
+    std::fs::remove_dir_all(&dir).unwrap();
+    let shown = texts(&s);
+    assert!(!shown.iter().any(|t| t == "Acme Ltd") && shown.iter().any(|t| t == "Legal owner"), "{shown:?}");
+    assert!(!cells(&mut s).iter().any(|cell| cell["name"] == "legal_owner"));
+    // The picture is in the block's group, under its lines.
+    let d = s.drawing("test").unwrap().clone();
+    let block = build(&s, &d, sheet).unwrap().scene.groups.into_iter().find(|g| g.kind == ObjectKind::TitleBlock).unwrap();
+    assert!(matches!(block.items.first(), Some(Item::Picture(_))), "{:?}", block.items.first());
+    run(&mut s, "drawing.title_block.logo", json!({"cell": "legal_owner", "file": null}));
+    assert!(texts(&s).iter().any(|t| t == "Acme Ltd"), "{:?}", texts(&s));
+    assert!(cells(&mut s).iter().any(|cell| cell["name"] == "legal_owner" && cell["text"] == "Acme Ltd"));
+}
+
 /// A value that wraps breaks between words to its box's width, its lines running down a pitch apart
 /// from the box's top: a part's tolerances note on a new drawing. A line break always breaks. What
 /// doesn't fit is shown whole, and `drawing.inspect` notes it: too many characters, too many lines,

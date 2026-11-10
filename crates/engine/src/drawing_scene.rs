@@ -3,10 +3,10 @@
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
 //! on the sheet by id, its lines as [`paper_group`] makes them, then the dimensions and notes of
 //! those views, by view and id ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]),
-//! then the notes on the sheet itself, then its title block's lines and
-//! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]), with its labels
-//! and values set on them ([`title_block_text`]). Images placed on the sheet sit between the border
-//! and the views ([`groups`]), so a view's lines draw over a photo. Tables join as one more kind of
+//! then the notes on the sheet itself, then its title block's logos, lines and projection symbol, in
+//! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
+//! ([`title_block_text`]). Images placed on the sheet sit between the border and the views
+//! ([`groups`]), so a view's lines draw over a photo. Tables join as one more kind of
 //! group. A shaded view's group holds
 //! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
@@ -344,7 +344,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let lettering = Lettering::of(s, drawing);
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
     let (notes, _) = sheet_notes(s, drawing, sheet, &lettering, true);
-    let mut assembly = assemble(record, drawing.projection, &text, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
+    let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
@@ -830,15 +831,16 @@ impl Assembly {
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, with its title block, its symbol in `projection` and
-/// its cells' text as [`block_text`] set it, to go on top ([`Assembly::finish`]). A view that would
-/// take the scene past a paper scene's limits is left out and says why, and the views after it are
-/// still drawn when they fit.
+/// lines, in id order) moved to its centre, with its title block (`logos` under its lines), its symbol in
+/// `projection` and its cells' text as [`block_text`] set it, to go on top ([`Assembly::finish`]). A view
+/// that would take the scene past a paper scene's limits is left out and says why, and the views after it
+/// are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
     text: &Set,
     images: &[Group],
+    logos: &[Item],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
@@ -850,6 +852,7 @@ fn assemble<D: Borrow<Drawn>>(
         (Some(block), Some(layout)) => {
             let placed = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?;
             let mut group = placed.paper(record.id, projection);
+            group.items.splice(0..0, logos.iter().cloned());
             group.items.extend(text.runs.iter().cloned().map(Item::Text));
             (Some(group), text.fonts.clone())
         }
@@ -1062,13 +1065,14 @@ struct DimensionEntry {
 }
 
 /// What a scene is assembled from: the sheet's record, the drawing's projection (its title block's
-/// symbol), the images on the sheet, each view on it with its entry's serial (0: not drawn yet)
+/// symbol), the images and logos on the sheet, each view on it with its entry's serial (0: not drawn yet)
 /// and its centre, and each dimension read so far with its entry's serial.
 #[derive(PartialEq)]
 struct Inputs {
     sheet: Sheet,
     projection: Projection,
     images: Vec<Group>,
+    logos: Vec<Item>,
     views: Vec<(u64, u64, Vec2)>,
     dimensions: Vec<(u64, u64)>,
 }
@@ -1162,10 +1166,11 @@ impl Cache {
     fn inputs(&self, d: &Drawing, record: &Sheet, on: &[(u64, ResolvedView, Vec2)]) -> Inputs {
         let serial = |id: &u64| self.views.get(id).map_or(0, |e| e.serial);
         let images = crate::drawing_pictures::groups(d, record.id);
+        let logos = crate::drawing_pictures::logo_items(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
         let read = dimensions_on(d, on.iter().map(|(id, ..)| *id));
         let dimensions = read.iter().filter_map(|record| self.dimensions.get(&record.id()).map(|e| (record.id(), e.serial))).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, views, dimensions }
+        Inputs { sheet: record.clone(), projection: d.projection, images, logos, views, dimensions }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -1363,7 +1368,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some() || d.notes.by_id(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &text, &inputs.images, drawn)?;
+            let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             assembly.add_sheet_notes(&notes);
             let (scene, views, objects, dimensions, notes) = assembly.finish()?;

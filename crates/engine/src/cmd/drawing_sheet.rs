@@ -218,7 +218,10 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
         let was = (sheet.sheet, sheet.title_block.clone());
         let lost = apply(cmd, sheet, p)?;
-        Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was, lost))
+        let changed = (sheet.id, (sheet.sheet, sheet.title_block.clone()) != was, lost);
+        // A logo goes with the block that showed it.
+        d.drop_unused_images();
+        Ok(changed)
     })?;
     // Only a change of paper or block changes the room views have; each view measured once.
     let d = s.drawing(cmd)?;
