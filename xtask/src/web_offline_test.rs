@@ -301,6 +301,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
     let count = std::cell::Cell::new(0);
+    // Run once, just before the next launch's page navigation is issued (see the update in another
+    // tab below).
+    let on_navigate: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
         let n = count.get() + 1;
         count.set(n);
@@ -310,6 +313,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
         // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
         // same page again must still start the same build.
         for attempt in 1..=2 {
+            if let Some(f) = on_navigate.borrow_mut().take() {
+                f();
+            }
             let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
             if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
                 return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
@@ -416,11 +422,22 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     other.eval(age)?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
     // The other tab updates once the launch is waiting for build.json, and leaves.
+    // Only a check made after this launch's navigation begins counts: another tab's check, late on a
+    // loaded machine, must not start the update before the launch has loaded its files (the new
+    // worker would then serve the new build's files to the old build's page).
     let waiting = server.checks.clone();
-    let before = waiting.load(Ordering::SeqCst);
+    let before = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    *on_navigate.borrow_mut() = Some(Box::new({
+        let (before, waiting) = (before.clone(), waiting.clone());
+        move || before.store(waiting.load(Ordering::SeqCst), Ordering::SeqCst)
+    }));
     let updater = std::thread::spawn(move || -> Result<Cdp, String> {
         let t = Instant::now();
-        while waiting.load(Ordering::SeqCst) <= before {
+        loop {
+            let b = before.load(Ordering::SeqCst);
+            if b != usize::MAX && waiting.load(Ordering::SeqCst) > b {
+                break;
+            }
             if t.elapsed() > LAUNCH_TIMEOUT {
                 return Err("the launch never asked for build.json".into());
             }
