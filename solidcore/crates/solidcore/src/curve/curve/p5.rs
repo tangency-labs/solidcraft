@@ -89,6 +89,8 @@
 //!   estimated length plus its own increment (`OdeOptions::rate`), shares that add up to
 //!   at most twice the length ([`Curve::length`];
 //!   `plan/findings/curve.curve_p5--curve-length-global-error-moves-cases-2026-11-08.md`).
+//!   Not upstream either: a circle's arc is its radius times the angle its B-spline turns
+//!   through, not an integral ([`Curve::length`]).
 //! - **Out-params.** Flags with outputs are `Option`s (`IsLine`: point and vector;
 //!   `IsArc`: frame, radius, start and end angle; the guesses); `IsLinear`'s
 //!   optional outputs are the fields of [`Linearity`] (`want_deviation` stands for a
@@ -116,6 +118,7 @@ use crate::curve::curve::p4::{
     CcIntersectEnfo, CcTangentIntEnfo, CurvePropertyEfo, FindCcNormalEnfo,
 };
 use crate::curve::curve_cache::{CurveCache, CurveCacheOptions};
+use crate::curve::ellipse::Ellipse;
 use crate::error::{ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError};
 use crate::geom::a_object::{CacheId, ObjectCacheType};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -1782,17 +1785,24 @@ impl Curve {
 
 impl Curve {
     /// `Length(crInterval, dDesiredAccuracy)`: the arc length over `interval` (the
-    /// line override, else [`Curve::length_base`]).
+    /// line override, else [`Curve::length_base`]). Not upstream: a circle (an
+    /// [`Ellipse`] whose radii agree) is its radius times the angle its B-spline turns
+    /// through over `interval`, to a rounding that scales with the radius, not with the
+    /// distance from the origin, whatever the accuracy asked (`circle_length`; upstream
+    /// integrates it as any B-spline). A circle stored as a plain B-spline still
+    /// integrates.
     ///
     /// # Errors
     ///
-    /// Those of [`Curve::length_base`].
+    /// Those of [`Curve::length_base`], and for a circle those of
+    /// [`BSplineCurve::span_speed`].
     pub fn length(&self, k: &Kernel, interval: &Extent1d, desired_accuracy: f64) -> Result<f64> {
         self.length_with_zone_tol(k, interval, desired_accuracy, self.owner_zone_tol_3d())
     }
 
     /// Arc length with the owning edge's resolved zone tolerance, independent of
-    /// the desired integration accuracy. Retains the virtual line override.
+    /// the desired integration accuracy. Retains the virtual line override and the
+    /// circle's closed form ([`Curve::length`]).
     pub(crate) fn length_with_zone_tol(
         &self,
         k: &Kernel,
@@ -1800,10 +1810,15 @@ impl Curve {
         desired_accuracy: f64,
         owner_zone_tol_3d: Option<f64>,
     ) -> Result<f64> {
-        match self.kind() {
-            CurveKind::Line(l) => Ok(l.length(interval)),
-            _ => self.length_base_with_zone_tol(k, interval, desired_accuracy, owner_zone_tol_3d),
+        if let CurveKind::Line(l) = self.kind() {
+            return Ok(l.length(interval));
         }
+        if let CurveKind::Ellipse(e) = self.kind() {
+            if let Some(length) = circle_length(e, interval)? {
+                return Ok(length);
+            }
+        }
+        self.length_base_with_zone_tol(k, interval, desired_accuracy, owner_zone_tol_3d)
     }
 
     /// The base-class `SmCurve::Length`: the sum over the spans of a curve cache
@@ -1969,6 +1984,71 @@ impl Curve {
 
         Ok(total_length)
     }
+}
+
+/// The length of `interval` of the circle `e` (an ellipse whose radii agree, see
+/// [`Ellipse::is_circle`]): its radius at the X axis times the angle its NURB turns
+/// through. The angle is summed over the pieces of `interval` between the NURB's knots,
+/// each `atan2(|a x b|, a . b)` of its end points `a`, `b` about the centre: a span of a
+/// rational quadratic NURB with positive weights is an arc of less than 180 degrees, so
+/// the angle has no seam or period to resolve. Each end point about the centre is the
+/// span's first control point about the centre, once, plus the point about that control
+/// point in difference form ([`SpanSpeed::from_first_point`]): the latter rounds to a few
+/// ulps of the radius, and the rounding of the former, a few ulps of the distance from
+/// the origin, moves both `a` and `b` alike, so the angle only by that times the angle
+/// over the radius. `None` (the caller integrates) for an ellipse that is not a circle, a
+/// radius not positive, a NURB of another degree, polynomial or with a weight not
+/// positive, or an interval past the NURB's ends.
+///
+/// # Errors
+///
+/// Those of the NURB's degree, control points and knots, and of
+/// [`BSplineCurve::span_speed`].
+fn circle_length(e: &Ellipse, interval: &Extent1d) -> Result<Option<f64>> {
+    let nurb = e.base();
+    let radius = e.x_radius();
+    let natural = nurb.natural_interval();
+    if !e.is_circle()
+        || radius.is_nan()
+        || radius <= 0.0
+        || nurb.degree()? != 2
+        || !nurb.is_rational()?
+        || nurb
+            .control_points()?
+            .iter()
+            .any(|p| p.w.is_nan() || p.w <= 0.0)
+        || !natural.contains_value(interval.min(), 0.0)
+        || !natural.contains_value(interval.max(), 0.0)
+    {
+        return Ok(None);
+    }
+    let center = e.position().origin();
+    let (knots, _) = nurb.knots(Some(interval))?;
+    let mut ends = vec![interval.min()];
+    ends.extend(
+        knots
+            .into_iter()
+            .filter(|&t| t > interval.min() && t < interval.max()),
+    );
+    ends.push(interval.max());
+    let mut angle = 0.0;
+    for (&a, &b) in ends.iter().zip(ends.iter().skip(1)) {
+        // (`None`: the span's control points are one point, which turns through nothing)
+        let Some(span) = nurb.span_speed(&Extent1d::from_min_max(a, b))? else {
+            continue;
+        };
+        let (Some(from), Some(to)) = (span.from_first_point(a)?, span.from_first_point(b)?) else {
+            return Ok(None);
+        };
+        let [x, y, z] = span.first_point();
+        let first = Point3::new(x, y, z) - center;
+        let (from, to) = (
+            first + Vec3::new(from[0], from[1], from[2]),
+            first + Vec3::new(to[0], to[1], to[2]),
+        );
+        angle += from.cross(to).length().atan2(from.dot(to));
+    }
+    Ok(Some(radius * angle))
 }
 
 // ---- LocalPropertyAnalysis --------------------------------------------------------------
