@@ -605,7 +605,8 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
         return Ok(());
     }
     let (format, ext) = FORMATS.get(k.format).map_or(("stl", "stl"), |f| (f.1, f.2));
-    let name = crate::selection::items(inputs, 0).body_names().first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
+    let body = crate::selection::items(inputs, 0).body_names().into_iter().next();
+    let name = crate::export_name::offered(app, body.as_deref(), body.as_deref().unwrap_or(&app.session.doc.name));
     app.preferences.save_mesh_format = format.into();
     app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
     // The file dialog answers later; the dialog closes meanwhile, as for every export.
@@ -969,6 +970,50 @@ mod tests {
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
         assert_eq!(saved["quality"], "finest");
+    }
+
+    /// The Export file name preference names the file every export offers: File › Export, Save As
+    /// Mesh and a body's right-click Export…. Left empty, File › Export offers the design's name and
+    /// the other two the body's, as before.
+    #[test]
+    fn exports_offer_the_name_the_export_file_name_preference_makes() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, _| {
+            seen.borrow_mut().push(name.to_string());
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Base"})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        let mut bodies = SelInput::new("Bodies", BODIES, true);
+        bodies.items = vec![Sel::Body { name: "Base".into() }];
+        let stl = SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: false, shown: None };
+        let offer = |h: &mut crate::scenario::Harness| {
+            // One file picker at a time: the STEP export finishes before the mesh asks.
+            crate::toolbar::export(&mut h.app, "step");
+            h.frames(3);
+            h.settle();
+            run(&mut h.app, &stl, std::slice::from_ref(&bodies)).unwrap();
+            h.frames(3);
+            h.settle();
+            // A body's right-click menu: Export….
+            let item = crate::context_menu::act("ui.export", "Export…", "export").with(json!({"bodies": ["Base"]}));
+            crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+            h.frames(3);
+            h.settle();
+            offered.borrow_mut().drain(..).collect::<Vec<_>>()
+        };
+        assert_eq!(offer(&mut h), ["Bracket.step", "Base.stl", "Base.step"], "an empty template offers the old names");
+
+        h.app.preferences.export_name = "{design}-{body}".into();
+        assert_eq!(offer(&mut h), ["Bracket-Base.step", "Bracket-Base.stl", "Bracket-Base.step"]);
+        assert!(h.dir.join("Bracket-Base.step").is_file() && h.dir.join("Bracket-Base.stl").is_file(), "the files are written");
+
+        // Design properties are placeholders too, set as File › Design Properties sets them.
+        h.app.run("document.metadata.set", json!({"values": {"part_number": "RV-102", "revision": "C"}})).unwrap();
+        h.app.preferences.export_name = "{part_number}_rev{revision}".into();
+        assert_eq!(offer(&mut h), ["RV-102_revC.step", "RV-102_revC.stl", "RV-102_revC.step"]);
     }
 
     #[test]

@@ -648,7 +648,8 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
 
 /// Export to a file with extension `ext`, in `format` when the extension alone doesn't name it.
 fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
-    let name = format!("{}.{ext}", app.session.doc.name);
+    let body = crate::export_name::first_body(app);
+    let name = format!("{}.{ext}", crate::export_name::offered(app, body.as_deref(), &app.session.doc.name));
     let format = format.map(str::to_string);
     app.pick_save(&name, &[ext], move |app, path| {
         let Some(path) = path else { return };
