@@ -2137,6 +2137,8 @@ fn link_reads(st: &ModelState, source: &solidcraft_sketch::LinkSource, read: &mu
             link_reads(st, a, read)?;
             link_reads(st, b, read)
         }
+        // Kept in its own component's frame, which these reads do not follow: key on the whole model.
+        L::ConstructionPoint { .. } => None,
         // In the sketch's own frame (construction axes it names are in its key), or text.
         L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => Some(()),
     }
