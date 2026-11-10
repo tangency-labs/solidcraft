@@ -25,10 +25,11 @@
 //! of the pcurve, isolated by subdividing its Bernstein coefficients (no sign change: no root;
 //! one: exactly one) and found to rounding by bisection.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Brep, Curve2, Face, Surface};
 use solidcraft_geom::brep::eval::SurfaceEval;
-use solidcraft_geom::brep::{Brep, Curve2, Face, Surface};
 use solidcraft_geom::bspline::{HPoint, segment};
+use solidcraft_geom::prelude::*;
 
 use crate::{KernelError, Result};
 
@@ -115,7 +116,7 @@ impl<'a> Use<'a> {
     /// The outward unit normal at the pcurve's point at `t`; `Ok(None)` where it is undefined (a
     /// pole: a zero of the normal).
     fn normal(&self, t: f64) -> Result<Option<Vec3>> {
-        let uv = self.pcurve.eval(t).ok_or_else(|| failed(format!("a pcurve at {t}")))?;
+        let uv = solidcore_ops::pcurve::eval(self.pcurve, t).ok_or_else(|| failed(format!("a pcurve at {t}")))?;
         let (_, su, sv) = self.surface.derivs(uv[0], uv[1]).ok_or_else(|| failed(format!("a face at ({}, {})", uv[0], uv[1])))?;
         let n = su.cross(sv);
         if !(n.len() > DEGENERATE * su.len() * sv.len()) {
@@ -274,10 +275,10 @@ fn bernstein_roots(c: &[f64], lo: f64, hi: f64, depth: u32, work: &mut usize, ou
 fn normal_pairs(rec: &Brep, sign: impl Fn(usize) -> Option<f64>, e: usize, mut visit: impl FnMut(Vec3, Vec3) -> bool) -> Result<Option<bool>> {
     let edge = rec.edges.get(e).ok_or_else(|| failed(format!("edge {e}")))?;
     let [ua, ub] = edge.uses.as_slice() else { return Ok(None) };
-    let use_of = |u: &solidcraft_geom::brep::EdgeUseRef| -> Result<Use<'_>> {
+    let use_of = |u: &solidcore_record::brep::EdgeUseRef| -> Result<Use<'_>> {
         let face = rec.faces.get(u.face as usize).ok_or_else(|| failed(format!("face {}", u.face)))?;
         let oriented = match face.loops.get(u.r#loop as usize) {
-            Some(solidcraft_geom::brep::Loop::Edges { edges }) => edges.get(u.position as usize),
+            Some(solidcore_record::brep::Loop::Edges { edges }) => edges.get(u.position as usize),
             _ => None,
         }
         .ok_or_else(|| failed(format!("a use of edge {e}")))?;

@@ -2,7 +2,7 @@
 //! from its own topology (an emboss on a cylinder, a raised band, a deleted face healed by its
 //! neighbours) starts from the body's record, takes faces away, adds faces bounded by new or
 //! existing edges, and finishes into a record in canonical order (docs/native-brep.md): pcurves
-//! from the record's one routine ([`solidcraft_geom::brep::pcurve`]) for every new use, the
+//! from the record's one routine ([`solidcore_ops::pcurve`]) for every new use, the
 //! record's own for every use kept, edge uses, regions and shells. The body is that record.
 //!
 //! Faces keep the record's convention as the operation gives them: each face's loops are seen
@@ -10,11 +10,13 @@
 //! and holes clockwise there; [`Assembly::finish`] stores them relative to the surface's natural
 //! normal, as the record does.
 
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::pcurve::{EdgeUse, pcurves_within};
-use solidcraft_geom::brep::{
-    Brep, Curve, Curve2, Edge, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex, form,
+use solidcore_ops::pcurve::{EdgeUse, pcurves_within};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{
+    Brep, Curve, Curve2, Edge, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell, Surface, VERSION, Vertex,
 };
+use solidcraft_geom::brep::form;
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceProv};
@@ -244,7 +246,7 @@ impl Assembly {
         let loose =
             Brep { version: VERSION, tolerance: self.tolerance, regions, shells, faces, edges: edges.collect(), vertices: self.vertices.clone() };
         let part = loose.canonical().map_err(invalid)?;
-        part.brep.check_geometry().map_err(invalid)?;
+        solidcore_ops::record_check::agreement(&part.brep).map_err(invalid)?;
         let mut face_map: Vec<Option<usize>> = vec![None; self.faces.len()];
         for (c, &k) in part.faces.iter().enumerate() {
             if let Some(slot) = kept.get(k as usize).and_then(|i| face_map.get_mut(*i)) {
@@ -422,7 +424,7 @@ fn domain_of(surface: &Surface, pcurves: &[Vec<Curve2>], kept: Option<[[f64; 2];
             }
         }
     }
-    let natural = surface.natural();
+    let natural = solidcore_ops::label::surface_natural(surface);
     let mut out = [[0.0; 2]; 2];
     for d in 0..2 {
         let (mut a, mut b) = (*lo.get(d)?, *hi.get(d)?);

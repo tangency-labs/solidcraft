@@ -6,8 +6,9 @@
 //! the slicer arranges them.
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::{ModelState, PrintFace};
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};

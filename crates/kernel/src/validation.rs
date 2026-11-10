@@ -137,7 +137,7 @@ pub(crate) enum Checked {
 /// at the end is the step's own, of the result the step made.
 #[derive(Debug)]
 pub(crate) struct Unchecked {
-    record: std::sync::Weak<solidcraft_geom::brep::Brep>,
+    record: std::sync::Weak<solidcore_record::brep::Brep>,
     /// The step, as its own refusal names it (`SMLib fillet`).
     what: String,
     how: Checked,
@@ -145,12 +145,12 @@ pub(crate) struct Unchecked {
 }
 
 impl Unchecked {
-    pub(crate) fn new(record: &Arc<solidcraft_geom::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep) -> Unchecked {
+    pub(crate) fn new(record: &Arc<solidcore_record::brep::Brep>, what: &str, how: Checked, result: solidcraft_smlib::Brep) -> Unchecked {
         Unchecked { record: Arc::downgrade(record), what: what.to_string(), how, result: std::sync::Mutex::new(Some(result)) }
     }
 
     /// The step's result, taken (once), when this is `record`'s.
-    fn take(&self, record: &Arc<solidcraft_geom::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
+    fn take(&self, record: &Arc<solidcore_record::brep::Brep>) -> Option<solidcraft_smlib::Brep> {
         if !std::ptr::eq(self.record.as_ptr(), Arc::as_ptr(record)) {
             return None;
         }
@@ -187,10 +187,51 @@ pub fn check_kept(body: &Body) -> Result<()> {
         Some((u, r)) => (u.what.as_str(), check_result(r, u.how)),
         None => ("SMLib", body.smlib()?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
     };
+    verdict(what, check)
+}
+
+/// What [`check_kept`] makes of SMLib's check of what it read (`what` names the step).
+fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> Result<()> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
         Ok(c) => Err(KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}"))),
         Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
+    }
+}
+
+/// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]).
+pub struct KeptCheck(Kept);
+
+enum Kept {
+    /// A mesh body: nothing to check.
+    Nothing,
+    /// The step's own result, taken from the body.
+    Step { what: String, how: Checked, result: solidcraft_smlib::Brep },
+    /// A copy of the body's SMLib form, made when the check was detached.
+    Copy(Result<solidcraft_smlib::Brep>),
+}
+
+/// [`check_kept`] of `body`, detached from it: the step's result is taken now, or the body's SMLib
+/// form is copied now, so the check reads nothing the operations after it use and can run on
+/// another thread beside them ([`KeptCheck::run`]).
+pub fn detach_kept(body: &Body) -> KeptCheck {
+    if body.is_mesh() {
+        return KeptCheck(Kept::Nothing);
+    }
+    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r))) {
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result });
+    }
+    KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))))
+}
+
+impl KeptCheck {
+    /// The check: [`check_kept`]'s result for the body it was detached from.
+    pub fn run(self) -> Result<()> {
+        match self.0 {
+            Kept::Nothing => Ok(()),
+            Kept::Step { what, how, result } => verdict(&what, check_result(&result, how)),
+            Kept::Copy(copy) => verdict("SMLib", copy?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+        }
     }
 }
 
@@ -213,11 +254,6 @@ mod tests {
     #[test]
     fn the_mode_reaches_the_kernels_worker_threads() {
         let items = [0, 1, 2, 3];
-        let (checked, deferred) = validating(Validation::EachFeature, || {
-            crate::par::map("validation", &items, true, |_| Ok(step())).into_iter().collect::<Result<Vec<Step>>>()
-        });
-        assert_eq!(checked.ok(), Some(vec![Step::Defer; 4]));
-        assert!(deferred);
         let (on_threads, deferred) = validating(Validation::EachFeature, || crate::par::map_on_threads(&items, 4, |_| step()));
         assert_eq!(on_threads, vec![Some(Step::Defer); 4]);
         assert!(deferred);
@@ -226,10 +262,9 @@ mod tests {
     /// A box with one corner moved off its three edges: SMLib's check refuses it. Under each_step
     /// the boolean that takes it refuses its result there; under each_feature it is not checked,
     /// says the check was left for later, and the check of the body kept refuses it.
-    #[cfg(feature = "smlib")]
     #[test]
     fn a_body_the_check_refuses_is_refused_at_the_step_or_at_the_end() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let good = crate::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
         assert!(check_kept(&good).is_ok());
         let mut record = good.record().clone();

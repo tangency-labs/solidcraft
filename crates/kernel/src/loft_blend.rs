@@ -40,9 +40,10 @@
 //! to 3 fuller, down to −0.9 flatter), exactly as a bridge's crown does. It shapes the middle of
 //! each end span and leaves every joint's conditions alone.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::bspline::{CurveN, HPoint, MAX_SPLINE_DEGREE, NurbsSurface};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::bridge::{Continuity, Frame};
@@ -315,10 +316,11 @@ impl<'a> Blend<'a> {
                     - point(self.sections, i - 1, s)?)
                     * (1.0 / cube)
             }
-            // Only behind: the same the other way round.
+            // Only behind: the backward four-point stencil at the second-to-last of them, the same
+            // difference of the same four stations (#13447).
             (Some(k), false) => {
-                (point(self.sections, k, s)? - point(self.sections, i - 1, s)? * 3.0 + point(self.sections, i, s)? * 3.0
-                    - point(self.sections, i + 1, s)?)
+                (point(self.sections, i + 1, s)? - point(self.sections, i, s)? * 3.0 + point(self.sections, i - 1, s)? * 3.0
+                    - point(self.sections, k, s)?)
                     * (1.0 / cube)
             }
             (None, false) => return Err(KernelError::Failed("loft blend: no fourth station for a change of curvature".into())),

@@ -1,10 +1,11 @@
 //! Command-level diagnostic work, including the report ultimately published to the model.
 
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 use serde_json::json;
+use solidcore_record::Vec2;
 use solidcraft_engine::Session;
-use solidcraft_geom::Vec2;
 use solidcraft_sketch::{Analysis, ConstraintKind, Sketch, profiling::capture};
 
 fn session(horizontal: bool) -> (Session, u64, String) {

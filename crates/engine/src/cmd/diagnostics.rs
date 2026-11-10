@@ -55,7 +55,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              trace?: path (write the recorded spans as a Chrome trace-event file, for chrome://tracing or Perfetto). Returns what \
              was recorded before enabled and reset apply: {compiled, enabled, wall_ms, spans, dropped, by_category: [{category, \
              self_ms, share}], rows: [{category, name, count, total_ms, self_ms, max_ms}], rows_total, trace?}, the rows the most \
-             self time first. Categories: smlib (SMLib's C API calls, timed by the C API), kernel, feature (one per feature \
+             self time first. Categories: solidcore (the kernel's calls), kernel, feature (one per feature \
              computed, by its type), doc, command, import (STEP/IGES stages), io. Self time is a span's time less the spans \
              inside it; total counts its outermost run only. Recording also starts with SOLIDCRAFT_PROFILE=1, the CLI's \
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
@@ -79,9 +79,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CRASH_TEST_CONTRACT)
         .output(output_schema_for::<CrashTestResult>)
         .params(
-            "mode: panic | kernel | abort. Checks that crash reports work: panic = an internal error in this command (caught; \
-             the design is unchanged), kernel = one inside the geometry kernel (caught), abort = the app ends at once (reported \
-             at the next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
+            "mode: panic | kernel | worker | worker_raw | abort. Checks that crash reports work: panic = an internal error in this \
+             command (caught; the design is unchanged), kernel = one inside the geometry kernel (caught), worker / worker_raw = \
+             one on a Rayon worker, caught inside / outside the kernel's guard, abort = the app ends at once (reported at the \
+             next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
         ),
 ];
 
@@ -123,21 +124,29 @@ fn crash_test_enabled(_: &Session) -> std::result::Result<(), String> {
     if solidcraft_geom::env::var_os("CRASH_TEST").is_some() { Ok(()) } else { Err("set SOLIDCRAFT_CRASH_TEST to use the crash test".into()) }
 }
 
-// The one deliberate panic: it proves the crash reports work, and runs only when asked for with
-// SOLIDCRAFT_CRASH_TEST.
+/// `diagnostics.crash_test`: the one deliberate panic. It proves the crash reports work, and runs
+/// only when asked for with SOLIDCRAFT_CRASH_TEST. `mode` picks where the internal error happens
+/// ([`CrashTestMode`](crate::schema::diagnostics::CrashTestMode)); every mode but `abort` ends
+/// in a caught error.
 #[allow(clippy::panic)]
 fn crash_test(_: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "diagnostics.crash_test";
     match str_(p, "mode") {
         Some("panic") => std::panic::panic_any(String::from("crash test: an internal error in a command")),
         Some("kernel") => {
-            solidcraft_kernel::guard("crash test", || -> solidcraft_kernel::Result<()> {
-                std::panic::panic_any(String::from("an internal error in the kernel"))
-            })?;
+            solidcraft_kernel::crash_test()?;
             Err(EngineError::Other("crash test: the kernel error was not caught".into()))
         }
+        Some("worker") => {
+            solidcraft_kernel::crash_test_worker_panic("an internal error in the kernel on a worker")?;
+            Err(EngineError::Other("crash test: the kernel error was not caught".into()))
+        }
+        Some("worker_raw") => {
+            solidcraft_kernel::crash_test_worker_panic_raw("a worker panic in a command")?;
+            Err(EngineError::Other("crash test: the worker panic was not resumed".into()))
+        }
         Some("abort") => std::process::abort(),
-        _ => Err(bad(cmd, "`mode` must be panic, kernel or abort")),
+        _ => Err(bad(cmd, "`mode` must be panic, kernel, worker, worker_raw or abort")),
     }
 }
 

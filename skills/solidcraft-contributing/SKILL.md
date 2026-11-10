@@ -72,9 +72,34 @@ not modelling a part through MCP.
   operation protocol in `plan/execution-plan.md` section 6; do not stop to ask unless it lists the decision
   as the owner's. Contributors without `plan/` can ignore this.
 - **Update the roadmap** when a milestone task lands: `docs/roadmap-detail.md` tracks status, milestones and estimates; `ROADMAP.md` is the short user-facing roadmap.
-- **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work is paused ("Kernel work is paused" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/kernel` may use `truck`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
+- **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work goes in `solidcore/` ("Kernel work goes in solidcore/" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/smlib` may use `solidcore`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
 - **Do not open a second PR** for an issue a lower-numbered open PR already closes, and keep the `Changes a default:` line filled in: `pr-checks.yml` fails both.
 - **The gate reads the working tree.** Do not switch branches while `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
+
+## Working as an agent
+
+- **The code is English. The comments are English. Always.** Identifiers, doc comments,
+  inline comments, commit messages, branch names, test names, error messages and
+  documentation are all in English. This is not a preference: a comment in another
+  language is a defect, it is not reviewable by the people who maintain this code, and a
+  reviewer rejects it. If something is not obvious, write it in English and keep it
+  short. A user-visible string is not inline in the code: it goes to the message
+  catalogs in `assets/locales/` (a new one to `assets/locales/pending/<slug>.json`),
+  and `skills/solidcraft-ui-text/SKILL.md` says how to name and translate it.
+- **Parallel work runs in parallel.** When a task splits into independent parts (several
+  files, several areas, several checks that do not depend on each other), dispatch one
+  subagent per part and let them run concurrently instead of walking the list one item at
+  a time. Give every subagent a self-contained brief: what to change, what not to touch,
+  and what to report back. Read the answers before you continue; a subagent's report is
+  not a result you can assume.
+- **Do not parallelize what depends on itself.** A fix and the test that proves it, a
+  refactor and the callers it breaks, two edits to the same file: those stay sequential.
+  One subagent per independent unit of work, and no two units may write the same file.
+- **Keep the cost down.** Keep one long-running agent session instead of restarting it.
+  Don't `--resume` a session after its prompt cache has gone cold: a cold resume re-reads the
+  whole history at full price. Act on CodeRabbit comments only when they're about crashes,
+  wrong results, data loss or security, and ignore style nitpicks. Don't push just to
+  re-trigger a review.
 
 ## 1. Check the environment
 
@@ -133,15 +158,14 @@ fails, inspect the divergence and preserve existing work; do not reset it away.
 ## 3. Choose an unclaimed task together
 
 Ask about their interests and show a few issues that fit the available resources.
-Read the current kernel-pause notice in CONTRIBUTING.md and skip kernel work
-while paused, including tasks outside `crates/kernel/` that change kernel behaviour.
+Kernel and geometry tasks are fine: they go in `solidcore/` (CONTRIBUTING.md, "Kernel work goes in solidcore/").
 Fetch the whole open list, including drafts, before narrowing it:
 
 ```sh
 gh issue list -R tangency-labs/solidcraft --state open --limit 500
 gh pr list -R tangency-labs/solidcraft --state open --limit 500 --json number,title,files
-gh issue list -R tangency-labs/solidcraft --state open --label 'good first issue' --search '-label:kernel-paused -label:"in progress"' --limit 100
-gh issue list -R tangency-labs/solidcraft --state open --label 'help wanted' --search '-label:kernel-paused -label:"in progress"' --limit 100
+gh issue list -R tangency-labs/solidcraft --state open --label 'good first issue' --search '-label:"in progress"' --limit 100
+gh issue list -R tangency-labs/solidcraft --state open --label 'help wanted' --search '-label:"in progress"' --limit 100
 ```
 
 Let the person choose. Set `N` to that issue's number, then inspect its discussion,

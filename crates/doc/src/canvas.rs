@@ -2,7 +2,8 @@
 //! The image bytes travel inside the design file (base64), so it reopens without the original.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::PlaneRef;
 
@@ -36,6 +37,10 @@ pub struct Canvas {
     pub flip: bool,
     #[serde(default = "yes")]
     pub visible: bool,
+    /// Locked (#12310): its place, size, angle and flip stay as they are, and it is not deleted,
+    /// until it is unlocked. Its opacity, visibility and name can still change.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// The component it belongs to (its plane is in that component's frame, so it moves with
     /// the component's occurrence); 0 = the root.
     #[serde(default, skip_serializing_if = "is_root")]

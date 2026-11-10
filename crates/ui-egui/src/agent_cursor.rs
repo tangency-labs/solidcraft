@@ -19,13 +19,14 @@
 //! settings on the navigation bar, or `ui.agent_cursor {show, speed, follow_camera}`); a call
 //! with `"animate": false` skips it.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::VecDeque;
 use std::sync::mpsc::Sender;
 
 use egui::{Pos2, Stroke, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;
@@ -108,7 +109,7 @@ pub fn speed_slider(ui: &mut egui::Ui, speed: &mut Speed) -> egui::Response {
         1.0..=5.5,
         crate::ui_kit::Slider {
             step: Some(0.5),
-            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { Speed::Times(v).label() },
+            format: |v| if v > 5.25 { solidcraft_ui_text::tr_label("Instant").into() } else { format!("{v:.2}x") },
             ..Default::default()
         },
     );
@@ -156,7 +157,7 @@ pub struct AgentCursor {
     /// Click ripples: where and when.
     ripples: Vec<(Pos2, f64)>,
     /// The view before a followed sketch (restored when it finishes).
-    saved_view: Option<solidcraft_engine::render::Camera>,
+    saved_view: Option<solidcraft_viewport::Camera>,
 }
 
 impl AgentCursor {
@@ -169,6 +170,11 @@ impl AgentCursor {
     /// the command.
     pub fn computing(&self) -> Option<(f64, String)> {
         self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.steps.shown()))
+    }
+
+    /// The steps of the command [`Self::computing`] reports.
+    pub(crate) fn computing_steps(&self) -> Option<std::sync::Arc<crate::control_job::Steps>> {
+        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| a.steps.clone())
     }
 
     /// Follow the pointer input an agent sends itself (`ui.move`, `ui.click`, `ui.drag`,
@@ -271,6 +277,9 @@ fn batch_targets(steps: &[Value]) -> Vec<(Pos2, &'static str)> {
 /// The places a command's parameters pick, in the world: [x, y, z] points (faces, edges,
 /// vertices, positions), active-sketch [x, y] points, and a new sketch's plane.
 pub fn picks(app: &SolveApp, command: &str, params: &Value) -> Vec<Vec3> {
+    if solidcraft_engine::panels::commands::is_command(command) {
+        return Vec::new();
+    }
     let id = solidcraft_engine::find_command(command).map_or(command, |c| c.id);
     let mut out = Vec::new();
     if id == "sketch.create"
@@ -473,7 +482,7 @@ fn finish(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// The pointer's colour: a violet no part of the UI uses.
-use crate::icons::pointer::agent;
+use solidcraft_look::pointer::agent;
 
 /// Draw the pointer, its "Agent" tag and the click ripples over everything.
 pub fn paint(app: &SolveApp, ctx: &egui::Context) {
@@ -481,25 +490,26 @@ pub fn paint(app: &SolveApp, ctx: &egui::Context) {
         return;
     }
     let Some(p) = app.agent.pos else { return };
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::new("sc_agent_cursor")));
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Debug, egui::Id::unique("sc_agent_cursor")));
     for (at, t0) in &app.agent.ripples {
         let k = ((app.now - t0) / 0.6).clamp(0.0, 1.0) as f32;
         painter.circle_stroke(*at, 6.0 + 22.0 * k, Stroke::new(3.0 * (1.0 - k) + 0.5, agent().gamma_multiply(1.0 - k)));
     }
-    crate::icons::pointer::paint(&painter, p);
+    solidcraft_look::pointer::paint(&painter, p);
     if let Some((_, label)) = app.agent.job.as_ref().and_then(|job| job.stops.front()).filter(|(_, label)| !label.is_empty()) {
         use crate::ui_kit::{Container, Surface};
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_agent_command"))
+            .area(egui::Id::unique("sc_agent_command"))
             .order(egui::Order::Debug)
             .fixed_pos(p + vec2(15.0, 42.0))
             .constrain(true)
             .interactable(false)
             .fade_in(false)
             .show(ctx, |ui| {
-                Container::popup_frame(ui.style()).fill(t.overlay).show(ui, |ui| {
-                    ui.label(egui::RichText::new(crate::i18n::tr_label(label)).size(t.font_label).color(t.text));
+                let frame = Container::popup_frame(ui.style()).fill(t.overlay);
+                Container::show_backing(ui, frame, |ui| {
+                    ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).size(t.font_label).color(t.text));
                 });
             });
     }

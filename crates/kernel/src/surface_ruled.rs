@@ -20,11 +20,12 @@
 //! edge's own curve as a NURBS where it stands on the body), and the faces are stitched by SMLib
 //! along the side edges they share.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self as b, Brep};
 use solidcraft_geom::brep::eval::SurfaceEval;
-use solidcraft_geom::brep::{self as b, Brep};
 use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
 
 use crate::body::Body;
@@ -362,7 +363,8 @@ fn normal_at(surface: &SurfaceEval, forward: bool, p: Vec3) -> Option<Vec3> {
 fn base_curve(r: &Brep, e: usize, forward: bool) -> Result<CurveN<4>> {
     let edge = r.edges.get(e).ok_or_else(|| KernelError::Invalid("an edge reference".into()))?;
     // On the curve itself: a conic's angles (its NURBS form, if any, is parameterised otherwise).
-    let [t0, t1] = edge.curve_interval().ok_or_else(|| KernelError::Invalid("an edge's NURBS form cannot be evaluated".into()))?;
+    let [t0, t1] =
+        solidcore_ops::label::edge_curve_interval(edge).ok_or_else(|| KernelError::Invalid("an edge's NURBS form cannot be evaluated".into()))?;
     let c = match &edge.curve {
         b::Curve::Line { start, end } => {
             let at = |t: f64| [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t, 1.0];
@@ -1021,8 +1023,8 @@ impl Strip {
         let side = top_start - bs;
         let Some(x) = side.normalized() else { return Ok(None) };
         let Some(y) = (flat(bs) - x * flat(bs).dot(x)).normalized().or_else(|| (axis - x * axis.dot(x)).normalized()) else { return Ok(None) };
-        let plane = solidcraft_geom::Plane { origin: bs, x, y };
-        let line = solidcraft_geom::Seg2::Line { a: solidcraft_geom::Vec2::ZERO, b: solidcraft_geom::Vec2::new(side.len(), 0.0) };
+        let plane = solidcore_record::Plane { origin: bs, x, y };
+        let line = solidcore_record::Seg2::Line { a: solidcore_record::Vec2::ZERO, b: solidcore_record::Vec2::new(side.len(), 0.0) };
         // SMLib turns right-handed about the axis it is given.
         let (axis, turn) = if turn < 0.0 { (axis * -1.0, -turn) } else { (axis, turn) };
         Ok(Some(crate::surfaces::revolved_record(&plane, &[line], c, axis, turn)?))
@@ -1050,10 +1052,11 @@ fn face_of(mut parts: Parts, surface: b::Surface, uses: Vec<(b::Curve, [f64; 2],
         .enumerate()
         .map(|(i, (e, (forward, pc)))| {
             let edge = u32::try_from(i).map_err(|_| KernelError::Failed("ruled surface: an edge".into()))?;
-            Ok(b::pcurve::EdgeUse { edge, curve: e.parameters(), interval: e.interval, forward: *forward, tolerance, given: pc.as_ref() })
+            Ok(solidcore_ops::pcurve::EdgeUse { edge, curve: e.parameters(), interval: e.interval, forward: *forward, tolerance, given: pc.as_ref() })
         })
         .collect::<Result<Vec<_>>>()?;
-    let pcurves = b::pcurve::pcurves(&surface, &[loop_uses], tolerance).map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?;
+    let pcurves =
+        solidcore_ops::pcurve::pcurves(&surface, &[loop_uses], tolerance).map_err(|e| KernelError::Failed(format!("ruled surface: {e}")))?;
     let edges = given
         .iter()
         .zip(pcurves.into_iter().flatten())
@@ -1322,8 +1325,8 @@ impl Joint {
                 let side = incoming - at;
                 let x = side.normalized().ok_or_else(|| KernelError::Failed("ruled surface: a round corner".into()))?;
                 let y = (axis - x * axis.dot(x)).normalized().ok_or_else(|| KernelError::Failed("ruled surface: a round corner".into()))?;
-                let plane = solidcraft_geom::Plane { origin: at, x, y };
-                let line = solidcraft_geom::Seg2::Line { a: solidcraft_geom::Vec2::ZERO, b: solidcraft_geom::Vec2::new(side.len(), 0.0) };
+                let plane = solidcore_record::Plane { origin: at, x, y };
+                let line = solidcore_record::Seg2::Line { a: solidcore_record::Vec2::ZERO, b: solidcore_record::Vec2::new(side.len(), 0.0) };
                 Ok(vec![crate::surfaces::revolved_record(&plane, &[line], at, axis, turn)?])
             }
         }
@@ -1335,7 +1338,7 @@ mod tests {
     use std::collections::HashMap;
     use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
-    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
 
     use super::*;
     use crate::history::FaceOrigin;
@@ -1358,7 +1361,7 @@ mod tests {
     fn on_edges_of(s: &Body, b: &Body) -> usize {
         let on = |p: Vec3| {
             b.record().edges.iter().any(|e| match e.curve {
-                solidcraft_geom::brep::Curve::Line { start, end } => {
+                solidcore_record::brep::Curve::Line { start, end } => {
                     let (a, z) = (Vec3::new(start[0], start[1], start[2]), Vec3::new(end[0], end[1], end[2]));
                     p.dist_to_segment(a, z) < 1e-6
                 }

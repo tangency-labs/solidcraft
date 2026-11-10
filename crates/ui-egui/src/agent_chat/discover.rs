@@ -146,6 +146,19 @@ pub const KNOWN: &[Known] = &[
         retired: false,
         reports_version: true,
     },
+    Known {
+        id: "vibe",
+        name: "Mistral Vibe",
+        programs: &["vibe-acp"],
+        args: &[],
+        install: "uv tool install mistral-vibe",
+        // Vibe may keep its sign-in in the OS keyring. Let it report whether it needs auth.
+        credentials: None,
+        config_dir_var: None,
+        key_vars: &["MISTRAL_API_KEY"],
+        retired: false,
+        reports_version: true,
+    },
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -470,7 +483,7 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detectio
         argv.extend(k.args.iter().map(|a| a.to_string()));
         let mut result = if k.reports_version { probe(&path, limit) } else { Probe::default() };
         if let Some(version) = result.old_node.as_deref() {
-            result.problem = Some(crate::i18n::format("ui.agent_chat_node_too_old", &[("version", version)]));
+            result.problem = Some(solidcraft_ui_text::format("ui.agent_chat_node_too_old", &[("version", version)]));
             if uses_env_node(&path)
                 && let Some(node) = compatible_node(dirs, limit)
             {
@@ -548,6 +561,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn a_node_adapter_recovers_from_an_incompatible_desktop_runtime() {
+        crate::i18n::install();
         use super::super::process::{AgentProcess, FromAgent};
         use std::os::unix::fs::PermissionsExt;
 
@@ -799,6 +813,36 @@ mod tests {
             assert!(!k.programs.is_empty() && !k.install.is_empty(), "{}", k.id);
         }
         assert_eq!(KNOWN.first().map(|k| k.id), Some("claude"), "the Claude Code adapter is the default");
+    }
+
+    #[test]
+    fn vibe_is_offered_for_install_and_discovered_as_an_acp_executable() {
+        let root = std::env::temp_dir().join(format!("sc-agent-vibe-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let detect = || detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
+        let uninstalled = detect();
+        let missing = uninstalled.missing.iter().find(|agent| agent.id == "vibe").unwrap();
+        assert_eq!(missing.install, "uv tool install mistral-vibe");
+
+        let program = if cfg!(windows) { root.join("vibe-acp.cmd") } else { root.join("vibe-acp") };
+        let script = if cfg!(windows) {
+            "@echo off\r\nif \"%1\"==\"--version\" echo vibe-acp 3.0.4\r\n"
+        } else {
+            "#!/bin/sh\n[ \"$1\" = --version ] && echo vibe-acp 3.0.4\n"
+        };
+        std::fs::write(&program, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let installed = detect();
+        let found = installed.found.iter().find(|agent| agent.id == "vibe").unwrap();
+        assert_eq!(found.argv, [program.to_string_lossy().into_owned()]);
+        assert_eq!(found.version.as_deref(), Some("3.0.4"));
+        assert_eq!(found.problem, None);
+        assert!(!installed.missing.iter().any(|agent| agent.id == "vibe"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// #9034: npm installed OpenCode without running its setup script, so the `opencode.exe` its

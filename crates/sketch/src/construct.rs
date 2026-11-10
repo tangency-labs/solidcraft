@@ -40,7 +40,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::decompose::{Budget, Decomposition, enqueue};
 use crate::loci::{MAX_LOCI, Reading, Rel, View, place, radii, read};

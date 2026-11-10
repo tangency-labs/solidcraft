@@ -41,8 +41,8 @@ fn nested_spans_have_self_and_total_time() {
             let _inner = span("test", "inner");
             spin(4);
         }
-        // Timed by someone else (SMLib's C API): a child of `outer`.
-        record("smlib", "call", Duration::from_millis(2));
+        // Timed by someone else: a child of `outer`.
+        record("external", "call", Duration::from_millis(2));
     }
     set_enabled(false);
     let r = report();
@@ -57,7 +57,7 @@ fn nested_spans_have_self_and_total_time() {
     let cats = r.by_category();
     assert_eq!(cats.iter().map(|c| c.0).collect::<Vec<_>>().len(), 2);
     let t = r.table(10);
-    assert!(t.contains("test outer") && t.contains("smlib call") && t.contains("self time by category"), "{t}");
+    assert!(t.contains("test outer") && t.contains("external call") && t.contains("self time by category"), "{t}");
 }
 
 #[test]

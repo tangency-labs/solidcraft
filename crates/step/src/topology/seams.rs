@@ -13,13 +13,16 @@
 //!
 //! A face bounded by a slit alone (a loop out along edges and straight back, of no (u, v) area)
 //! on a closed surface is all of that surface less a cut of none: its slit is made its seams
-//! ([`Builder::complete_slits`]), so the loop bounds the surface's whole (u, v) domain.
+//! ([`Builder::complete_slits`]), so the loop bounds the surface's whole (u, v) domain. A slit that
+//! is only one bound of a face with another loop encloses nothing of it either, and is left out
+//! of the face ([`Builder::drop_inner_slits`]).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
-use solidcraft_geom::brep::{Curve as BCurve, Frame, Surface as BSurface, Vertex};
 
 use super::{Builder, EdgeB, LoopB, R, index, unsupported};
 
@@ -104,7 +107,7 @@ fn axis(s: &BSurface) -> Option<Axis> {
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward: false } if *matrix == IDENTITY => {
             let (origin, z) = (Vec3::from(*origin), Vec3::from(*axis));
             let c = CurveEval::new(profile).ok()?;
-            let solidcraft_geom::brep::Natural::Range(a, b) = profile.natural() else { return None };
+            let solidcore_record::brep::Natural::Range(a, b) = profile.natural() else { return None };
             // A profile end on the axis is a pole.
             let pole = |t: f64| {
                 c.point(t).filter(|p| {
@@ -512,7 +515,7 @@ impl Builder<'_, '_> {
                 // a's angle; each vertex's profile parameter (a pole's from the profile's end).
                 let qa = eval.project(pa, None, f64::INFINITY).ok_or("a seam vertex off its surface")?;
                 let qb = eval.project(pb, Some(qa), f64::INFINITY).ok_or("a seam vertex off its surface")?;
-                let solidcraft_geom::brep::Natural::Range(lo, hi) = profile.natural() else { return Err("a periodic profile".into()) };
+                let solidcore_record::brep::Natural::Range(lo, hi) = profile.natural() else { return Err("a periodic profile".into()) };
                 let vb = match ax.poles {
                     [Some(p), _] if p.dist(pb) <= self.tol => lo,
                     [_, Some(p)] if p.dist(pb) <= self.tol => hi,
@@ -552,6 +555,46 @@ impl Builder<'_, '_> {
         let i = index(self.edges.len())?;
         self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
         Ok(i)
+    }
+
+    /// Leave out of each face its bounds that are slits (a loop out along edges and straight back,
+    /// of no (u, v) area) when the face has a bound that is not one, and no other face uses the
+    /// slit's edges: the slit lies inside the face and takes nothing from it, but the portable
+    /// B-rep refuses a loop of no area, and with it the face and the solid. Returns how many
+    /// bounds were left out.
+    pub(super) fn drop_inner_slits(&mut self) -> usize {
+        let mut uses: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        for face in &self.faces {
+            for l in &face.loops {
+                if let LoopB::Edges(es) = l {
+                    for (e, _) in es {
+                        *uses.entry(*e).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let alone = |l: &LoopB| match l {
+            LoopB::Edges(es) => es.len() >= 2 && slit_path(es).is_some() && es.iter().all(|(e, _)| uses.get(e).copied() == Some(2)),
+            LoopB::Vertex(_) => false,
+        };
+        let mut dropped = 0;
+        for face in &mut self.faces {
+            let slit: Vec<bool> = face.loops.iter().enumerate().map(|(i, l)| face.outer != Some(i) && alone(l)).collect();
+            let count = slit.iter().filter(|s| **s).count();
+            // A face of slits alone is a whole closed surface ([`Builder::complete_slits`]).
+            if count == 0 || count == face.loops.len() {
+                continue;
+            }
+            // The marked outer bound keeps its place among those that stay.
+            face.outer = face.outer.map(|o| o - slit.iter().take(o).filter(|s| **s).count());
+            let mut at = 0;
+            face.loops.retain(|_| {
+                at += 1;
+                !slit.get(at - 1).copied().unwrap_or(false)
+            });
+            dropped += count;
+        }
+        dropped
     }
 
     /// Complete every face bounded by a slit alone into the whole of its surface. A slit is a

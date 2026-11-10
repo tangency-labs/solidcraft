@@ -1,7 +1,7 @@
 //! Text styles: alignment, letter and line spacing, a made-up italic, a bold the font lacks, and
 //! text that follows a curve of its sketch; and text measured (`TextMetrics`) by the rule that draws it.
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use super::*;
 use crate::{CurveKind, Sketch, font_data};
@@ -88,7 +88,7 @@ fn italic_without_an_italic_face_slants_and_bold_without_a_bold_face_is_an_error
 /// its own; Bold sets its weight axis to 700, so the strokes widen at the same height.
 #[test]
 fn bold_in_a_variable_font_sets_its_weight_axis() {
-    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf");
+    let file = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../look/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf");
     let font = file.to_string_lossy().into_owned();
     let set = |style: &TextStyle| extent(&text_geometry_styled(Some(&font), "l", Vec2::ZERO, 10.0, 0.0, style, None).unwrap());
     let (plain, bold) = (set(&TextStyle::default()), set(&TextStyle { bold: true, ..TextStyle::default() }));

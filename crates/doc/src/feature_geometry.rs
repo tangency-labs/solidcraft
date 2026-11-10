@@ -4,7 +4,7 @@
 //! The walk (`crate::walk`) is behind `transform_geometry`, `face_points`, `profile_sels` and
 //! `point_expr`.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::walk::Walk;
 use crate::{FeatureKind, PointExpr, ProfileSel};
@@ -55,7 +55,8 @@ impl FeatureKind {
 
     /// The body a feature that works on one body's faces names (shell, draft, split, offset,
     /// delete and replace face, surface offset, the placed plastic features, sheet metal
-    /// conversion, ruled surface, untrim): its face points pick faces of that body.
+    /// conversion, ruled surface, untrim, Split Body's tool face): its face points pick faces of
+    /// that body.
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
@@ -66,10 +67,11 @@ impl FeatureKind {
             | FeatureKind::ReplaceFace { body, .. }
             | FeatureKind::SurfaceOffset { body, .. }
             | FeatureKind::Boss { body, .. }
+            | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
             | FeatureKind::Rest { body, .. } => body.as_deref(),
             FeatureKind::SheetConvert { body, .. } | FeatureKind::SurfaceRuled { body, .. } => Some(body.as_ref()),
-            FeatureKind::SurfaceUntrim { face, .. } => Some(face.body.as_ref()),
+            FeatureKind::SurfaceUntrim { face, .. } | FeatureKind::Split { tool: Some(face), .. } => Some(face.body.as_ref()),
             _ => None,
         }
     }

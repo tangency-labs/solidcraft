@@ -25,7 +25,7 @@ fn a_context_error_offers_no_create_issue_button_10181() {
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Body1"})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.settle();
-    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcraft_engine::geom::Vec3::new(20.0, 15.0, 20.0) }];
+    h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcore_record::Vec3::new(20.0, 15.0, 20.0) }];
     h.app.start("sketch.project");
     h.frames(4);
     assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SketchProject { .. })), "the Project panel opens for the live sketch");
@@ -174,7 +174,7 @@ fn equation_curve_window_gives_the_variable_its_ranges_unit() {
     *start = "a".into();
     *end = "3 * a".into();
     h.settle();
-    let handle = format!("dialog:{}", crate::i18n::tr("ui.equation_variable_unit"));
+    let handle = format!("dialog:{}", solidcraft_ui_text::tr("ui.equation_variable_unit"));
     h.step(&json!({"click": {"handle": handle}})).unwrap();
     h.settle();
     let Some(Kind::SketchModify(Mod::Equation { range_unit, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no equation window") };
@@ -249,7 +249,7 @@ fn intersect_dialog_filters_geometry_or_whole_bodies_and_controls_projection_lin
     assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
     // A model edge is cut with the plane too (#10484).
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcraft_engine::geom::Vec3::new(0.0, 0.0, 10.0) }];
+    d.inputs[0].items = vec![Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(0.0, 0.0, 10.0) }];
     let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(cmds, vec![("sketch.intersect".into(), json!({"refs":[{"edge":[0.0,0.0,10.0],"body":"Post"}],"projection_link":false}))]);
 }
@@ -285,7 +285,31 @@ fn intersect_dialog_takes_a_line_of_another_sketch() {
     let link = &sk.sketch.links[0].id;
     let at: Vec<_> = sk.sketch.link_points(link).iter().filter_map(|p| sk.sketch.point(*p)).map(|p| sk.plane.to_world(p)).collect();
     assert_eq!(at.len(), 1, "{at:?}");
-    assert!(at[0].dist(solidcraft_engine::geom::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
+    assert!(at[0].dist(solidcore_record::Vec3::new(20.0, 0.0, 0.0)) < 1e-6, "{at:?}");
+}
+
+/// A Project of an edge and a vertex beside it names both in the status line: the curve, and
+/// the point that is not one of its ends.
+#[test]
+fn project_status_names_a_lone_point_beside_a_curve() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":30})).unwrap();
+    h.settle();
+    h.app.start("sketch.project");
+    h.settle();
+    {
+        let d = h.app.dialog.as_mut().expect("Project opens its dialog");
+        d.inputs[0].items = vec![
+            Sel::Edge { body: "Post".into(), index: 0, point: solidcore_record::Vec3::new(20.0, 0.0, 20.0) },
+            Sel::Vertex { body: "Post".into(), point: solidcore_record::Vec3::new(40.0, 30.0, 20.0) },
+        ];
+    }
+    h.app.status = None;
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.status.clone().map(|(text, _, error)| (text, error)), Some(("Project added 1 curve and 1 point to the sketch.".into(), false)));
 }
 
 #[test]
@@ -328,6 +352,67 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     let sketch = &state.sketch(sketch).unwrap().sketch;
     assert!(sketch.links.is_empty());
     assert!(!sketch.curves.is_empty());
+}
+
+/// Project takes a point of another sketch (#13246): a point on XY, a sketch on a plane above
+/// it, and a click on the point in the Project dialog picks it, where it used to do nothing.
+#[test]
+fn project_dialog_takes_a_point_of_another_sketch_13246() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point":[30,20],"id":"pt"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let first = h.app.session.doc.features.last().unwrap().id;
+    h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap();
+    h.app.run("sketch.point", json!({"point":[-30,10],"id":"own"})).unwrap();
+    h.app.run("view.home", json!({})).unwrap();
+    h.app.start("sketch.project");
+    h.settle();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { bodies: false, .. }));
+    // The sketch's own point is not something Project takes.
+    h.step(&json!({"click":{"world":[-30,10,20]}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    h.step(&json!({"click":{"world":[30,20,0]}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::ExternalSketchPoint { sketch: first, id: "pt".into() }], "the point is picked");
+    let cmds = apply_commands(&h.app, d).unwrap();
+    assert_eq!(cmds, vec![("sketch.project".into(), json!({"refs":[{"sketch":first,"point":"pt"}],"projection_link":true}))]);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    let state = h.app.session.world_state().unwrap();
+    let sk = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert!(
+        sk.sketch.points.iter().any(|p| p.id != "origin" && (p.pos.x - 30.0).abs() < 1e-6 && (p.pos.y - 20.0).abs() < 1e-6),
+        "the point is projected"
+    );
+}
+
+/// Project's Geometry field takes a named construction point and makes a linked point of it
+/// (#12075).
+#[test]
+fn project_dialog_takes_a_construction_point() {
+    let mut h = Harness::new();
+    h.app.run("construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "YZ"})).unwrap();
+    h.app.start("sketch.project");
+    h.frames(4);
+    let point = Sel::ConstructionPoint { name: "Point1".into() };
+    {
+        let d = h.app.dialog.as_mut().expect("Project opens its dialog");
+        assert_ne!(d.inputs[0].accept & crate::selection::CONSTRUCTION_POINTS, 0, "the Geometry field takes construction points");
+        d.inputs[0].items = vec![point];
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"point":"Point1"}],"projection_link":true}))]);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &state.sketch(sketch).unwrap().sketch;
+    assert_eq!(sketch.links.len(), 1);
+    assert_eq!(sketch.links[0].source, solidcraft_engine::sketch::LinkSource::ConstructionPoint { name: "Point1".into() });
+    assert_eq!(sketch.link_points(&sketch.links[0].id).len(), 1);
 }
 
 #[test]
@@ -406,6 +491,14 @@ fn picked_list_removes_one_item_and_field_still_activates_input() {
     d.inputs[0].items.push(Sel::SketchCurve { id: second.clone(), sketch: None });
     h.app.dialog = Some(d);
     h.frames(4);
+    assert!(crate::scenario::handle_at("dialog:list:Entities:0:remove").is_none(), "the list starts folded, as in every dialog");
+    h.step(&json!({"click":{"handle":"dialog:list_toggle:Entities"}})).unwrap();
+    h.frames(2);
+    // Hovering a row lights its curve in the sketch.
+    let row = crate::scenario::handle_at("dialog:list:Entities:1:remove").unwrap();
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    h.frames(2);
+    assert!(matches!(&h.app.viewport.hover, Some(crate::viewport::Hit::SketchCurve { id, .. }) if *id == second), "{:?}", h.app.viewport.hover);
     h.step(&json!({"click":{"handle":"dialog:list:Entities:0:remove"}})).unwrap();
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::SketchCurve { id: second, sketch: None }]);
     h.step(&json!({"click":{"handle":"dialog:Base point"}})).unwrap();
@@ -639,4 +732,133 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
     assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");
+}
+
+#[test]
+fn transform_applies_the_dimensioned_rectangle_shown_in_its_preview() {
+    for profile in [false, true] {
+        let mut h = fixture();
+        for (line, value) in [("l1", 30), ("l2", 20)] {
+            h.app.run("sketch.dimension", json!({"entities": [line], "type": "length", "value": value})).unwrap();
+        }
+        let mut dialog = Dialog::for_command(&h.app, "sketch.transform").unwrap();
+        dialog.inputs[0].items = if profile {
+            vec![Sel::Profile { sketch: h.app.session.active_sketch.unwrap(), index: 0 }]
+        } else {
+            ["l1", "l2", "l3", "l4"].map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).to_vec()
+        };
+        h.app.dialog = Some(dialog);
+        h.frames(4);
+        if let Some(Kind::SketchModify(Mod::Transform { factor, angle, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *factor = "2".into();
+            *angle = "30 deg".into();
+        }
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let state = h.app.session.world_state().unwrap();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+        let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+        let edge = b - a;
+        assert!((edge.len() - 60.0).abs() < 1e-6, "the applied width matches Scale 2: {edge:?}");
+        assert!((edge.angle().to_degrees() - 30.0).abs() < 1e-6, "the applied rotation matches Angle 30: {edge:?}");
+    }
+}
+
+/// #11718: a point picked as Transform's Center is what Scale works about: the rectangle's corner
+/// at (10, 10) stays while the rectangle doubles, and the handles' box is drawn about it too.
+#[test]
+fn transform_scales_about_a_picked_center() {
+    let mut h = fixture();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    let (ids, corner) = {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let corner = sk.points.iter().find(|p| p.id != "origin" && p.pos.dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-9).unwrap().id.clone();
+        (sk.curves.iter().map(|c| c.id.clone()).collect::<Vec<_>>(), corner)
+    };
+    let mut d = Dialog::for_command(&h.app, "sketch.transform").unwrap();
+    assert_eq!(d.inputs.get(1).map(|i| i.label), Some("Center"), "the window takes a Center point");
+    d.inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    h.app.dialog = Some(d);
+    h.frames(4);
+    // The corner is under the box's corner handle: with Center waiting for a pick, a click there
+    // picks the point instead of starting a scale.
+    h.step(&json!({"call": "ui.dialogInput", "params": {"index": 1}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"sketch": [10, 10]}})).unwrap();
+    h.frames(3);
+    let picked = h.app.dialog.as_ref().unwrap().inputs[1].items.clone();
+    assert_eq!(picked, vec![Sel::SketchPoint { id: corner.clone() }], "the corner is the Center");
+    assert!(crate::scenario::handle_at("transform:handle:5").is_some(), "with Center picked, the handles work again");
+    if let Some(Kind::SketchModify(Mod::Transform { factor, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *factor = "2".into();
+    }
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    let Kind::SketchModify(k) = &d.kind else { panic!("no transform window") };
+    let (cmd, p) = crate::sketch_modify_ui::commands(&h.app, k, &d.inputs, &d.extra).unwrap().remove(0);
+    assert_eq!((cmd.as_str(), &p["center"]), ("sketch.transform", &json!(corner)), "{p}");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+        lo = (lo.0.min(p.x), lo.1.min(p.y));
+        hi = (hi.0.max(p.x), hi.1.max(p.y));
+    }
+    assert!((lo.0 - 10.0).abs() < 1e-6 && (lo.1 - 10.0).abs() < 1e-6, "the picked corner stayed: {lo:?}");
+    assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
+}
+
+/// An Intersect whose result the sketch hides (Projected Geometries off) said nothing, so it
+/// looked as if the pick had done nothing, and each try laid another point on the first. The
+/// status line now says what was added and why it is not shown, and the same curve again adds
+/// no second point.
+#[test]
+fn intersect_says_what_it_added_and_that_projected_geometries_hides_it() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"YZ","offset":20})).unwrap();
+    h.app.run("sketch.options", json!({"show_projected": false})).unwrap();
+    h.app.run("view.home", json!({})).unwrap();
+    h.settle();
+    let intersect = |h: &mut Harness, at: [f64; 3]| {
+        h.app.status = None;
+        h.app.start("sketch.intersect");
+        h.settle();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state().unwrap();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        (h.app.status.clone().map(|(text, _, error)| (text, error)), sk.links.len(), sk.points.len())
+    };
+    let (status, links, points) = intersect(&mut h, [10.0, 0.0, 0.0]);
+    assert_eq!(
+        status,
+        Some((
+            "Intersect added 1 point to the sketch. The result is hidden because Projected Geometries is off in the sketch palette.".into(),
+            false
+        ))
+    );
+    assert_eq!(links, 1);
+    // The same side again adds nothing, and the refusal is guidance: nothing to report.
+    let (status, again, more) = intersect(&mut h, [10.0, 0.0, 0.0]);
+    assert_eq!((again, more), (links, points), "{status:?}");
+    h.frames(2);
+    assert!(h.app.dialog.as_ref().and_then(|d| d.error.clone()).is_some_and(|e| e.contains("already intersected")), "{status:?}");
+    assert!(scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a pick the sketch holds");
+    h.app.dialog = None;
+    // Shown, the status says only what was added.
+    h.app.run("sketch.options", json!({"show_projected": true})).unwrap();
+    let (status, links, _) = intersect(&mut h, [10.0, 30.0, 0.0]);
+    assert_eq!(status, Some(("Intersect added 1 point to the sketch.".into(), false)));
+    assert_eq!(links, 2);
 }

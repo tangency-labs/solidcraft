@@ -1,7 +1,7 @@
 use super::*;
 use crate::brep::eval::SurfaceEval;
-use crate::brep::{Curve, Frame, Surface};
 use crate::linkage::surface_jet;
+use solidcore_record::brep::{Curve, Frame, Surface};
 
 /// A homogeneous point of an edge.
 fn eval_edge_h(e: &IsoEdge, t: f64) -> SplineResult<HPoint> {

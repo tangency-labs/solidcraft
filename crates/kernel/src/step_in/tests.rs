@@ -1,4 +1,6 @@
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
@@ -451,7 +453,7 @@ fn shelled_three_quarter_tube_round_trips() {
 /// which SMLib does not take for a torus: the part came in as a mesh of its faces.
 #[test]
 fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::PI;
     let (major, minor) = (10.75, 1.25);
     let d = Loop2 {
@@ -540,15 +542,31 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
-/// A solid whose B-rep SMLib refuses, its faces too (here every SMLib call: the build has no
-/// SMLib), is refused with the kernel's reason, naming the solid. It once came in as a mesh of
-/// its faces, which the planner could still triangulate.
-#[cfg(not(feature = "smlib"))]
+/// The unit cube whose top face has a second bound: one edge along the face run out and back (a
+/// slit of no area), written `.F.` then `.T.` or the other way round. The face is still the whole
+/// top: the solid is closed, six faces, one cubic millimetre.
 #[test]
-fn a_solid_smlib_refuses_with_its_faces_is_refused_not_meshed() {
-    let text = format!("{HEAD}{}#60=SHAPE_REPRESENTATION('',(#101),$);\n{TAIL}", cube_entities());
-    let why = step_import(&text).map(|imp| imp.warnings).unwrap_err().to_string();
-    assert!(why.contains("solid 'Cube': not imported: ") && why.contains("SMLib"), "{why}");
+fn a_planar_face_with_a_slit_for_an_inner_bound_keeps_the_solid_closed() {
+    for (what, first, second) in [("out then back", ".F.", ".T."), ("back then out", ".T.", ".F.")] {
+        let mut entities = cube_entities();
+        // The top face is #431: its outer bound #426 on the plane #430. The slit lies on it at z = 1.
+        entities = entities.replace("#431=ADVANCED_FACE('',(#426),#430,.T.);", "#431=ADVANCED_FACE('',(#426,#2005),#430,.T.);");
+        entities += "#2000=CARTESIAN_POINT('',(0.3,0.5,1.));\n#2001=VERTEX_POINT('',#2000);\n#2002=CARTESIAN_POINT('',(0.7,0.5,1.));\n#2003=VERTEX_POINT('',#2002);\n";
+        entities +=
+            "#2010=DIRECTION('',(1.,0.,0.));\n#2011=VECTOR('',#2010,1.);\n#2012=LINE('',#2000,#2011);\n#2013=EDGE_CURVE('',#2001,#2003,#2012,.T.);\n";
+        entities += &format!(
+            "#2020=ORIENTED_EDGE('',*,*,#2013,{first});\n#2021=ORIENTED_EDGE('',*,*,#2013,{second});\n#2004=EDGE_LOOP('',(#2020,#2021));\n#2005=FACE_BOUND('',#2004,.T.);\n"
+        );
+        entities += &context(10, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        entities += "#9=ADVANCED_BREP_SHAPE_REPRESENTATION('Slit',(#101),#10);\n";
+        let import = step_import(&format!("{HEAD}{entities}{TAIL}")).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(import.bodies.len(), 1, "{what}: {:?}", import.warnings);
+        assert!(import.bodies[0].closed, "{what}: {:?}", import.warnings);
+        assert_eq!(import.bodies[0].file_faces, 6, "{what}");
+        let m = measure(&import.bodies[0].body).unwrap();
+        assert!(rel(m.volume, 1.0) < 1e-6, "{what}: volume {}", m.volume);
+        assert!(rel(m.area, 6.0) < 1e-6, "{what}: area {}", m.area);
+    }
 }
 
 /// A hand-written unit cube brep (`#100`…) in a representation with the given unit and items.
@@ -604,6 +622,41 @@ fn cube_entities() -> String {
     }
     s += &format!("#100=CLOSED_SHELL('',({}));\n#101=MANIFOLD_SOLID_BREP('Cube',#100);\n", face_ids.join(","));
     s
+}
+
+/// A planar lens: the line from (0, 0, 0) to (`len`, 0, 0) and the arc back through
+/// (`len` / 2, `width`, 0), as a sliver a part writes where two of its faces nearly meet,
+/// on the plane z = 0 with its x axis across the lens (along y), in a file stating 1e-6 mm.
+fn planar_lens(len: f64, width: f64) -> String {
+    let r = (len * len / 4.0 + width * width) / (2.0 * width);
+    let f = |x: f64| format!("{x:.17E}");
+    let mut t = String::from(HEAD);
+    t += "#10=CARTESIAN_POINT('',(0.,0.,0.));\n#11=DIRECTION('',(0.,0.,1.));\n#12=DIRECTION('',(0.,1.,0.));\n";
+    t += "#13=AXIS2_PLACEMENT_3D('',#10,#11,#12);\n#14=PLANE('',#13);\n";
+    t += &format!("#20=CARTESIAN_POINT('',({},0.,0.));\n#21=VERTEX_POINT('',#10);\n#22=VERTEX_POINT('',#20);\n", f(len));
+    t += "#30=DIRECTION('',(1.,0.,0.));\n#31=VECTOR('',#30,1.);\n#32=LINE('',#10,#31);\n#33=EDGE_CURVE('',#21,#22,#32,.T.);\n";
+    // The arc from the line's end back to its start, centred below the line.
+    t += &format!("#40=CARTESIAN_POINT('',({},{},0.));\n", f(len / 2.0), f(width - r));
+    t += "#41=AXIS2_PLACEMENT_3D('',#40,#11,#30);\n";
+    t += &format!("#42=CIRCLE('',#41,{});\n#43=EDGE_CURVE('',#22,#21,#42,.T.);\n", f(r));
+    t += "#50=ORIENTED_EDGE('',*,*,#33,.T.);\n#51=ORIENTED_EDGE('',*,*,#43,.T.);\n#52=EDGE_LOOP('',(#50,#51));\n";
+    t += "#53=FACE_OUTER_BOUND('',#52,.T.);\n#54=ADVANCED_FACE('',(#53),#14,.T.);\n";
+    t += "#60=OPEN_SHELL('',(#54));\n#61=SHELL_BASED_SURFACE_MODEL('Lens',(#60));\n#62=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn a_sliver_planar_face_passes_smlibs_check() {
+    // A lens 0.77 mm long and 1e-5 mm wide (#12757: such a face on an imported part). A plane
+    // is unbounded, so the face's parameter box is the reader's to choose: kept to its pcurves,
+    // padded 1e-6, its two sides across the lens lay within SMLib's tolerance of each other,
+    // and SMLib refused the body ("Bad Surf Coincidence at Seam: Open surface has partially
+    // coincident boundaries").
+    let imp = step_import(&planar_lens(0.77, 1e-5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
 }
 
 fn context(id: u64, unit: &str) -> String {
@@ -670,6 +723,69 @@ fn a_surface_models_closed_shell_beside_a_sheet_is_a_solid_of_its_own() {
     assert!(!sheet.closed && sheet.body.is_surface() && sheet.body.face_count() == 1);
     assert_eq!((sheet.source_item, sheet.name.as_str()), (110, "Thigh"));
     assert!(imp.bodies.iter().all(|b| b.color == Some([1.0, 0.5, 0.0])));
+}
+
+/// A surface model whose shells are all OPEN_SHELLs, one of them closed all the same (a unit
+/// cube) beside a sheet of two faces, the first used against its plane (as SolidWorks 2011 wrote
+/// a vendor part): SMLib's export walks that face as its plane faces and numbers the edges and
+/// vertices otherwise than the reader, its faces still in the reader's order. The model comes in
+/// as one body of all its faces, each the file's face it was; it once came in as nothing ("SMLib
+/// renumbered the solid's faces"), and the file with it.
+#[test]
+fn a_surface_model_of_open_shells_one_closed_beside_a_turned_sheet_imports() {
+    let mut t = String::from(HEAD);
+    t += &cube_entities().replace("#100=CLOSED_SHELL", "#100=OPEN_SHELL");
+    // Two unit squares at z = 5 sharing the edge x = 1, both facing +z: the first on a plane
+    // facing -z used against it, the second on a plane facing +z.
+    let corners = [(0, 0), (1, 0), (2, 0), (2, 1), (1, 1), (0, 1)];
+    for (i, (x, y)) in corners.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,5.));\n#{}=VERTEX_POINT('',#{});\n", 800 + i, 810 + i, 800 + i);
+    }
+    let edges = [(0, 1), (1, 4), (4, 5), (5, 0), (1, 2), (2, 3), (3, 4)];
+    for (k, (a, b)) in edges.iter().enumerate() {
+        let (p, q) = (corners[*a], corners[*b]);
+        t += &format!("#{}=DIRECTION('',({}.,{}.,0.));\n#{}=VECTOR('',#{},1.);\n", 900 + 2 * k, q.0 - p.0, q.1 - p.1, 901 + 2 * k, 900 + 2 * k);
+        t += &format!(
+            "#{}=LINE('',#{},#{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
+            820 + k,
+            800 + a,
+            901 + 2 * k,
+            830 + k,
+            810 + a,
+            810 + b,
+            820 + k
+        );
+    }
+    let faces: [(&[(usize, bool)], i32, &str); 2] =
+        [(&[(0, true), (1, true), (2, true), (3, true)], -1, ".F."), (&[(4, true), (5, true), (6, true), (1, false)], 1, ".T.")];
+    for (f, (lp, nz, sense)) in faces.iter().enumerate() {
+        let base = 940 + 20 * f;
+        let oes: Vec<String> = lp
+            .iter()
+            .enumerate()
+            .map(|(j, (e, fwd))| {
+                t += &format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", base + j, 830 + e, if *fwd { ".T." } else { ".F." });
+                format!("#{}", base + j)
+            })
+            .collect();
+        t += &format!("#{}=EDGE_LOOP('',({}));\n#{}=FACE_OUTER_BOUND('',#{},.T.);\n", base + 5, oes.join(","), base + 6, base + 5);
+        t += &format!("#{}=CARTESIAN_POINT('',(0.,0.,5.));\n#{}=DIRECTION('',(0.,0.,{nz}.));\n", base + 7, base + 8);
+        t += &format!("#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n#{}=PLANE('',#{});\n", base + 9, base + 7, base + 8, base + 10, base + 9);
+        t += &format!("#{}=ADVANCED_FACE('',(#{}),#{},{sense});\n", base + 11, base + 6, base + 10);
+    }
+    t += "#130=OPEN_SHELL('',(#951,#971));\n#110=SHELL_BASED_SURFACE_MODEL('Bracket',(#130,#100));\n";
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#110),#20);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert_eq!((b.source_item, b.file_faces, b.body.face_count()), (110, 8, 8), "{:?}", imp.warnings);
+    assert!(b.refused.is_none(), "{:?}", b.refused);
+    // Each face is the file's face it was: the sheet's first, then the cube's.
+    assert_eq!(b.face_origin, [951, 971, 411, 431, 451, 471, 491, 511]);
+    let m = measure(&b.body).unwrap();
+    assert!(rel(m.area, 8.0) < 1e-9, "area {}", m.area);
 }
 
 #[test]
@@ -1453,7 +1569,7 @@ fn glued_halves_export_as_whole_faces() {
 /// Read back, the part has its exact volume.
 #[test]
 fn rounded_slot_exports_cylinders() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::{FRAC_PI_2, PI};
     let outer = Loop2 {
         segs: vec![
@@ -1488,7 +1604,7 @@ fn rounded_slot_exports_cylinders() {
 /// by its surfaces saw a 60 mm part as 130 mm long), and the part reads back whole.
 #[test]
 fn ramp_cut_slot_exports_sheets_bounded_by_their_faces() {
-    use solidcraft_geom::Seg2;
+    use solidcore_record::Seg2;
     use std::f64::consts::{FRAC_PI_2, PI};
     let outer = Loop2 {
         segs: vec![
@@ -1933,7 +2049,7 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert_eq!(imported.bodies[0].file_faces, 1);
             let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.01)).unwrap();
             for mesh in [
-                plan.evaluate(),
+                plan.evaluate_mesh(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
@@ -2013,11 +2129,10 @@ pub(super) fn schema_4_volume(text: &str) -> f64 {
     measure(&Body::from_record(r.solids[0].brep.clone()).unwrap()).unwrap().volume
 }
 
-/// The step-conformance parts read into SMLib (`SOLIDCRAFT_KERNEL=smlib`): the STEP reader's
+/// The step-conformance parts read into the kernel: the STEP reader's
 /// schema 4 record, SMLib's body of it, back as a kernel body. Each has its exact volume and
 /// face count, and every face is traced to a face of the file (the NURBS cylinder, dome and
 /// torus ring among them: their faces wind around a spline closed on itself, and get a seam).
-#[cfg(feature = "smlib")]
 #[test]
 fn step_conformance_parts_read_into_smlib() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
@@ -2347,7 +2462,7 @@ fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
         .shells
         .iter()
         .flat_map(|s| match s {
-            solidcraft_geom::brep::Shell::Faces { faces, .. } => faces.iter().filter(|f| f.face as usize == bottom).map(|f| f.forward).collect(),
+            solidcore_record::brep::Shell::Faces { faces, .. } => faces.iter().filter(|f| f.face as usize == bottom).map(|f| f.forward).collect(),
             _ => Vec::new(),
         })
         .collect();
@@ -2500,7 +2615,7 @@ fn a_round_face_off_its_frames_quarter_lines_is_formed_within_one_turn() {
         let b = &imp.bodies[0];
         assert!(b.closed && b.refused.is_none(), "{start} {sweep}: {:?} {:?}", b.refused, imp.warnings);
         let wall = b.face_origin.iter().position(|f| *f == 53).unwrap();
-        let Some(solidcraft_geom::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[wall].nurbs else {
+        let Some(solidcore_record::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[wall].nurbs else {
             panic!("the wall's form")
         };
         assert!(u_knots[u_knots.len() - 1] - u_knots[0] <= 4.0, "{start}: the wall's form spans {u_knots:?}");
@@ -2616,7 +2731,7 @@ fn a_balls_halves_with_seams_off_each_others_quarter_lines_each_form_within_one_
         let meshed = b.body.faces(0.005).unwrap();
         for half in [56, 66] {
             let fi = b.face_origin.iter().position(|f| *f == half).unwrap();
-            let Some(solidcraft_geom::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[fi].nurbs else {
+            let Some(solidcore_record::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[fi].nurbs else {
                 panic!("the half's form")
             };
             assert!(u_knots[u_knots.len() - 1] - u_knots[0] <= 4.0, "{lower_first}: face #{half}'s form spans {u_knots:?}");
@@ -2855,7 +2970,7 @@ fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
         assert!(b.closed && b.refused.is_none(), "{tube:?}: {:?} {:?}", b.refused, imp.warnings);
         let face = b.face_origin.iter().position(|f| *f == 53).unwrap();
         let record = b.body.record();
-        let Some(solidcraft_geom::brep::Surface::RationalSpline { v_knots, .. }) = &record.faces[face].nurbs else { panic!("the tube's form") };
+        let Some(solidcore_record::brep::Surface::RationalSpline { v_knots, .. }) = &record.faces[face].nurbs else { panic!("the tube's form") };
         assert!(v_knots[v_knots.len() - 1] - v_knots[0] <= 4.0, "{tube:?}: the tube's form spans {v_knots:?}");
         let m = measure(&b.body).unwrap();
         let (volume, area) = match tube {
@@ -2881,4 +2996,49 @@ fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
         assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
         assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
     }
+}
+
+/// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
+/// surface colour, whichever style the file lists first or last. The edge's colour once painted
+/// the whole solid, because the first colour found was taken.
+#[test]
+fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
+    let surface = "#71=PRESENTATION_STYLE_ASSIGNMENT((#72));\n#72=SURFACE_STYLE_USAGE(.BOTH.,#73);\n#73=SURFACE_SIDE_STYLE('',(#74));\n#74=SURFACE_STYLE_FILL_AREA(#75);\n#75=FILL_AREA_STYLE('',(#76));\n#76=FILL_AREA_STYLE_COLOUR('',#77);\n#77=COLOUR_RGB('',1.,0.5,0.);\n";
+    let curve = "#81=PRESENTATION_STYLE_ASSIGNMENT((#82));\n#82=CURVE_STYLE('',#83,POSITIVE_LENGTH_MEASURE(0.1),#84);\n#83=DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n#84=COLOUR_RGB('',0.,0.,1.);\n";
+    for (list, name) in [("(#71,#81)", "surface first"), ("(#81,#71)", "curve first")] {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += &format!("#70=STYLED_ITEM('',{list},#101);\n");
+        t += surface;
+        t += curve;
+        t += TAIL;
+        let imp = step_import(&t).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{name}: {:?}", imp.warnings);
+        assert_eq!(imp.bodies[0].color, Some([1.0, 0.5, 0.0]), "{name}");
+    }
+    // A surface style whose boundary lines are drawn in another colour is still its fill's colour.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);
+#70=STYLED_ITEM('',(#71),#101);
+";
+    t += &surface.replace("SURFACE_SIDE_STYLE('',(#74))", "SURFACE_SIDE_STYLE('',(#74,#78))");
+    t += "#78=SURFACE_STYLE_BOUNDARY(#79);
+#79=CURVE_STYLE_RENDERING(.CONSTANT_SHADING.,#80);
+#80=SURFACE_RENDERING_PROPERTIES(#84);
+#84=COLOUR_RGB('',0.,0.,1.);
+";
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, Some([1.0, 0.5, 0.0]), "boundary lines");
+    // A solid styled with a curve style alone has no colour of its own.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n#70=STYLED_ITEM('',(#81),#101);\n";
+    t += curve;
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, None);
 }

@@ -2,7 +2,7 @@
 //! cylinders encloses the target and only touches the sphere.
 use crate::history::BodyHistory;
 use crate::{Body, BoolOp};
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use std::f64::consts::{FRAC_PI_2, PI};
 
 fn dome() -> Body {

@@ -1,9 +1,10 @@
 //! The creation builders' histories: every face's origin checked against the geometry the
 //! builder made it from.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::body::Body;
 use crate::build::PathSeg;

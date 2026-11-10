@@ -7,8 +7,8 @@ and the primary OK action use bold. Selection fields and status messages use
 medium. Numeric fields and sketch dimensions use IBM Plex Mono Regular.
 
 Both fonts are licensed under the SIL Open Font License 1.1. Their licence texts
-are in `assets/fonts/ibm-plex-sans/OFL.txt` and
-`assets/fonts/ibm-plex-mono/OFL.txt`; provenance is recorded in
+are in `crates/look/fonts/ibm-plex-sans/OFL.txt` and
+`crates/look/fonts/ibm-plex-mono/OFL.txt`; provenance is recorded in
 [ATTRIBUTION.md](../ATTRIBUTION.md).
 
 The `ui_font` preference puts the chosen font first in every sans family,
@@ -25,18 +25,19 @@ and any font preference.
 ## Type scale and metrics
 
 Text sizes come from `theme::Tokens`, with identical values in the light and dark
-palettes in `assets/styles/ui/palettes.rs`. The compact scale runs from
+palettes in `crates/theme/src/palettes.rs`. The compact scale runs from
 `font_badge` (9.5 pt) through `font_heading` (14 pt). Special roles preserve the
 existing designs: `font_triad` (8), `font_compass` (13.5), `font_subtitle` (15),
 `font_intro` (16), `font_article_heading` (17), `font_title` (22), and
 `font_display` (26). Scaled labels derive from these tokens. Weight helpers in
-`fonts.rs` choose the family independently of size.
+`ui_kit/type_face.rs` (the kit's type API, which holds no font data) choose the
+family independently of size; `fonts.rs` embeds and installs the faces.
 
 Dense forms also use tokens for control height/radius, label width, row gap,
 header/footer/card dimensions, icons, text insets, checkbox and action heights,
 and section letter spacing. Existing `space_*` tokens supply shared padding.
 The `font_literals_tests` source guard scans production Rust, including the
 viewport icon sources, and rejects numeric font sizes, private font families
-outside `fonts.rs`, and direct dense-form spacing literals. Its small per-file
+outside `ui_kit/type_face.rs`, and direct dense-form spacing literals. Its small per-file
 allowance table documents graphic spinner diameters; it permits no text sizes.
 Run it with `cargo test -p solidcraft-ui-egui --lib font_literals_tests`.

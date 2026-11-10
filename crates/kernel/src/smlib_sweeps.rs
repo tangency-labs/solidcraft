@@ -17,7 +17,8 @@
 //! revolutions); the face in the start plane is the start cap, the one in the end plane (or,
 //! where the sweep has no end plane, the planar face left over) the end cap.
 
-use solidcraft_geom::{Plane, Region2, Seg2, Vec3};
+use solidcore_record::{Plane, Region2, Seg2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::body::Body;
 use crate::numbered::{NumberedLoop, NumberedRegion};
@@ -30,11 +31,17 @@ pub(crate) struct Piece {
     /// The segment as drawn that names it: itself, or for collinear lines joined into one, the
     /// first of them.
     pub drawn: Seg2,
+    /// It carries on the piece before it as one curve (pieces of one ellipse or spline): SMLib
+    /// gets the run as one B-spline and sweeps one wall over it.
+    pub joins_previous: bool,
 }
 
 /// The segments of `loops` as pieces, loop after loop.
 pub(crate) fn pieces<'a>(loops: impl IntoIterator<Item = &'a NumberedLoop>) -> Vec<Piece> {
-    loops.into_iter().flat_map(|l| l.lp.segs.iter().enumerate().map(|(i, s)| Piece { seg: *s, numbers: l.numbers(i).to_vec(), drawn: *s })).collect()
+    loops
+        .into_iter()
+        .flat_map(|l| l.lp.segs.iter().enumerate().map(|(i, s)| Piece { seg: *s, numbers: l.numbers(i).to_vec(), drawn: *s, joins_previous: false }))
+        .collect()
 }
 
 /// The pieces of `joined` (`drawn` with collinear lines joined): outer loop, then holes, each
@@ -86,15 +93,15 @@ mod imp {
     use solidcraft_smlib::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use solidcraft_smlib::{Brep, CheckLevel};
 
-    use solidcraft_geom::Vec2;
+    use solidcore_record::Vec2;
 
     use super::*;
     use crate::history::FaceProv;
     use crate::provenance::{closest_on_tri, face_tris};
     use crate::record;
 
-    fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
-        KernelError::Failed(format!("SMLib {what}: {e}"))
+    fn failed(what: &str, e: impl crate::Cause) -> KernelError {
+        KernelError::smlib(format!("SMLib {what}"), e)
     }
 
     fn corner(c: crate::DraftCorner) -> DraftCorner {
@@ -144,8 +151,70 @@ mod imp {
         })
     }
 
+    /// The pieces as SMLib's curves: one each, but one B-spline for each run of pieces that join
+    /// the one before them ([`Piece::joins_previous`]).
     fn curves(plane: &Plane, pieces: &[Piece]) -> Result<Vec<Curve>> {
-        pieces.iter().map(|x| curve(plane, &x.seg)).collect()
+        let mut out = Vec::new();
+        let mut run = Vec::new();
+        for x in pieces {
+            if !x.joins_previous && !run.is_empty() {
+                out.push(joined(std::mem::take(&mut run))?);
+            }
+            run.push(curve(plane, &x.seg)?);
+        }
+        if !run.is_empty() {
+            out.push(joined(run)?);
+        }
+        Ok(out)
+    }
+
+    /// Bézier curves of one degree, each starting where the one before ends, as the one B-spline
+    /// they are, exactly: their control points in a row (each joint once) on knots repeated the
+    /// degree times at each joint. A rational piece's weights are scaled (which leaves it the same
+    /// curve) to meet the weight the piece before ends with. Each piece's knot span is as long as
+    /// keeps the speed through the joint the same on both sides, so pieces meeting tangentially
+    /// (the pieces of one ellipse or spline) join with a continuous first derivative: SMLib makes
+    /// one wall over a curve that is, and splits it where the derivative jumps.
+    fn joined(run: Vec<Curve>) -> Result<Curve> {
+        if run.len() == 1 {
+            return run.into_iter().next().ok_or_else(|| KernelError::Invalid("an empty run of curves".into()));
+        }
+        let not_one = || KernelError::Invalid("the pieces of one curve are not Béziers of one degree".into());
+        let xyz = |q: &[f64; 4]| Vec3::new(q[0], q[1], q[2]);
+        let mut degree = None;
+        let mut points: Vec<[f64; 4]> = Vec::new();
+        let mut knots = Vec::new();
+        // The knot at the last joint, and the length of the span before it.
+        let (mut at, mut span) = (0.0, 1.0);
+        for c in &run {
+            let Curve::Nurbs { degree: d, points: ps, .. } = c else { return Err(not_one()) };
+            if degree.is_some_and(|p| p != *d) || ps.len() != d + 1 || *d == 0 {
+                return Err(not_one());
+            }
+            degree = Some(*d);
+            let (Some(first), Some(second)) = (ps.first(), ps.get(1)) else { return Err(not_one()) };
+            let (Some(last), Some(before)) = (points.last(), points.len().checked_sub(2).and_then(|i| points.get(i))) else {
+                points.extend(ps.iter().copied());
+                knots.extend(std::iter::repeat_n(0.0, d + 1));
+                continue;
+            };
+            let scale = last[3] / first[3];
+            if !(scale.is_finite() && scale > 0.0) {
+                return Err(not_one());
+            }
+            // The derivative of a rational Bézier on a span of length h at its end is
+            // d (w[d-1] / w[d]) (P[d] - P[d-1]) / h, at its start d (w[1] / w[0]) (P[1] - P[0]) / h.
+            let ending = (xyz(last) - xyz(before)) * (before[3] / last[3]) * (1.0 / span);
+            let starting = (xyz(second) - xyz(first)) * (second[3] / first[3]);
+            let next = starting.len() / ending.len();
+            at += span;
+            span = if next.is_finite() && next > 0.0 { next } else { 1.0 };
+            points.extend(ps.iter().skip(1).map(|q| [q[0], q[1], q[2], q[3] * scale]));
+            knots.extend(std::iter::repeat_n(at, *d));
+        }
+        let degree = degree.ok_or_else(not_one)?;
+        knots.extend(std::iter::repeat_n(at + span, degree + 1));
+        Ok(Curve::Nurbs { degree, points, knots })
     }
 
     /// A chain of sketch segments on `plane` as SMLib's curves, one each, exactly (lines, arcs,
@@ -172,7 +241,7 @@ mod imp {
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
     /// modeller's own record (no healing) and checked there.
-    pub(crate) fn body_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
+    pub(crate) fn body_from_record(record: &solidcore_record::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
         body_of(brep, what)
     }
@@ -187,7 +256,7 @@ mod imp {
         plane: &Plane,
         segs: &[Seg2],
         direction: Vec3,
-    ) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    ) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         let c = segs.iter().map(|s| curve(plane, s)).collect::<Result<Vec<_>>>()?;
         let out = body
             .smlib()?
@@ -198,7 +267,12 @@ mod imp {
 
     /// The face of `body` at `face_at` cut by the plane through `plane_point` square to `normal`,
     /// SMLib's section curves on that face, as record curves on their intervals.
-    pub(crate) fn face_section(body: &Body, face_at: Vec3, plane_point: Vec3, normal: Vec3) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    pub(crate) fn face_section(
+        body: &Body,
+        face_at: Vec3,
+        plane_point: Vec3,
+        normal: Vec3,
+    ) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         let out = body
             .smlib()?
             .face_section(p(face_at), pick_reach(body), p(plane_point), p(normal), curve_tolerance(body))
@@ -226,12 +300,12 @@ mod imp {
     }
 
     /// SMLib's NURBS curves as record curves (rational splines) on their intervals.
-    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcraft_geom::brep::Curve, [f64; 2])>> {
+    fn record_curves(out: Vec<(Curve, [f64; 2])>, what: &str) -> Result<Vec<(solidcore_record::brep::Curve, [f64; 2])>> {
         out.into_iter()
             .map(|(c, interval)| match c {
                 Curve::Nurbs { points, knots, .. } => {
                     let homogeneous = points.iter().map(|q| [q[0] * q[3], q[1] * q[3], q[2] * q[3], q[3]]).collect();
-                    Ok((solidcraft_geom::brep::Curve::RationalSpline { knots, homogeneous }, interval))
+                    Ok((solidcore_record::brep::Curve::RationalSpline { knots, homogeneous }, interval))
                 }
                 _ => Err(failed(what, "a curve SMLib made is not a B-spline")),
             })
@@ -558,9 +632,24 @@ mod imp {
                     };
                     crate::FaceSource::ExtrudeSide { segment: x.drawn, plane, coalesced: false }
                 }),
+                // The one wall over a whole run of pieces of one curve: named by its first piece.
+                Role::Wall(set) if run_starts(pieces, set).is_some() => run_starts(pieces, set)
+                    .and_then(|i| pieces.get(i))
+                    .map(|x| crate::FaceSource::ExtrudeSide { segment: x.drawn, plane: None, coalesced: false }),
                 _ => None,
             })
             .collect()
+    }
+
+    /// The first piece of the run of joined pieces `set` is exactly (all of it, and nothing else).
+    fn run_starts(pieces: &[Piece], set: &BTreeSet<usize>) -> Option<usize> {
+        let (&first, &last) = (set.first()?, set.last()?);
+        let run = pieces.get(first..=last)?;
+        let whole = last - first + 1 == set.len()
+            && run.first().is_some_and(|x| !x.joins_previous)
+            && run.iter().skip(1).all(|x| x.joins_previous)
+            && pieces.get(last + 1).is_none_or(|x| !x.joins_previous);
+        (set.len() > 1 && whole).then_some(first)
     }
 
     fn numbered_segments(r: &Region2) -> usize {
@@ -589,7 +678,7 @@ mod imp {
         let walls: Vec<Piece> = pieces
             .iter()
             .filter(|x| [0.0, 0.5, 1.0].iter().any(|t| off_axis(plane.to_world(x.seg.point_at(*t)))))
-            .map(|x| Piece { seg: x.seg, numbers: x.numbers.clone(), drawn: x.drawn })
+            .map(|x| Piece { seg: x.seg, numbers: x.numbers.clone(), drawn: x.drawn, joins_previous: false })
             .collect();
         let about = |q: Vec3, a: f64| origin + turned(q - origin, k, a);
         let full = turn >= std::f64::consts::TAU - 1e-9;
@@ -628,8 +717,14 @@ mod imp {
 
     /// The profile `pieces` on `plane` swept along `path`, turning with it, or only moving along
     /// it when `translate`. SMLib's sweep follows a smooth path; at a corner (the direction
-    /// jumping) the path is swept piece by piece ([`cornered`]).
+    /// jumping) the path is swept piece by piece ([`cornered`]). A profile drawn away from the
+    /// path's start is first carried there ([`at_path_start`]).
     pub(crate) fn sweep(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Body> {
+        sweep_from_start(&at_path_start(plane, pieces, path, translate)?, pieces, path, translate)
+    }
+
+    /// [`sweep`] of a profile already where the sweep starts.
+    fn sweep_from_start(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Body> {
         if translate {
             // Every segment's direction of travel, at its ends and between them.
             let bad = || KernelError::Invalid("a path segment has no direction".into());
@@ -888,6 +983,147 @@ mod imp {
         Some(m)
     }
 
+    /// The profile's `plane` where the sweep along `path` starts. A profile drawn part way along
+    /// the path (its plane missing the path's start but crossing the path) is carried back from
+    /// the crossing nearest it to the start, the way the sweep would carry it forward (moved
+    /// only, when `translate`), so the swept body follows the whole path and passes through the
+    /// profile where it lies. SMLib sweeps from the path's start only. A profile whose plane misses
+    /// the path altogether is carried back the same way from the point of the path nearest it: it
+    /// travels beside the whole path, square to it, keeping its distance and side.
+    fn at_path_start(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Plane> {
+        let Some(start) = path.first().map(crate::PathSeg::start) else { return Ok(*plane) };
+        let lens: Vec<f64> = path.iter().map(seg_len).collect();
+        let total: f64 = lens.iter().sum();
+        if !(total > 0.0 && total.is_finite()) || plane.height(start).abs() <= (total * 1e-9).max(1e-9) {
+            return Ok(*plane);
+        }
+        let mids: Vec<Vec3> = pieces.iter().map(|x| plane.to_world(x.seg.point_at(0.5))).collect();
+        let centre = mids.iter().fold(Vec3::ZERO, |s, q| s + *q) * (1.0 / mids.len().max(1) as f64);
+        // Each crossing as (its point, the length along the path to it).
+        let mut crossings: Vec<(Vec3, f64)> = Vec::new();
+        let mut before = 0.0;
+        for (s, len) in path.iter().zip(&lens) {
+            let height = |f: f64| seg_at(s, f).map(|(q, _)| plane.height(q));
+            for i in 0..CROSSING_SAMPLES {
+                let (mut lo, mut hi) = (i as f64 / CROSSING_SAMPLES as f64, (i + 1) as f64 / CROSSING_SAMPLES as f64);
+                let (Some(h_lo), Some(h_hi)) = (height(lo), height(hi)) else { continue };
+                if h_lo * h_hi > 0.0 || (h_lo == 0.0 && i > 0) {
+                    continue;
+                }
+                let rising = h_lo < h_hi;
+                for _ in 0..60 {
+                    let mid = 0.5 * (lo + hi);
+                    match height(mid) {
+                        Some(h) if (h < 0.0) == rising => lo = mid,
+                        Some(_) => hi = mid,
+                        None => break,
+                    }
+                }
+                let f = 0.5 * (lo + hi);
+                if let Some((q, _)) = seg_at(s, f) {
+                    crossings.push((q, before + f * len));
+                }
+            }
+            before += len;
+        }
+        let nearest = crossings.into_iter().min_by(|a, b| a.0.dist(centre).total_cmp(&b.0.dist(centre)));
+        let Some((at, along)) = nearest.or_else(|| nearest_on_path(path, &lens, centre)) else {
+            return Ok(*plane);
+        };
+        let forward = if translate {
+            affine_moved(&IDENTITY, at - start)
+        } else {
+            carried_through(path, along).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?
+        };
+        Ok(placed(plane, &affine_inverse(&forward)))
+    }
+
+    /// The point of `path` (its segments `lens` long) nearest `q`, and the length along the path
+    /// to it: the nearest of points read along each segment, then narrowed between its neighbours.
+    fn nearest_on_path(path: &[crate::PathSeg], lens: &[f64], q: Vec3) -> Option<(Vec3, f64)> {
+        let mut best: Option<(Vec3, f64, f64)> = None;
+        let mut before = 0.0;
+        for (s, len) in path.iter().zip(lens) {
+            let dist = |f: f64| seg_at(s, f).map_or(f64::INFINITY, |(p, _)| p.dist(q));
+            let n = CROSSING_SAMPLES as f64;
+            let Some(i) = (0..=CROSSING_SAMPLES).min_by(|a, b| dist(*a as f64 / n).total_cmp(&dist(*b as f64 / n))) else { continue };
+            let (mut lo, mut hi) = (((i as f64) - 1.0).max(0.0) / n, ((i as f64) + 1.0).min(n) / n);
+            for _ in 0..60 {
+                let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+                if dist(a) < dist(b) {
+                    hi = b;
+                } else {
+                    lo = a;
+                }
+            }
+            let f = 0.5 * (lo + hi);
+            if let Some((p, _)) = seg_at(s, f)
+                && best.is_none_or(|(_, _, d)| p.dist(q) < d)
+            {
+                best = Some((p, before + f * len, p.dist(q)));
+            }
+            before += len;
+        }
+        best.map(|(p, along, _)| (p, along))
+    }
+
+    /// The rigid motion carrying a section from the start of `path` to `along` (clamped to the
+    /// path) along it, turning with it: [`carried_along`] on lines and arcs, turned through each
+    /// joint by the angle between the directions there (as [`cornered`] turns it round a corner),
+    /// and along another curve turned through its directions of travel step by step.
+    fn carried_through(path: &[crate::PathSeg], along: f64) -> Option<Affine> {
+        const STEPS: usize = 256;
+        let mut m = IDENTITY;
+        let mut left = along.max(0.0);
+        let mut last: Option<Vec3> = None;
+        for s in path {
+            if left <= 0.0 {
+                break;
+            }
+            let (t0, _) = s.tangents()?;
+            if let Some(t) = last {
+                m = affine_after(&turn_between(s.start(), t, t0), &m);
+            }
+            let length = seg_len(s);
+            let d = left.min(length);
+            m = match *s {
+                crate::PathSeg::Line { .. } | crate::PathSeg::Arc { .. } => affine_after(&carried_along(std::slice::from_ref(s), d)?, &m),
+                _ if length > 0.0 => {
+                    let end = d / length;
+                    let (mut q, mut t) = seg_at(s, 0.0)?;
+                    for i in 1..=STEPS {
+                        let (q1, t1) = seg_at(s, end * i as f64 / STEPS as f64)?;
+                        m = affine_after(&turn_between(q1, t, t1), &affine_moved(&m, q1 - q));
+                        (q, t) = (q1, t1);
+                    }
+                    m
+                }
+                _ => m,
+            };
+            last = seg_at(s, if length > 0.0 { d / length } else { 1.0 }).map(|(_, t)| t);
+            left -= d;
+        }
+        Some(m)
+    }
+
+    /// The least turn about a line through `at` taking the unit direction `from` to `to`.
+    fn turn_between(at: Vec3, from: Vec3, to: Vec3) -> Affine {
+        let k = from.cross(to);
+        match k.normalized() {
+            Some(axis) if k.len() > 1e-12 => affine_turned(at, axis, k.len().atan2(from.dot(to))),
+            _ => IDENTITY,
+        }
+    }
+
+    /// The inverse of the rigid motion `a`.
+    fn affine_inverse(a: &Affine) -> Affine {
+        let t = Vec3::new(a.t[0], a.t[1], a.t[2]);
+        let col = |i: usize| Vec3::new(a.m[i][0], a.m[i][1], a.m[i][2]);
+        // The inverse turn is the transpose: its columns are the turn's rows.
+        let m = [0, 1, 2].map(|j| [a.m[0][j], a.m[1][j], a.m[2][j]]);
+        Affine { m, t: [-col(0).dot(t), -col(1).dot(t), -col(2).dot(t)] }
+    }
+
     /// The length of a path segment.
     fn seg_len(s: &crate::PathSeg) -> f64 {
         match *s {
@@ -992,11 +1228,14 @@ mod imp {
     /// in another outer loop are cut from the sweep of the rest. Other loops are skinned, and an
     /// arc centred on the line within a loop of other curves still is.
     pub(crate) fn sweep_controlled(plane: &Plane, region: &NumberedRegion, path: &[crate::PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
+        let pieces = pieces(region.loops());
+        // A profile drawn away from the path's start is carried there as it is: it is the start
+        // section, and the twist and the scale run from there.
+        let plane = &at_path_start(plane, &pieces, path, ctl.orientation == crate::SweepOrientation::Parallel)?;
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered_controlled(plane, region, path, &runs, ctl);
         }
-        let pieces = pieces(region.loops());
         let start = path.first().map(crate::PathSeg::start).ok_or_else(|| KernelError::Invalid("the path needs 1…1000 segments".into()))?;
         // A circle centred on the twist axis, swept straight along that axis, turns onto itself:
         // its wall is exactly the cylinder, built as one rather than skinned (solidcore#2184: a
@@ -1010,7 +1249,7 @@ mod imp {
         if let Some((_, _, round)) = &axial {
             if round.iter().all(Option::is_some) {
                 // Every loop a circle about the axis: the twist changes nothing.
-                match sweep(plane, &pieces, path, false) {
+                match sweep_from_start(plane, &pieces, path, false) {
                     Ok(body) => return Ok(body),
                     Err(e) => log::debug!(target: "smlib", "twisted sweep of circles about its path, swept untwisted: {e}; skinned instead"),
                 }
@@ -1083,7 +1322,7 @@ mod imp {
 
     /// The centre and radius of `lp` when it is one circle (in one or several arcs) centred on the
     /// line through `start` along the unit `k`.
-    fn circle_on_axis(plane: &Plane, lp: &solidcraft_geom::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
+    fn circle_on_axis(plane: &Plane, lp: &solidcore_record::Loop2, start: Vec3, k: Vec3) -> Option<(Vec3, f64)> {
         let mut circle: Option<(Vec3, f64)> = None;
         let mut turn = 0.0;
         for s in &lp.segs {
@@ -1389,11 +1628,9 @@ mod imp {
         let st = crate::sweep_path::controlled_stations(plane, &[start, a0], &[first_t, t0], &[], &law)?;
         let want = st.last().map(|s| s.apply(plane.x)).ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
         let have = affine_turn(at_start, plane.x);
-        // About the section's normal, pointing the way the run leaves it (the twist's axis).
-        let n = affine_turn(at_start, plane.normal());
-        let axis = (if n.dot(t0) < 0.0 { n * -1.0 } else { n })
-            .normalized()
-            .ok_or_else(|| KernelError::Invalid("the sweep's section is degenerate".into()))?;
+        // About the run's direction (the twist's axis, as `controlled_stations` turns about the
+        // path where it leaves the profile).
+        let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("the sweep's section is degenerate".into()))?;
         let flat = |v: Vec3| (v - axis * v.dot(axis)).normalized();
         let (Some(w), Some(h)) = (flat(want), flat(have)) else {
             return Err(KernelError::Invalid("the profile lies along the sweep path at a corner".into()));
@@ -1529,7 +1766,7 @@ mod imp {
                         all.extend(q.numbers.iter().copied());
                     }
                 }
-                Piece { seg: x.seg, numbers: all.into_iter().collect(), drawn: x.drawn }
+                Piece { seg: x.seg, numbers: all.into_iter().collect(), drawn: x.drawn, joins_previous: false }
             })
             .collect();
         let roles = roles(&body, start, Some(&last.0), &seeds(start, &columns, |q| q), &[], false)?;

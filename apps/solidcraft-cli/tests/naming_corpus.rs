@@ -16,13 +16,14 @@
 //! designs, the engine's design fixtures and the older designs kept by the hole matrix, taper
 //! and projection tests.
 
+use solidcraft_engine::geom::prelude::*;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::{FaceAttachmentStatus, Feature, FeatureKind, ModelBody, ModelState, PlaneRef, naming};
-use solidcraft_engine::geom::Vec3;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()

@@ -3,13 +3,13 @@
 //! control spline without them is the clamped uniform B-spline over its points.
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_geom::bspline::{self, HPoint};
-use solidcraft_geom::{Seg2, Vec2, Vec3};
 
 use crate::model::{Result, SketchError};
 
 /// Most knots a spline may have (its points are capped at [`crate::MAX_SPLINE_POINTS`]).
-const MAX_KNOTS: usize = crate::curves::MAX_SPLINE_POINTS + solidcraft_geom::MAX_BEZIER_DEGREE + 1;
+const MAX_KNOTS: usize = crate::curves::MAX_SPLINE_POINTS + solidcore_record::MAX_BEZIER_DEGREE + 1;
 /// Most a weight may exceed another by: past it the curve is all but its heaviest points.
 const MAX_WEIGHT_RATIO: f64 = 1e12;
 /// Polyline samples per knot span.
@@ -33,7 +33,7 @@ impl Nurbs {
     /// Whether these knots and weights fit a control spline of `degree` over `n` points.
     pub fn check(&self, n: usize, degree: u8) -> Result<()> {
         let d = usize::from(degree);
-        if !(1..=solidcraft_geom::MAX_BEZIER_DEGREE).contains(&d) || n <= d || n > crate::curves::MAX_SPLINE_POINTS {
+        if !(1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&d) || n <= d || n > crate::curves::MAX_SPLINE_POINTS {
             return bad("a knotted spline needs more points than its degree, 1 to 9");
         }
         let k = &self.knots;

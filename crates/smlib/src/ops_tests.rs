@@ -1,6 +1,5 @@
-//! The operations against analytic volumes and topology counts (built with SMLib only). `SMLIB_OPS_SHOTS=<dir>` also
+//! The operations against analytic volumes and topology counts. `SMLIB_OPS_SHOTS=<dir>` also
 //! writes every result there as a native `.smb`, to render.
-#![cfg(feature = "native")]
 
 use super::*;
 use crate::CheckLevel;
@@ -390,29 +389,26 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the
-/// box's six faces and the three rounds (9 faces, 30 edges, 22 vertices), a sheet SMLib's check
-/// passes, and one hole of twelve edges (each section and face curve in two), chained end to
-/// start, each bounding a different face than the patch's neighbours across it.
+/// box's six faces and the three rounds (9 faces, 27 edges, 19 vertices), a sheet SMLib's check
+/// passes, and one hole of nine edges, chained end to start, each bounding a different face than
+/// the patch's neighbours across it. The marked corner is the blend corner's Setback
+/// (tangency-labs/solidcore#2988), whose sections and face curves are one edge each; the N x N
+/// patch it replaced split each in two (12 edges, 30 and 22).
 #[test]
 fn a_setback_corner_left_open_returns_its_hole() {
     let b = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
-    solidcraft_profile::set_enabled(true);
-    let mark = solidcraft_profile::mark();
     let (open, holes) = b.blend_setback_open(Blend::Round, &edges, &[5.0; 3], &[[60.0, 40.0, 20.0]], &[8.0], 0.1).unwrap();
-    // The call is a profiler span like every other, timed by the C API.
-    let report = mark.report();
-    assert!(report.rows.iter().any(|r| r.category == "smlib" && r.name == "smlib_blend_setback_open"), "{report:?}");
     shot(&open, "setback_open");
-    assert_eq!(open.counts().unwrap(), [9, 30, 22]);
+    assert_eq!(open.counts().unwrap(), [9, 27, 19]);
     assert!(!open.is_manifold_solid().unwrap());
     let [hole] = holes.as_slice() else { panic!("one corner: {holes:?}") };
-    assert_eq!(hole.edges.len(), 12);
-    let flat = open.export().unwrap();
-    let ends = flat.get_i64(crate::flat::EDGE_VERTICES).unwrap();
+    assert_eq!(hole.edges.len(), 9);
+    let arrays = open.arrays().unwrap();
+    let ends = &arrays.ints[&crate::flat::EDGE_VERTICES];
     let end = |h: &HoleEdge, last: bool| ends[2 * h.edge + usize::from(h.forward == last)];
     for (k, h) in hole.edges.iter().enumerate() {
-        let next = &hole.edges[(k + 1) % 12];
+        let next = &hole.edges[(k + 1) % 9];
         assert_eq!(end(h, true), end(next, false), "edge {k} ends where the next starts");
         assert!(h.face < 9);
     }

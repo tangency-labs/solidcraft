@@ -2,6 +2,7 @@
 //! sketch, where a pick by point can land in another region.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::Session;
 use solidcraft_doc::{FeatureKind, ProfileSel};
@@ -68,7 +69,7 @@ fn a_profile_picked_by_curves_follows_a_parameter_change() {
     if let Some(f) = s.doc_mut().feature_mut(id)
         && let FeatureKind::Extrude { profiles, .. } = &mut f.kind
     {
-        *profiles = ProfileSel::Points { points: vec![solidcraft_geom::Vec2::new(25.0, 10.0)] };
+        *profiles = ProfileSel::Points { points: vec![solidcore_record::Vec2::new(25.0, 10.0)] };
     }
     s.refresh();
     assert!((volumes(&s)[0] - 6000.0).abs() < 1.0);

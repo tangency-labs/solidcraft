@@ -1,7 +1,8 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::FRAC_PI_2;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -121,6 +122,27 @@ fn revolute_hinge_turns_about_the_knuckle() {
     assert!(near(place(&s, "LeafB", p), Vec3::new(20.0, 66.0, 8.0)));
     run(&mut s, "edit.undo", json!({}));
     assert!(near(place(&s, "LeafB", p), Vec3::new(20.0, 29.0, 37.0)));
+}
+
+/// A joint value too large says so, rather than that it is not a number (#9625).
+#[test]
+fn a_joint_value_out_of_range_says_so() {
+    let mut s = Session::default();
+    leaf(&mut s, "LeafA");
+    leaf(&mut s, "LeafB");
+    let o = occ(&s, "LeafA");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    let hinge = json!({"type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "flip": true, "name": "Hinge"});
+    run(&mut s, "joint.create", hinge);
+    for value in [json!(1e9), json!(-5e15)] {
+        let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": value})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            e.contains("a joint value must be a number between -1e9 and 1e9") && !e.contains("a joint value must be a number or"),
+            "{value}: {e}"
+        );
+    }
+    let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": true})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("a joint value must be a number or an expression") && !e.contains("between"), "{e}");
 }
 
 /// Two 10 mm cubes in components A (grounded) and B.
@@ -2235,6 +2257,14 @@ fn a_trace_follows_the_instance_its_path_names() {
     let pivot = Vec3::new(0.0, 50.0, 1.0);
     assert!(turned.iter().all(|p| (p.dist(pivot) - 122f64.sqrt()).abs() < 1e-6), "{turned:?}");
     assert!(turned.first().zip(turned.last()).is_some_and(|(a, b)| (a.dist(*b) - 244f64.sqrt()).abs() < 1e-6), "a quarter turn: {turned:?}");
+    // Kept with a point_ref as the Motion Trace dialog sends a pick on the second Arm: with the
+    // pick's placement path. The trace's own occurrence names that placement already.
+    let reference = json!({"occurrence": tip, "path": [second, tip], "point": [11, 51, 1]});
+    let p = json!({"occurrence": [second, tip], "point": [11, 51, 1], "joint": "Pivot", "from": 0, "to": 90, "samples": 3, "point_ref": reference});
+    let kept = run(&mut s, "motion.trace.keep", p);
+    let trace_point = s.doc.assembly.traces.last().map(|t| t.point.clone());
+    assert_eq!(trace_point.map(|o| (o.occurrence, o.inside)), Some((tip, Vec::new())), "{kept}");
+    assert!(traced(&kept).iter().all(|p| (p.dist(pivot) - 122f64.sqrt()).abs() < 1e-6), "{kept}");
     let first = trace(&mut s, json!(tip));
     assert!(first.iter().all(|p| p.dist(Vec3::new(11.0, 51.0, 1.0)) < 1e-9), "{first:?}");
     assert!(s.execute("motion.trace", &json!({"occurrence": [tip, second], "point": [0, 0, 0], "joint": "Pivot", "from": 0, "to": 90})).is_err());
@@ -2472,7 +2502,7 @@ fn joint_inspect_reports_a_lost_origin() {
 }
 
 /// An edge whose first face is a fillet's: the fillet face's name holds the edge it rounds
-/// (`F2:blend:<face>|<face>`), so the edge's two faces are the whole blend name and the slot's
+/// (`F2:blend(<face>|<face>)`), so the edge's two faces are the whole blend name and the slot's
 /// wall, not the blend name cut at its own `|`.
 #[test]
 fn joint_inspect_splits_an_edge_of_a_blend_face_into_its_two_faces() {
@@ -2496,11 +2526,11 @@ fn joint_inspect_splits_an_edge_of_a_blend_face_into_its_two_faces() {
     let edge = reference(&j, "a", "edge");
     let name = edge["name"].as_str().unwrap_or_default().to_string();
     let faces: Vec<String> = edge["faces"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(str::to_string)).collect();
-    // `F4:blend:F3:+x|F3:+z#[F3:-y,F5:-y]|F5:-y`: the blend piece beside the slot, and the slot's wall.
-    assert!(name.split_once(':').is_some_and(|(_, r)| r.starts_with("blend:")), "the blend face comes first: {name}");
+    // `F4:blend(F3:+x|F3:+z#[F3:-y,F5:-y])|F5:-y`: the blend piece beside the slot, and the slot's wall.
+    assert!(name.split_once(':').is_some_and(|(_, r)| r.starts_with("blend(")), "the blend face comes first: {name}");
     assert_eq!(faces.len(), 2, "{edge}");
     assert_eq!(format!("{}|{}", faces[0], faces[1]), name, "{edge}");
-    assert!(faces[0].contains(":blend:") && faces[0].contains('|'), "{edge}");
+    assert!(faces[0].contains(":blend(") && faces[0].contains('|'), "{edge}");
     assert!(!faces[1].contains('|'), "{edge}");
 }
 
@@ -2696,4 +2726,212 @@ fn driving_an_angle_reports_the_number_a_person_would_read() {
     // Only what is reported is rounded: the stored value keeps full precision.
     let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
     assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
+}
+
+#[test]
+fn new_joints_generate_type_prefixed_names_or_keep_custom_name() {
+    let mut s = two_cubes();
+    let (a, b) = (occ(&s, "A"), occ(&s, "B"));
+
+    // 1. Without name: revolute joint defaults to "Revolute Joint1"
+    let r1 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r1["name"], "Revolute Joint1");
+
+    // 2. Without name: slider joint defaults to "Slider Joint1"
+    let r2 = run(
+        &mut s,
+        "joint.as_built",
+        json!({
+            "type": "slider",
+            "a": "A",
+            "b": "B"
+        }),
+    );
+    assert_eq!(r2["name"], "Slider Joint1");
+
+    // 3. With custom name: preserves custom name exactly
+    let r3 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "CustomRigid",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r3["name"], "CustomRigid");
+}
+
+/// A sub-assembly placed twice: Board (holding Header, a 10 mm cube from the origin, turned 90
+/// degrees about Z and moved 20 mm along Y in Board, so its top's centre is at (-5, 25, 10)) at
+/// the origin and again at +100 mm X, both grounded, and a free 2 mm Probe cube from the origin.
+/// Returns (Board:1, Board:2, Header:1) occurrence ids.
+fn board_twice(s: &mut Session) -> (u64, u64, u64) {
+    run(s, "component.create", json!({"name": "Board", "parent": "root"}));
+    run(s, "component.create", json!({"name": "Header", "parent": "Board"}));
+    run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(s, "component.activate", json!({"component": "root"}));
+    run(s, "occurrence.move", json!({"occurrence": "Header:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    run(s, "occurrence.move", json!({"occurrence": "Header:1", "translate": [0, 20, 0]}));
+    let second = run(s, "occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(s, "occurrence.ground", json!({"occurrence": second, "grounded": true}));
+    run(s, "component.create", json!({"name": "Probe", "parent": "root", "grounded": false}));
+    run(s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "ProbeBox"}));
+    run(s, "component.activate", json!({"component": "root"}));
+    (occ(s, "Board"), second, occ(s, "Header"))
+}
+
+/// The Probe's centre in the world.
+fn probe_centre(s: &Session) -> Vec3 {
+    place(s, "Probe", Vec3::new(1.0, 1.0, 1.0))
+}
+
+#[test]
+fn a_joint_origin_on_a_repeated_sub_assembly_stays_on_the_copy_it_was_picked_on() {
+    // #11426: Header sits in Board, which is placed twice. A pick on the second Board's header
+    // was stored on Header's one occurrence and placed through the first Board, so a part mated
+    // to it landed on the first copy (-5, 25, 11) instead of the one picked (95, 25, 11).
+    for how in ["path", "no occurrence"] {
+        let mut s = Session::default();
+        let (_, second, header) = board_twice(&mut s);
+        let mut a = json!({"name": "Top", "face": [95, 25, 10]});
+        if how == "path" {
+            a["occurrence"] = json!(header);
+            a["path"] = json!([second, header]);
+        }
+        run(&mut s, "joint.origin", a);
+        let top = s.doc.assembly.origins.iter().find(|o| o.name == "Top").map(|o| o.origin.clone()).unwrap();
+        // On the second Board, reaching its header: the copy it was picked on, its face by name.
+        assert_eq!((top.occurrence, top.inside.clone()), (second, vec![header]), "{how}: {top:?}");
+        assert!(matches!(&top.snap, solidcraft_doc::joints::Snap::FaceCenter { face: Some(_), .. }), "{how}: {top:?}");
+        run(&mut s, "joint.create", json!({"type": "rigid", "a": "Top", "b": {"occurrence": "Probe", "face": [1, 1, 0]}}));
+        assert!(near(probe_centre(&s), Vec3::new(95.0, 25.0, 11.0)), "{how}: {:?}", probe_centre(&s));
+        // joint.inspect lists the occurrences inside the copy; a side with none leaves the key out.
+        let sides = run(&mut s, "joint.inspect", json!({}))["joints"][0].clone();
+        assert_eq!((&sides["a"]["occurrence"], &sides["a"]["inside"]), (&json!(second), &json!([header])), "{how}: {sides}");
+        assert!(sides["b"].get("inside").is_none(), "{how}: {sides}");
+        // It follows that copy when it moves, and keeps it through saving and opening again.
+        run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [0, 20, 0], "move_grounded": true}));
+        assert!(near(probe_centre(&s), Vec3::new(95.0, 45.0, 11.0)), "{how}: {:?}", probe_centre(&s));
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        *s.doc_mut() = doc;
+        run(&mut s, "joint.list", json!({}));
+        let reopened = s.doc.assembly.origins.iter().find(|o| o.name == "Top").map(|o| o.origin.clone()).unwrap();
+        assert_eq!(reopened, top, "{how}");
+        let world = s.doc.origin_world(&s.model.state(), &reopened).unwrap();
+        assert!(near(Vec3::new(world[3][0], world[3][1], world[3][2]), Vec3::new(95.0, 45.0, 10.0)), "{how}: {world:?}");
+    }
+}
+
+#[test]
+fn a_joint_origin_on_the_first_copy_is_stored_as_before() {
+    // Through first placements only, an origin is its part's occurrence with nothing inside, as
+    // every origin was before #11426, given a path or not.
+    let mut s = Session::default();
+    let (first, _, header) = board_twice(&mut s);
+    for (name, path) in [("ByPath", Some(json!([first, header]))), ("ByPick", None)] {
+        let mut p = json!({"name": name, "occurrence": header, "face": [-5, 25, 10]});
+        if let Some(path) = path {
+            p["path"] = path;
+        }
+        run(&mut s, "joint.origin", p);
+        let o = s.doc.assembly.origins.iter().find(|o| o.name == name).map(|o| o.origin.clone()).unwrap();
+        assert_eq!((o.occurrence, o.inside.len()), (header, 0), "{name}: {o:?}");
+        assert!(!s.doc.to_json().contains("\"inside\""), "{name}: an empty `inside` is not written");
+    }
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": "ByPath", "b": {"occurrence": "Probe", "face": [1, 1, 0]}}));
+    assert!(near(probe_centre(&s), Vec3::new(-5.0, 25.0, 11.0)), "{:?}", probe_centre(&s));
+    let sides = run(&mut s, "joint.inspect", json!({}))["joints"][0].clone();
+    assert!(sides["a"].get("inside").is_none(), "{sides}");
+}
+
+#[test]
+fn a_joint_origin_path_is_checked() {
+    let mut s = Session::default();
+    let (first, second, header) = board_twice(&mut s);
+    let probe = occ(&s, "Probe");
+    let long: Vec<u64> = (0..65).collect();
+    for path in [
+        json!([]),
+        json!([999]),
+        json!([header, second]),
+        json!([second]),
+        json!([first, header, header]),
+        json!(long),
+        json!("6/4"),
+        json!([-1]),
+        json!([1.5]),
+    ] {
+        let p = json!({"occurrence": header, "face": [95, 25, 10], "path": path});
+        assert!(s.execute("joint.origin", &p).is_err(), "{p}");
+    }
+    // A path that ends at another occurrence than the one named.
+    assert!(s.execute("joint.origin", &json!({"occurrence": probe, "face": [95, 25, 10], "path": [second, header]})).is_err());
+    assert!(s.doc.assembly.origins.is_empty());
+    // `null` is left out, as for the other optional keys: the pick finds its copy.
+    run(&mut s, "joint.origin", json!({"name": "Top", "face": [95, 25, 10], "path": null}));
+    let top = s.doc.assembly.origins.iter().find(|o| o.name == "Top").map(|o| o.origin.clone()).unwrap();
+    assert_eq!((top.occurrence, top.inside), (second, vec![header]));
+}
+
+#[test]
+fn a_placement_with_no_inverse_does_not_stop_picks_on_other_parts() {
+    // A hand-edited file can hold a placement that can't be undone. The search for the placement
+    // a pick is on skips it, instead of failing every pick in the design.
+    let mut s = Session::default();
+    let (_, second, header) = board_twice(&mut s);
+    let probe = occ(&s, "Probe");
+    if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == probe) {
+        o.transform = [[0.0; 4]; 4];
+    }
+    run(&mut s, "joint.origin", json!({"name": "Top", "face": [95, 25, 10]}));
+    let top = s.doc.assembly.origins.iter().find(|o| o.name == "Top").map(|o| o.origin.clone()).unwrap();
+    assert_eq!((top.occurrence, top.inside), (second, vec![header]));
+}
+
+#[test]
+fn removing_the_part_inside_a_joint_origin_removes_its_joints() {
+    let mut s = Session::default();
+    let (_, second, header) = board_twice(&mut s);
+    run(&mut s, "joint.origin", json!({"name": "Top", "occurrence": header, "path": [second, header], "face": [95, 25, 10]}));
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": "Top", "b": {"occurrence": "Probe", "face": [1, 1, 0]}}));
+    run(&mut s, "component.delete", json!({"component": "Header"}));
+    assert!(s.doc.assembly.origins.is_empty(), "{:?}", s.doc.assembly.origins);
+    assert!(s.doc.assembly.joints.is_empty(), "{:?}", s.doc.assembly.joints);
+}
+
+#[test]
+fn paste_new_takes_a_joint_origin_inside_a_repeated_sub_assembly_to_its_copy() {
+    // Top holds Board twice (+100 mm X), each Board holds Header (a 10 mm cube, turned and moved
+    // in Board as `board_twice` does). An origin on the
+    // second Board's header is on that Board, inside Header. Paste New of Top copies it onto the
+    // copy's second Board and the copy's Header, not the originals.
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Top", "parent": "root"}));
+    run(&mut s, "component.create", json!({"name": "Board", "parent": "Top"}));
+    run(&mut s, "component.create", json!({"name": "Header", "parent": "Board"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Header:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Header:1", "translate": [0, 20, 0]}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let (top, header) = (occ(&s, "Top"), occ(&s, "Header"));
+    run(&mut s, "joint.origin", json!({"name": "Top pin", "path": [top, second, header], "face": [95, 25, 10]}));
+    let origin = s.doc.assembly.origins.iter().find(|o| o.name == "Top pin").map(|o| o.origin.clone()).unwrap();
+    assert_eq!((origin.occurrence, origin.inside.clone()), (second, vec![header]), "{origin:?}");
+    run(&mut s, "component.paste_new", json!({"component": "Top", "translate": [0, 200, 0]}));
+    let copied: Vec<_> = s.doc.assembly.origins.iter().filter(|o| o.name != "Top pin").map(|o| o.origin.clone()).collect();
+    let [copy] = copied.as_slice() else { panic!("one copied origin: {:?}", s.doc.assembly.origins) };
+    assert!(copy.occurrence != second && copy.inside.len() == 1 && copy.inside != origin.inside, "{copy:?}");
+    let world = s.doc.origin_world(&s.model.state(), copy).unwrap();
+    assert!(near(Vec3::new(world[3][0], world[3][1], world[3][2]), Vec3::new(95.0, 225.0, 10.0)), "{world:?}");
 }

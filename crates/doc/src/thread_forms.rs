@@ -554,8 +554,22 @@ impl ThreadForm {
     }
 
     /// The standard size a cylinder of this diameter takes: a shaft is the major diameter, a hole
-    /// the drill. None when no size is within 15% (or the form has no size table).
+    /// its nominal diameter, else the drill ([`fit_with`](Self::fit_with)). None when no size is within 15% (or the form has no size table).
     pub fn fit(self, diameter: f64, internal: bool) -> Option<(f64, f64)> {
+        self.fit_with(diameter, internal, false)
+    }
+
+    /// [`fit`](Self::fit) as designs saved before the nominal rule had it (`old_rule`: a hole is
+    /// matched by the tap drill alone, so a 12 mm hole is M14's) or as it is now: a hole as wide
+    /// as a size's nominal diameter (within 1% and 0.03 mm) is that size, a 12 mm hole is M12,
+    /// and only a hole near no nominal diameter is matched by tap drill.
+    pub fn fit_with(self, diameter: f64, internal: bool, old_rule: bool) -> Option<(f64, f64)> {
+        if internal && !old_rule {
+            let near = |n: f64| (n - diameter).abs() <= 0.01 * diameter + 0.03;
+            if let Some((n, p)) = self.sizes().into_iter().find(|(n, _)| near(*n)) {
+                return Some((n, p));
+            }
+        }
         self.sizes()
             .into_iter()
             .map(|(n, p)| (n, p, if internal { self.drill(n, p) } else { n }))

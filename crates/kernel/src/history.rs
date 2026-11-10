@@ -15,20 +15,20 @@
 //! history here gives its faces attachments with no attachment code of its own. An operation
 //! that can't should leave its result without one (`Body::without_history`), never guess.
 
-pub use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
+pub use solidcore_record::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
 
 use crate::body::{Body, FaceSource};
 use crate::{KernelError, Result};
-use solidcraft_geom::brep::{Brep, part::Part};
+use solidcore_record::brep::{Brep, part::Part};
 
-impl From<solidcraft_geom::brep::history::Failed> for KernelError {
-    fn from(e: solidcraft_geom::brep::history::Failed) -> KernelError {
+impl From<solidcore_record::brep::history::Failed> for KernelError {
+    fn from(e: solidcore_record::brep::history::Failed) -> KernelError {
         KernelError::Failed(e.to_string())
     }
 }
 
 /// What a [`History`] needs a kernel body for: the history types belong to
-/// `solidcraft_geom::brep::history`, so a backend can report them without this crate.
+/// `solidcore_record::brep::history`, so a backend can report them without this crate.
 pub trait BodyHistory {
     /// The history of an operation that keeps every face and edge of its one operand in place
     /// (a rigid move, a rebuild that keeps the topology's order).

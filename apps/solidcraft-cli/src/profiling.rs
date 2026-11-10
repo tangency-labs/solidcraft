@@ -1,5 +1,5 @@
 //! `--profile` and `--profile-out FILE` for `run`, `eval` and `bench-open` (and
-//! `SOLIDCRAFT_PROFILE=1` for any command): record where the time goes, SMLib's calls to the
+//! `SOLIDCRAFT_PROFILE=1` for any command): record where the time goes, the kernel's calls to the
 //! commands, print the table to stderr when the command ends (stdout stays the command's JSON)
 //! and write the spans as a Chrome trace for chrome://tracing or Perfetto.
 

@@ -1,6 +1,7 @@
 //! Keyboard-authored intent must survive stage transitions and later model edits.
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
 
 fn start(command: &str) -> Harness {
@@ -196,6 +197,40 @@ fn polygon_radius_is_persistent_and_fractional_sides_are_rejected() {
     assert_eq!(sketch.curves.iter().filter(|c| !c.construction).count(), 5);
 }
 
+/// "By side" offers the side length and the number of sides, as the other polygon modes do
+/// (#11271): the typed length becomes a dimension of the first side.
+#[test]
+fn edge_polygon_takes_a_typed_side_length_and_side_count() {
+    let mut h = start("sketch.polygon.edge");
+    let labels: Vec<_> = h.app.tool.as_ref().unwrap().dims.iter().map(|d| d.label).collect();
+    assert_eq!(labels, ["Length", "Sides"]);
+    type_value(&mut h, "12");
+    h.step(&json!({"key":"Tab"})).unwrap();
+    type_value(&mut h, "5");
+    let undo = h.app.session.undo.len();
+    enter(&mut h);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(constraints(&h).iter().any(|c| matches!(c, ConstraintKind::Length { value, .. } if (*value - 12.0).abs() < 1e-7)));
+    // The design's own state: this sketch is in no component, so it matches the world view.
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let sides: Vec<f64> = sketch
+        .curves
+        .iter()
+        .filter(|c| !c.construction)
+        .filter_map(|c| match c.kind {
+            CurveKind::Line { a, b } => Some(sketch.points[a].pos.dist(sketch.points[b].pos)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sides.len(), 5);
+    assert!(sides.iter().all(|l| (l - 12.0).abs() < 1e-6), "{sides:?}");
+    // The first side runs from the first click towards the cursor.
+    let CurveKind::Line { a, b } = sketch.curves[0].kind else { panic!("expected the first side") };
+    assert!(sketch.points[a].pos.dist(solidcore_record::Vec2::new(0.0, 0.0)) < 1e-6);
+    assert!(sketch.points[b].pos.dist(solidcore_record::Vec2::new(12.0, 0.0)) < 1e-6);
+}
+
 #[test]
 fn line_angle_survives_drag_and_one_undo_removes_geometry_and_dimensions() {
     let mut h = start("sketch.line");
@@ -264,7 +299,7 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         h.app.run("sketch.construction", json!({"curves":["l1"]})).unwrap();
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 60.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(0.0, 5.0, 0.0);
         h.settle();
         h.step(&json!({"start":command})).unwrap();
         for p in picks {
@@ -273,7 +308,7 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
         h.step(&json!({"move":{"world":[end[0], end[1], 0]}})).unwrap();
         let cursor = h.at(&json!({"world":[end[0], end[1], 0]})).unwrap();
         let cursor = egui::pos2(cursor[0] as f32, cursor[1] as f32);
-        let blocking = h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).filter(|r| r.expand(2.0).contains(cursor));
+        let blocking = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).filter(|r| r.expand(2.0).contains(cursor));
         assert!(blocking.is_none(), "{command}: the value box {blocking:?} sits under the cursor {cursor:?}");
         h.step(&json!({"click":{"world":[end[0], end[1], 0]}})).unwrap();
         // A slot's third pick sets its width only; the arc's end takes the point it lands on.
@@ -293,5 +328,43 @@ fn the_arc_end_pick_snaps_to_a_point_under_the_value_box() {
                     _ => false,
                 });
         assert!(snapped, "{command}: the third pick snapped to the line's end: {:?}", sketch.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>());
+    }
+}
+
+/// A Center Point Arc is drawn with three clicks, its value boxes optional: the Radius box never
+/// sits under the cursor, so the second click places the start point instead of landing in the
+/// box and waiting for Enter (#12208, #12205). Small radii in every direction, where a box at the
+/// radius's middle covered the cursor.
+#[test]
+fn a_center_point_arc_takes_three_clicks_without_enter() {
+    for (radius, angle) in [(2.0f64, 0.0f64), (4.0, 0.0), (4.0, 90.0), (4.0, 180.0), (4.0, 270.0), (6.0, 45.0), (15.0, 0.0)] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 60.0;
+        h.app.cam.target = solidcore_record::Vec3::new(0.0, 0.0, 0.0);
+        h.settle();
+        h.step(&json!({"start":"sketch.arc.center_point"})).unwrap();
+        h.step(&json!({"click":{"world":[0, 0, 0]}})).unwrap();
+        let (s, c) = angle.to_radians().sin_cos();
+        let start = [radius * c, radius * s];
+        h.step(&json!({"move":{"world":[start[0], start[1], 0]}})).unwrap();
+        let cursor = h.at(&json!({"world":[start[0], start[1], 0]})).unwrap();
+        let cursor = egui::pos2(cursor[0] as f32, cursor[1] as f32);
+        let blocking = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).filter(|r| r.expand(2.0).contains(cursor));
+        assert!(blocking.is_none(), "radius {radius} at {angle} deg: the Radius box {blocking:?} sits under the cursor {cursor:?}");
+        h.step(&json!({"click":{"world":[start[0], start[1], 0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2, "radius {radius} at {angle} deg: the click placed the start point");
+        let (s, c) = (angle + 90.0).to_radians().sin_cos();
+        h.step(&json!({"move":{"world":[radius * c, radius * s, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[radius * c, radius * s, 0]}})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let arc = sketch.curves.iter().find_map(|curve| match curve.kind {
+            CurveKind::Arc { c, a, .. } => Some(sketch.points[a].pos.dist(sketch.points[c].pos)),
+            _ => None,
+        });
+        assert!(arc.is_some_and(|r| (r - radius).abs() < 0.5), "radius {radius} at {angle} deg: three clicks made the arc, got {arc:?}");
+        assert!(!sketch.constraints.iter().any(|c| c.kind.is_dimension()), "radius {radius} at {angle} deg: clicks alone add no typed dimension");
     }
 }

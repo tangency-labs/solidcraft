@@ -1,0 +1,15 @@
+{
+  "format": "solidcraft-theme/1",
+  "name": "Blur review",
+  "base": "dark",
+  "options": [
+    {"id": "opacity", "type": "range", "default": 75},
+    {"id": "blur", "type": "range", "default": 0},
+    {"id": "tab_colours", "type": "bool", "default": true},
+    {"id": "tab_fade_ms", "type": "range", "default": 120}
+  ],
+  "tabs": {
+    "RENDER": {"panel": "#302039", "viewport_top": "#30203d", "viewport_bottom": "#493252"},
+    "SKETCH": {"panel": "#123028", "viewport_top": "#103128", "viewport_bottom": "#204a3c"}
+  }
+}

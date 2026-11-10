@@ -7,9 +7,9 @@
 //! persistent names.
 
 use serde_json::Value;
+use solidcore_record::Vec3;
 use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
-use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, plane_param, sketch_id};

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::kernel::{FaceSurface, face_surface};
+use solidcraft_engine::geom::prelude::*;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()

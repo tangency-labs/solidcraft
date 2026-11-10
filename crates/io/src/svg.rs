@@ -5,7 +5,8 @@
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::sketch2d::{Geom2, MAX_DRAWING_BYTES, MAX_ENTITIES};
 use crate::{IoError, Result};
@@ -410,6 +411,19 @@ fn points_list(s: &str) -> Vec<Vec2> {
     numbers(s).chunks(2).filter(|c| c.len() == 2).map(|c| Vec2::new(c[0], c[1])).collect()
 }
 
+/// Whether an element and everything in it is left out of the drawing (#11039): the contents of
+/// `defs`, `clipPath`, `mask`, `symbol`, `marker` and `pattern` are only drawn through a
+/// reference, and `display: none` (as an attribute or in `style`) hides an element with its children.
+fn not_drawn(name: &str, a: &[(String, String)]) -> bool {
+    if matches!(name, "defs" | "clipPath" | "mask" | "symbol" | "marker" | "pattern") {
+        return true;
+    }
+    let none = |v: &str| v.trim().trim_end_matches("!important").trim().eq_ignore_ascii_case("none");
+    attr(a, "display").is_some_and(none)
+        || attr(a, "style")
+            .is_some_and(|s| s.split(';').filter_map(|d| d.split_once(':')).any(|(k, v)| k.trim().eq_ignore_ascii_case("display") && none(v)))
+}
+
 /// Read the geometry of an SVG document (millimetres, y up). `scale` multiplies the result.
 pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     if text.len() > MAX_DRAWING_BYTES {
@@ -422,6 +436,8 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
     let mut out = Out { g: Vec::new() };
     let mut root: Option<Tf> = None;
     let mut pending_text: Option<(Tf, Vec2, f64)> = None;
+    // The depth of the element whose contents are not drawn (#11039), while inside one.
+    let mut skip_from: Option<usize> = None;
     loop {
         let ev = rd.read_event_into(&mut buf).map_err(|e| IoError::Invalid(format!("SVG: {e}")))?;
         let (e, empty) = match &ev {
@@ -429,6 +445,9 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
             Event::Empty(e) => (Some(e.clone()), true),
             Event::End(_) => {
                 stack.pop();
+                if skip_from.is_some_and(|d| stack.len() <= d) {
+                    skip_from = None;
+                }
                 buf.clear();
                 continue;
             }
@@ -454,6 +473,18 @@ pub fn read_svg(text: &str) -> Result<Vec<Geom2>> {
         let a = attrs(&e);
         let parent = stack.last().copied().or(root).unwrap_or(Tf::ID);
         let name = String::from_utf8_lossy(e.local_name().as_ref()).to_string();
+        if skip_from.is_some() || not_drawn(&name, &a) {
+            // Keep the stack in step with the end tags; draw nothing until this element closes.
+            if !empty {
+                skip_from = skip_from.or(Some(stack.len()));
+                stack.push(parent);
+                if stack.len() > MAX_DEPTH {
+                    return Err(IoError::Invalid("SVG nested too deeply".into()));
+                }
+            }
+            buf.clear();
+            continue;
+        }
         let mut tf = match attr(&a, "transform") {
             Some(s) => parent.mul(parse_transform(s)),
             None => parent,
@@ -695,6 +726,36 @@ mod tests {
         for bytes in [&[0xFF, 0xFE, 0x3C][..], &[0xFE, 0xFF, 0xD8, 0x00][..], &[][..]] {
             assert!(decode_svg(bytes).is_ok());
         }
+    }
+
+    /// #11039: shapes a file only defines (`defs`, `clipPath`, `mask`, `symbol`, `marker`,
+    /// `pattern`) or hides (`display: none`) are not drawn by a browser, so they are not imported.
+    #[test]
+    fn shapes_a_file_only_defines_or_hides_are_not_imported() {
+        let doc = |body: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="40mm" height="40mm" viewBox="0 0 40 40"><rect x="5" y="5" width="30" height="30"/>{body}</svg>"#
+            )
+        };
+        for body in [
+            "",
+            r#"<defs><clipPath id="c"><circle cx="20" cy="20" r="10"/></clipPath></defs>"#,
+            r#"<defs><mask id="m"><circle cx="20" cy="20" r="10"/></mask></defs>"#,
+            r#"<defs><symbol id="s"><circle cx="20" cy="20" r="10"/></symbol></defs>"#,
+            r#"<defs><circle id="d" cx="20" cy="20" r="10"/><text x="1" y="1">A</text></defs>"#,
+            r#"<clipPath id="c"><g><circle cx="20" cy="20" r="10"/></g></clipPath>"#,
+            r#"<marker id="k"><path d="M0 0 L5 5"/></marker><pattern id="p"><line x1="0" y1="0" x2="5" y2="5"/></pattern>"#,
+            r#"<circle cx="20" cy="20" r="10" style="display:none"/>"#,
+            r#"<circle cx="20" cy="20" r="10" style="fill: red; display : none !important"/>"#,
+            r#"<g display="none"><circle cx="20" cy="20" r="10"/><g><line x1="0" y1="0" x2="5" y2="5"/></g></g>"#,
+            r#"<g transform="scale(1e308)" display="none"><circle r="5"/></g>"#,
+        ] {
+            let g = read_svg(&doc(body)).unwrap();
+            assert_eq!(g.len(), 4, "{body}: {g:?}");
+        }
+        // What follows a skipped part still reads, and a shape that is merely styled still draws.
+        let g = read_svg(&doc(r#"<defs><circle r="1"/></defs><g style="display:inline"><circle cx="20" cy="20" r="10"/></g>"#)).unwrap();
+        assert_eq!(g.len(), 5, "{g:?}");
     }
 
     /// A transform that scales a shape past the range of `f64` is refused with a clear error

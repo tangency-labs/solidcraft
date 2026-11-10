@@ -4,8 +4,9 @@
 //! every other edge kept by a point at its middle).
 use super::Body;
 use crate::{KernelError, Result, guard};
-use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::{self, eval::CurveEval};
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self};
+use solidcraft_geom::brep::eval::CurveEval;
 use std::sync::Arc;
 
 /// Points along a record edge (ends and three inside).
@@ -21,8 +22,8 @@ fn edge_middle(e: &brep::Edge) -> Option<Vec3> {
     CurveEval::new(e.parameters()).ok()?.point(0.5 * (t0 + t1))
 }
 
-fn failed(e: impl std::fmt::Display) -> KernelError {
-    KernelError::Failed(format!("SMLib planar regularization: {e}"))
+fn failed(e: impl crate::Cause) -> KernelError {
+    KernelError::smlib("SMLib planar regularization", e)
 }
 
 impl Body {

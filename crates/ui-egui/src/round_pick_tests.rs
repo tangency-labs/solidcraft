@@ -4,9 +4,10 @@
 //! hovering one draws the axis or centre as construction geometry.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{AxisRef, FeatureKind, PatternKind, PlaneRef};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::Kind;
 use crate::scenario::Harness;

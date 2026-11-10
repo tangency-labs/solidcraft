@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn a_faceted_boolean_is_boolean_time_and_a_reference_mesh_tessellation() {
         use crate::{BoolOp, box_solid, faceted_boolean};
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
         let tool = box_solid(Vec3::new(5.0, 5.0, 5.0), Vec3::new(15.0, 15.0, 15.0)).unwrap().mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
         // The thread groove's route: the faceting it does first is the boolean's time too.
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn kernel_operations_are_profiler_spans_with_smlib_calls_inside() {
         use crate::{BoolOp, boolean, box_solid};
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         solidcraft_profile::set_enabled(true);
         let mark = solidcraft_profile::mark();
         let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
@@ -192,9 +192,10 @@ mod tests {
         let k = row("kernel", "boolean").unwrap_or_else(|| panic!("{rep:?}"));
         assert!(k.count >= 1 && row("kernel", "box_solid").is_some(), "{rep:?}");
         if r.is_ok() {
-            // With SMLib built, its calls are children of the boolean: their time is not its self time.
-            let smlib: std::time::Duration = rep.rows.iter().filter(|r| r.category == "smlib").map(|r| r.total).sum();
-            assert!(smlib > std::time::Duration::ZERO && k.self_time < k.total, "{rep:?}");
+            // The geometry kernel's calls are children of the boolean: their time is not its self
+            // time.
+            let calls: std::time::Duration = rep.rows.iter().filter(|r| r.category == "solidcore").map(|r| r.total).sum();
+            assert!(calls > std::time::Duration::ZERO && k.self_time < k.total, "{rep:?}");
         }
     }
 }

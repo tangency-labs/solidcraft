@@ -1,6 +1,7 @@
 // Exact occurrence workflows through the same commands used by the Browser.
 use crate::Session;
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, p: Value) -> Value {
     s.execute(command, &p).unwrap()
@@ -11,6 +12,76 @@ fn created(s: &mut Session, name: &str) -> (u64, u64) {
 }
 fn near(value: &Value, expected: f64) {
     assert!((value.as_f64().unwrap() - expected).abs() < 1e-6, "{value} != {expected}");
+}
+
+#[test]
+fn ambiguous_component_names_are_refused_without_changing_the_session() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    // A placement with that name must not hide an ambiguous component lookup.
+    s.doc_mut().occurrences.first_mut().unwrap().name = "A".into();
+    run(&mut s, "component.create", json!({"name":"Temporary","activate":false}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.redo.is_empty(), "exercise refusal with an existing redo step");
+    let commands = [
+        ("component.delete", json!({"component":"A"})),
+        ("component.rename", json!({"component":"A","name":"Changed"})),
+        ("component.activate", json!({"component":"A"})),
+        ("component.create", json!({"name":"Child","parent":"A"})),
+        ("component.metadata.set", json!({"component":"A","description":"Changed"})),
+        ("component.break_link", json!({"component":"A"})),
+        ("selection.delete", json!({"components":["A"]})),
+        ("assembly.bom", json!({"component":"A"})),
+        ("config.column", json!({"component_appearance":"A"})),
+        ("appearance.chain", json!({"target":{"component":"A"}})),
+        ("appearance.assign", json!({"components":["A"],"appearance":"ABS - Red"})),
+        ("appearance.replace", json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":["A"]}})),
+        ("parts.resize", json!({"component":"A","size":"M6"})),
+        ("solid.pattern.rectangular", json!({"components":["A"],"dir1":[1,0,0],"count1":2,"spacing1":10})),
+    ];
+    for (command, params) in commands {
+        let doc = s.doc.clone();
+        let undo = s.undo.len();
+        let redo = s.redo.len();
+        let error = s.execute(command, &params).unwrap_err();
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+        let message = error.to_string();
+        for expected in ["ambiguous component `A`", &first.to_string(), &second.to_string(), "numeric component ID"] {
+            assert!(message.contains(expected), "{command}: {message}");
+        }
+        assert_eq!(s.doc, doc, "{command} changed the document");
+        assert_eq!(s.undo.len(), undo, "{command} changed undo");
+        assert_eq!(s.redo.len(), redo, "{command} changed redo");
+        assert_eq!(s.active_component, 0, "{command} changed the active component");
+        assert!(s.active_occurrence_path.is_none(), "{command} changed the active placement");
+    }
+    run(&mut s, "component.delete", json!({"component":second}));
+    assert!(s.doc.components.iter().any(|component| component.id == first));
+    assert!(!s.doc.components.iter().any(|component| component.id == second));
+    run(&mut s, "component.rename", json!({"component":"A","name":"Unique"}));
+    assert_eq!(s.doc.find_component("Unique"), Some(first));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.find_component("A"), Some(first));
+}
+
+#[test]
+fn component_ids_take_priority_over_numeric_names_and_survive_reopen() {
+    let mut s = Session::default();
+    let named = run(&mut s, "component.create", json!({"name":"3","activate":false}))["component"].as_u64().unwrap();
+    let target = run(&mut s, "component.create", json!({"name":"Target","activate":false}))["component"].as_u64().unwrap();
+    assert_eq!(target, 3);
+    let zero_name = run(&mut s, "component.create", json!({"name":"03","activate":false}))["component"].as_u64().unwrap();
+    for key in [json!(target), json!(target.to_string())] {
+        run(&mut s, "component.activate", json!({"component":key}));
+        assert_eq!(s.active_component, target);
+    }
+    run(&mut s, "component.activate", json!({"component":"03"}));
+    assert_eq!(s.active_component, zero_name);
+    let mut reopened = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+    run(&mut reopened, "component.rename", json!({"component":target.to_string(),"name":"Renamed"}));
+    assert_eq!(reopened.doc.components.iter().find(|component| component.id == named).unwrap().name, "3");
+    assert_eq!(reopened.doc.find_component("Renamed"), Some(target));
 }
 
 #[test]
@@ -529,7 +600,7 @@ fn isolate_nested_child_hides_ancestor_material_and_sibling() {
         .add_occurrence(
             child_component,
             parent_component,
-            solidcraft_doc::rigid(crate::geom::Vec3::new(20.0, 0.0, 0.0), crate::geom::Vec3::ZERO, crate::geom::Vec3::Z, 0.0),
+            solidcraft_doc::rigid(solidcore_record::Vec3::new(20.0, 0.0, 0.0), solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0),
         )
         .unwrap();
     s.refresh();
@@ -538,6 +609,84 @@ fn isolate_nested_child_hides_ancestor_material_and_sibling() {
         let body = s.occurrence_bodies(&path, false).unwrap()[0].clone();
         assert_eq!(s.body_visible(&body), expected);
     }
+}
+
+/// #7896: isolating a body hides its own component's other bodies one by one and every other
+/// placement as a placement, so the Browser row of a component shows it is off and its eye
+/// brings it back. A second placement of the body's own component is another placement.
+/// #7896: isolating a body inside a hidden Bodies folder or group shows that folder and group
+/// again, so the body is visible; the folder's other bodies stay hidden.
+#[test]
+fn isolate_shows_the_hidden_folder_and_group_a_picked_body_is_in() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Kept"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Other","operation":"new"}));
+    let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": ["Kept"], "name": "Held"}));
+    let group = group["group"].as_u64().or_else(|| group["id"].as_u64()).expect("the group's id");
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies", format!("c0/g{group}")], "visible": false}));
+    assert!(!s.body_visible("Kept") && !s.body_visible("Other"));
+    run(&mut s, "browser.visibility", json!({"items": ["Kept"], "visible": true, "isolate": true}));
+    assert!(s.body_visible("Kept"), "the picked body shows: {:?}", s.visibility.hidden_folders);
+    assert!(!s.body_visible("Other"), "the folder's other body stays hidden");
+    assert!(s.visibility.hidden_folders.is_empty(), "{:?}", s.visibility.hidden_folders);
+}
+
+#[test]
+fn isolate_bodies_hides_other_components_as_components() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[-20,0,0],"body_name":"Root"}));
+    let comp = |s: &mut Session, name: &str| {
+        let c = run(s, "component.create", json!({"name": name, "parent": "root", "grounded": false}));
+        c["occurrence"].as_u64().unwrap()
+    };
+    let a = comp(&mut s, "CompA");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BoxA"}));
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[0,0,20],"body_name":"BoxA2"}));
+    let b = comp(&mut s, "CompB");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"BoxB1"}));
+    run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0],"body_name":"BoxB2"}));
+    let a2 = run(&mut s, "occurrence.copy", json!({"occurrence":a,"translate":[0,40,0]}))["occurrence"].as_u64().unwrap();
+    let in_a = s.occurrence_bodies(&[a], false).unwrap();
+    let (box_a, box_a2) = (in_a.iter().find(|n| !n.contains("BoxA2")).unwrap().clone(), in_a.iter().find(|n| n.contains("BoxA2")).unwrap().clone());
+
+    let out = run(&mut s, "browser.visibility", json!({"visible":true,"items":[box_a],"isolate":true}));
+    assert_eq!(out["isolated"], json!([box_a]));
+    let mut occurrences = s.visibility.hidden_occurrences.clone();
+    occurrences.sort();
+    let mut others = vec![vec![b], vec![a2]];
+    others.sort();
+    assert_eq!(occurrences, others, "CompB and CompA's other placement go as placements");
+    let mut bodies = s.visibility.hidden_bodies.clone();
+    bodies.sort();
+    assert_eq!(bodies, vec![box_a2.clone(), "Root".to_string()], "only bodies beside BoxA go one by one");
+    assert!(s.body_visible(&box_a) && !s.body_visible(&box_a2) && !s.body_visible("Root"));
+    for name in s.occurrence_bodies(&[b], false).unwrap().iter().chain(&s.occurrence_bodies(&[a2], false).unwrap()) {
+        assert!(!s.body_visible(name), "{name}");
+    }
+    // CompB's eye brings it back whole.
+    run(&mut s, "browser.visibility", json!({"visible":true,"paths":[[b]]}));
+    assert!(s.occurrence_bodies(&[b], false).unwrap().iter().all(|n| s.body_visible(n)));
+
+    // Isolating a root body hides every placement as a placement and no body one by one.
+    run(&mut s, "browser.visibility", json!({"visible":true,"items":["Root"],"isolate":true}));
+    let mut occurrences = s.visibility.hidden_occurrences.clone();
+    occurrences.sort();
+    let mut all = vec![vec![a], vec![b], vec![a2]];
+    all.sort();
+    assert_eq!(occurrences, all);
+    assert!(s.visibility.hidden_bodies.is_empty() && s.body_visible("Root"), "{:?}", s.visibility.hidden_bodies);
+
+    // Only bodies isolate, and only shown; a refusal changes nothing.
+    let before = s.visibility.clone();
+    for p in [
+        json!({"visible":false,"items":["Root"],"isolate":true}),
+        json!({"visible":true,"items":["XY"],"isolate":true}),
+        json!({"visible":true,"items":["Nope"],"isolate":true}),
+        json!({"visible":true,"folder":"bodies","isolate":true}),
+    ] {
+        assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.visibility, before);
 }
 
 #[test]
@@ -615,7 +764,7 @@ fn instance_styles_follow_source_identity_after_collision_rename_and_pending_mov
         assert!((measured["bodies"][0]["mass_g"].as_f64().unwrap() - 0.068).abs() < 1e-8);
     }
     let definition = s.model.state();
-    assert_eq!(solidcraft_kernel::measure(&definition.body("Shared Renamed").unwrap().body).unwrap().bbox.min, crate::geom::Vec3::ZERO);
+    assert_eq!(solidcraft_kernel::measure(&definition.body("Shared Renamed").unwrap().body).unwrap().bbox.min, solidcore_record::Vec3::ZERO);
     let painted = s.doc.painted(&world);
     let secondname = s.occurrence_bodies(&[second], false).unwrap()[0].clone();
     let body = painted.body(&secondname).unwrap();
@@ -766,7 +915,7 @@ fn a_cut_or_join_from_the_top_level_into_a_linked_part_is_refused() {
             _ => None,
         })
         .unwrap();
-    let c = plane.to_local(solidcraft_geom::Vec3::new(55.0, 10.0, 30.0));
+    let c = plane.to_local(solidcore_record::Vec3::new(55.0, 10.0, 30.0));
     run(&mut s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
     run(&mut s, "sketch.finish", json!({}));
     let features = s.doc.features.len();
@@ -886,7 +1035,7 @@ fn a_stood_up_nested_step_part_is_cut_and_joined_from_its_face() {
     run(&mut src, "occurrence.move", json!({"occurrence": carrier, "translate": [12, 7, 5], "axis": [0, 0, 1], "angle": "30 deg"}));
     run(&mut src, "occurrence.move", json!({"occurrence": nested, "translate": [3, 11, 2], "axis": [0, 1, 0], "angle": "20 deg"}));
     // The middle of the top face, in the file's frame: the imported root's.
-    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcraft_geom::Vec3::new(20.0, 12.0, 10.0));
+    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcore_record::Vec3::new(20.0, 12.0, 10.0));
     run(&mut src, "file.export", json!({"path": path, "format": "step"}));
 
     // #5679: the same from the top level, where the part is two moved and turned levels down
@@ -1092,7 +1241,7 @@ fn component_delete_removes_joints_to_its_occurrences_and_undo_restores_them() {
 /// opened with its imported root active, and a sketch on the part's top face. Returns the
 /// session, the sketch, the middle of the top face in the root's frame, the face's outward
 /// normal and that middle in the sketch's coordinates.
-fn nested_part_face_sketch() -> (Session, u64, solidcraft_geom::Vec3, solidcraft_geom::Vec3, solidcraft_geom::Vec2) {
+fn nested_part_face_sketch() -> (Session, u64, solidcore_record::Vec3, solidcore_record::Vec3, solidcore_record::Vec2) {
     let dir = std::env::temp_dir().join(format!("solidcraft-nested-scope-{}-{:?}", std::process::id(), std::thread::current().id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("nested.step");
@@ -1102,7 +1251,7 @@ fn nested_part_face_sketch() -> (Session, u64, solidcraft_geom::Vec3, solidcraft
     run(&mut src, "solid.box", json!({"length": 40, "width": 24, "height": 10, "body_name": "NestedBlock"}));
     run(&mut src, "occurrence.move", json!({"occurrence": carrier, "translate": [12, 7, 5], "axis": [0, 0, 1], "angle": "30 deg"}));
     run(&mut src, "occurrence.move", json!({"occurrence": nested, "translate": [3, 11, 2], "axis": [0, 1, 0], "angle": "20 deg"}));
-    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcraft_geom::Vec3::new(20.0, 12.0, 10.0));
+    let top = solidcraft_doc::apply_point(&src.doc.component_transform(part), solidcore_record::Vec3::new(20.0, 12.0, 10.0));
     run(&mut src, "file.export", json!({"path": path, "format": "step"}));
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path, "up": "y"}));
@@ -1541,7 +1690,7 @@ fn join_extrude_to_a_body_of_another_component_leaves_that_body_alone() {
     run(&mut s, "solid.cylinder", json!({"radius":6,"height":10,"body_name":"Connector"}));
     let sketch = run(&mut s, "sketch.create", json!({"plane":{"face":[0,0,10]},"project_edges":false}))["sketch"].as_u64().unwrap();
     let plane = s.model.state().sketch(sketch).unwrap().plane;
-    let centre = plane.to_local(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0));
+    let centre = plane.to_local(solidcore_record::Vec3::new(0.0, 0.0, 10.0));
     run(&mut s, "sketch.circle.center", json!({"center":[centre.x, centre.y],"radius":4}));
     run(&mut s, "sketch.finish", json!({}));
     // The boss runs up to the shell's underside and joins the connector it was sketched on.
@@ -1672,7 +1821,7 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
         }),
     );
     let at_origin = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
-    assert!(at_origin.min.dist(solidcraft_geom::Vec3::ZERO) < 1e-5, "{at_origin:?}");
+    assert!(at_origin.min.dist(solidcore_record::Vec3::ZERO) < 1e-5, "{at_origin:?}");
 
     // Hostile / invalid parameters never panic.
     for bad_params in [
@@ -1697,7 +1846,7 @@ fn occurrence_align_keeps_every_pick_and_reports_shared_definitions() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 4, "body_name": "Plate"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     let b = run(&mut s, "occurrence.copy", json!({"component": frame, "translate": [0, 50, 0]}))["occurrence"].as_u64().unwrap();
-    let origin = |s: &Session, path: &[u64]| solidcraft_doc::apply_point(&s.occurrence_placement(path).unwrap().world, solidcraft_geom::Vec3::ZERO);
+    let origin = |s: &Session, path: &[u64]| solidcraft_doc::apply_point(&s.occurrence_placement(path).unwrap().world, solidcore_record::Vec3::ZERO);
     let (a0, ab0, b0, bb0) = (origin(&s, &[a]), origin(&s, &[a, bracket]), origin(&s, &[b]), origin(&s, &[b, bracket]));
 
     assert!(!s.occurrence_shared(&[a]) && !s.occurrence_shared(&[b]), "top-level placements are their own");
@@ -1707,7 +1856,7 @@ fn occurrence_align_keeps_every_pick_and_reports_shared_definitions() {
     assert_eq!(r["paths"], json!([[a, bracket], [b]]), "{r}");
     assert_eq!(r["shared"], json!([[a, bracket]]), "{r}");
 
-    let shift = solidcraft_geom::Vec3::new(5.0, 0.0, 0.0);
+    let shift = solidcore_record::Vec3::new(5.0, 0.0, 0.0);
     assert!(origin(&s, &[a]).dist(a0) < 1e-9, "A itself stays");
     assert!(origin(&s, &[a, bracket]).dist(ab0 + shift) < 1e-9, "the picked Bracket moves");
     assert!(origin(&s, &[b]).dist(b0 + shift) < 1e-9, "B moves");
@@ -1751,6 +1900,31 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     assert!(s.model.state().body("Cube (2)").is_none());
 }
 
+/// A body pasted from another design while an exploded view moves the target component is at
+/// the world coordinates it had there once the target is shown assembled again.
+#[test]
+fn a_body_pasted_from_another_design_while_an_exploded_view_is_shown_keeps_its_world_position() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new()).unwrap();
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Block"}));
+    let (a, a_at) = created(&mut s, "A");
+    run(&mut s, "occurrence.move", json!({"occurrence": a_at, "translate": [100,0,0]}));
+    // An exploded view needs two placements: B stays put.
+    run(&mut s, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+    let view = run(&mut s, "explode.create", json!({"moves": [{"occurrence": a_at, "translate": [0, 60, 0]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "explode.show", json!({"view": view}));
+    s.foreign_copy = Some(std::sync::Arc::new(copy));
+    run(&mut s, "component.paste_from_design", json!({"component": a, "component_path": [a_at]}));
+    run(&mut s, "explode.show", json!({}));
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+}
+
 /// A body seen in another placement of its component ("Cube (Holder:2)") pastes into another
 /// design under its own name, at that placement's position.
 #[test]
@@ -1773,4 +1947,82 @@ fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_nam
     assert_eq!(out["bodies"], json!(["Cube"]));
     let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+}
+
+// #12150: `occurrence.move` with `to` / `to_matrix` places the occurrence at a target pose, not
+// on top of its current one.
+#[test]
+fn absolute_move_places_at_target_whatever_the_current_placement() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [7,8,9], "axis": [1,0,0], "angle": "30 deg"}));
+    for _ in 0..2 {
+        let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [10,20,30], "axis": [0,0,1], "angle": "90 deg"}}));
+        let t = &r["transform"];
+        near(&t[3][0], 10.0);
+        near(&t[3][1], 20.0);
+        near(&t[3][2], 30.0);
+        // X turns onto Y about Z.
+        near(&t[0][0], 0.0);
+        near(&t[0][1], 1.0);
+        near(&t[2][2], 1.0);
+    }
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [1,2,3]}}));
+    near(&r["transform"][0][0], 1.0);
+    near(&r["transform"][3][2], 3.0);
+}
+
+#[test]
+fn absolute_move_to_matrix_in_world_under_a_turned_parent() {
+    let mut s = Session::default();
+    let (_, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "translate": [100,0,0], "axis": [0,0,1], "angle": "90 deg"}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "translate": [3,4,5]}));
+    let target = json!([1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30]);
+    for _ in 0..2 {
+        run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "space": "world", "to_matrix": target}));
+        let result = run(&mut s, "occurrence.properties", json!({"occurrence": child, "path": [parent,child]}));
+        near(&result["total"]["center_of_mass"][0], 10.5);
+        near(&result["total"]["center_of_mass"][1], 20.5);
+        near(&result["total"]["center_of_mass"][2], 30.5);
+    }
+    // Local: the same numbers are the placement in the parent.
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": child, "to_matrix": target}));
+    near(&r["transform"][3][0], 10.0);
+    near(&r["transform"][3][1], 20.0);
+}
+
+#[test]
+fn absolute_move_refuses_relative_keys_and_keeps_capture_and_grounding() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    for extra in [
+        json!({"translate": [1,0,0]}),
+        json!({"axis": [0,0,1]}),
+        json!({"angle": 1}),
+        json!({"origin": [0,0,0]}),
+        json!({"matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+        json!({"to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+    ] {
+        let mut p = json!({"occurrence": occ, "to": {"position": [1,2,3]}});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        assert!(s.execute("occurrence.move", &p).is_err(), "{p}");
+    }
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0], "translate": [1,0,0]})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"axis": [0,0,1]}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [0,0,0], "spin": 1}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [2,0,0,0,0,1,0,0,0,0,1,0]})).is_err());
+    let before = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform;
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [5,0,0]}, "capture": false}));
+    assert_eq!(r["pending"], json!(true));
+    near(&r["transform"][3][0], 5.0);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform, before);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [9,0,0]}})).is_err());
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [9,0,0]}, "move_grounded": true}));
+    near(&r["transform"][3][0], 9.0);
 }

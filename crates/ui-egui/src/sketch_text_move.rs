@@ -96,6 +96,7 @@ pub(crate) fn end_drag(app: &mut SolveApp) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+    use solidcraft_engine::geom::prelude::*;
     use solidcraft_engine::sketch::LinkSource;
 
     fn setup() -> (Harness, String) {
@@ -126,7 +127,7 @@ mod tests {
         assert!(h.app.dialog.is_none());
         let sk = h.app.session.doc.sketch(1).unwrap();
         let LinkSource::Text { at, angle, text, .. } = &sk.link(&link).unwrap().source else { panic!() };
-        assert!(at.dist(solidcraft_engine::geom::Vec2::new(28.4, 2.0)) < 1e-8);
+        assert!(at.dist(solidcore_record::Vec2::new(28.4, 2.0)) < 1e-8);
         assert!((*angle - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
         assert_eq!(text, "II");
         assert_eq!(h.app.session.undo.len(), undo + 1);

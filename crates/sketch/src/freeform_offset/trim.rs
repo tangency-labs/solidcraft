@@ -12,7 +12,8 @@
 //! to its source.
 use super::{Certificate, H, MAX_OFFSET_WORK, MAX_PIECES, OFFSET_TOLERANCE, Result, bad, certify, normal_point};
 use crate::{CurveKind, Sketch, fit_beziers};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
+use solidcraft_geom::prelude::*;
 
 /// Samples of the plain offset used to find its crossings (whole chain).
 const MAX_SAMPLES: usize = 32_768;

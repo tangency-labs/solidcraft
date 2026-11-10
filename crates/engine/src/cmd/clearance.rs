@@ -9,16 +9,28 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_geom::mesh_distance::box_gap;
+use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::{BodyDistance, DistanceShape};
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_, string_list};
+use crate::schema::clearance::{
+    Clearance as ClearanceReply, ClearanceParams, MAX_CLEARANCE, MAX_NEAREST, NearPair, Neighbour, Overlap, OverlapBounds, Unchecked,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "Clearance", clearance).icon("interference").noundo().params(
+const CONTRACT: TypedContract<ClearanceParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "Clearance", crate::checked!("inspect.clearance", clearance))
+    .icon("interference")
+    .noundo()
+    .contract(&CONTRACT)
+    .output(output_schema_for::<ClearanceReply>)
+    .params(
     "bodies?: [names] (default: every solid body, in world placement, but those in `against`; mesh bodies are not measured); against?: [names] (only pairs with one body in `bodies` and the other here); \
      min_volume?: mm³ (default 0.01: smaller overlaps count as contact); clearance?: mm (default 0: report pairs closer than this); \
      nearest?: n (each body of `bodies` gets its n nearest others); skip_within?: \"occurrence\" (pairs of bodies of one occurrence) | \
@@ -33,10 +45,6 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("inspect.clearance", "C
 const MAX_BODIES: usize = 20_000;
 /// Most pairs whose grown boxes meet that one call measures.
 const MAX_PAIRS: usize = 200_000;
-/// Most neighbours a body's `nearest` list holds.
-const MAX_NEAREST: usize = 1000;
-/// Largest clearance (mm).
-const MAX_CLEARANCE: f64 = 1e6;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SkipWithin {
@@ -58,7 +66,7 @@ pub(crate) struct PairCache(HashMap<(u64, u64, [u64; 3]), PairResult>);
 #[derive(Clone, Default)]
 struct PairResult {
     /// Shared volume, area, box and centre.
-    overlap: Option<(f64, f64, Aabb3, solidcraft_geom::Vec3)>,
+    overlap: Option<(f64, f64, Aabb3, solidcore_record::Vec3)>,
     distance: Option<BodyDistance>,
     unchecked: Option<String>,
 }
@@ -190,7 +198,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
                     p.into_iter().for_each(|v| bx.add(v));
                 }
                 let chord = b.display_tol();
-                let g = solidcraft_geom::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
+                let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
                 if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } }
             }
             _ => Aabb3::EMPTY,
@@ -198,7 +206,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         .collect();
 
     // Pairs whose boxes, grown by half the clearance each, meet.
-    let half = solidcraft_geom::Vec3::new(1.0, 1.0, 1.0) * (gap / 2.0);
+    let half = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * (gap / 2.0);
     let grown: Vec<Aabb3> = boxes.iter().map(|b| if b.is_empty() { *b } else { Aabb3 { min: b.min - half, max: b.max + half } }).collect();
     let (close, truncated) = super::joints::overlapping_pairs(&grown, MAX_PAIRS);
     let has_mesh = |i: usize| meshes.get(i).is_some_and(Option::is_some);
@@ -260,48 +268,56 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     for k in ["bodies", "against"] {
         asked.extend(string_list(cmd, p, k)?);
     }
-    let mut unchecked: Vec<Value> = mesh_bodies
+    let mut unchecked: Vec<Unchecked> = mesh_bodies
         .iter()
         .filter(|b| p.get("bodies").is_none_or(Value::is_null) || asked.contains(&b.name))
-        .map(|b| json!({"a": b.name, "b": null, "reason": super::interference::MESH_NOT_CHECKED}))
+        .map(|b| Unchecked { a: b.name.clone(), b: None, reason: super::interference::MESH_NOT_CHECKED.to_string() })
         .collect();
     let name = |i: usize| solid.get(i).map_or("", |b| b.name.as_str());
+    let pair = |i: usize, j: usize, reason: String| Unchecked { a: name(i).to_string(), b: Some(name(j).to_string()), reason };
     for (&(i, j), r) in close.iter().zip(results) {
         let r = match r {
             Ok(r) => r,
             Err(e) => {
-                unchecked.push(json!({"a": name(i), "b": name(j), "reason": e.to_string()}));
+                unchecked.push(pair(i, j, e.to_string()));
                 continue;
             }
         };
         if let Some(reason) = r.unchecked {
-            unchecked.push(json!({"a": name(i), "b": name(j), "reason": reason}));
+            unchecked.push(pair(i, j, reason));
             continue;
         }
         if let Some((volume, area, bbox, center)) = r.overlap
             && volume >= min_volume
         {
-            overlaps.push(json!({"a": name(i), "b": name(j), "volume_mm3": volume, "area_mm2": area,
-                "bbox": {"min": bbox.min, "max": bbox.max}, "center": center}));
+            overlaps.push(Overlap {
+                a: name(i).to_string(),
+                b: name(j).to_string(),
+                volume_mm3: volume,
+                area_mm2: area,
+                bbox: OverlapBounds { min: bbox.min.into(), max: bbox.max.into() },
+                center: center.into(),
+            });
             known.insert((i, j), 0.0);
             continue;
         }
         let Some(d) = r.distance else { continue };
         known.insert((i, j), d.distance);
         if d.distance < gap {
-            let mut e = json!({"a": name(i), "b": name(j), "distance_mm": d.distance, "from": d.from, "to": d.to});
-            if let Some((v, ..)) = r.overlap.filter(|o| o.0 > 0.0) {
-                e["overlap_mm3"] = json!(v);
-            }
-            if !d.exact {
-                e["exact"] = json!(false);
-            }
-            near.push(e);
+            near.push(NearPair {
+                a: name(i).to_string(),
+                b: name(j).to_string(),
+                distance_mm: d.distance,
+                from: d.from.into(),
+                to: d.to.into(),
+                overlap_mm3: r.overlap.filter(|o| o.0 > 0.0).map(|o| o.0),
+                exact: (!d.exact).then_some(false),
+            });
         }
     }
-    near.sort_by(|x, y| x["distance_mm"].as_f64().unwrap_or(0.0).total_cmp(&y["distance_mm"].as_f64().unwrap_or(0.0)));
+    near.sort_by(|x, y| x.distance_mm.total_cmp(&y.distance_mm));
 
-    let mut nearest_out = serde_json::Map::new();
+    let mut nearest_out = BTreeMap::new();
     if nearest > 0 {
         let lists = nearest_lists(&subjects, n, nearest, &boxes, &allowed, &mut known, |pairs| {
             solidcraft_kernel::map_with_local_pools(pairs, usize::MAX, |&(i, j)| {
@@ -310,23 +326,25 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             })
         });
         for (i, list) in lists {
-            let rows: Vec<Value> = list.iter().map(|&(j, d)| json!({"body": name(j), "distance_mm": d})).collect();
-            nearest_out.insert(name(i).to_string(), Value::Array(rows));
+            let rows = list.iter().map(|&(j, d)| Neighbour { body: name(j).to_string(), distance_mm: d }).collect();
+            nearest_out.insert(name(i).to_string(), rows);
         }
     }
 
-    Ok(json!({
-        "overlaps": overlaps,
-        "near": near,
-        "nearest": nearest_out,
-        "unchecked": unchecked,
-        "bodies": subjects.len(),
-        "pairs_checked": close.len(),
-        "pairs_reused": reused,
-        "pairs_pruned": total.saturating_sub(close.len()),
-        "truncated": truncated > 0,
-        "ms": started.elapsed().as_secs_f64() * 1000.0,
-    }))
+    let reply = ClearanceReply {
+        overlaps,
+        near,
+        nearest: nearest_out,
+        unchecked,
+        bodies: subjects.len(),
+        pairs_checked: close.len(),
+        pairs_reused: reused,
+        pairs_pruned: total.saturating_sub(close.len()),
+        truncated: truncated > 0,
+        ms: started.elapsed().as_secs_f64() * 1000.0,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// One pair: its overlap when the meshes meet or one holds the other, otherwise its distance
@@ -406,14 +424,14 @@ fn shared_region(a: &DistanceShape, b: &DistanceShape) -> Aabb3 {
         return Aabb3::EMPTY;
     }
     let grow = 1.0 + 0.05 * min.dist(max);
-    let g = solidcraft_geom::Vec3::new(grow, grow, grow);
+    let g = solidcore_record::Vec3::new(grow, grow, grow);
     Aabb3 { min: min - g, max: max + g }
 }
 
 /// [`solidcraft_kernel::measure`] of `body` moved by `-at` and back: far from the origin, the
 /// centre of a thin part loses its precision (its moments are large numbers that nearly cancel).
-fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcraft_geom::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
-    let moved = solidcraft_kernel::transform(body, -at, solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::Z, 0.0)?;
+fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
+    let moved = solidcraft_kernel::transform(body, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)?;
     let mut m = solidcraft_kernel::measure(&moved)?;
     m.centroid += at;
     m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };

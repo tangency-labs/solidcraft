@@ -15,7 +15,7 @@ crates/doc/src/eval.rs:edge_refs turns edge picks into references through the di
 crates/doc/src/eval.rs:eval_feature places features by the display mesh (faces, edges, nearness)
 crates/doc/src/eval.rs:face_plane finds a sketch's face plane again on a mesh
 crates/doc/src/eval.rs:face_samples takes a point on each face from its mesh triangles
-crates/doc/src/eval.rs:faces_through finds the faces near a point and their normals by the display mesh
+crates/doc/src/eval.rs:faces_near finds the faces near a point by the display mesh
 crates/doc/src/eval.rs:feature_tools_with_constructor reaches a To Object extent by the display mesh
 crates/doc/src/eval.rs:height_at measures a point's height on a face by the display mesh
 crates/doc/src/eval.rs:hole_axis_size sizes a hole's tools by the bodies its axis meets on the display mesh
@@ -134,7 +134,6 @@ crates/engine/src/cmd/join_pieces.rs:adds_nothing decides a join adds no materia
 crates/engine/src/cmd/join_pieces.rs:mesh_volume measures the volume a closed mesh encloses
 crates/engine/src/cmd/joints.rs:body_centre centres an occurrence by the display mesh's box
 crates/engine/src/cmd/joints.rs:cam_profile samples a cam's picked edges from the display mesh
-crates/engine/src/cmd/joints.rs:occurrence_at picks the occurrence nearest a point by the display mesh
 crates/engine/src/cmd/measure_sel.rs:closest measures closest points on mesh triangles
 crates/engine/src/cmd/measure_sel.rs:describe measures a selection on the display mesh
 crates/engine/src/cmd/measure_sel.rs:face_slot finds a slot from mesh triangles

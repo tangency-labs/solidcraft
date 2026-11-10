@@ -247,6 +247,7 @@ fn origin(
 ) -> Option<JointOrigin> {
     let mut out = origin.clone();
     out.occurrence = *occurrences.get(&origin.occurrence)?;
+    out.inside = origin.inside.iter().map(|o| occurrences.get(o).copied()).collect::<Option<_>>()?;
     for face in out.snap.face_names_mut() {
         *face = face_name(face, features, bodies)?;
     }
