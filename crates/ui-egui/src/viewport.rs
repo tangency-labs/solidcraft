@@ -4739,12 +4739,15 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), col, 2.0, true);
             }
         }
-        // Coordinate systems (#14644): a small triad in the axis colours, thicker when picked.
+        // Coordinate systems (#14644): a small triad in the axis colours, drawn over the model as
+        // construction points are (it often sits on a part's corner, along its edges), thicker
+        // when picked.
         for (name, o, x, y, z) in construction_frames(app) {
             let on = sel.iter().any(|s| matches!(s, Sel::Plane { name: n } if *n == name));
-            let (len, w) = (size * 0.5, if on { 3.0 } else { 2.0 });
+            let (len, w) = (size * 1.2, if on { 3.5 } else { 2.5 });
             for (d, c) in [(x, t.axis_x), (y, t.axis_y), (z, t.axis_z)] {
-                reference_line(&mut sc, o.to_f32(), (o + d * len).to_f32(), c4(c), w, through);
+                let col = sc.color(c4(c));
+                sc.line(o.to_f32(), (o + d * len).to_f32(), col, w, true);
             }
         }
     }
@@ -8155,6 +8158,8 @@ mod tests {
         let frames = solidcraft_engine::view::construction_frames(&app.session);
         let (_, _, o, x, _, z) = frames.first().unwrap();
         assert!(o.dist(corner) < 1e-6 && x.dist(Vec3::X) < 1e-9 && z.dist(Vec3::Z) < 1e-9, "{frames:?}");
+        // Hidden until shown, as an Origin folder's items are.
+        assert!(construction_frames(&app).is_empty());
     }
 
     #[test]

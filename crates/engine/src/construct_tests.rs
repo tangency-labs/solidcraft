@@ -1232,6 +1232,16 @@ fn a_coordinate_system_on_a_vertex_follows_the_part() {
     assert!(near(frame(&s, "Corner").0, Vec3::new(70.0, 30.0, 20.0)), "{:?}", frame(&s, "Corner").0);
     // Hidden until shown, as an Origin folder's items are.
     assert!(!s.construction_visible("Corner"));
+    // Shown and hidden again from the Browser as other construction items are.
+    run(&mut s, "browser.visibility", json!({"items": ["Corner"], "visible": true}));
+    assert!(s.construction_visible("Corner"));
+    run(&mut s, "browser.visibility", json!({"items": ["Corner"], "visible": false}));
+    assert!(!s.construction_visible("Corner"));
+    // Made in a computation the app adopts (as its dialogs run), it starts hidden there too.
+    let mut computed = s.scratch();
+    run(&mut computed, "construct.coordinate_system", json!({"origin": [0, 0, 0], "name": "Later"}));
+    s.accept_computed(computed);
+    assert!(s.doc.find_feature("Later").is_some() && !s.construction_visible("Later"));
 }
 
 /// Typed: the origin at a point and the axes along directions given as numbers; X is laid square
