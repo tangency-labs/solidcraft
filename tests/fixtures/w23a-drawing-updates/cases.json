@@ -1,0 +1,738 @@
+{
+  "schema": "w23a-drawing-update-acceptance/1",
+  "purpose": "Reviewable source-edit-to-Drawing acceptance contract; not an executable SolidCraft application document",
+  "coordinates": "Model: millimetres in XY; labels: paper millimetres in an A3 1:2 view.",
+  "status": "DRAFT_CONTRACT_ONLY",
+  "ui_workflow_policy": {
+    "model_commands_during_open_drawing": "rejected",
+    "drawing_and_model_same_design_file": true,
+    "required_sequence": [
+        "close_drawing_workspace",
+        "switch_to_model_workspace",
+        "apply_source_edit_or_undo_redo",
+        "reopen_drawing_workspace",
+        "verify_views_dimensions_references_and_positions"
+      ],
+    "runtime_status": "NOT_RUN",
+    "source": "https://github.com/tangency-labs/solidcraft/pull/8288#issuecomment-6599897742",
+    "live_coediting": "future_only_not_current_acceptance"
+  },
+  "source_of_truth": "tests/oracle/W23a-workshop-acceptance.md",
+  "source_data": {
+    "fixture": "84-plate-two-bores",
+    "source_session": "design",
+    "drawing_session": "drawing",
+    "session_semantics_note": "These names denote model vs drawing command intent; UI edits switch workspaces in the same design file, never concurrent model commands in an open Drawing workspace.",
+    "baseline": {
+      "plate_mm": [
+        100,
+        80,
+        20
+      ],
+      "bores": [
+        {
+          "feature": "Bore1",
+          "center_xy_mm": [
+            20,
+            20
+          ],
+          "diameter_mm": 10
+        },
+        {
+          "feature": "Bore2",
+          "center_xy_mm": [
+            60,
+            50
+          ],
+          "diameter_mm": 10
+        }
+      ],
+      "centre_distance_mm": 50,
+      "source_oracle": "tests/oracle/84-plate-two-bores",
+      "volume_mm3": 156858.4073464102
+    },
+    "drawing_future": {
+      "sheet": "ISO A3 landscape",
+      "scale": "1:2",
+      "annotation_model_units": "mm",
+      "symbolic_handles_note": "Test-local only: resolve real dimension IDs from future API",
+      "labels": [
+        {
+          "symbolic": "diam_bore1",
+          "paper_xy_mm": [
+            95,
+            55
+          ],
+          "model_value_mm": 10,
+          "reference_intent": "W20a: circular rim edge, radial diameter dimension"
+        },
+        {
+          "symbolic": "diam_bore2",
+          "paper_xy_mm": [
+            138,
+            74
+          ],
+          "model_value_mm": 10,
+          "reference_intent": "W20a: circular rim edge, radial diameter dimension"
+        },
+        {
+          "symbolic": "centres_1_2",
+          "paper_xy_mm": [
+            128,
+            95
+          ],
+          "model_value_mm": 50,
+          "reference_intent": "R2: Bore1 axis centre to Bore2 axis centre; never W19d corner picks"
+        },
+        {
+          "symbolic": "plate_width",
+          "paper_xy_mm": [
+            65,
+            115
+          ],
+          "model_value_mm": 80,
+          "reference_intent": "R1: opposing planar plate side faces; do not assume corners"
+        }
+      ],
+      "dimension_text_at_units": "view-relative paper millimetres (offset from actual view centre)",
+      "paper_to_view_text_at_rule": "After placing the real view, compute text.at = authored paper_xy_mm minus the view centre's paper_xy_mm; preserve paper coordinates across model edits and save/reopen."
+    }
+  },
+  "cases": [
+    {
+      "id": "W23A-E2E-01",
+      "title": "Bore1 Ø10 to Ø12 preserves its authored drawing dimension",
+      "starts_from": "84-plate-two-bores",
+      "oracle_after": "86-plate-first-bore-12",
+      "source_actions": [
+        {
+          "command": "parameters.change",
+          "params": {
+            "name": "bore1_d",
+            "expression": "12 mm"
+          },
+          "session": "design"
+        }
+      ],
+      "source_expected": {
+        "oracle": "tests/oracle/86-plate-first-bore-12",
+        "volume_mm3": 156167.25696262045,
+        "plate_mm": [
+          100,
+          80,
+          20
+        ],
+        "bores": [
+          {
+            "feature": "Bore1",
+            "diameter_mm": 12,
+            "center_xy_mm": [
+              20,
+              20
+            ]
+          },
+          {
+            "feature": "Bore2",
+            "diameter_mm": 10,
+            "center_xy_mm": [
+              60,
+              50
+            ]
+          }
+        ]
+      },
+      "drawing_expected": {
+        "diam_bore1": {
+          "model_value_mm": 12,
+          "same_authored_dimension_id": true,
+          "status": "ok"
+        },
+        "diam_bore2": {
+          "model_value_mm": 10,
+          "status": "ok"
+        },
+        "centres_1_2": {
+          "model_value_mm": 50,
+          "status": "ok",
+          "reference_intent": "R2_BORE_AXIS_CENTRES",
+          "must_not_bind_as": "W19d linear corners"
+        },
+        "plate_width": {
+          "model_value_mm": 80,
+          "status": "ok",
+          "reference_intent": "R1_OPPOSING_PLANAR_FACES"
+        },
+        "same_manual_label_paper_coordinates": true,
+        "view_after_deferred_update": "not_current_until_Update",
+        "dimension_inspect_after_source_edit": "immediate_model_read_without_U2"
+      },
+      "dependencies": [
+        "R1",
+        "R2",
+        "R3",
+        "R5",
+        "U2",
+        "W19d",
+        "W20a"
+      ],
+      "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": false,
+        "note": "Reopen the same drawing after the diameter edit and verify the updated Ø12 dimension, unchanged Bore2 and authored labels.",
+        "runtime_status": "NOT_RUN"
+      },
+      "early_dimension_inspect": {
+        "runtime_status": "NOT_RUN",
+        "goal": "Bore1 Ø10 -> Ø12 keeps the same authored dimension ID and inspect reads Ø12",
+        "requires": [
+          "W19d",
+          "W20a"
+        ],
+        "does_not_require": [
+          "U2"
+        ],
+        "checks": [
+          "dimension.record.kind stays identical to the authored reference",
+          "diam_bore1.status == ok",
+          "diam_bore1.model_value_mm == 12",
+          "diam_bore2.status == ok"
+        ],
+        "excludes_until_other_slices": [
+          "R1 plate_width",
+          "R2 centres_1_2",
+          "R5/U2 view publication and deferred update",
+          "view-relative label placement",
+          "save/reopen last_good persistence"
+        ],
+        "implemented_rust_tests": [
+          "changing_a_bores_diameter_keeps_its_dimension"
+        ],
+        "last_passing_run": "https://github.com/Benny1496/solidcraft/actions/runs/41430987707",
+        "validation_note": "The full UI/paper runtime scenario is NOT RUN; the runnable Engine subset passed on the clean integration commit in Test #56."
+      }
+    },
+    {
+      "id": "W23A-E2E-02",
+      "title": "Deleting Bore1 keeps lost reference instead of silently remapping to Bore2",
+      "starts_from": "84-plate-two-bores",
+      "oracle_after": "87-plate-bore1-deleted",
+      "source_actions": [
+        {
+          "command": "timeline.delete",
+          "params": {
+            "feature": "Bore1"
+          },
+          "session": "design"
+        }
+      ],
+      "source_expected": {
+        "oracle": "tests/oracle/87-plate-bore1-deleted",
+        "volume_mm3": 158429.2036732051,
+        "plate_mm": [
+          100,
+          80,
+          20
+        ],
+        "bores": [
+          {
+            "feature": "Bore2",
+            "diameter_mm": 10,
+            "center_xy_mm": [
+              60,
+              50
+            ],
+            "same_original_feature_identity": true
+          }
+        ],
+        "bore1_feature_present": false
+      },
+      "drawing_expected": {
+        "diam_bore1": {
+          "historical_last_value_mm": 10,
+          "attached_to_any_other_bore": false,
+          "status": "lost"
+        },
+        "centres_1_2": {
+          "historical_last_value_mm": 50,
+          "attached_to_any_other_bore": false,
+          "status": "lost",
+          "reference_intent": "R2_BORE_AXIS_CENTRES",
+          "must_not_bind_as": "W19d linear corners"
+        },
+        "diam_bore2": {
+          "model_value_mm": 10,
+          "same_original_feature_identity": true,
+          "status": "ok"
+        },
+        "plate_width": {
+          "model_value_mm": 80,
+          "status": "ok",
+          "reference_intent": "R1_OPPOSING_PLANAR_FACES"
+        },
+        "same_manual_label_paper_coordinates": true,
+        "no_silent_repair": true,
+        "dimension_inspect_after_source_edit": "immediate_model_read_without_U2"
+      },
+      "dependencies": [
+        "R1",
+        "R2",
+        "R3",
+        "R5",
+        "U2",
+        "W19d",
+        "W20a"
+      ],
+      "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": false,
+        "note": "Reopen after deleting Bore1 and verify the lost reference/last_good instead of attaching to Bore2.",
+        "runtime_status": "NOT_RUN"
+      },
+      "early_dimension_inspect": {
+        "runtime_status": "NOT_RUN",
+        "goal": "Deleting Bore1 makes the original diameter dimension lost, never retargeted to Bore2",
+        "requires": [
+          "W19d",
+          "W20a"
+        ],
+        "does_not_require": [
+          "U2"
+        ],
+        "checks": [
+          "dimension.record.kind stays identical to the authored reference",
+          "diam_bore1.status == lost",
+          "diam_bore1 never rebinds to Bore2",
+          "diam_bore2.status == ok",
+          "diam_bore1.last_good within 1e-9 mm of 10"
+        ],
+        "excludes_until_other_slices": [
+          "R1 plate_width",
+          "R2 centres_1_2",
+          "R5/U2 view publication and deferred update",
+          "view-relative label placement",
+          "save/reopen last_good persistence"
+        ],
+        "implemented_rust_tests": [
+          "deleting_a_bore_loses_its_dimension_and_never_moves_it"
+        ],
+        "last_passing_run": "https://github.com/Benny1496/solidcraft/actions/runs/41430987707",
+        "validation_note": "The full UI/paper runtime scenario is NOT RUN; the runnable Engine subset passed on the clean integration commit in Test #56."
+      }
+    },
+    {
+      "id": "W23A-E2E-03",
+      "title": "Source undo/redo restores drawing states and does not undo authored drawing changes",
+      "starts_from": "84-plate-two-bores",
+      "subcases": [
+        {
+          "source_edit": {
+            "command": "parameters.change",
+            "params": {
+              "name": "bore1_d",
+              "expression": "12 mm"
+            },
+            "session": "design"
+          },
+          "sequence": [
+            {
+              "state": "86-plate-first-bore-12",
+              "diam_bore1_mm": 12,
+              "status": "ok"
+            },
+            {
+              "command": "edit.undo",
+              "params": {},
+              "session": "design",
+              "state": "84-plate-two-bores",
+              "diam_bore1_mm": 10,
+              "status": "ok"
+            },
+            {
+              "command": "edit.redo",
+              "params": {},
+              "session": "design",
+              "state": "86-plate-first-bore-12",
+              "diam_bore1_mm": 12,
+              "status": "ok"
+            }
+          ]
+        },
+        {
+          "source_edit": {
+            "command": "timeline.delete",
+            "params": {
+              "feature": "Bore1"
+            },
+            "session": "design"
+          },
+          "sequence": [
+            {
+              "state": "87-plate-bore1-deleted",
+              "diam_bore1_last_mm": 10,
+              "status": "lost"
+            },
+            {
+              "command": "edit.undo",
+              "params": {},
+              "session": "design",
+              "state": "84-plate-two-bores",
+              "diam_bore1_mm": 10,
+              "status": "ok"
+            },
+            {
+              "command": "edit.redo",
+              "params": {},
+              "session": "design",
+              "state": "87-plate-bore1-deleted",
+              "diam_bore1_last_mm": 10,
+              "status": "lost"
+            }
+          ]
+        }
+      ],
+      "drawing_expected": {
+        "same_authored_dimension_ids": true,
+        "same_manual_label_paper_coordinates": true,
+        "drawing_undo_history_unmodified_by_source_edit": true,
+        "if_deferred": "source undo and redo each leave drawing out of date until Update; publishing refresh must not add authored undo step"
+      },
+      "dependencies": [
+        "R1",
+        "R2",
+        "R3",
+        "R5",
+        "U2",
+        "W19d",
+        "W20a"
+      ],
+      "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": true,
+        "note": "Undo and redo occur in the Model workspace; reopen and inspect the Drawing workspace after every model transition.",
+        "runtime_status": "NOT_RUN"
+      },
+      "early_dimension_inspect": {
+        "runtime_status": "NOT_RUN",
+        "goal": "Undo and redo model resize/deletion while preserving authored drawing JSON, positioned labels and both geometric dimension references",
+        "requires": [
+          "W19d",
+          "W20a"
+        ],
+        "does_not_require": [
+          "U2"
+        ],
+        "implemented_rust_tests": [
+          "undo_and_redo_a_diameter_change_keep_its_dimension",
+          "undo_and_redo_a_deleted_bore_restore_its_dimension"
+        ],
+        "checks": [
+          "diam_bore1.status changes ok/lost as edit undo/redo requires",
+          "dimension.record.kind retains its authored target",
+          "authored drawing to_json is identical before model edit and after undo",
+          "both custom dimension text positions are kept",
+          "deleted and redo-deleted Bore1 last_good ~ 10 mm"
+        ],
+        "excludes_until_other_slices": [
+          "R1/R2 full sheet dimensions",
+          "R5/U2 automatic rendered-view update and publication"
+        ],
+        "last_passing_run": "https://github.com/Benny1496/solidcraft/actions/runs/41430987707",
+        "validation_note": "The native Engine subset passed on the clean integration commit in Test #56. The full UI test is NOT RUN."
+      }
+    },
+    {
+      "id": "W23A-E2E-04",
+      "title": "Save and reopen preserves authored dimension identities and lost status",
+      "starts_from": "84-plate-two-bores",
+      "source_checkpoints": [
+        {
+          "state": "84-plate-two-bores",
+          "expect": {
+            "diam_bore1": {
+              "model_value_mm": 10,
+              "status": "ok"
+            },
+            "centres_1_2": {
+              "model_value_mm": 50,
+              "status": "ok"
+            }
+          }
+        },
+        {
+          "state": "86-plate-first-bore-12",
+          "source_action": {
+            "command": "parameters.change",
+            "params": {
+              "name": "bore1_d",
+              "expression": "12 mm"
+            },
+            "session": "design"
+          },
+          "expect": {
+            "diam_bore1": {
+              "model_value_mm": 12,
+              "status": "ok"
+            },
+            "centres_1_2": {
+              "model_value_mm": 50,
+              "status": "ok"
+            }
+          }
+        },
+        {
+          "state": "87-plate-bore1-deleted",
+          "source_action": {
+            "command": "timeline.delete",
+            "params": {
+              "feature": "Bore1"
+            },
+            "session": "design"
+          },
+          "expect": {
+            "diam_bore1": {
+              "historical_last_value_mm": 10,
+              "status": "lost"
+            },
+            "centres_1_2": {
+              "historical_last_value_mm": 50,
+              "status": "lost"
+            }
+          },
+          "notes": "Separate fresh run from 84, not sequentially after state 86."
+        }
+      ],
+      "drawing_expected": {
+        "after_every_save_reopen": true,
+        "actual_id_equality_from_runtime_results": true,
+        "references_preserved": true,
+        "manually_placed_label_paper_coordinates_preserved": true,
+        "lost_historical_value_does_not_become_live": true,
+        "no_silent_remap": true,
+        "requires_real_drawing_container_reader_writer": true
+      },
+      "dependencies": [
+        "R1",
+        "R2",
+        "R3",
+        "R5",
+        "U2",
+        "W19d",
+        "W20a",
+        "K4"
+      ],
+      "runtime_status": "NOT_RUN",
+      "ui_workflow": {
+        "model_command_while_drawing_open": false,
+        "required_sequence": [
+          "close_drawing_workspace",
+          "switch_to_model_workspace",
+          "apply_source_edit_or_undo_redo",
+          "reopen_drawing_workspace",
+          "verify_views_dimensions_references_and_positions"
+        ],
+        "check_after_each_undo_redo": false,
+        "note": "The unchanged baseline is a pure save/reopen; for resized/deleted states close the Drawing workspace before each model edit and reopen for verification.",
+        "runtime_status": "NOT_RUN"
+      },
+      "early_dimension_inspect": {
+        "runtime_status": "NOT_RUN",
+        "goal": "Real save/reopen of unchanged, resized and deleted plate states in a fresh session",
+        "requires": [
+          "W19d",
+          "W20a",
+          "K4"
+        ],
+        "does_not_require": [
+          "U2"
+        ],
+        "implemented_rust_tests": [
+          "reopening_a_plate_keeps_dimensions_and_a_lost_bores_last_value"
+        ],
+        "checks": [
+          "dimension.record.kind identical after reopening",
+          "both authored text.at records preserved",
+          "Bore1 unchanged 10 mm, resized 12 mm, deleted lost with last_good ~ 10 mm",
+          "Bore2 stays 10 mm and independently referenced"
+        ],
+        "excludes_until_other_slices": [
+          "full paper coordinate mapping and R1/R2 dimensions",
+          "rendered U2 annotation refresh"
+        ],
+        "last_passing_run": "https://github.com/Benny1496/solidcraft/actions/runs/41430987707",
+        "validation_note": "Native Engine subset passed on the clean integration commit in Test #56. Full UI/paper E2E stays NOT RUN."
+      }
+    }
+  ],
+  "early_native_extensions": [
+    {
+      "id": "W23A-R1-WIDTH",
+      "goal": "plate_width as a dimension between the plate's two side faces (R1) follows width 80 -> 100 -> 80 with the same reference",
+      "requires": ["R1 faces dimension (#11871, on drawings through #11823)"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "width", "expression": "100 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "dimension.record.kind stays identical to the authored faces reference",
+        "plate_width.status == ok and reads 80, then 100, then 80"
+      ],
+      "oracle_cross_check": "tests/oracle/85-plate-width-100",
+      "implemented_rust_tests": ["the_plates_width_between_its_side_faces_follows_a_width_change"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-SUPPRESSED-BORE",
+      "goal": "Bore1 suppressed reads suppressed and keeps its reference; on again it reads 10 ok; deleted it is lost and never moves to Bore2",
+      "requires": ["suppressed and failed references (#11823)"],
+      "source_actions": [
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": true}, "session": "design"},
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": false}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"}
+      ],
+      "checks": [
+        "dimension.record.kind stays identical to the authored reference after every edit",
+        "diam_bore1.status == suppressed, then ok (10), then lost with last_good 10",
+        "diam_bore2.status == ok (10) throughout, and diam_bore1 never rebinds to Bore2"
+      ],
+      "implemented_rust_tests": ["a_suppressed_bore_says_so_and_its_dimension_comes_back"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-FIVE-DIMENSIONS",
+      "goal": "the plate's five dimensions (Bore1 Ø, Bore2 Ø, width, length, Bore1's centre to Bore2's) each follow only the parameter that drives them, and come back on undo",
+      "requires": ["R1 faces dimension (#11871)", "a circle's centre as a corner (#9249)"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "bore1_d", "expression": "12 mm"}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "bore2_d", "expression": "8 mm"}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "width", "expression": "100 mm"}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "length", "expression": "120 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "edit.redo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "the plate reads Ø10, Ø10, 80, 100 and 50",
+        "each change alone moves only its own dimension (Ø12, Ø8, 100 or 120), and its undo gives the plate back with the authored drawing unchanged",
+        "all four at once read Ø12, Ø8, 100, 120 and 50; four undos give the plate back, four redos all four again",
+        "dimension.record.kind stays identical to the authored reference after every edit"
+      ],
+      "implemented_rust_tests": ["the_plates_five_dimensions_follow_each_parameter_and_its_undo"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-R2-CENTRES",
+      "goal": "Bore1's centre to Bore2's, each centre named by its rim (R2 at engine level): 50 aligned, 40 across and 30 up the top view, through a resize, suppress, delete, undo, redo and reopen",
+      "requires": ["a circle's centre as a corner (#9249)", "suppressed and failed references (#11823)"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "bore1_d", "expression": "12 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": true}, "session": "design"},
+        {"command": "timeline.suppress", "params": {"feature": "Bore1", "suppressed": false}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "edit.redo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "centres_1_2 reads 50 aligned, 40 horizontal and 30 vertical, and a new Bore1 diameter moves none of them",
+        "Bore1 suppressed: all three read suppressed",
+        "Bore1 deleted: all three are lost with last_good 50, 40 and 30 and read no value, while Bore2 reads Ø10",
+        "undo reads them again; after redo they stay lost with their last values through save and reopen",
+        "dimension.record.kind stays identical to the authored reference after every edit"
+      ],
+      "implemented_rust_tests": ["the_bores_centres_stay_put_and_a_lost_bore_takes_its_centre_dimensions"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-SHEET",
+      "goal": "the plate's sheet as drawing.scene, drawing.status and drawing.export draw it (lines and arrowheads; the sheet has no text yet) follows the model and comes back on undo",
+      "requires": ["dimensions on the sheet (#11867)", "drawing.scene, drawing.status and drawing.export"],
+      "source_actions": [
+        {"command": "parameters.change", "params": {"name": "bore1_d", "expression": "12 mm"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "parameters.change", "params": {"name": "length", "expression": "120 mm"}, "session": "design"}
+      ],
+      "checks": [
+        "the top view at 1:2 sits round (150, 180), 50 x 40, with all five dimensions drawn; the width's arrowheads 40 apart, the length's 50 and the centres' 25",
+        "Bore1 at Ø12 redraws the view and Bore1's dimension; the others stay where they were",
+        "Bore1 deleted: its two dimensions are left out and listed lost by drawing.scene and drawing.status; the other three stay where they were and the sheet still exports",
+        "each undo draws the sheet as it was within 1e-9 mm and exports the same SVG",
+        "the length at 120 widens the view to 60 round the same place and the length's arrowheads to 60; a save and reopen draws the same sheet"
+      ],
+      "implemented_rust_tests": ["the_plates_sheet_draws_what_the_model_has_and_the_same_after_undo"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-FILLETED-CORNERS",
+      "goal": "fillets that take the plate's corners leave its faces, bores and centres measured",
+      "requires": ["R1 faces dimension (#11871)"],
+      "source_actions": [
+        {"command": "solid.fillet", "params": {"body": "Plate", "radius": 5, "edges": [[0, 0, 10]]}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "solid.fillet", "params": {"body": "Plate", "radius": 2, "edges": [[50, 0, 20]]}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "with either fillet, and after its undo, the five read Ø10, Ø10, 80, 100 and 50",
+        "dimension.record.kind stays identical to the authored reference"
+      ],
+      "implemented_rust_tests": ["fillets_on_the_plates_corners_leave_its_five_dimensions_read"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    },
+    {
+      "id": "W23A-REPAIR",
+      "goal": "a lost Bore1 dimension reads again only through the user's own repair (W23-2, #12170): after Bore1's rim is rounded, and after Bore1 is deleted",
+      "requires": ["lost references name leads and take a repair (#12170)"],
+      "source_actions": [
+        {"command": "solid.fillet", "params": {"body": "Plate", "radius": 1, "edges": [[25, 20, 20]]}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "edit.redo", "params": {}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"},
+        {"command": "timeline.delete", "params": {"feature": "Bore1"}, "session": "design"},
+        {"command": "edit.undo", "params": {}, "session": "design"}
+      ],
+      "checks": [
+        "Bore1's rim rounded: diam_bore1 is lost with last_good 10 and leads that include the bore's circle where the round meets it; diam_bore2 reads 10",
+        "drawing.dimension.repair onto that circle reads 10 as one drawing undo step, with the same id, view and text place, and only the edge's name changed",
+        "the repair undone is lost with the same leads, redone reads 10, and reads 10 after save and reopen",
+        "the round undone, the repaired dimension is lost and keeps its repair; redone it reads 10; repair and round undone, it reads 10 by its first record",
+        "Bore1 deleted: diam_bore1 is lost and never reads Bore2 by itself, and its leads are the plate's, never Bore2's rim; repaired onto Bore2's rim it reads 10 by the name Bore2's own dimension has",
+        "Bore1's delete undone, the repair stays on Bore2; the repair undone, diam_bore1 reads Bore1 by its first record"
+      ],
+      "implemented_rust_tests": ["a_rounded_bore_rim_is_lost_and_a_repair_reads_it_again", "a_deleted_bores_dimension_reads_bore2_only_when_repaired_to_it"],
+      "runtime_status": "NATIVE_ENGINE_TEST"
+    }
+  ],
+  "not_tested": [
+    "R5 drawing records",
+    "U2 publishing and updates",
+    "W19/W20 drawing dimensions",
+    "full end-to-end 3D-to-2D drawing acceptance"
+  ],
+  "future_binding_rule": "Use actual owner-approved public command/API names when available. Never invent fake Drawing commands or synthetic permanent IDs.",
+  "no_runtime_pass_claimed": true
+}

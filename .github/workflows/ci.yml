@@ -377,7 +377,7 @@ jobs:
     name: Format and repository checks
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
@@ -423,6 +423,16 @@ jobs:
         run: python3 -I scripts/ci/test_affected.py
       - name: Merge-of-main detection self-test
         run: python3 -I scripts/ci/test_main_merge.py
+      # Static acceptance recipes are checked on every non-draft CI run; tests/fixtures
+      # are introduced by separate Drawing PRs, so run each validator when present.
+      - name: Drawing acceptance fixture contracts
+        run: |
+          if test -f tests/fixtures/w23a-drawing-updates/validate.py; then
+            python3 -I tests/fixtures/w23a-drawing-updates/validate.py
+          fi
+          if test -f tests/fixtures/w23-assembly-sheet/validate.py; then
+            python3 -I tests/fixtures/w23-assembly-sheet/validate.py
+          fi
       - name: Claim, triage and kernel-paused bot tests
         run: node --test scripts/claim/*.test.js scripts/triage/*.test.js scripts/kernel-paused/*.test.js scripts/pr-checks/*.test.js
 
