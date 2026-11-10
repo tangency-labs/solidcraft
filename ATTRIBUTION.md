@@ -200,7 +200,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/platforms/macos/README.txt | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/windows/solidcraft.en-us.wxl | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/windows/solidcraft.wxs | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
-| assets/shaders/viewport.wgsl | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
+| crates/viewport-gpu/shaders/viewport.wgsl | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/gruvbox-dark.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/gruvbox-light.json | SolidCraft contributors | original SolidCraft theme file mapping SolidCraft's UI colours to the Gruvbox palette's colour values (Gruvbox by Pavel Pertsev, https://github.com/morhetz/gruvbox, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/solidcraft-95.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
@@ -843,6 +843,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | assets/locales/pending/drag-to-zoom.json | SolidCraft contributors | Original drag-to-zoom labels and translations | MIT OR Apache-2.0 |
 | `assets/locales/pending/hole-group-folder.json` | SolidCraft contributors | Original Hole grouping preference labels and translations | MIT OR Apache-2.0 |
 | assets/locales/pending/press-pull-dialog-title.json | SolidCraft contributors | Original Press Pull dialog title translations for SolidCraft's English catalog; no external text used | MIT OR Apache-2.0 |
+| docs/layers/layers.svg | SolidCraft contributors | original diagram of SolidCraft's crate layers for docs/layers.md, written as SVG in solidcore's docs/layers diagram style | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
@@ -886,7 +887,7 @@ crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
 | Crate | Used for | Licence |
 |---|---|---|
-| solidcore (https://github.com/tangency-labs/solidcore, pinned by rev in Cargo.toml) | the Rust port of NVIDIA's SMLib: the B-rep kernel behind crates/smlib | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
+| solidcore (https://github.com/tangency-labs/solidcore, vendored at solidcore/) | the Rust port of NVIDIA's SMLib: the B-rep kernel behind crates/smlib | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
 
 Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
 into THIRD-PARTY-LICENSES.txt when `main` regenerates it.

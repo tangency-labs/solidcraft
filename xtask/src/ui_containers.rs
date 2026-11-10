@@ -320,7 +320,7 @@ pub fn run(root: &Path) -> Result<(), String> {
                 }
             } else if path.extension().is_some_and(|e| e == "rs")
                 && path.components().any(|c| c.as_os_str() == "src" || c.as_os_str() == "examples")
-                && path != root.join("crates/ui-egui/src/ui_kit/container.rs")
+                && path != root.join("crates/ui-kit/src/container.rs")
             {
                 let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
                 let found = violations(&source).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -461,7 +461,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("solidcraft-container-guard-{}-{unique}", std::process::id()));
         let source = root.join("crates/future-ui/src/nested/panel.rs");
         let example = root.join("apps/future-platform/examples/viewer.rs");
-        let implementation = root.join("crates/ui-egui/src/ui_kit/container.rs");
+        let implementation = root.join("crates/ui-kit/src/container.rs");
         for path in [&source, &example, &implementation] {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         }
@@ -471,7 +471,7 @@ mod tests {
         let rejected = run(&root).unwrap_err().replace('\\', "/");
         assert!(rejected.contains("future-ui/src/nested/panel.rs"));
         assert!(rejected.contains("future-platform/examples/viewer.rs"));
-        assert!(!rejected.contains("ui_kit/container.rs"), "only the implementation is exempt");
+        assert!(!rejected.contains("ui-kit/src/container.rs"), "only the implementation is exempt");
         for path in [&source, &example] {
             std::fs::write(path, "fn show() { Container::new(ctx, Surface::Panel).area(id); }").unwrap();
         }

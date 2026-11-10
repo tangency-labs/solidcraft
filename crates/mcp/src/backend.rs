@@ -9,9 +9,9 @@ use solidcraft_engine::Session;
 use solidcraft_engine::control_pending;
 use solidcraft_engine::panels::ActionSink;
 use solidcraft_engine::panels::commands::LayoutCatalogue;
-use solidcraft_engine::render::StandardView;
 use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
+use solidcraft_viewport::StandardView;
 
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
 /// `document.inspect`, `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
@@ -47,6 +47,13 @@ pub trait Backend {
     /// ask again on a later call.
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         Ok(None)
+    }
+    /// A bridge to the same app on a connection of its own, for a backend bridged to one: the
+    /// server answers `running` on it while this backend is busy with a call (#14007), as the
+    /// app answers `control.running` on any connection at once. `None`: nothing to ask apart
+    /// (an in-process session answers only between calls).
+    fn side_channel(&self) -> Option<Remote> {
+        None
     }
 }
 
@@ -88,7 +95,7 @@ pub(crate) const STILL_RUNNING: &str = "still running:";
 struct Outstanding {
     what: String,
     /// What it does when it finishes; `None`: not known (a request this bridge did not send).
-    effect: Option<control_pending::Effect>,
+    effect: Option<solidcraft_control::Effect>,
     since: Instant,
 }
 
@@ -332,7 +339,7 @@ impl Remote {
         }
         let mut msg = json!({"id": id, "method": method, "params": params});
         // The token goes with every request (an app restarted mid-session has a new one).
-        let token = solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref());
+        let token = solidcraft_engine::control_auth::APP.client_token(self.port, self.explicit_token.as_deref());
         if let Some(t) = &token {
             msg["token"] = json!(t.token);
         }
@@ -384,7 +391,8 @@ impl Remote {
     /// The tool error for the outstanding request still running after its wait.
     fn still_running(&self, earlier: bool) -> String {
         let Some(o) = &self.outstanding else { return format!("{STILL_RUNNING} a request is still running in the app") };
-        let effect = o.effect.map_or("it was not cancelled and may still change the design when it finishes", control_pending::Effect::when_done);
+        let effect =
+            o.effect.map_or_else(|| "it was not cancelled and may still change the design when it finishes".into(), |e| e.when_done("design"));
         let settle = self.waits.settle.as_secs();
         if earlier {
             format!(
@@ -495,7 +503,8 @@ impl Remote {
         }
         // A refused token: say which token file it came from (and whether it is stale).
         outcome(&v).map_err(|error| {
-            solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref())
+            solidcraft_engine::control_auth::APP
+                .client_token(self.port, self.explicit_token.as_deref())
                 .map_or_else(|| error.clone(), |t| t.explain_error(&error))
         })
     }
@@ -607,7 +616,7 @@ impl Remote {
         let steps = params.get("commands").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         if self.param_check == ParamCheck::Strict {
             if let Some(refusal) = solidcraft_engine::batch_preflight::contracts(steps) {
-                return Ok(refusal.reply(steps.len()));
+                return Ok(refusal.reply(steps.len(), params.get("rollback").and_then(Value::as_bool).unwrap_or(true)));
             }
             return self.call_once("engine.batch", params, true);
         }
@@ -644,6 +653,10 @@ impl Backend for Remote {
     fn has_ui(&self) -> bool {
         true
     }
+    /// The same app with this bridge's token, not yet connected: it connects when asked.
+    fn side_channel(&self) -> Option<Remote> {
+        Some(Remote::new(&self.addr, self.explicit_token.as_deref()).with_param_check(self.param_check))
+    }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         // This runs on the serve loop before a tool call, so it never waits: not behind a request
         // still running (ask again on a later call), and one try with no retry, because a retry
@@ -661,7 +674,8 @@ impl Backend for Remote {
         let reply = reply.map_err(|e| self.explain(&e))?;
         let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
         let r = outcome(&v).map_err(|error| {
-            solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref())
+            solidcraft_engine::control_auth::APP
+                .client_token(self.port, self.explicit_token.as_deref())
                 .map_or_else(|| error.clone(), |t| t.explain_error(&error))
         });
         match r {
@@ -730,13 +744,14 @@ impl Headless {
         if steps.len() > 100_000 {
             return Err("script too long".into());
         }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
         if method == "engine.batch"
             && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, self.session.param_check, &[])
         {
-            return Ok(refusal.reply(steps.len()));
+            return Ok(refusal.reply(steps.len(), rollback));
         }
         let panels = steps.iter().filter(|step| step_command(step).is_some_and(commands::is_command)).count();
-        if method == "engine.batch" && p.get("rollback").and_then(Value::as_bool).unwrap_or(true) {
+        if method == "engine.batch" && rollback {
             if panels != steps.len() {
                 return Err(commands::error_text(error(
                     Rule::Capability,
@@ -800,7 +815,7 @@ impl Headless {
                     "fit" => {
                         let b = solidcraft_engine::view::bounds(s).map_err(|e| e.to_string())?;
                         if let Some(c) = s.camera.as_mut() {
-                            c.fit(&b);
+                            c.fit(&solidcraft_engine::render::view_bounds(&b));
                         }
                     }
                     _ => {
@@ -960,6 +975,9 @@ impl Backend for Auto {
             // Headless for now: the app may yet start, so ask again on a later call.
             None => Err("no app yet".into()),
         }
+    }
+    fn side_channel(&self) -> Option<Remote> {
+        self.remote.as_ref().and_then(Remote::side_channel)
     }
     fn notice(&self) -> Option<String> {
         self.headless.as_ref().map(|_| {

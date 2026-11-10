@@ -192,6 +192,7 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         .bodies
         .iter()
         .enumerate()
+        .filter(|(_, b)| !super::more::beyond_cylinder_reach(b, p))
         .filter_map(|(i, b)| {
             #[cfg(test)]
             super::cost_tests::count(|c| c.cylinder_search += 1);

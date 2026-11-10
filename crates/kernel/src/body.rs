@@ -33,6 +33,9 @@ pub struct Body {
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
+    /// because they share the record.
+    pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -264,70 +267,42 @@ pub struct FaceInfo {
     pub plane_normal: Option<Vec3>,
 }
 
-/// The most one facet of the display mesh turns (radians): a curved face or edge is divided
-/// until no facet spans more of it than this, however small its radius is beside the body.
-/// 20 degrees: a quarter turn is drawn with at least five facets, a full circle with at least 18.
-pub const DISPLAY_ANGLE: f64 = std::f64::consts::PI / 9.0;
+/// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
+/// at: the mesher's own (solidcore-tess).
+pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
 
-/// The sag, as a fraction of the chord tolerance, below which the angle no longer divides a
-/// facet: at [`DISPLAY_ANGLE`] and the application's tolerance of 1/1000 of the body, a radius
-/// under about 1/15000 of the body gets fewer facets than the angle asks for, and one under
-/// a millionth of it only those of the chord tolerance.
-const DISPLAY_ANGLE_FLOOR: f64 = 1e-3;
-
-/// The finest angle a display mesh is divided by (one degree).
-const MIN_DISPLAY_ANGLE: f64 = std::f64::consts::PI / 180.0;
-
-/// How closely [`Body::mesh`] follows the exact surfaces.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MeshTolerance {
-    /// The farthest a facet or an edge segment may stand off the surface or curve it stands for
-    /// (mm). Not finite or not positive: 0.05 mm. Never finer than a millionth of the body.
-    pub chord: f64,
-    /// The most a facet may turn (radians, at least one degree) where its sag is above a
-    /// thousandth of `chord`; `None`: `chord` alone.
-    pub angle: Option<f64>,
+/// Whether a control net is small enough to test for flatness ([`flat_net`]): the work is one
+/// pass over its points, at most 65,536 of them (a face of an imported design can carry a large
+/// net, and [`Body::planar_face`] is asked of every face a pick passes).
+fn net_fits<T>(net: &[Vec<T>]) -> bool {
+    net.iter().try_fold(0usize, |count, row| count.checked_add(row.len()).filter(|count| *count <= 1 << 16)).is_some()
 }
 
-impl MeshTolerance {
-    /// `chord` alone.
-    pub const fn chord(chord: f64) -> Self {
-        MeshTolerance { chord, angle: None }
+/// A B-spline control net (`net[i][j]`, i along u) lying on one plane within `tolerance`: a point
+/// of the plane and two directions on it whose cross product runs along the surface's natural
+/// normal (`∂S/∂u × ∂S/∂v`), as a plane surface's axes do. `None` for a net off every plane, or
+/// one too degenerate to have a normal (#14346).
+fn flat_net(net: &[Vec<Vec3>], tolerance: f64) -> Option<(Vec3, Vec3, Vec3)> {
+    let columns = net.first()?.len();
+    if net.len() < 2 || columns < 2 || net.iter().any(|row| row.len() != columns) || !(tolerance.is_finite() && tolerance > 0.0) {
+        return None;
     }
-
-    /// What the viewport draws: `chord`, and no facet turning more than [`DISPLAY_ANGLE`], so
-    /// small radii on a large body look round too.
-    pub const fn display(chord: f64) -> Self {
-        MeshTolerance { chord, angle: Some(DISPLAY_ANGLE) }
+    // The net's oriented area, Σ (P[i+1][j] − P[i][j]) × (P[i][j+1] − P[i][j]), runs along the
+    // natural normal of a flat surface that doesn't fold over itself; the u steps give its u way.
+    let (mut area, mut along_u) = (Vec3::ZERO, Vec3::ZERO);
+    for (row, next) in net.iter().zip(net.iter().skip(1)) {
+        for ((p, q), r) in row.iter().zip(row.iter().skip(1)).zip(next) {
+            area += (*r - *p).cross(*q - *p);
+            along_u += *r - *p;
+        }
     }
-
-    /// The application's display mesh of a body of size `size` (its box diagonal): 1/1000 of
-    /// it, at least 1 µm, at [`DISPLAY_ANGLE`].
-    pub fn display_of(size: f64) -> Self {
-        MeshTolerance::display((size * 1e-3).max(1e-3))
+    let normal = area.normalized()?;
+    let origin = *net.first()?.first()?;
+    if net.iter().flatten().any(|p| !p.is_finite() || (*p - origin).dot(normal).abs() > tolerance) {
+        return None;
     }
-
-    /// For export to a mesh format (STL, 3MF, OBJ) of a body of size `size`: 1/5000 of it, at
-    /// least 1 µm, the chord alone.
-    pub fn export_of(size: f64) -> Self {
-        MeshTolerance::chord((size * 2e-4).max(1e-3))
-    }
-
-    /// The planner's chord tolerance and facet angle for a body of size `size`.
-    pub(crate) fn rules(&self, size: f64) -> (f64, Option<crate::tess::size::Turn>) {
-        let tol = if self.chord.is_finite() && self.chord > 0.0 { self.chord } else { 0.05 };
-        let tol = tol.max(size * 1e-6);
-        let turn = self
-            .angle
-            .filter(|a| a.is_finite() && *a > 0.0)
-            .map(|a| crate::tess::size::Turn { angle: a.max(MIN_DISPLAY_ANGLE), floor: tol * DISPLAY_ANGLE_FLOOR });
-        (tol, turn)
-    }
-
-    /// The key a kept mesh is found by.
-    fn key(&self) -> (u64, u64) {
-        (self.chord.to_bits(), self.angle.map_or(u64::MAX, f64::to_bits))
-    }
+    let u = (along_u - normal * along_u.dot(normal)).normalized()?;
+    Some((origin, u, normal.cross(u)))
 }
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
@@ -391,7 +366,7 @@ fn same_shared<T: PartialEq>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync
 /// canonical order) and at least one face. A solid's faces bound material; a surface body's lie
 /// in open shells.
 fn solid_record(record: Brep) -> Result<Brep> {
-    solidcraft_geom::brep::check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
+    solidcore_ops::record_check::validate_built(&record).map_err(|e| KernelError::Invalid(e.to_string()))?;
     if record.faces.is_empty() {
         return Err(KernelError::Failed("empty result".into()));
     }
@@ -494,6 +469,7 @@ impl Body {
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh,
             color: None,
             paint: None,
@@ -739,7 +715,10 @@ impl Body {
     }
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
-    /// face's plane as the face faces (out of the material in a closed shell).
+    /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
+    /// or a B-spline whose control points all lie on one plane within the body's tolerance (a
+    /// loft's side between parallel straight edges, #14346): a B-spline surface lies in the
+    /// convex hull of its control points, so the whole face is on that plane.
     pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
@@ -747,6 +726,17 @@ impl Body {
             Surface::PlaneThrough { origin, u_point, v_point } => {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
+            }
+            Surface::Spline { points, .. } if net_fits(points) => {
+                flat_net(&points.iter().map(|row| row.iter().map(|p| v3(*p)).collect()).collect::<Vec<Vec<_>>>(), self.record.tolerance)?
+            }
+            // With positive weights a rational patch stays in its points' convex hull too.
+            Surface::RationalSpline { homogeneous, .. } if net_fits(homogeneous) => {
+                let net = homogeneous
+                    .iter()
+                    .map(|row| row.iter().map(|&[x, y, z, w]| (w.is_finite() && w > 0.0).then(|| Vec3::new(x / w, y / w, z / w))).collect())
+                    .collect::<Option<Vec<Vec<_>>>>()?;
+                flat_net(&net, self.record.tolerance)?
             }
             _ => return None,
         };
@@ -1057,13 +1047,21 @@ impl Body {
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
-    /// is its triangles'.
+    /// is its triangles'. Measured once per record: a boolean asks for the box of every body it
+    /// meets, and the same bodies come back feature after feature. A failure is not kept.
     pub fn exact_bounds(&self) -> Result<Aabb3> {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
+        // Held while measuring, so callers on other threads wait for this measurement.
+        let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(b) = *slot {
+            return Ok(b);
+        }
         let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+        let b = Aabb3 { min: v3(lo), max: v3(hi) };
+        *slot = Some(b);
+        Ok(b)
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
@@ -1096,7 +1094,12 @@ impl Body {
     /// makes a kept timeline snapshot expensive, so it dominates the estimate.
     pub fn retained_bytes(&self) -> usize {
         if let Some(m) = &self.mesh {
-            return m.positions.len() * 24 + m.triangles.len() * 12;
+            return m
+                .positions
+                .len()
+                .saturating_mul(24)
+                .saturating_add(m.triangles.len().saturating_mul(12))
+                .saturating_add(m.corner_normals.len().saturating_mul(72));
         }
         let uses: usize = self.record.faces.iter().flat_map(|f| &f.loops).map(|l| if let Loop::Edges { edges } = l { edges.len() } else { 1 }).sum();
         self.record.faces.len() * 2048 + uses * (512 + 96)
@@ -1151,8 +1154,8 @@ impl Body {
         {
             return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
         }
-        let (tol, turn) = t.rules(self.size());
-        let (plan, stats) = guard("mesh", || crate::tess::plan(&self.record, tol, turn))?;
+        let size = self.size();
+        let (plan, stats) = guard("mesh", || solidcore_tess::plan(&self.record, t, size).map_err(KernelError::from))?;
         // A face filled leniently has no hole on screen, but its pcurves or seams are still wrong:
         // it is reported, never silent.
         for f in &stats.lenient {
@@ -1168,7 +1171,7 @@ impl Body {
     /// The mesh of `plan`, a plan [`Body::mesh_plan`] made of this body: what [`Body::mesh`]
     /// gives at the plan's tolerance.
     pub fn mesh_of(&self, plan: &solidcraft_geom::tess::TessPlan) -> Result<Mesh> {
-        self.flagged(plan.evaluate())
+        self.flagged(solidcraft_geom::tess::EvaluateMesh::evaluate_mesh(plan))
     }
 
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy

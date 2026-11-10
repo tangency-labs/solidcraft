@@ -375,12 +375,25 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
     // Offer the image types first: the default Open filter lists only designs and meshes.
     app.pick_open_for(&["png", "jpg", "jpeg"], move |app, path| {
         if let Some(path) = path {
-            IMAGE.with(|i| *i.borrow_mut() = Some(path));
-            app.last_command = solidcraft_engine::find_command(&command).map(|spec| (spec.id.into(), spec.label.into()));
-            app.tool = crate::tools::Tool::for_command(&command);
+            start_image_placement(app, &command, path);
         }
     });
     false
+}
+
+/// Whether `path` names an image the Canvas tool takes (PNG or JPEG, by its extension).
+pub(crate) fn is_canvas_image(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| ["png", "jpg", "jpeg"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+}
+
+/// Start placing image `path` with `command` (Canvas or Decal), as when it is chosen in the
+/// tool's file dialog: the next click on a plane or face (or the sketch plane) places it.
+/// Home closes, since the click needs the viewport (a picture can be dropped on Home).
+pub(crate) fn start_image_placement(app: &mut SolveApp, command: &str, path: String) {
+    app.home.open = false;
+    IMAGE.with(|i| *i.borrow_mut() = Some(path));
+    app.last_command = solidcraft_engine::find_command(command).map(|spec| (spec.id.into(), spec.label.into()));
+    app.tool = crate::tools::Tool::for_command(command);
 }
 
 fn v3(v: &Value) -> Option<Vec3> {
@@ -567,7 +580,8 @@ pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec
         for target in targets {
             let Some(id) = &target.id else { continue };
             let mode = if target.horizontal { "horizontal" } else { "vertical" };
-            let params = json!({"points": [point, id], "mode": mode, "if_redundant": "refuse"});
+            let other = id.strip_prefix("mid:").map_or_else(|| json!(id), |line| json!({"midpoint": line}));
+            let params = json!({"points": [point, other], "mode": mode, "if_redundant": "refuse"});
             let _ = app.session.execute("sketch.constraint.horizontal_vertical", &params);
         }
     }
@@ -702,7 +716,12 @@ pub fn refine_snap(
     let g = |v: f64| (v / step).round() * step;
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
-    let targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
+    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
+    // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
+    // command makes on that line (#13413).
+    if app.preferences.sketch_align_points {
+        targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+    }
     let mut lined = Vec::new();
     if !mid_only
         && best.is_none()

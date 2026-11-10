@@ -7,8 +7,8 @@
 
 use std::collections::HashSet;
 
-use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
 use serde_json::{Value, json};
@@ -565,7 +565,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
         return;
     }
     let mut cam = app.cam;
-    cam.fit(&bb);
+    cam.fit(&solidcraft_engine::render::view_bounds(&bb));
     app.animate_to(cam);
 }
 
@@ -2008,7 +2008,7 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
     }
     if grouped(app, joints.len()) {
         let open = joints_open(app, joints.len(), set);
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
         let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
         if clicked {
             toggle_joints(app, set);
@@ -2152,14 +2152,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 }
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
-/// edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+/// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
     if joints.is_empty() {
-        return;
+        return None;
     }
     // Drawn like every other browser node (its fold, eye and rows publish `fold:Joints`,
     // `eye:Joints`, `row:<name>`). The folder's eye is its own: hiding it hides every joint's
@@ -2179,9 +2179,10 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         toggle(app, key, start_open);
     }
     if !open {
-        return;
+        return None;
     }
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for (id, name, kind, suppressed) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
@@ -2201,6 +2202,9 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         );
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
+        }
+        if r.hovered {
+            hovered = Some(id);
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -2222,6 +2226,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A click on a joint's browser row: it becomes the pick (or, with Ctrl, toggles in or out of
@@ -2251,11 +2256,12 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// double-click edits it, the eye shows or hides its glyph and the menu is the joint's menu.
 /// The folder starts closed and has no eye of its own (the root folder's eye hides every joint
 /// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
-pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) {
+/// Returns the joint whose row is under the pointer.
+pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
-        return;
+        return None;
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
@@ -2264,11 +2270,12 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         toggle(app, &key, false);
     }
     if !open {
-        return;
+        return None;
     }
     // Hiding the root folder hides every glyph: these rows fade with it, as its own rows do.
     let folder_shown = !app.session.folder_hidden("c0/joints");
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for j in joints {
         let id = j.id;
         let visible = app.session.joint_visible(id);
@@ -2288,6 +2295,9 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
                 ..Default::default()
             },
         );
+        if r.hovered {
+            hovered = Some(id);
+        }
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
         }
@@ -2310,6 +2320,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A joint as a placement's Joints folder lists it.
@@ -2615,29 +2626,28 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
         crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
-        let col = if g.picked {
-            t.sel_edge
-        } else if j.suppressed {
-            t.text_dim
-        } else {
-            t.accent
-        };
-        let col = if g.faded { col.gamma_multiply(0.3) } else { col };
-        let width = if g.picked { 2.5 } else { 1.5 };
-        let stroke = Stroke::new(width, col);
+        let (stroke, rim) = glyph_strokes(app, g.id, g.picked, j.suppressed);
+        // A glyph piled on another is drawn faint.
+        let fade = |s: Stroke| if g.faded { Stroke::new(s.width, s.color.gamma_multiply(0.3)) } else { s };
+        let (stroke, rim) = (fade(stroke), rim.map(fade));
+        let width = stroke.width;
         let c = g.centre;
+        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
         if g.rigid {
             let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
-            let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-            painter.rect(egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0)), 0.0, fill, stroke, egui::StrokeKind::Middle);
+            let rect = egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0));
+            if let Some(rim) = rim {
+                painter.rect_stroke(rect, 0.0, rim, egui::StrokeKind::Middle);
+            }
+            painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Middle);
             continue;
         }
         let len = g.len;
-        // The motion axis (z), both ways.
-        if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
-            painter.line_segment([a, b], stroke);
-        }
-        // A ring about the axis.
+        // The motion axis (z), both ways, and a ring about it: the rim first, then the core.
+        let axis = match (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
+            (Some(a), Some(b)) => Some([a, b]),
+            _ => None,
+        };
         let r = len * 0.5;
         let ring: Vec<Pos2> = (0..=32)
             .filter_map(|k| {
@@ -2645,8 +2655,13 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 proj.to_screen(at(m, r * a.cos(), r * a.sin(), 0.0))
             })
             .collect();
-        if ring.len() > 1 {
-            painter.add(egui::Shape::line(ring, stroke));
+        for s in rim.into_iter().chain([stroke]) {
+            if let Some(axis) = axis {
+                painter.line_segment(axis, s);
+            }
+            if ring.len() > 1 {
+                painter.add(egui::Shape::line(ring.clone(), s));
+            }
         }
         // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
         let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
@@ -2668,8 +2683,27 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 }
             }
         }
-        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-        painter.circle(c, if g.picked { 4.5 } else { 3.5 }, fill, stroke);
+        if let Some(rim) = rim {
+            painter.circle_stroke(c, 4.5, rim);
+        }
+        painter.circle(c, if rim.is_some() { 4.5 } else { 3.5 }, fill, stroke);
+    }
+}
+
+/// A joint glyph's core stroke and, while it is picked or its browser row is hovered, the
+/// lighter rim under it: the colours and widths a selected or hovered body's edges use.
+pub(crate) fn glyph_strokes(app: &SolveApp, id: u64, picked: bool, suppressed: bool) -> (Stroke, Option<Stroke>) {
+    let t = Tokens::get();
+    let lit = if picked {
+        Some((t.sel_edge, t.sel_edge_rim))
+    } else if app.viewport.hover_joint == Some(id) {
+        Some((t.hover_edge, t.hover_edge_halo))
+    } else {
+        None
+    };
+    match lit {
+        Some((core, rim)) => (Stroke::new(2.5, core), Some(Stroke::new(2.5 + 3.0, rim))),
+        None => (Stroke::new(1.5, if suppressed { t.text_dim } else { t.accent }), None),
     }
 }
 

@@ -538,7 +538,7 @@ fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
         Some(Value::String(x)) => x.clone(),
         _ => return Err(bad(cmd, format!("`{key}` must be a component id or name"))),
     };
-    s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))
+    s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))
 }
 
 /// A command's reply as JSON: they build their replies from the types their output schemas
@@ -1271,6 +1271,73 @@ mod tests {
             assert_eq!(update["warnings"], json!([]), "{case}: {update}");
             assert_joint_at(&mut s, x, case);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The plate linked in, with a sketch on its top face (away from the hole) extruded 3 mm.
+    /// Returns the sketch's and the extrude's feature ids.
+    fn sketched_on_plate(s: &mut Session, path: &Path) -> (u64, u64) {
+        run(s, "component.insert_design", json!({"path": path, "name": "Plate"}));
+        let sketch = run(s, "sketch.create", json!({"plane": {"face": [-20, 10, 5]}, "name": "OnPlate"}))["sketch"].as_u64().unwrap();
+        run(s, "sketch.rectangle.two_point", json!({"p0": [-25, 5], "p1": [-15, 15]}));
+        run(s, "sketch.finish", json!({}));
+        let extrude = run(s, "solid.extrude", json!({"sketch": "OnPlate", "distance": 3}))["feature"].as_u64().unwrap();
+        (sketch, extrude)
+    }
+
+    /// The error of feature `id`, if it failed.
+    fn feature_error(s: &Session, id: u64) -> Option<String> {
+        s.model.result(id).and_then(|r| r.error.clone())
+    }
+
+    /// A sketch on a linked part's face stays on that face when Update Links brings in an edit
+    /// that leaves the face as it was, as joints do (#3330): the face is found by the name the
+    /// part gives it, not by the imported file's digest, which any edit of the part changes.
+    #[test]
+    fn a_sketch_on_a_linked_face_follows_it_through_update_links() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-sketch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft");
+        let edits: [(&str, &dyn Fn(&mut Session)); 3] = [
+            ("a body added far from the plate", &|p: &mut Session| {
+                run(p, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "body_name": "Spacer"}));
+            }),
+            ("the hole moved to x = 20", &|p: &mut Session| {
+                run(p, "parameters.change", json!({"name": "hx", "expression": "20 mm"}));
+            }),
+            ("a second hole added", &|p: &mut Session| hole(p, 15.0, "Hole2")),
+        ];
+        for (case, edit) in edits {
+            let mut part = plate(&path);
+            let mut s = Session::default();
+            let (sketch, extrude) = sketched_on_plate(&mut s, &path);
+            edit(&mut part);
+            run(&mut part, "file.save", json!({}));
+            let update = run(&mut s, "component.update_links", json!({}));
+            assert_eq!(update["updated"], json!(["Plate"]), "{case}: {update}");
+            assert_eq!(feature_error(&s, sketch), None, "{case}: the sketch lost its face");
+            assert_eq!(feature_error(&s, extrude), None, "{case}: the extrude failed");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// When the face a sketch is on is gone from the linked part, the sketch still fails: it is
+    /// not moved to another face.
+    #[test]
+    fn a_sketch_whose_linked_face_is_gone_still_fails() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-sketch-gone-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("plate.solidcraft");
+        let mut part = plate(&path);
+        let mut s = Session::default();
+        let (sketch, _) = sketched_on_plate(&mut s, &path);
+        run(&mut part, "timeline.delete", json!({"feature": "Hole"}));
+        let plate_box = part.doc.features.first().map(|f| f.id).unwrap();
+        run(&mut part, "timeline.delete", json!({"feature": plate_box}));
+        run(&mut part, "solid.box", json!({"length": 60, "width": 40, "height": 8, "corner": [-30, -20, 0], "body_name": "Plate"}));
+        run(&mut part, "file.save", json!({}));
+        run(&mut s, "component.update_links", json!({}));
+        assert!(feature_error(&s, sketch).is_some(), "a sketch on a face the part no longer has must fail");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

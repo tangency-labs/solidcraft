@@ -1,0 +1,205 @@
+{
+  "area": "ladder/07-fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b38"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b38"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b39"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b39"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b40"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "error": "SMLib failed (status 1001)",
+      "inputs": [
+        "b40"
+      ],
+      "op": "blend_dropping",
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  60.0,
+                  40.0,
+                  0.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  15.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  39.58257569495585,
+                  17.0
+                ],
+                [
+                  60.0,
+                  40.0,
+                  15.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  60.0,
+                  39.58257569495585,
+                  17.0
+                ],
+                [
+                  57.0,
+                  34.999999999999986,
+                  20.0
+                ]
+              ],
+              "index": 17
+            }
+          ],
+          "points": [
+            [
+              60.0,
+              40.0,
+              7.5
+            ],
+            [
+              60.0,
+              39.791287847477925,
+              16.0
+            ],
+            [
+              58.931891825700944,
+              37.559849485548405,
+              19.29401699439179
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "kind": "round",
+        "sizes": [
+          3.007,
+          3.007,
+          3.007
+        ]
+      }
+    }
+  ],
+  "case": "020-corner-three-sequential-r5-r3-r7-partial-chain",
+  "expected": {
+    "method": "the r7 runs on (tangent chain) up the side x=60 along its arc on the r5 round, a circle of radius 5 about the r5 axis: the r7's contact line on that face would be the arc offset 7 towards its centre, radius 5 - 7 < 0, so the blend passes through itself; and along the seam of the r5 and r3 rounds no ball over r3 fits the r3 round. No such round exists, so the right answer is a clean refusal (SMLib: no room for the rolling ball). 021 is the same corner with a radius that fits.",
+    "outcome": "refused",
+    "refusal": "the fillet is larger than the faces beside its edges allow",
+    "source": "invariants",
+    "sources": [],
+    "what": "rounds r5 and r3 on the two top edges at a corner, the r3 on its edge alone (Tangent chain off, so it ends where the edge runs on into the r5 round's end arc), then r7 on the vertical edge under them: refused, the r7 cannot exist"
+  },
+  "expressible": false,
+  "golden": {
+    "measured": null,
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "engine_error": "step 4 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (58.936, 37.566, 19.292): the rolling ball does not fit a face it rolls on; the largest radius that fits is 3 mm (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "kernel_error": "SMLib failed (status 1001)",
+    "ran": false
+  },
+  "records": "020-corner-three-sequential-r5-r3-r7-partial-chain.bodies.json.gz",
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 4 (solid.fillet): not supported yet: the fillet is larger than the faces beside its edges allow, at the edge at (58.936, 37.566, 19.292): the rolling ball does not fit a face it rolls on; the largest radius that fits is 3 mm (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "refusal \"the fillet is larger than the faces beside its edges allow\": SolidCraft's wording of the kernel's error"
+  ],
+  "what": "rounds r5 and r3 on the two top edges at a corner, the r3 on its edge alone (Tangent chain off, so it ends where the edge runs on into the r5 round's end arc), then r7 on the vertical edge under them: refused, the r7 cannot exist",
+  "why_not": []
+}

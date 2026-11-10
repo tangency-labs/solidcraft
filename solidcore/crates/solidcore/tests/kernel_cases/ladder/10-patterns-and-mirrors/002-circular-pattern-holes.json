@@ -1,0 +1,265 @@
+{
+  "area": "ladder/10-patterns-and-mirrors",
+  "bodies": {
+    "b123": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b68": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b123"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b124"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b124"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b125"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b68"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b126"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b126"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b127"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b125"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b128"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b127"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b129"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b128",
+        "b129"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b130"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "002-circular-pattern-holes",
+  "expected": {
+    "body_count": 1,
+    "faces": 11,
+    "method": "eight holes pi 3^2 10",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 26012.387171723,
+    "what": "a d6 hole patterned 8 times round a disk r30 h10"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 8595.397500202987,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 26012.38717152013
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18
+    }
+  },
+  "records": "002-circular-pattern-holes.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b130"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8595.397500202987,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 26012.38717152013
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a d6 hole patterned 8 times round a disk r30 h10",
+  "why_not": []
+}

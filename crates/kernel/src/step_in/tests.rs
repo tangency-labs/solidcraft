@@ -1,5 +1,6 @@
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
@@ -541,6 +542,33 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
+/// The unit cube whose top face has a second bound: one edge along the face run out and back (a
+/// slit of no area), written `.F.` then `.T.` or the other way round. The face is still the whole
+/// top: the solid is closed, six faces, one cubic millimetre.
+#[test]
+fn a_planar_face_with_a_slit_for_an_inner_bound_keeps_the_solid_closed() {
+    for (what, first, second) in [("out then back", ".F.", ".T."), ("back then out", ".T.", ".F.")] {
+        let mut entities = cube_entities();
+        // The top face is #431: its outer bound #426 on the plane #430. The slit lies on it at z = 1.
+        entities = entities.replace("#431=ADVANCED_FACE('',(#426),#430,.T.);", "#431=ADVANCED_FACE('',(#426,#2005),#430,.T.);");
+        entities += "#2000=CARTESIAN_POINT('',(0.3,0.5,1.));\n#2001=VERTEX_POINT('',#2000);\n#2002=CARTESIAN_POINT('',(0.7,0.5,1.));\n#2003=VERTEX_POINT('',#2002);\n";
+        entities +=
+            "#2010=DIRECTION('',(1.,0.,0.));\n#2011=VECTOR('',#2010,1.);\n#2012=LINE('',#2000,#2011);\n#2013=EDGE_CURVE('',#2001,#2003,#2012,.T.);\n";
+        entities += &format!(
+            "#2020=ORIENTED_EDGE('',*,*,#2013,{first});\n#2021=ORIENTED_EDGE('',*,*,#2013,{second});\n#2004=EDGE_LOOP('',(#2020,#2021));\n#2005=FACE_BOUND('',#2004,.T.);\n"
+        );
+        entities += &context(10, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        entities += "#9=ADVANCED_BREP_SHAPE_REPRESENTATION('Slit',(#101),#10);\n";
+        let import = step_import(&format!("{HEAD}{entities}{TAIL}")).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(import.bodies.len(), 1, "{what}: {:?}", import.warnings);
+        assert!(import.bodies[0].closed, "{what}: {:?}", import.warnings);
+        assert_eq!(import.bodies[0].file_faces, 6, "{what}");
+        let m = measure(&import.bodies[0].body).unwrap();
+        assert!(rel(m.volume, 1.0) < 1e-6, "{what}: volume {}", m.volume);
+        assert!(rel(m.area, 6.0) < 1e-6, "{what}: area {}", m.area);
+    }
+}
+
 /// A hand-written unit cube brep (`#100`…) in a representation with the given unit and items.
 fn cube_entities() -> String {
     let mut s = String::new();
@@ -594,6 +622,41 @@ fn cube_entities() -> String {
     }
     s += &format!("#100=CLOSED_SHELL('',({}));\n#101=MANIFOLD_SOLID_BREP('Cube',#100);\n", face_ids.join(","));
     s
+}
+
+/// A planar lens: the line from (0, 0, 0) to (`len`, 0, 0) and the arc back through
+/// (`len` / 2, `width`, 0), as a sliver a part writes where two of its faces nearly meet,
+/// on the plane z = 0 with its x axis across the lens (along y), in a file stating 1e-6 mm.
+fn planar_lens(len: f64, width: f64) -> String {
+    let r = (len * len / 4.0 + width * width) / (2.0 * width);
+    let f = |x: f64| format!("{x:.17E}");
+    let mut t = String::from(HEAD);
+    t += "#10=CARTESIAN_POINT('',(0.,0.,0.));\n#11=DIRECTION('',(0.,0.,1.));\n#12=DIRECTION('',(0.,1.,0.));\n";
+    t += "#13=AXIS2_PLACEMENT_3D('',#10,#11,#12);\n#14=PLANE('',#13);\n";
+    t += &format!("#20=CARTESIAN_POINT('',({},0.,0.));\n#21=VERTEX_POINT('',#10);\n#22=VERTEX_POINT('',#20);\n", f(len));
+    t += "#30=DIRECTION('',(1.,0.,0.));\n#31=VECTOR('',#30,1.);\n#32=LINE('',#10,#31);\n#33=EDGE_CURVE('',#21,#22,#32,.T.);\n";
+    // The arc from the line's end back to its start, centred below the line.
+    t += &format!("#40=CARTESIAN_POINT('',({},{},0.));\n", f(len / 2.0), f(width - r));
+    t += "#41=AXIS2_PLACEMENT_3D('',#40,#11,#30);\n";
+    t += &format!("#42=CIRCLE('',#41,{});\n#43=EDGE_CURVE('',#22,#21,#42,.T.);\n", f(r));
+    t += "#50=ORIENTED_EDGE('',*,*,#33,.T.);\n#51=ORIENTED_EDGE('',*,*,#43,.T.);\n#52=EDGE_LOOP('',(#50,#51));\n";
+    t += "#53=FACE_OUTER_BOUND('',#52,.T.);\n#54=ADVANCED_FACE('',(#53),#14,.T.);\n";
+    t += "#60=OPEN_SHELL('',(#54));\n#61=SHELL_BASED_SURFACE_MODEL('Lens',(#60));\n#62=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn a_sliver_planar_face_passes_smlibs_check() {
+    // A lens 0.77 mm long and 1e-5 mm wide (#12757: such a face on an imported part). A plane
+    // is unbounded, so the face's parameter box is the reader's to choose: kept to its pcurves,
+    // padded 1e-6, its two sides across the lens lay within SMLib's tolerance of each other,
+    // and SMLib refused the body ("Bad Surf Coincidence at Seam: Open surface has partially
+    // coincident boundaries").
+    let imp = step_import(&planar_lens(0.77, 1e-5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
 }
 
 fn context(id: u64, unit: &str) -> String {
@@ -1986,7 +2049,7 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert_eq!(imported.bodies[0].file_faces, 1);
             let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.01)).unwrap();
             for mesh in [
-                plan.evaluate(),
+                plan.evaluate_mesh(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
@@ -2933,4 +2996,49 @@ fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
         assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
         assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
     }
+}
+
+/// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
+/// surface colour, whichever style the file lists first or last. The edge's colour once painted
+/// the whole solid, because the first colour found was taken.
+#[test]
+fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
+    let surface = "#71=PRESENTATION_STYLE_ASSIGNMENT((#72));\n#72=SURFACE_STYLE_USAGE(.BOTH.,#73);\n#73=SURFACE_SIDE_STYLE('',(#74));\n#74=SURFACE_STYLE_FILL_AREA(#75);\n#75=FILL_AREA_STYLE('',(#76));\n#76=FILL_AREA_STYLE_COLOUR('',#77);\n#77=COLOUR_RGB('',1.,0.5,0.);\n";
+    let curve = "#81=PRESENTATION_STYLE_ASSIGNMENT((#82));\n#82=CURVE_STYLE('',#83,POSITIVE_LENGTH_MEASURE(0.1),#84);\n#83=DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n#84=COLOUR_RGB('',0.,0.,1.);\n";
+    for (list, name) in [("(#71,#81)", "surface first"), ("(#81,#71)", "curve first")] {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += &format!("#70=STYLED_ITEM('',{list},#101);\n");
+        t += surface;
+        t += curve;
+        t += TAIL;
+        let imp = step_import(&t).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{name}: {:?}", imp.warnings);
+        assert_eq!(imp.bodies[0].color, Some([1.0, 0.5, 0.0]), "{name}");
+    }
+    // A surface style whose boundary lines are drawn in another colour is still its fill's colour.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);
+#70=STYLED_ITEM('',(#71),#101);
+";
+    t += &surface.replace("SURFACE_SIDE_STYLE('',(#74))", "SURFACE_SIDE_STYLE('',(#74,#78))");
+    t += "#78=SURFACE_STYLE_BOUNDARY(#79);
+#79=CURVE_STYLE_RENDERING(.CONSTANT_SHADING.,#80);
+#80=SURFACE_RENDERING_PROPERTIES(#84);
+#84=COLOUR_RGB('',0.,0.,1.);
+";
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, Some([1.0, 0.5, 0.0]), "boundary lines");
+    // A solid styled with a curve style alone has no colour of its own.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n#70=STYLED_ITEM('',(#81),#101);\n";
+    t += curve;
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, None);
 }

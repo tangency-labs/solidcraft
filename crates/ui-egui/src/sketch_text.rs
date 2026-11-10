@@ -525,7 +525,12 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         k.style.bold = false;
     }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold));
+    let emphasis = ui_kit::EmphasisLabels {
+        bold: solidcraft_ui_text::tr("sketch_text.bold"),
+        italic: solidcraft_ui_text::tr("sketch_text.italic"),
+        no_bold: solidcraft_ui_text::tr("sketch_text.no_bold"),
+    };
+    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold, &emphasis));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
             TextAlign::Left => 0,
@@ -1092,7 +1097,7 @@ mod tests {
         h.frames(2);
         h.step(&json!({"click":{"handle":"menu:report"}})).unwrap();
         h.frames(3);
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
         let focus = egui::Id::unique("issue_report_title");
