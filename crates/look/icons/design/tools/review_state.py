@@ -8,7 +8,7 @@ import os, re, json, glob, hashlib, tomllib, threading, uuid
 
 LOCK = threading.RLock()
 
-D = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # .../assets/icons/ui/design
+D = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # .../crates/look/icons/design
 REVIEW = D + '/review.json'
 
 def aliases():

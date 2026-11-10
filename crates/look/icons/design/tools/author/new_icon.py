@@ -26,12 +26,12 @@ def main():
     if args.base == 'slab': grey_slab(icon)
     icon.write(args.family)
     root = design.parents[3]
-    path = f'assets/icons/ui/design/svg/{args.family}/{args.name}.svg'
+    path = f'crates/look/icons/design/svg/{args.family}/{args.name}.svg'
     attribution = root / 'ATTRIBUTION.md'
     row = f'| {path} | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |\n'
     text = attribution.read_text()
     if '| ' + path + ' |' not in text:
-        anchor = '| assets/icons/ui/design/svg/model/placeholder.svg'
+        anchor = '| crates/look/icons/design/svg/model/placeholder.svg'
         if anchor in text: text = text.replace(anchor, row + anchor, 1)
         else: text += '\n' + row
         attribution.write_text(text)

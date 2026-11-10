@@ -1,8 +1,10 @@
 //! Collected glyph artwork. Caption geometry adapted from VectorCraft (MIT OR Apache-2.0).
-use crate::titlebar::Caption;
 use egui::{Color32, Pos2, Rect, Stroke, Ui, pos2, vec2};
+use solidcraft_ui_kit::icons::glyphs::Glyphs;
+use solidcraft_ui_kit::window_chrome::Caption;
 
-pub(crate) fn transport_glyph(p: &egui::Painter, c: egui::Pos2, what: &str, col: Color32) {
+/// [`Glyphs::transport`]: a history transport mark centred on `c`.
+pub fn transport_glyph(p: &egui::Painter, c: egui::Pos2, what: &str, col: Color32) {
     let tri = |dir: f32, dx: f32| {
         let pts = vec![pos2(c.x + dx - 4.0 * dir, c.y - 5.0), pos2(c.x + dx + 4.0 * dir, c.y), pos2(c.x + dx - 4.0 * dir, c.y + 5.0)];
         p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
@@ -33,7 +35,8 @@ pub(crate) fn transport_glyph(p: &egui::Painter, c: egui::Pos2, what: &str, col:
     }
 }
 
-pub(crate) fn paint_glyph(ui: &Ui, c: Caption, maximized: bool, at: egui::Pos2, s: Stroke) {
+/// [`Glyphs::caption`]: a window caption button's mark centred on `at`.
+pub fn paint_glyph(ui: &Ui, c: Caption, maximized: bool, at: egui::Pos2, s: Stroke) {
     let p = ui.painter();
     let g = Rect::from_center_size(at, vec2(10.0, 10.0));
     match c {
@@ -56,7 +59,8 @@ pub(crate) fn paint_glyph(ui: &Ui, c: Caption, maximized: bool, at: egui::Pos2, 
     }
 }
 
-pub(crate) fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
+/// [`Glyphs::badge`]: the `lock` or `pin` status badge in `r`.
+pub fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
     let s = Stroke::new(1.3, c);
     match name {
         "lock" => {
@@ -84,7 +88,8 @@ pub(crate) fn badge(p: &egui::Painter, r: Rect, name: &str, c: Color32) {
     }
 }
 
-pub(crate) fn pin_icon(p: &egui::Painter, r: Rect, on: bool, col: Color32) {
+/// [`Glyphs::pin`]: a pin in `r`, upright when `on`.
+pub fn pin_icon(p: &egui::Painter, r: Rect, on: bool, col: Color32) {
     let c = r.center();
     let (sin, cos) = if on { (0.0, 1.0) } else { std::f32::consts::FRAC_PI_4.sin_cos() };
     // Local coordinates: the pin points down, its head on top.
@@ -103,18 +108,19 @@ pub(crate) fn pin_icon(p: &egui::Painter, r: Rect, on: bool, col: Color32) {
 /// A breadcrumb separator ("Sketch › Create"): a thin chevron about 3 by 6 px, centred on `c`.
 /// Drawn rather than typed, because a font's "›" sits on the baseline in some languages
 /// (Japanese), where it reads as a comma.
-pub(crate) fn breadcrumb(p: &egui::Painter, c: egui::Pos2, col: Color32) {
+pub fn breadcrumb(p: &egui::Painter, c: egui::Pos2, col: Color32) {
     let s = Stroke::new(1.0, col);
     p.line_segment([pos2(c.x - 1.5, c.y - 3.0), pos2(c.x + 1.5, c.y)], s);
     p.line_segment([pos2(c.x + 1.5, c.y), pos2(c.x - 1.5, c.y + 3.0)], s);
 }
 
-pub(crate) fn brand_mark(p: &egui::Painter, c: Pos2) {
+/// The SolidCraft mark in its colours, 20 points high, centred on `c` (the application bar).
+pub fn brand_mark(p: &egui::Painter, c: Pos2) {
     brand_mark_styled(p, c, 20.0, solidcraft_theme::Tokens::get().logo, true);
 }
 
 /// The same original mark as a single quiet silhouette, without face seams or outlines.
-pub(crate) fn brand_mark_silhouette(p: &egui::Painter, c: Pos2, height: f32, ink: Color32) {
+pub fn brand_mark_silhouette(p: &egui::Painter, c: Pos2, height: f32, ink: Color32) {
     brand_mark_styled(p, c, height, [ink; 3], false);
 }
 
@@ -165,7 +171,27 @@ fn brand_mark_styled(p: &egui::Painter, c: Pos2, height: f32, colours: [Color32;
     ));
 }
 
-pub(crate) fn cross(p: &egui::Painter, r: Rect, s: Stroke) {
+/// [`Glyphs::cross`]: a cross filling `r`.
+pub fn cross(p: &egui::Painter, r: Rect, s: Stroke) {
     p.line_segment([r.left_top(), r.right_bottom()], s);
     p.line_segment([r.right_top(), r.left_bottom()], s);
+}
+
+/// SolidCraft's code-drawn glyphs, as the kit draws them ([`solidcraft_ui_kit::icons::glyphs`]).
+pub static GLYPHS: Glyphs = Glyphs {
+    transport: transport_glyph,
+    caption: paint_glyph,
+    badge,
+    pin: pin_icon,
+    cross,
+    breadcrumb,
+    axis_tip: crate::compass::axis_tip_scaled,
+    axis_radius: crate::compass::AXIS_RADIUS,
+    pointer: crate::pointer::paint,
+    brand_mark: brand_mark_silhouette,
+};
+
+/// Make [`GLYPHS`] the glyphs the kit draws, once per process; calling it again does nothing.
+pub fn install() {
+    solidcraft_ui_kit::icons::glyphs::install(&GLYPHS);
 }

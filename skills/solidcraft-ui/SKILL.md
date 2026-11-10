@@ -23,7 +23,7 @@ The UI is thin: it reads engine state and acts through `app.run(id, params)` or 
 Every page or canvas with a camera (viewport, Render preview, a flat pattern or drawing page) calls `navigation::handle` (`crates/ui-egui/src/navigation.rs`) with its `NavCaps` (orbit off for flat 2D pages). Never hand-roll camera input from drags, the wheel or pinch; `hand_rolled_camera_input_is_rejected` fails if a page does.
 
 ## Icons
-Command icons are original SVG masters compiled through `crates/ui-egui/src/icon_svg.rs`. Read `assets/AGENTS.md`, `assets/icons/ui/AGENTS.md` and `assets/icons/ui/STYLE_GUIDE.md` first, add the ATTRIBUTION.md row, and run `cargo xtask icons` and `cargo xtask assets`. See `skills/solidcraft-ground-rules/SKILL.md`.
+Command icons are original SVG masters compiled by the look crate (`crates/look/src/icons.rs`). Read `assets/AGENTS.md`, `crates/look/icons/AGENTS.md` and `crates/look/icons/STYLE_GUIDE.md` first, add the ATTRIBUTION.md row, and run `cargo xtask icons` and `cargo xtask assets`. See `skills/solidcraft-ground-rules/SKILL.md`.
 
 ## Text
 Every label, tooltip and message goes through the catalogs: `skills/solidcraft-ui-text/SKILL.md`. A new behaviour that is on by default: `skills/solidcraft-preferences/SKILL.md`.

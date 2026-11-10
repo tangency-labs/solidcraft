@@ -70,4 +70,4 @@ meetup. If you publish a fork or a modified build, give it its own name and logo
 don't mistake it for SolidCraft.
 
 The wordmark is set in IBM Plex Sans Bold (SIL Open Font License 1.1, the interface font in
-`assets/fonts/ibm-plex-sans/`) and outlined, so you don't need the font to print it.
+`crates/look/fonts/ibm-plex-sans/`) and outlined, so you don't need the font to print it.

@@ -179,10 +179,10 @@ fn render(root: &Path, crates: &[Crate]) -> String {
          - CraftUI-TC.otf (assets/fonts/craft-ui-tc/CraftUI-TC.otf)\n  \
            Copyright 2014-2021 Adobe / Google Inc. (Noto Sans TC subset for SolidCraft web zh-TW)\n  \
            Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/TC)\n\n\
-         - IBMPlexSans-Variable.ttf (assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
+         - IBMPlexSans-Variable.ttf (crates/look/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n\
-         - IBMPlexMono-Regular.ttf (assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf)\n  \
+         - IBMPlexMono-Regular.ttf (crates/look/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n"
     );

@@ -4275,6 +4275,7 @@ dependencies = [
  "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-egui",
@@ -4488,6 +4489,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-look"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "log",
+ "solidcraft-theme",
+ "solidcraft-ui-kit",
+ "tiny-skia",
+ "toml",
+]
+
+[[package]]
 name = "solidcraft-mcp"
 version = "0.40.0-rc.3"
 dependencies = [
@@ -4623,6 +4636,7 @@ dependencies = [
  "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-kit",
@@ -4633,7 +4647,6 @@ dependencies = [
  "solidcraft-viewport-gpu",
  "syn 2.0.119",
  "tiny-skia",
- "toml",
  "ttf-parser",
  "web-time",
  "winreg",
@@ -4731,6 +4744,7 @@ dependencies = [
  "serde_json",
  "solidcraft-control",
  "solidcraft-engine",
+ "solidcraft-look",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
  "url",
