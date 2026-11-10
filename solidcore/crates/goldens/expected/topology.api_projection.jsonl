@@ -6,7 +6,7 @@
 {"case":"gen0004","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42115.12617628933,42115.12617628933,1052823.4743722875]],"n":70},"status":[0.0]}}
 {"case":"gen0005","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14069.536198655822,14071.536198655822,42791.27591283868]],"n":25},"status":[0.0]}}
 {"case":"gen0006","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[-1.0,-1.0],"status":[0.0]}}
-{"case":"gen0007","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[181412.0566749329,185710.53307332803,23223430.55659301],[1505.2856037839313,1982.314713254581,19171.21069018719]],"n":277},"status":[0.0]}}
+{"case":"gen0007","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[181412.0566749329,185710.53307332803,23223430.556593012],[1505.285603783931,1982.314713254581,19171.210690187185]],"n":277},"status":[0.0]}}
 {"case":"gen0008","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56161.92618293647,56161.92618293647,2049830.6123624903]],"n":93},"status":[0.0]}}
 {"case":"gen0009","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[42121.04598583094,42121.04598583094,1053128.3874231414]],"n":70},"status":[0.0]}}
 {"case":"gen0010","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[58505.313614065475,58505.313614065475,2164627.337805356]],"n":93},"status":[0.0]}}
@@ -15,11 +15,11 @@
 {"case":"gen0013","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[2.0],"status":[1001.0]}}
 {"case":"gen0014","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14040.096397504616,14042.096397504616,28139.527213919915]],"n":25},"status":[0.0]}}
 {"case":"gen0015","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14039.49481745948,14041.49481745948,42204.436480778546]],"n":25},"status":[0.0]}}
-{"case":"project_brep_Solids_cylinder","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[96853.70209263428,100493.85178638861,6855700.652618297]],"n":162},"status":[0.0]}}
+{"case":"project_brep_Solids_cylinder","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[82996.45869835683,86106.55849419304,4920424.817247666]],"n":139},"status":[0.0]}}
 {"case":"project_brep_Solids_sphere","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[13820.415665203107,14340.415820445238,24222.662973693034]],"n":24},"status":[0.0]}}
 {"case":"project_brep_box_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[126319.08000000003,127067.68800000001,11866181.719999999]],"n":208},"status":[0.0]}}
 {"case":"project_brep_box_x_prefilled","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56206.0,56406.0,2051629.0]],"n":93},"status":[0.0]}}
-{"case":"project_brep_cone","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[69019.4309083761,71604.53070421233,3296325.922269292]],"n":116},"status":[0.0]}}
+{"case":"project_brep_cone","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[55238.9753543642,57294.025252282314,2004054.8864100543]],"n":93},"status":[0.0]}}
 {"case":"project_brep_fillet_box","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[112579.76588235292,112579.76588235292,9288456.563671915]],"n":185},"status":[0.0]}}
 {"case":"project_brep_fillet_box_long_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[112579.76588235292,112579.76588235292,9288456.563671915]],"n":185},"status":[0.0]}}
 {"case":"project_brep_fillet_box_zero_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1007.0]}}
@@ -43,7 +43,7 @@
 {"case":"silhouette_box10_appended","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56485.0,56485.0,2065005.0]],"n":93},"status":[0.0]}}
 {"case":"silhouette_box10_long_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[56484.0,56484.0,2065004.0]],"n":93},"status":[0.0]}}
 {"case":"silhouette_box10_zero_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1007.0]}}
-{"case":"silhouette_fillet_box_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[169298.6282744874,169298.6282744874,21754555.220659163],[66.50000000000001,66.50000000000001,702.2322330470337]],"n":277},"status":[0.0]}}
+{"case":"silhouette_fillet_box_oblique","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[169298.6282744874,169298.6282744874,21754555.220659163],[66.50000000000003,66.50000000000003,702.2322330470339]],"n":277},"status":[0.0]}}
 {"case":"silhouette_null_body","deferred":null,"error":null,"ints":{},"rejected":"null B-rep dereferenced upstream (SmApiCreateSilhouetteCurves)","topology":null,"values":{}}
 {"case":"silhouette_null_zero_normal","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1007.0]}}
 {"case":"silhouette_torus","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[70534.12900516426,70841.72998725541,3389108.006813345]],"n":116},"status":[0.0]}}
