@@ -22,7 +22,7 @@
 //! the side its first use needs (its same_sense, and its loops run counter-clockwise about that
 //! side's normal); a later use of the other side refers to it through an ORIENTED_FACE.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::Vec3Geom as _;
 use std::sync::Arc;
 
 use solidcore_record::brep::{Brep, Curve as BCurve, Curve2, Edge, Face, Frame, Loop, Shell, Surface as BSurface};
@@ -118,7 +118,7 @@ fn bspline_curve(full: &[f64], points: Vec<P3>, weights: Option<Vec<f64>>) -> R<
 /// crosses itself. Anything else is not known without searching the curve, and stays unknown.
 fn known_flags(full: &[f64], degree: usize, points: &[P3]) -> (Logical, Logical) {
     let flag = |b: bool| if b { Logical::True } else { Logical::False };
-    let clamped = |ends: &[f64]| ends.len() > degree && ends.iter().all(|k| *k == ends[0]);
+    let clamped = |ends: &[f64]| ends.len() > degree && ends.first().is_some_and(|f| ends.iter().all(|k| k == f));
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return (Logical::Unknown, Logical::Unknown) };
     let (head, tail) = (full.get(..=degree).unwrap_or_default(), full.get(full.len().saturating_sub(degree + 1)..).unwrap_or_default());
     let closed = if clamped(head) && clamped(tail) {
@@ -190,13 +190,18 @@ fn plane(origin: P3, a: P3, b: P3) -> R<(Surface, Map)> {
 type Affine = ([P3; 3], P3);
 
 fn affine(m: &[[f64; 4]; 4]) -> Affine {
-    let col = |c: usize| [m[c][0], m[c][1], m[c][2]];
-    ([col(0), col(1), col(2)], col(3))
+    let col = |c: &[f64; 4]| [c[0], c[1], c[2]];
+    let [c0, c1, c2, c3] = m;
+    ([col(c0), col(c1), col(c2)], col(c3))
 }
 
 fn linear(l: &[P3; 3], p: P3) -> P3 {
     let [a, b, c] = l;
-    [0, 1, 2].map(|i| a[i] * p[0] + b[i] * p[1] + c[i] * p[2])
+    let mut out = [0.0; 3];
+    for (((o, a), b), c) in out.iter_mut().zip(a).zip(b).zip(c) {
+        *o = a * p[0] + b * p[1] + c * p[2];
+    }
+    out
 }
 
 fn moved((l, t): &Affine, p: P3) -> P3 {
@@ -635,7 +640,7 @@ fn signed_area(ring: &[[f64; 2]]) -> f64 {
 /// axis (the sphere's centre, the torus's centre circle); `None` when the NURBS has no normal at
 /// its domain's centre.
 fn form_map(analytic: &BSurface, n: &BSurface, domain: [[f64; 2]; 2], map: Map) -> Option<Map> {
-    let eval = solidcraft_geom::brep::eval::SurfaceEval::new(n).ok()?;
+    let eval = crate::kernel::SurfaceEval::new(n).ok()?;
     let (p, su, sv) = eval.derivs(0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1]))?;
     let normal = su.cross(sv);
     let away = |f: &Frame| {

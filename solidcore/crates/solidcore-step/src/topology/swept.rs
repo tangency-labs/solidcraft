@@ -14,7 +14,7 @@
 //! surfaces' parameters may differ from STEP's (an extrusion's v, a conic's rational
 //! parameter); pcurves and domains come from the records, never from STEP's parameters.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::Vec3Geom as _;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::Vec3;
@@ -79,7 +79,13 @@ pub(super) fn parabola_spline(p: &Placement, f: f64, t0: f64, t1: f64) -> BCurve
 
 /// The STEP line from `t0` to `t1` as a degree-1 spline on knots `t0, t1`: STEP's parameter.
 fn line_spline(origin: P3, direction: P3, magnitude: f64, t0: f64, t1: f64) -> BCurve {
-    let at = |t: f64| [0, 1, 2].map(|i| origin[i] + direction[i] * magnitude * t);
+    let at = |t: f64| {
+        let mut p = [0.0; 3];
+        for ((p, o), d) in p.iter_mut().zip(origin).zip(direction) {
+            *p = o + d * magnitude * t;
+        }
+        p
+    };
     BCurve::Spline { knots: vec![t0, t0, t1, t1], points: vec![at(t0), at(t1)] }
 }
 
@@ -188,7 +194,7 @@ fn span(ts: &[f64], seam: &[f64], closed: bool) -> R<Span> {
 
 /// A conic's NURBS form over `[lo, hi]` in angle.
 fn form(c: BCurve, lo: f64, hi: f64) -> R<BCurve> {
-    Ok(solidcraft_geom::brep::form::curve(&c, [lo, hi]).ok_or_else(|| unsupported("a conic profile of more than one turn"))?.0)
+    Ok(crate::kernel::form::curve(&c, [lo, hi]).ok_or_else(|| unsupported("a conic profile of more than one turn"))?.0)
 }
 
 /// The profile over its span as an exact spline (B-spline and polyline profiles whole).
@@ -404,10 +410,10 @@ fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64) -> Option<(f64, f64)> 
 /// them: the same curve at the same parameters (`bspline::segment`, exact knot insertion), so
 /// it keeps the grid its edges' forms share and stops where the profile meets the axis.
 fn clip_form(curve: BCurve, (a0, a1): (f64, f64)) -> R<BCurve> {
-    use solidcraft_geom::bspline::{HPoint, segment};
+    use solidcore::eval::pcurve::segment;
     let BCurve::RationalSpline { knots, homogeneous } = curve else { return Ok(curve) };
     let (Some(&k0), Some(&k1)) = (knots.first(), knots.last()) else { return Err("a profile without knots".into()) };
-    let (lo, hi) = (solidcraft_geom::brep::form::param(a0).max(k0), solidcraft_geom::brep::form::param(a1).min(k1));
+    let (lo, hi) = (crate::kernel::form::param(a0).max(k0), crate::kernel::form::param(a1).min(k1));
     if lo <= k0 && hi >= k1 {
         return Ok(BCurve::RationalSpline { knots, homogeneous });
     }
@@ -415,9 +421,8 @@ fn clip_form(curve: BCurve, (a0, a1): (f64, f64)) -> R<BCurve> {
         return Err(unsupported("a revolved profile on its axis"));
     }
     let degree = knots.len().checked_sub(homogeneous.len() + 1).ok_or("a profile's knots")?;
-    let ctrl: Vec<HPoint> = homogeneous.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect();
-    let (knots, ctrl) = segment(degree, &knots, &ctrl, lo, hi).map_err(|e| format!("a revolved profile cut at its axis: {e}"))?;
-    Ok(BCurve::RationalSpline { knots, homogeneous: ctrl.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() })
+    let (knots, homogeneous) = segment(degree, &knots, &homogeneous, lo, hi).map_err(|e| format!("a revolved profile cut at its axis: {e}"))?;
+    Ok(BCurve::RationalSpline { knots, homogeneous })
 }
 
 /// Going from `from` (where `side` is positive or zero) towards `to`, the first parameter

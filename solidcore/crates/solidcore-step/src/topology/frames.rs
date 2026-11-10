@@ -10,7 +10,7 @@
 //! its form spans the four quarters (or fewer) it covers.
 //!
 //! A circle edge about the axis of the round faces it bounds is labelled on one of their frames
-//! (`solidcraft_geom::brep::form::edge`), so its form and theirs share one quarter grid and its pcurves are
+//! (`crate::kernel::form::edge`), so its form and theirs share one quarter grid and its pcurves are
 //! straight lines; the faces joined that way (a cylinder and the coaxial fillet beside it) are
 //! turned together, by one angle about their common axis, and keep that. They are turned only
 //! when one of them spills and one angle puts every one of them within four quarters (a start
@@ -20,12 +20,12 @@
 //!
 //! A torus face's tube spills the same way along its tube angle, which STEP counts from the outer
 //! equator: its tube start moves to where the face's tube begins, or a turn before where it ends
-//! (`solidcraft_geom::brep::form::tube_turned`), the same surface. Its circles round the tube are labelled from
-//! the tube start (`solidcraft_geom::brep::form::on_tube`), unless one is about another round face's axis (a
+//! (`crate::kernel::form::tube_turned`), the same surface. Its circles round the tube are labelled from
+//! the tube start (`crate::kernel::form::on_tube`), unless one is about another round face's axis (a
 //! pipe's cylinder meeting the tube), which labels it on its own grid: the tube start is then
 //! the one of the two that puts the tube's grid on that face's.
 
-use solidcraft_geom::prelude::*;
+use crate::vec::Vec3Geom as _;
 use std::f64::consts::TAU;
 
 use solidcore_record::Vec3;
@@ -35,13 +35,13 @@ use super::{Builder, LoopB, R};
 
 /// A circle edge bounds a face about the circle's own axis: the faces it joins share a grid.
 fn about_axis(edge: &BCurve, interval: [f64; 2], frame: &brep::Frame, tol: f64) -> bool {
-    matches!(edge, BCurve::Circle { .. }) && solidcraft_geom::brep::form::on_frame(edge, interval, frame, tol).is_some()
+    matches!(edge, BCurve::Circle { .. }) && crate::kernel::form::on_frame(edge, interval, frame, tol).is_some()
 }
 
 /// The face's quarters about the axis with its frame turned by `angle` (its box shifted to
 /// match), or `None` when its form cannot be measured.
 fn quarters_turned(surface: &brep::Surface, [u, v]: [[f64; 2]; 2], angle: f64, tol: f64) -> Option<usize> {
-    solidcraft_geom::brep::form::turn_quarters(surface, [[u[0] - angle, u[1] - angle], v], tol)
+    crate::kernel::form::turn_quarters(surface, [[u[0] - angle, u[1] - angle], v], tol)
 }
 
 /// Union-find root of `i`.
@@ -76,7 +76,7 @@ impl Builder<'_, '_> {
     /// neither does, where it begins.
     fn turn_tubes(&mut self) -> usize {
         let tol = self.tol;
-        let frames: Vec<Option<brep::Frame>> = self.faces.iter().map(|f| solidcraft_geom::brep::form::frame_of(&f.surface)).collect();
+        let frames: Vec<Option<brep::Frame>> = self.faces.iter().map(|f| crate::kernel::form::frame_of(&f.surface)).collect();
         // The round faces each edge bounds.
         let mut bounding: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
         for (fi, f) in self.faces.iter().enumerate() {
@@ -97,7 +97,7 @@ impl Builder<'_, '_> {
         for fi in 0..self.faces.len() {
             let Some(face) = self.faces.get(fi) else { continue };
             let Some(e) = face.extent else { continue };
-            if solidcraft_geom::brep::form::tube_quarters(&face.surface, e, tol).is_none_or(|q| q <= 4) {
+            if crate::kernel::form::tube_quarters(&face.surface, e, tol).is_none_or(|q| q <= 4) {
                 continue;
             }
             // Its tube circles about another round face's axis, with that face's frame.
@@ -114,13 +114,13 @@ impl Builder<'_, '_> {
                 }
             }
             let on_grid = |start: f64| {
-                solidcraft_geom::brep::form::tube_turned(&face.surface, start).is_some_and(|torus| {
-                    joined.iter().all(|(c, iv, fr)| solidcraft_geom::brep::form::tube_on_grid(c, *iv, fr, &torus, tol).is_none_or(|on| on))
+                crate::kernel::form::tube_turned(&face.surface, start).is_some_and(|torus| {
+                    joined.iter().all(|(c, iv, fr)| crate::kernel::form::tube_on_grid(c, *iv, fr, &torus, tol).is_none_or(|on| on))
                 })
             };
             let (begin, end) = (e[1][0], e[1][1] - TAU);
             let start = if !on_grid(begin) && on_grid(end) { end } else { begin };
-            let Some(surface) = solidcraft_geom::brep::form::tube_turned(&face.surface, start) else { continue };
+            let Some(surface) = crate::kernel::form::tube_turned(&face.surface, start) else { continue };
             if let Some(face) = self.faces.get_mut(fi) {
                 face.surface = surface;
                 if let Some(e) = face.extent.as_mut() {
@@ -135,7 +135,7 @@ impl Builder<'_, '_> {
     /// Measure the round faces' boxes and turn the groups that spill about their axes.
     fn turn_about_axes(&mut self) -> R<usize> {
         let n = self.faces.len();
-        let frames: Vec<Option<brep::Frame>> = self.faces.iter().map(|f| solidcraft_geom::brep::form::frame_of(&f.surface)).collect();
+        let frames: Vec<Option<brep::Frame>> = self.faces.iter().map(|f| crate::kernel::form::frame_of(&f.surface)).collect();
         for fi in 0..n {
             if frames.get(fi).is_some_and(Option::is_some) {
                 let extent = self.face_extent(fi)?;
@@ -176,7 +176,8 @@ impl Builder<'_, '_> {
                 .filter(|fi| frames.get(*fi).and_then(Option::as_ref).is_some_and(|fr| about_axis(&edge.curve, edge.interval, fr, self.tol)))
                 .collect();
             for w in joined.windows(2) {
-                let (a, b) = (root(&mut parent, w[0]), root(&mut parent, w[1]));
+                let &[x, y] = w else { continue };
+                let (a, b) = (root(&mut parent, x), root(&mut parent, y));
                 if a != b
                     && let Some(slot) = parent.get_mut(a)
                 {
@@ -224,7 +225,7 @@ impl Builder<'_, '_> {
             if members.len() != g.len()
                 || members
                     .iter()
-                    .any(|(fi, _, e)| e.is_none() || self.faces.get(*fi).and_then(|f| solidcraft_geom::brep::form::turned(&f.surface, 0.0)).is_none())
+                    .any(|(fi, _, e)| e.is_none() || self.faces.get(*fi).and_then(|f| crate::kernel::form::turned(&f.surface, 0.0)).is_none())
             {
                 continue;
             }
@@ -264,7 +265,7 @@ impl Builder<'_, '_> {
             };
             for (fi, angle) in turns {
                 let Some(face) = self.faces.get_mut(fi) else { continue };
-                let Some(surface) = solidcraft_geom::brep::form::turned(&face.surface, angle) else { continue };
+                let Some(surface) = crate::kernel::form::turned(&face.surface, angle) else { continue };
                 face.surface = surface;
                 if let Some(e) = face.extent.as_mut() {
                     e[0] = [e[0][0] - angle, e[0][1] - angle];
