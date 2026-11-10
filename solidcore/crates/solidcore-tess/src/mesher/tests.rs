@@ -632,7 +632,6 @@ fn a_continuous_offset_m20_with_shared_exact_edges_has_a_complete_display_plan()
         assert_eq!(check.failures().count(), 0, "{:?}", check.reports);
     };
     strict(&mut k, &mut body);
-    eprintln!("M20_TESS_STAGE strict_input_passed");
     let picked: Vec<_> = body
         .faces()
         .ids()
@@ -663,7 +662,6 @@ fn a_continuous_offset_m20_with_shared_exact_edges_has_a_complete_display_plan()
             .count(),
         2
     );
-    eprintln!("M20_TESS_STAGE strict_output_passed");
     let (record, _) = kernel::brep::to_record(&mut k, &mut body).unwrap();
     record.validate_built().unwrap();
     record.validate().unwrap();
@@ -674,11 +672,6 @@ fn a_continuous_offset_m20_with_shared_exact_edges_has_a_complete_display_plan()
         .filter(|e| matches!(e.curve, Curve::OnSurfaceRef { .. }))
         .count();
     assert_eq!(shared_edges, 52);
-    eprintln!(
-        "M20_TESS_STAGE record_written faces={} edges={} shared_edges={shared_edges}",
-        record.faces.len(),
-        record.edges.len()
-    );
 
     // The outer stock is a 20 mm diameter, 20 mm high cylinder. Display rules
     // use its exact box diagonal; the requested chord is the standard 0.05 mm.
@@ -688,7 +681,6 @@ fn a_continuous_offset_m20_with_shared_exact_edges_has_a_complete_display_plan()
         20.0 * 3.0_f64.sqrt(),
     )
     .unwrap();
-    eprintln!("M20_TESS_STAGE planned {stats:?}");
     assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed);
     assert!(
         stats.unsampled_edges.is_empty(),
