@@ -80,6 +80,7 @@ use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::api_queries::{brep_is_closed_manifold, brep_is_manifold_solid, BrepRef};
+use crate::surface::surface::Surface;
 
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p3 as bp3;
@@ -1479,7 +1480,7 @@ impl OffsetExecutive {
         // (WR-718, S1) is refused, naming the largest wall that works
         if self.local_faces.is_empty() && self.operation() != OffsetOperation::LocalOperation {
             if let Some(crate::surface::surface::SurfaceKind::OffsetSurface(offset)) =
-                surface.as_ref().map(crate::surface::surface::Surface::kind)
+                surface.as_ref().map(Surface::kind)
             {
                 refuse_singular_offset(kernel, original, id, offset, operation)?;
                 refuse_folding_offset(kernel, original, id, offset, operation)?;
@@ -1604,7 +1605,7 @@ impl OffsetExecutive {
                     crate::geom::context::Context::with_notification_context(
                         kernel,
                         |kernel, context| {
-                            crate::topology::brep::p2::replace_surface(
+                            replace_surface_with_screw_parameters(
                                 kernel,
                                 &mut temporary,
                                 &mut crate::topology::edge::NotifyEnv {
@@ -1616,8 +1617,6 @@ impl OffsetExecutive {
                                 id,
                                 extension,
                                 key,
-                                crate::topology::brep::p2::OldSurface::Keep,
-                                false,
                             )
                         },
                     )??;
@@ -1643,7 +1642,7 @@ impl OffsetExecutive {
                         let restored = crate::geom::context::Context::with_notification_context(
                             kernel,
                             |kernel, context| {
-                                crate::topology::brep::p2::replace_surface(
+                                replace_surface_with_screw_parameters(
                                     kernel,
                                     &mut temporary,
                                     &mut crate::topology::edge::NotifyEnv {
@@ -1655,8 +1654,6 @@ impl OffsetExecutive {
                                     id,
                                     original_surface,
                                     key,
-                                    crate::topology::brep::p2::OldSurface::Keep,
-                                    false,
                                 )
                             },
                         )?;
@@ -1670,6 +1667,57 @@ impl OffsetExecutive {
         self.set_offset_brep(temporary);
         status
     }
+}
+
+/// A retained screw section has the same UV coordinates on its certified continuation.
+/// Keep its paired intersection trims across the ordinary notified surface replacement.
+/// Other surface classes retain the ordinary replacement contract.
+fn replace_surface_with_screw_parameters(
+    kernel: &Kernel,
+    brep: &mut Brep,
+    env: &mut crate::topology::edge::NotifyEnv<'_>,
+    face: FaceId,
+    surface: Surface,
+    face_ref: ObjectRef,
+) -> Result<(Option<Surface>, Vec<FaceId>)> {
+    let same_parameters = brep
+        .face(face)?
+        .surface
+        .as_ref()
+        .and_then(Surface::procedural_sweep)
+        .zip(surface.procedural_sweep())
+        .is_some_and(|(a, b)| a.definition().same_screw_parameterization(b.definition()));
+    let mut trims = Vec::new();
+    if same_parameters {
+        for edgeuse in crate::topology::face::p4::upward_edgeuses(brep, face, false, None)? {
+            if let Some(curve) = eu::uv_trim_curve(brep, edgeuse)?.0 {
+                trims.push((edgeuse, curve.copy(kernel)?));
+            }
+        }
+    }
+    let result = crate::topology::brep::p2::replace_surface(
+        kernel,
+        brep,
+        env,
+        face,
+        surface,
+        face_ref,
+        crate::topology::brep::p2::OldSurface::Keep,
+        false,
+    )?;
+    for (edgeuse, curve) in trims {
+        // The definition and parameter map are unchanged. Reattach through the normal
+        // setter so ownership and gap caches are correct, without growing tolerances.
+        eu::set_uv_trim_curve(
+            brep,
+            edgeuse,
+            eu::UvTrimCurveArg::New(Box::new(curve)),
+            0.0,
+            true,
+            None,
+        )?;
+    }
+    Ok(result)
 }
 
 pub(super) fn select_offset_faceuse(
@@ -1920,7 +1968,7 @@ pub fn local_operation_simple(
     kernel: &mut Kernel,
     b: &mut Brep,
     faces: &[FaceId],
-    surfaces: Vec<crate::surface::surface::Surface>,
+    surfaces: Vec<Surface>,
 ) -> Result<()> {
     let saved_key = b.key();
     b.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
@@ -2010,7 +2058,7 @@ pub fn faceuse_offset(
     faceuse: FaceuseId,
     distance: f64,
     approx_tol_3d: f64,
-) -> Result<Option<crate::surface::surface::Surface>> {
+) -> Result<Option<Surface>> {
     let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
         distance,
         approx_tol_3d,
@@ -4165,6 +4213,144 @@ mod tests {
                 }
             ));
             assert!(exec.offset_brep().unwrap().faces().is_empty());
+        }
+    }
+
+    #[test]
+    fn screw_support_swaps_keep_paired_trims_and_leave_tolerances_unchanged() {
+        use crate::curve::curve::Curve;
+        use crate::primitive::api_curves::create_line_segment;
+        use crate::surface::plane::Plane;
+
+        let mut kernel = Kernel::default();
+        let corners = [
+            Vec3::new(4.0, 0.0, 0.0),
+            Vec3::new(5.0, 0.0, 0.2),
+            Vec3::new(5.0, 0.0, 0.8),
+            Vec3::new(4.0, 0.0, 1.0),
+        ];
+        let profile: Vec<Curve> = corners
+            .iter()
+            .zip(corners.iter().cycle().skip(1))
+            .map(|(&a, &b)| Curve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let mut body = crate::sweep::screw::screw_sweep(
+            &mut kernel,
+            &profile,
+            Vec3::ZERO,
+            Vec3::Z,
+            1.5,
+            1.25,
+            1e-4,
+        )
+        .unwrap();
+        let face = body
+            .faces()
+            .ids()
+            .find(|&f| {
+                body.face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .is_some_and(|s| s.procedural_sweep().is_some())
+            })
+            .unwrap();
+        let original = body
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .copy(&kernel)
+            .unwrap();
+        let screw = original.procedural_sweep().unwrap();
+        let extension = screw
+            .definition()
+            .extended_for_offset(screw.net(), 0.05, 1e-3)
+            .unwrap();
+        assert!(screw
+            .definition()
+            .same_screw_parameterization(extension.procedural_sweep().unwrap().definition()));
+        let edgeuses =
+            crate::topology::face::p4::upward_edgeuses(&body, face, false, None).unwrap();
+        let mut samples = Vec::new();
+        for edgeuse in edgeuses {
+            crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                &kernel, &mut body, edgeuse, false, false, true,
+            )
+            .unwrap()
+            .status
+            .unwrap();
+            let curve = eu::uv_trim_curve(&body, edgeuse).unwrap().0.unwrap();
+            let interval = curve.natural_interval();
+            let points = [0.17, 0.5, 0.83].map(|f| {
+                curve
+                    .evaluate_point(
+                        &kernel,
+                        interval.min() + f * (interval.max() - interval.min()),
+                    )
+                    .unwrap()
+            });
+            samples.push((edgeuse, points));
+        }
+        // The continuous 1.25-turn wall has split rails at the seam stations:
+        // three edges on each rail and two end edges. Check every trim below.
+        assert_eq!(samples.len(), 8);
+        let tolerances: Vec<_> = body
+            .edges()
+            .iter()
+            .map(|(id, e)| (id, e.tolerance))
+            .collect();
+        let mut records = crate::topology::topology::NotifyRecords::new();
+        let mut attributes = AttributeStore::default();
+        let key_of = &crate::topology::loopuse::notify_ref;
+        let face_ref = key_of(EntityRef::Face(face));
+        let mut env = crate::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of,
+        };
+        let (kept, _) = replace_surface_with_screw_parameters(
+            &kernel, &mut body, &mut env, face, extension, face_ref,
+        )
+        .unwrap();
+        for candidate in [None, kept] {
+            if let Some(surface) = candidate {
+                replace_surface_with_screw_parameters(
+                    &kernel, &mut body, &mut env, face, surface, face_ref,
+                )
+                .unwrap();
+            }
+            for (edgeuse, expected) in &samples {
+                let curve = eu::uv_trim_curve(&body, *edgeuse).unwrap().0.unwrap();
+                let interval = curve.natural_interval();
+                let actual = [0.17, 0.5, 0.83].map(|f| {
+                    curve
+                        .evaluate_point(
+                            &kernel,
+                            interval.min() + f * (interval.max() - interval.min()),
+                        )
+                        .unwrap()
+                });
+                assert_eq!(actual, *expected);
+            }
+            for &(edge, tolerance) in &tolerances {
+                assert_eq!(body.edge(edge).unwrap().tolerance, tolerance);
+            }
+        }
+        // An unrelated support keeps the generic cache-invalidating contract.
+        replace_surface_with_screw_parameters(
+            &kernel,
+            &mut body,
+            &mut env,
+            face,
+            Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z)),
+            face_ref,
+        )
+        .unwrap();
+        for (edgeuse, _) in samples {
+            assert!(eu::uv_trim_curve(&body, edgeuse).unwrap().0.is_none());
         }
     }
 

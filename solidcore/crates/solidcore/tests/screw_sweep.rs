@@ -948,3 +948,174 @@ fn screw_offset_derivatives_through_four_are_derivatives_of_the_exact_wall() {
         }
     }
 }
+
+#[test]
+fn offset_screw_sections_intersect_in_a_helix_with_paired_parameters() {
+    let mut k = Kernel::default();
+    let body = screw_sweep(&mut k, &m10_groove(2.5).curves(), O, Z, 2.5, 1.271, 1e-5).unwrap();
+    let offset: Vec<_> = walls(&body)
+        .iter()
+        .map(|wall| {
+            let s = wall.procedural_sweep().unwrap();
+            let (_, b, swapped) = s.definition().definition_map();
+            let sign = (b[0] * b[1]).signum() * if swapped { -1.0 } else { 1.0 };
+            s.definition()
+                .normal_offset(s.net(), 0.4 * sign, 1e-4)
+                .unwrap()
+        })
+        .collect();
+    let (a, b) = (&offset[0], &offset[1]);
+    let da = a.procedural_sweep().unwrap().net().natural_uv_domain();
+    let db = b.procedural_sweep().unwrap().net().natural_uv_domain();
+    let curves = a
+        .global_surface_intersect(&k, &da, b, &db, [false, false], Some(1e-6), None)
+        .unwrap();
+    assert_eq!(curves.curves_3d.len(), 1);
+    let c = &curves.curves_3d[0];
+    assert!(matches!(
+        c.kind(),
+        solidcore::curve::curve::CurveKind::CrvOnSurf(_)
+    ));
+    let saved = solidcore::curve::from_parameters::record_of(&k, c, &c.natural_interval())
+        .expect("the exact screw section curve must have a portable record");
+    assert_eq!(
+        saved.interval,
+        [c.natural_interval().min(), c.natural_interval().max()]
+    );
+    let restored =
+        solidcore::curve::from_parameters::from_parameters(&k, &saved.curve, saved.interval)
+            .expect("the exact screw section record must reconstruct");
+    assert!(matches!(
+        restored.curve.kind(),
+        solidcore::curve::curve::CurveKind::CrvOnSurf(_)
+    ));
+    assert_eq!(restored.interval, c.natural_interval());
+    let solidcore::curve::curve::CurveKind::CrvOnSurf(original_cos) = c.kind() else {
+        panic!("source curve")
+    };
+    let solidcore::curve::curve::CurveKind::CrvOnSurf(restored_cos) = restored.curve.kind() else {
+        panic!("restored curve")
+    };
+    let original_sweep = original_cos.surface().procedural_sweep().unwrap();
+    let restored_sweep = restored_cos.surface().procedural_sweep().unwrap();
+    assert_eq!(
+        original_sweep.definition().screw(),
+        restored_sweep.definition().screw()
+    );
+    assert_eq!(
+        original_sweep.definition().definition_map(),
+        restored_sweep.definition().definition_map()
+    );
+    assert_eq!(
+        original_sweep.definition().stations(),
+        restored_sweep.definition().stations()
+    );
+    let original_record = original_sweep
+        .definition()
+        .to_record(original_sweep.net())
+        .unwrap();
+    let restored_record = restored_sweep
+        .definition()
+        .to_record(restored_sweep.net())
+        .unwrap();
+    let solidcore::eval::geometry::sweep::SweepDefinitionRecord::Screw {
+        profile: ap,
+        motion: am,
+        offset: ao,
+    } = &original_record.definition;
+    let solidcore::eval::geometry::sweep::SweepDefinitionRecord::Screw {
+        profile: bp,
+        motion: bm,
+        offset: bo,
+    } = &restored_record.definition;
+    assert_eq!((ap, am), (bp, bm));
+    assert_eq!(
+        ao.as_ref().map(|o| (&o.source, o.signed_distance)),
+        bo.as_ref().map(|o| (&o.source, o.signed_distance))
+    );
+    assert_eq!(original_cos.uv_domain(), restored_cos.uv_domain());
+    let saved_again =
+        solidcore::curve::from_parameters::record_of(&k, &restored.curve, &restored.interval)
+            .unwrap();
+    let (
+        solidcore::eval::Curve::OnSurface {
+            uv_curve: before_uv,
+            domain: before_domain,
+            ..
+        },
+        solidcore::eval::Curve::OnSurface {
+            uv_curve: after_uv,
+            domain: after_domain,
+            ..
+        },
+    ) = (&saved.curve, &saved_again.curve)
+    else {
+        panic!("lost UV record")
+    };
+    assert_eq!(before_uv, after_uv);
+    assert_eq!(before_domain, after_domain);
+    let plain_eval = solidcore::eval::CurveEval::new(&saved.curve).unwrap();
+    let mut bad_domain = saved.curve.clone();
+    if let solidcore::eval::Curve::OnSurface { domain, .. } = &mut bad_domain {
+        domain[0][0] = f64::NAN;
+    }
+    assert!(
+        solidcore::curve::from_parameters::from_parameters(&k, &bad_domain, saved.interval)
+            .is_err()
+    );
+    let mut bad_weight = saved.curve.clone();
+    if let solidcore::eval::Curve::OnSurface { uv_curve, .. } = &mut bad_weight {
+        let solidcore::eval::Curve2::Spline { knots, points } = uv_curve else {
+            panic!("expected polynomial UV spline")
+        };
+        *uv_curve = solidcore::eval::Curve2::RationalSpline {
+            knots: knots.clone(),
+            homogeneous: points.iter().map(|p| [p[0], p[1], -1.0]).collect(),
+        };
+    }
+    assert!(
+        solidcore::curve::from_parameters::from_parameters(&k, &bad_weight, saved.interval)
+            .is_err()
+    );
+    for fraction in [0.173, 0.619] {
+        let t = saved.interval[0] + fraction * (saved.interval[1] - saved.interval[0]);
+        let original = c.evaluate(&k, t, 2, false, false).unwrap();
+        let reopened = restored.curve.evaluate(&k, t, 2, false, false).unwrap();
+        for (a, b) in original.iter().zip(&reopened) {
+            assert!((*a - *b).length() <= 1e-11 * (1.0 + a.length()));
+        }
+        let (p, d) = plain_eval.derivs(t).unwrap();
+        assert!((p - original[0]).length() <= 1e-11 * (1.0 + original[0].length()));
+        assert!((d - original[1]).length() <= 1e-11 * (1.0 + original[1].length()));
+    }
+    let pa = curves.surface1_uv_curves[0].as_ref().unwrap();
+    let pb = curves.surface2_uv_curves[0].as_ref().unwrap();
+    let domain = c.natural_interval();
+    let mut radial_height: Option<(f64, f64)> = None;
+    for i in 1..100 {
+        let t = domain.min() + (domain.max() - domain.min()) * f64::from(i) / 100.0;
+        let p = c.evaluate_point(&k, t).unwrap();
+        {
+            let _loose = NetScope::new(&k);
+            assert_eq!(c.evaluate_point(&k, t).unwrap(), p);
+            assert!((c.evaluate(&k, t, 3, false, false).unwrap()[0] - p).length() < 2e-12);
+        }
+        let auv = pa.evaluate_point(&k, t).unwrap();
+        let buv = pb.evaluate_point(&k, t).unwrap();
+        let qa = a.evaluate_point(&k, Point2::new(auv.x, auv.y)).unwrap();
+        let qb = b.evaluate_point(&k, Point2::new(buv.x, buv.y)).unwrap();
+        assert!((p - qa).length() <= curves.deviations[0]);
+        assert!((p - qb).length() <= curves.deviations[0]);
+        let d = a.procedural_sweep().unwrap().definition();
+        let theta = d
+            .turn_at(d.definition_parameters(Point2::new(auv.x, auv.y)).y)
+            .0;
+        let invariant = (p.x.hypot(p.y), p.z - 2.5 * theta / (2.0 * PI));
+        if let Some((radius, height)) = radial_height {
+            assert!((invariant.0 - radius).abs() < 2e-12);
+            assert!((invariant.1 - height).abs() < 2e-12);
+        } else {
+            radial_height = Some(invariant);
+        }
+    }
+}

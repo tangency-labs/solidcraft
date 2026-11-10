@@ -1168,6 +1168,126 @@ mod tests {
     }
 
     #[test]
+    fn refined_offset_reopens_using_fresh_certificate_for_reversed_swapped_map() {
+        use crate::math::{Point2, Vec3};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::surface::procedural_sweep::offset_profile::OffsetProfile;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion, SweepMap};
+
+        let source = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(9.5, 0.0, -0.3),
+            Vec3::new(10.125, 0.0, -0.7),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let (profile, offset) =
+            OffsetProfile::build(&source, &motion, 0.1, [0.0, 1.0], 1e-6).unwrap();
+        let stations = [0.0, 0.25, 0.5];
+        let mut definition = ProceduralSweep::create(&profile, motion, &stations, 0.125).unwrap();
+        definition.offset = Some(offset);
+        let (mut net, pieces) = build_refined(&definition, &profile, 3e-6).unwrap();
+        net.reverse(SurfParamType::U).unwrap();
+        net.reverse(SurfParamType::V).unwrap();
+        net.swap_uv().unwrap();
+        definition.map = SweepMap {
+            a: [1.0, 0.5],
+            b: [-1.0, -1.0],
+            swapped: true,
+        };
+        let bound = certify_refined(&definition, &net, pieces).unwrap();
+        assert!(bound < 1e-5, "{bound}");
+        definition.bound = bound;
+        let mut record = definition.to_record(&net).unwrap();
+        record.bound = 1e-300;
+        let crate::eval::geometry::sweep::SweepDefinitionRecord::Screw {
+            offset: Some(saved),
+            ..
+        } = &mut record.definition
+        else {
+            panic!("offset record must retain its source");
+        };
+        saved.approximation_bound = 0.0;
+        let reopened = ProceduralSweep::from_record(&record).unwrap();
+        let reopened = reopened.procedural_sweep().unwrap();
+        assert!(reopened.bound() > record.bound);
+        assert!(reopened.bound() < 1e-5, "{}", reopened.bound());
+        for uv in [Point2::new(0.08, 0.13), Point2::new(0.29, 0.37)] {
+            let original = definition.evaluate_definition_point(uv).unwrap();
+            let restored = reopened.definition().evaluate_definition_point(uv).unwrap();
+            assert!((original - restored).length() < 1e-11);
+        }
+        // A finite but altered net is rechecked as stored; a forged tiny bound
+        // may not hide the control displacement.
+        record.net.points[0][2] += 0.001;
+        let altered = ProceduralSweep::from_record(&record).unwrap();
+        assert!(altered.procedural_sweep().unwrap().bound() > 1e-4);
+    }
+
+    #[test]
+    fn saved_screw_preserves_normalized_axis_bits() {
+        use crate::math::Vec3;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::sweep::screw::screw_net;
+
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::new(1.0, 0.3, 0.9), 2.5, None).unwrap();
+        let original_axis = motion.axis();
+        let stations = [0.0, 0.25];
+        let net = screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.125).unwrap();
+        let record = definition.to_record(&net).unwrap();
+        let restored = ProceduralSweep::from_record(&record).unwrap();
+        let restored_axis = restored
+            .procedural_sweep()
+            .unwrap()
+            .definition()
+            .screw()
+            .unwrap()
+            .axis();
+        assert_eq!(
+            restored_axis, original_axis,
+            "saved axis changed on restoration"
+        );
+    }
+
+    #[test]
+    fn saved_screw_rejects_nonunit_and_nonfinite_axes() {
+        use crate::eval::geometry::sweep::SweepDefinitionRecord;
+        use crate::math::Vec3;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::sweep::screw::screw_net;
+        let profile =
+            BSplineCurve::create_line_segment(3, Vec3::X, Vec3::new(2.0, 0.0, 1.0)).unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.25];
+        let net = screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.125).unwrap();
+        for axis in [
+            [2.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [f64::NAN, 0.0, 1.0],
+            [f64::INFINITY, 0.0, 1.0],
+        ] {
+            let mut record = definition.to_record(&net).unwrap();
+            let SweepDefinitionRecord::Screw { motion, .. } = &mut record.definition;
+            motion.axis = axis;
+            assert!(
+                ProceduralSweep::from_record(&record).is_err(),
+                "accepted axis {axis:?}"
+            );
+        }
+    }
+
+    #[test]
     fn invalid_subarcs_are_refused() {
         for (tau, a, b) in [
             (0.0, 0.0, 1.0),

@@ -279,6 +279,23 @@ fn is_tangent_end_off_curve(e: &SolidError) -> bool {
     )
 }
 
+// Exact screw-section mating must preserve its certificate refusal, as every mate passes on an
+// exact intersection curve it cannot cut and an end beside a crossing tangent edge.
+fn mate_status<T>(complete: bool, result: Result<T>) -> Result<Option<T>> {
+    match result {
+        Err(e)
+            if matches!(
+                e.failure().map(|f| &f.reason),
+                Some(Reason::Offset(OffsetFailure::ExactCurveUncut))
+            ) || is_tangent_end_off_curve(&e) =>
+        {
+            Err(e)
+        }
+        result if complete => result.map(Some),
+        result => ignore_soft(result),
+    }
+}
+
 /// `SmTArray::FindElement`.
 fn contains<O: PartialEq>(list: &[O], item: &O) -> bool {
     list.iter().any(|x| x == item)
@@ -454,6 +471,12 @@ pub trait OffsetExecutive<O> {
     /// `GetOffsetEdgeuse`: the offset edge use related to `original`, only when exactly
     /// one is (`m_vEUToEU` is a many-to-many `SmRelation`; none or several give `None`).
     fn offset_edgeuse(&self, original: O) -> Option<O>;
+    /// Offset faces related to a participating original faceuse. Its opposite
+    /// use has no relation. An empty default cannot certify a retained seam.
+    fn offset_faces(&self, original: O) -> Vec<O> {
+        let _ = original;
+        Vec::new()
+    }
     /// Not upstream (WR-344 refinement, tangency-labs/solidcore#1795): `EdgeuseOffset`
     /// could not mate the offsets of `original`'s edge (`MateEdges` failed, which upstream
     /// only reports), so the merge must still intersect them; called only with
@@ -1506,14 +1529,14 @@ pub fn make_edges_on_analytics_exact(
         ) {
             Ok(exact) => exact,
             Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
+                return Err(err);
             }
             Err(_) => continue,
         };
         let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
             Ok(Some(trimmed)) => trimmed,
             Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                return Err(err)
+                return Err(err);
             }
             Ok(None) | Err(_) => continue,
         };
@@ -2209,7 +2232,7 @@ impl OffsetGeometryCreation {
             let sphere = match BSplineSurface::create_sphere_from_arcs(k, &curves, tolerance) {
                 Ok(sphere) => sphere,
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
+                    return Err(e);
                 }
                 Err(_) => return Err(sm_err(OP_VERTEX)),
             };
@@ -3819,9 +3842,39 @@ impl OffsetGeometryCreation {
             None => store_curve(brep, Curve::from(uv_curve_extended.clone()))?,
         };
 
+        let lifted_h = store_curve(brep, lifted_curve)?;
+        self.finish_extended_trim(
+            k,
+            brep,
+            executive,
+            edgeuse,
+            other_edgeuse,
+            offset_edgeuse,
+            other_offset_edgeuse,
+            lifted_h,
+            uv_curve_extended_h,
+            other_uv_h,
+            mark,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn finish_extended_trim<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        edgeuse: O,
+        other_edgeuse: Option<O>,
+        offset_edgeuse: Option<O>,
+        other_offset_edgeuse: Option<O>,
+        lifted_h: O,
+        uv_curve_extended_h: O,
+        other_uv_h: Option<O>,
+        mark: MarkType,
+    ) -> Result<()> {
         // Now that we have created one or two UV curves and a 3D curve find trimming
         // interval and if we find a good one replace the geometry.
-        let lifted_h = store_curve(brep, lifted_curve.clone())?;
         let trim_ivl = self.trim_extended_edge(
             k,
             brep,
@@ -3895,6 +3948,203 @@ impl OffsetGeometryCreation {
 
         // all done
         Ok(())
+    }
+
+    /// A shared retained station is a partition of one physical wall, not
+    /// an intersection branch to rank. Preserve its authored meridian through
+    /// the offset, with complete old/new wall and cylinder-parent certificates.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn extend_screw_separator<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &mut impl OffsetExecutive<O>,
+        edgeuse: O,
+        other_edgeuse: Option<O>,
+        offset_edgeuse: Option<O>,
+        other_offset_edgeuse: Option<O>,
+        mark: MarkType,
+    ) -> Result<bool> {
+        let (Some(other), Some(off), Some(other_off)) =
+            (other_edgeuse, offset_edgeuse, other_offset_edgeuse)
+        else {
+            return Ok(false);
+        };
+        let surface_handle = |brep: &dyn OffsetBrep<O>, eu| -> Result<O> {
+            let face = brep
+                .edgeuse_face(eu)?
+                .ok_or(dangling("seam without face"))?;
+            brep.face_surface(face)?
+                .ok_or(dangling("seam face without surface"))
+        };
+        let old_a = surface_handle(brep, edgeuse)?;
+        let old_b = surface_handle(brep, other)?;
+        let Some(separator) = super::procedural_screw::seam::Separator::new(
+            surface_of(brep, old_a)?,
+            surface_of(brep, old_b)?,
+        )?
+        else {
+            return Ok(false);
+        };
+        let target_a = surface_handle(brep, off)?;
+        let target_b = surface_handle(brep, other_off)?;
+        if !separator.supports_targets(surface_of(brep, target_a)?, surface_of(brep, target_b)?)? {
+            return Ok(false);
+        }
+        let edge = brep
+            .edgeuse_edge(edgeuse)?
+            .ok_or(dangling("seam without edge"))?;
+        let tolerance = brep.edge_tolerance(edge)?;
+        let curve = brep
+            .edge_curve(edge)?
+            .ok_or(dangling("seam without curve"))?;
+        separator.certify_curve(curve_of(brep, curve)?, tolerance)?;
+        for (eu, surf) in [(edgeuse, old_a), (other, old_b)] {
+            let uv = brep
+                .edgeuse_uv_trim_curve(eu)?
+                .ok_or(dangling("seam without original pcurve"))?;
+            separator.certify_source_uv(surface_of(brep, surf)?, curve_of(brep, uv)?, tolerance)?;
+        }
+        let first = brep
+            .edge_vertex(edge)?
+            .ok_or(dangling("seam without first vertex"))?;
+        let last = brep
+            .edge_other_vertex(edge, first)?
+            .ok_or(dangling("seam without last vertex"))?;
+        let mut radii = Vec::new();
+        for vertex in [first, last] {
+            let mut count = 0_usize;
+            let mut radius: Option<super::procedural_screw::seam::CylinderCorner> = None;
+            for parent in brep.vertex_edges(vertex)? {
+                if parent == edge {
+                    continue;
+                }
+                let faces = brep.edge_faces(parent)?;
+                if faces.len() != 2 {
+                    continue;
+                }
+                let cylinders = faces
+                    .iter()
+                    .map(|&face| -> Result<bool> {
+                        let surf = brep
+                            .face_surface(face)?
+                            .ok_or(dangling("parent face without surface"))?;
+                        // The parents the seam certificate accepts: a tapered cone (a
+                        // chamfer meeting the shank) is skipped, not refused.
+                        separator.is_coaxial_cylinder(surface_of(brep, surf)?)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                if !cylinders.into_iter().all(|v| v) {
+                    continue;
+                }
+                count += 1;
+                let parent_tol = brep.edge_tolerance(parent)?;
+                let curve = brep
+                    .edge_curve(parent)?
+                    .ok_or(dangling("parent seam without curve"))?;
+                separator.certify_curve(curve_of(brep, curve)?, parent_tol)?;
+                let parent_uses = brep.edge_edgeuses(parent)?;
+                for face in faces {
+                    // Face construction relates only its participating use. The
+                    // opposite use intentionally has no edge/face relation; the
+                    // parent edge itself need not have been mapped uniquely yet.
+                    let mut participating = None;
+                    for &eu in &parent_uses {
+                        if brep.edgeuse_face(eu)? != Some(face) {
+                            continue;
+                        }
+                        let fu = brep
+                            .edgeuse_faceuse(eu)?
+                            .ok_or(dangling("parent seam without faceuse"))?;
+                        let targets = executive.offset_faces(fu);
+                        if targets.is_empty() {
+                            continue;
+                        }
+                        let [target] = targets.as_slice() else {
+                            return Err(dangling("parent face has no unique target"));
+                        };
+                        if participating.replace((eu, *target)).is_some() {
+                            return Err(dangling("parent face has multiple participating uses"));
+                        }
+                    }
+                    let (eu, target) =
+                        participating.ok_or(dangling("parent face has no participating target"))?;
+                    let surf = surface_handle(brep, eu)?;
+                    let uv = brep
+                        .edgeuse_uv_trim_curve(eu)?
+                        .ok_or(dangling("parent seam without pcurve"))?;
+                    separator.certify_cylinder_uv(
+                        k,
+                        surface_of(brep, surf)?,
+                        curve_of(brep, uv)?,
+                        parent_tol,
+                    )?;
+                    let target = brep
+                        .face_surface(target)?
+                        .ok_or(dangling("parent target without surface"))?;
+                    let (extended, _) = executive.get_create_extended_surface(k, brep, target)?;
+                    let current = separator.certify_cylinder_uv(
+                        k,
+                        surface_of(brep, extended)?,
+                        curve_of(brep, uv)?,
+                        parent_tol,
+                    )?;
+                    radius = Some(radius.map_or(current, |prior| prior.hull(current)));
+                }
+            }
+            if count != 1 {
+                return Err(SolidError::invalid_input(
+                    OP_EXTEND,
+                    "retained seam needs one cylinder separator at each endpoint",
+                ));
+            }
+            radii.push(radius.ok_or(dangling("missing target seam cylinder radius"))?);
+        }
+        let [r0, r1] = radii.as_slice() else {
+            return Err(dangling("missing pair of seam cylinder corners"));
+        };
+        let a = surface_handle(brep, off)?;
+        let b = surface_handle(brep, other_off)?;
+        let (a, da) = executive.get_create_extended_surface(k, brep, a)?;
+        let (b, db) = executive.get_create_extended_surface(k, brep, b)?;
+        let mut curves = separator.construct(
+            k,
+            (surface_of(brep, a)?, &da),
+            (surface_of(brep, b)?, &db),
+            [*r0, *r1],
+            tolerance / 3.0,
+        )?;
+        let curve = curves
+            .curves_3d
+            .pop()
+            .ok_or(dangling("missing certified meridian seam"))?;
+        let ua = curves
+            .surface1_uv_curves
+            .pop()
+            .flatten()
+            .ok_or(dangling("missing first meridian pcurve"))?;
+        let ub = curves
+            .surface2_uv_curves
+            .pop()
+            .flatten()
+            .ok_or(dangling("missing second meridian pcurve"))?;
+        let curve = store_curve(brep, curve)?;
+        let ua = store_curve(brep, ua)?;
+        let ub = store_curve(brep, ub)?;
+        self.finish_extended_trim(
+            k,
+            brep,
+            executive,
+            edgeuse,
+            Some(other),
+            Some(off),
+            Some(other_off),
+            curve,
+            ua,
+            Some(ub),
+            mark,
+        )?;
+        Ok(true)
     }
 
     /// `MateEdges(ctx, exec, pEdgeuse, pOtherEdgeuse, pOffsetEdgeuse,
@@ -4645,6 +4895,18 @@ impl OffsetGeometryCreation {
             }
 
             if tan_sec || lamina {
+                if self.extend_screw_separator(
+                    k,
+                    brep,
+                    executive,
+                    original_edgeuse,
+                    other_original_edgeuse,
+                    offset_edgeuse,
+                    other_offset_edgeuse,
+                    mark,
+                )? {
+                    return Ok(out);
+                }
                 // Extend or Trim Lamina or Tangent Edges (a problem is only reported)
                 let extended = self.extend_trim_edges(
                     k,
@@ -4669,28 +4931,41 @@ impl OffsetGeometryCreation {
             }
 
             // Mate a couple of edges by extension and intersection (a problem is only
-            // reported; not upstream: a port invariant (through `ignore_soft`), and an
-            // exact intersection curve that cannot be cut into its pieces, are passed on)
-            let mated = match self.mate_edges(
-                k,
-                brep,
-                executive,
-                Some(original_edgeuse),
-                other_original_edgeuse,
-                offset_edgeuse,
-                other_offset_edgeuse,
-                mark,
-            ) {
-                Err(e)
-                    if matches!(
-                        e.failure().map(|f| &f.reason),
-                        Some(Reason::Offset(OffsetFailure::ExactCurveUncut))
-                    ) || is_tangent_end_off_curve(&e) =>
-                {
-                    return Err(e)
+            // reported; not upstream: a port invariant (through `ignore_soft`), an exact
+            // intersection curve that cannot be cut into its pieces, and an end beside a
+            // crossing tangent edge, are passed on). Exact screw-section pairs require certified
+            // replacement edges; retaining an original rail after refusal breaks its moved
+            // endpoints.
+            let complete = if let (Some(a), Some(b)) = (offset_edgeuse, other_offset_edgeuse) {
+                let surfaces = |eu| -> Result<Option<O>> {
+                    match brep.edgeuse_face(eu)? {
+                        Some(face) => brep.face_surface(face),
+                        None => Ok(None),
+                    }
+                };
+                match (surfaces(a)?, surfaces(b)?) {
+                    (Some(a), Some(b)) => super::procedural_screw::requires_complete_mate(
+                        surface_of(brep, a)?,
+                        surface_of(brep, b)?,
+                    )?,
+                    _ => false,
                 }
-                r => ignore_soft(r)?,
+            } else {
+                false
             };
+            let mated = mate_status(
+                complete,
+                self.mate_edges(
+                    k,
+                    brep,
+                    executive,
+                    Some(original_edgeuse),
+                    other_original_edgeuse,
+                    offset_edgeuse,
+                    other_offset_edgeuse,
+                    mark,
+                ),
+            )?;
             // Not upstream (WR-344 refinement, #1795): the merge must still intersect the
             // offsets of an edge that could not be mated
             if mated.is_none() && k.fixes.offset_extended_edges_mated {
@@ -5080,7 +5355,7 @@ impl OffsetGeometryCreation {
                     new_surface = Some(trimmed.plane);
                 }
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
+                    return Err(e);
                 }
                 // any other failure is upstream's `!= SM_SUCCESS` (e.g. the `SM_ERR` of
                 // `Unitize` on the zero cross product of two collinear-derivative rails):
@@ -6063,6 +6338,60 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_screw_mating_preserves_a_real_certificate_refusal() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::offset::procedural_screw;
+        use crate::surface::cone::Cone;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+        use crate::sweep::screw::screw_net;
+
+        let k = Kernel::default();
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 2.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.1];
+        let net = screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.05).unwrap();
+        let wall = definition.normal_offset(&net, 0.0, 1e-4).unwrap();
+        let cylinder = Surface::from(
+            Cone::create_canonical(&k, &Axis2Placement::IDENTITY, 9.5, 9.5, 20.0, false, false)
+                .unwrap(),
+        );
+        let wall_domain = wall.natural_uv_domain_with_nurb(&k).unwrap();
+        let cylinder_domain = cylinder.natural_uv_domain_with_nurb(&k).unwrap();
+        for (a, ad, b, bd) in [
+            (&wall, &wall_domain, &cylinder, &cylinder_domain),
+            (&cylinder, &cylinder_domain, &wall, &wall_domain),
+        ] {
+            assert!(procedural_screw::requires_complete_mate(a, b).unwrap());
+            assert!(procedural_screw::intersect(&k, a, ad, b, bd, 1e-5)
+                .unwrap()
+                .is_some());
+            // The same genuine crossing cannot certify below floating-point
+            // construction/evaluation error. Preserve that actual refusal.
+            let refusal = procedural_screw::intersect(&k, a, ad, b, bd, 1e-30).unwrap_err();
+            let status: Result<()> = Err(refusal.clone());
+            assert_eq!(mate_status(true, status).unwrap_err(), refusal);
+        }
+        let uncut = Failure::new("mate", OffsetFailure::ExactCurveUncut).into_error();
+        for complete in [false, true] {
+            assert_eq!(
+                mate_status(complete, Err::<(), _>(uncut.clone())).unwrap_err(),
+                uncut
+            );
+        }
+        assert!(!procedural_screw::requires_complete_mate(&cylinder, &cylinder).unwrap());
+        assert_eq!(
+            mate_status(false, Err::<(), _>(SolidError::sm_err("legacy mate"))).unwrap(),
+            None
+        );
+    }
 
     #[test]
     fn audit_483_tangent_gaps_preserve_errors_and_no_solution() {

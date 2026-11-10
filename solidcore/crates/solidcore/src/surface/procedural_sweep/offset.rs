@@ -324,6 +324,61 @@ impl ProceduralSweep {
         self.offset_support(domain, distance, tolerance)
     }
 
+    /// An offset executive's continued support, sized from exact source derivatives.
+    /// The extension is a support rectangle; final face loops determine its used part.
+    pub(crate) fn extended_for_offset(
+        &self,
+        net: &BSplineSurface,
+        distance: f64,
+        tolerance: f64,
+    ) -> Result<Surface> {
+        if !distance.is_finite() {
+            return Err(bad("a screw support extension must be finite"));
+        }
+        let domain = self.definition_box(&net.natural_uv_domain())?;
+        let Some((section, [lo, hi])) = self.screw_offset_section()? else {
+            return Err(bad(
+                "continued screw supports require an invariant affine section",
+            ));
+        };
+        let width = Ivl::from(hi) - Ivl::from(lo);
+        if !width.lo.is_finite() || width.lo <= 0.0 || !width.hi.is_finite() {
+            return Err(bad("a screw source has a singular parameter interval"));
+        }
+        // C'=b+d n' and b.n'=0, so |C'| >= |b| on every regular
+        // continuation, not merely at the old interval's endpoints.
+        let profile_speed = (Ivl::from(section.profile_speed_lower_bound()) / width).lo;
+        if !profile_speed.is_finite() || profile_speed <= 0.0 {
+            return Err(bad("a screw support has a singular extension direction"));
+        }
+        let dw = (Ivl::from(distance.abs()) / Ivl::from(profile_speed)).hi;
+        let from = (Ivl::from(domain.u_min()) - Ivl::from(dw)).lo;
+        let to = (Ivl::from(domain.u_max()) + Ivl::from(dw)).hi;
+        let source = (Ivl::new(from, to) - Ivl::from(lo)) / width;
+        // The angular bound must hold at the new profile ends as well.
+        let screw_speed = section.turn_speed_lower_bound(source)?;
+        if !screw_speed.is_finite() || screw_speed <= 0.0 {
+            return Err(bad("a screw support has a singular extension direction"));
+        }
+        let dt = (Ivl::from(distance.abs()) / Ivl::from(screw_speed)).hi;
+        let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
+            return Err(bad("missing screw stations"));
+        };
+        // Support construction consumes physical angles. Its retained end stations
+        // enclose the old face even when the face's arc parameter is not its angle.
+        let expanded = Extent2d::from_bounds(
+            from,
+            (Ivl::from(first) - Ivl::from(dt)).lo,
+            to,
+            (Ivl::from(last) + Ivl::from(dt)).hi,
+        );
+        self.offset_support(
+            expanded,
+            self.offset.as_ref().map_or(0.0, |s| s.distance),
+            tolerance,
+        )
+    }
+
     fn offset_support(&self, domain: Extent2d, distance: f64, tolerance: f64) -> Result<Surface> {
         if !tolerance.is_finite() || tolerance <= 0.0 {
             return Err(bad("a screw net tolerance must be positive and finite"));
@@ -416,5 +471,150 @@ impl ProceduralSweep {
         let mut surface = Surface::from(net);
         surface.set_sweep_definition(definition);
         Ok(surface)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::Kernel;
+    use crate::math::Point3;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::surface::procedural_blend::NetScope;
+    use crate::surface::procedural_sweep::ScrewMotion;
+    use crate::sweep::screw::screw_net;
+
+    fn offset_wall(start: Point3, end: Point3, pitch: f64, distance: f64) -> Surface {
+        let profile = BSplineCurve::create_line_segment(3, start, end).unwrap();
+        assert_eq!(profile.natural_interval().min(), 0.0);
+        assert_eq!(profile.natural_interval().max(), 1.0);
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, pitch, None).unwrap();
+        let stations = [0.0, 0.1];
+        let definition =
+            ProceduralSweep::create(&profile, motion.clone(), &stations, 0.05).unwrap();
+        let net = screw_net(&profile, &motion, &stations).unwrap();
+        definition.normal_offset(&net, distance, 1e-3).unwrap()
+    }
+
+    #[test]
+    fn continuation_reaches_the_requested_length_beyond_the_old_interval() {
+        let wall = offset_wall(Point3::X, Point3::new(2.0, 0.0, 1.0), TAU, 0.25);
+        let source = wall.procedural_sweep().unwrap();
+        let requested = 1.0;
+        let continued = source
+            .definition()
+            .extended_for_offset(source.net(), requested, 1e-3)
+            .unwrap();
+        let definition = continued.procedural_sweep().unwrap().definition();
+        let end = definition.profile().natural_interval().max();
+        assert!(end > 1.0);
+
+        // P=(1+x,0,x), h=1, d=1/4 gives the exact speed below. It decreases
+        // for x>=1, so right/left rectangles bound its integral, without a fit
+        // or an unproved quadrature error. The old interval's minimum speed
+        // is strictly greater than the speed on its upper continuation.
+        let speed = |x: Ivl| {
+            let radius = Ivl::from(1.0) + x;
+            let normal_sq = Ivl::from(2.0) * radius * radius + Ivl::from(1.0);
+            (Ivl::from(2.0) * (Ivl::from(1.0) + Ivl::from(0.0625) / (normal_sq * normal_sq))).sqrt()
+        };
+        let width = Ivl::from(end) - Ivl::from(1.0);
+        let pieces = 2048;
+        let step = width / Ivl::from(f64::from(pieces));
+        let mut lower = Ivl::from(0.0);
+        let mut upper = Ivl::from(0.0);
+        for i in 0..pieces {
+            let left = Ivl::from(1.0) + step * Ivl::from(f64::from(i));
+            let right = Ivl::from(1.0) + step * Ivl::from(f64::from(i + 1));
+            lower = lower + step * speed(right);
+            upper = upper + step * speed(left);
+        }
+        assert!(
+            lower.lo >= requested,
+            "upper continuation length is in [{}, {}], requested {requested}",
+            lower.lo,
+            upper.hi
+        );
+    }
+
+    #[test]
+    fn turn_continuation_reaches_at_the_extended_profile_ends() {
+        let wall = offset_wall(Point3::X, Point3::new(2.0, 0.0, 1.0), TAU, 0.25);
+        let source = wall.procedural_sweep().unwrap();
+        let requested = 1.0;
+        let continued = source
+            .definition()
+            .extended_for_offset(source.net(), requested, 1e-3)
+            .unwrap();
+        let definition = continued.procedural_sweep().unwrap().definition();
+        let (section, [lo, hi]) = definition.screw_offset_section().unwrap().unwrap();
+        let domain = definition.profile().natural_interval();
+        let first = definition.stations()[0];
+        let last = *definition.stations().last().unwrap();
+        for w in [domain.min(), domain.max()] {
+            let x = (w - lo) / (hi - lo);
+            let meridian = section.meridian_bounds(x, x, Vec3::X).unwrap();
+            // Every orbit has exact speed sqrt(r^2+h^2) per physical angle.
+            // Here h=1. Its radius is fixed even on a continued profile point.
+            let orbit_speed = (meridian.radius * meridian.radius + Ivl::from(1.0)).sqrt();
+            for turn in [
+                Ivl::from(0.0) - Ivl::from(first),
+                Ivl::from(last) - Ivl::from(0.1),
+            ] {
+                let length = orbit_speed * turn;
+                assert!(
+                    length.lo >= requested,
+                    "turn continuation at w={w} has length {length:?}, requested {requested}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn paired_helix_rounding_is_covered_in_physical_units() {
+        let k = Kernel::default();
+        let a = offset_wall(
+            Point3::new(8.0, 0.0, 0.0),
+            Point3::new(10.0, 0.0, 2.0),
+            2.5,
+            0.0,
+        );
+        let b = offset_wall(
+            Point3::new(8.0, 0.0, 1.2),
+            Point3::new(10.0, 0.0, -0.8),
+            2.5,
+            0.0,
+        );
+        let db = b.procedural_sweep().unwrap().net().natural_uv_domain();
+        // The exact sections meet at x=y=.3, r=8.6, z=.6. Translating or
+        // compressing face UVs leaves this locus unchanged but amplifies the
+        // rounding of the inverse affine map and the stored pcurve coefficients.
+        for u in [[0.0, 1.0], [-1e8, -1e8 + 1.0], [-1.0, -1.0 + 1e-6]] {
+            let mut first = a.copy(&k).unwrap();
+            let da = Extent2d::from_bounds(u[0], db.v_min(), u[1], db.v_max());
+            first.reparameterize(&k, &da).unwrap();
+            let result = first
+                .global_surface_intersect(&k, &da, &b, &db, [false, false], Some(1e-3), None)
+                .unwrap();
+            assert_eq!(result.curves_3d.len(), 1);
+            let _exact = NetScope::exact(&k);
+            let curve = &result.curves_3d[0];
+            let range = curve.natural_interval();
+            let bound = result.deviations[0];
+            assert!(bound.is_finite() && bound <= 1e-3);
+            for fraction in [0.0, 0.137, 0.5, 0.829, 1.0] {
+                let t = range.min() + fraction * (range.max() - range.min());
+                let point = curve.evaluate_point(&k, t).unwrap();
+                for (surface, pcurve) in [
+                    (&first, result.surface1_uv_curves[0].as_ref().unwrap()),
+                    (&b, result.surface2_uv_curves[0].as_ref().unwrap()),
+                ] {
+                    let uv = pcurve.evaluate_point(&k, t).unwrap();
+                    let mapped = surface.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                    let gap = (point - mapped).length();
+                    assert!(gap <= bound, "UV interval {u:?}: gap {gap}, bound {bound}");
+                }
+            }
+        }
     }
 }

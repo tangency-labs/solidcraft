@@ -4180,6 +4180,17 @@ impl Surface {
         context: Option<SurfaceIntersectContext<'_, O>>,
         out: &mut SurfaceIntersection,
     ) -> Result<()> {
+        if let Some(intersection) = crate::offset::procedural_screw::intersect(
+            k,
+            self,
+            uv_domain,
+            other,
+            other_uv_domain,
+            approx_tol_3d.unwrap_or(k.tolerances.approx_tol_3d),
+        )? {
+            *out = intersection;
+            return Ok(());
+        }
         match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => crate::surface::plane::p2::global_surface_intersect_into(
                 k,

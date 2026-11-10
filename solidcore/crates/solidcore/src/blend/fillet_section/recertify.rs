@@ -164,6 +164,35 @@ pub(crate) fn net_distance(b: &[Vec<Hpt>], h: &[Vec<Hpt>]) -> Result<f64> {
     net_distance_with::<FloatMetric>(b, h)
 }
 
+/// Encloses the distance between two rational Bézier patches whose homogeneous
+/// coefficients are intervals. Each input must be rectangular with the same shape;
+/// callers bound the coefficient count and the quadratic comparison work.
+///
+/// # Errors
+/// Refuses mismatched or empty nets, nonfinite coefficient intervals and weights
+/// not proved positive, or a nonfinite resulting bound.
+pub(crate) fn interval_net_distance(
+    actual: &[Vec<([Ivl; 3], Ivl)>],
+    ideal: &[Vec<([Ivl; 3], Ivl)>],
+) -> Result<f64> {
+    let width = actual.first().map_or(0, Vec::len);
+    let same_shape = width > 0
+        && actual.len() == ideal.len()
+        && actual.iter().chain(ideal).all(|row| row.len() == width);
+    let finite = actual.iter().chain(ideal).flatten().all(|(p, w)| {
+        p.iter()
+            .chain(core::iter::once(w))
+            .all(|x| x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi)
+    });
+    if !same_shape || !finite {
+        return Err(SolidError::invalid_input(
+            OP,
+            "invalid interval control nets",
+        ));
+    }
+    net_distance_with::<IntervalMetric>(actual, ideal)
+}
+
 /// Cached weight-only part of the interval net inequality. The complete list
 /// of weights is checked on reuse; coordinates are always checked afresh.
 #[derive(Default)]
@@ -2347,6 +2376,52 @@ mod tests {
             Vec3::new(2.0, 1.0, 0.5 + dz),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn interval_ideal_encloses_control_net_displacement_and_refuses_bad_weights() {
+        let point = |x: Ivl, y: f64| ([x, Ivl::from(y), Ivl::from(0.0)], Ivl::from(1.0));
+        let actual = vec![vec![point(Ivl::from(0.0), 0.0), point(Ivl::from(1.0), 0.0)]];
+        let ideal = vec![vec![
+            point(Ivl::new(0.099, 0.101), 0.0),
+            point(Ivl::new(1.099, 1.101), 0.0),
+        ]];
+        let bound = interval_net_distance(&actual, &ideal).unwrap();
+        assert!((0.101..0.102).contains(&bound), "{bound}");
+        let mut bad = ideal.clone();
+        bad[0][0].1 = Ivl::new(-1.0, 1.0);
+        assert!(interval_net_distance(&actual, &bad).is_err());
+        assert!(interval_net_distance(&actual, &[vec![ideal[0][0]]]).is_err());
+    }
+
+    #[test]
+    fn cached_interval_weights_match_unfactored_certificate() {
+        let point = |x: f64, w: f64| {
+            (
+                [Ivl::from(x), Ivl::from(0.3), Ivl::from(-0.2)],
+                Ivl::from(w),
+            )
+        };
+        let mut actual = vec![
+            vec![point(0.1, 1.0), point(0.7, 0.8), point(1.0, 1.0)],
+            vec![point(1.1, 1.0), point(1.7, 0.8), point(2.0, 1.0)],
+        ];
+        let mut ideal = actual.clone();
+        ideal[1][1].0[0] = Ivl::new(1.69, 1.71);
+        let mut cache = IntervalWeightCache::default();
+        let (first, reused) = interval_net_distance_cached(&actual, &ideal, &mut cache).unwrap();
+        assert!(!reused);
+        assert_eq!(first, interval_net_distance(&actual, &ideal).unwrap());
+        actual[0][0].0[0] = Ivl::from(-0.1);
+        let (second, reused) = interval_net_distance_cached(&actual, &ideal, &mut cache).unwrap();
+        assert!(reused);
+        assert_eq!(second, interval_net_distance(&actual, &ideal).unwrap());
+        ideal[1][1].1 = Ivl::new(0.79, 0.81);
+        let (third, reused) = interval_net_distance_cached(&actual, &ideal, &mut cache).unwrap();
+        assert!(!reused);
+        assert_eq!(third, interval_net_distance(&actual, &ideal).unwrap());
+        ideal[1][1].1 = Ivl::new(-1.0, 1.0);
+        assert!(interval_net_distance_cached(&actual, &ideal, &mut cache).is_err());
     }
 
     #[test]

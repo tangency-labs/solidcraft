@@ -2486,6 +2486,11 @@ mod tests {
         owner
     }
 
+    fn screw_record(surface: &Surface) -> crate::eval::geometry::sweep::ProceduralSweepRecord {
+        let kept = surface.procedural_sweep().unwrap();
+        kept.definition().to_record(kept.net()).unwrap()
+    }
+
     fn on_screw(curve: &Curve) -> &CrvOnSurf {
         let CurveKind::CrvOnSurf(on) = curve.kind() else {
             panic!("expected exact surface curve")
@@ -2664,6 +2669,37 @@ mod tests {
     }
 
     #[test]
+    fn retained_screw_owner_copies_preserve_close_source_knots_and_signed_zero() {
+        let k = Kernel::default();
+        let owner = retained_owner(10.0, true, false);
+        let expected = screw_record(&owner);
+        let curve = Curve::from(
+            CrvOnSurf::from_uv_line(
+                &k,
+                Point2::new(0.75e-9, 0.005),
+                Point2::new(2.75e-9, 0.025),
+                owner,
+                None,
+                3,
+            )
+            .unwrap(),
+        );
+        let before = curve.evaluate(&k, 0.37, 2, false, false).unwrap();
+        for copy in [
+            curve.copy(&k).unwrap(),
+            curve.clone_for_evaluation().unwrap(),
+            curve.clone_exact_bounded(),
+        ] {
+            let record = screw_record(on_screw(&copy).surface());
+            // Debug float formatting distinguishes signed zero as well as every finite
+            // coefficient. This compares the complete literal record, not geometric nearness.
+            assert_eq!(format!("{record:?}"), format!("{expected:?}"));
+            assert_eq!(copy.natural_interval(), curve.natural_interval());
+            assert_eq!(copy.evaluate(&k, 0.37, 2, false, false).unwrap(), before);
+        }
+    }
+
+    #[test]
     fn retained_screw_curve_copy_preserves_close_uv_knots() {
         let k = Kernel::default();
         let mut raw = allocate_nurb_curve(2, 1, 4).unwrap();
@@ -2716,6 +2752,85 @@ mod tests {
             .unwrap(),
         );
         assert_ne!(knots(&ordinary.copy(&k).unwrap()), knots(&ordinary));
+    }
+
+    #[test]
+    fn restored_screw_owners_share_payload_through_curve_copy_and_detach_on_edit() {
+        use crate::surface::procedural_sweep::ProceduralSweep;
+        let k = Kernel::default();
+        // Match the two actual continued M20 owners' 65 x 2249 control counts,
+        // without repeating their controls in every one of the 52 edge owners.
+        let mut owners = [10.0, 12.0].map(|radius| {
+            ProceduralSweep::from_record(&screw_record(&retained_owner(radius, false, true)))
+                .unwrap()
+        });
+        let payload = |surface: &Surface| {
+            let net = surface.procedural_sweep().unwrap().net().gw_nurb().unwrap();
+            assert_eq!(net.array_sizes().0 + 1, 65);
+            assert_eq!(net.array_sizes().1 + 1, 2249);
+            net.row(0).unwrap().as_ptr()
+        };
+        let pointers = owners.each_ref().map(payload);
+        assert_ne!(pointers[0], pointers[1]);
+        let mut curves = Vec::new();
+        for i in 0..52 {
+            let owner = &owners[i % 2];
+            let curve = Curve::from(
+                CrvOnSurf::from_uv_line(
+                    &k,
+                    Point2::new(0.2, 0.3),
+                    Point2::new(0.8, 0.9),
+                    owner.clone_for_evaluation().unwrap(),
+                    None,
+                    3,
+                )
+                .unwrap(),
+            );
+            // This is the native copy used by make_topology_from_data::curve_for_edge.
+            let copy = curve.copy(&k).unwrap();
+            assert_eq!(payload(on_screw(&copy).surface()), pointers[i % 2]);
+            curves.push(copy);
+        }
+        let before: Vec<_> = curves
+            .iter()
+            .map(|c| c.evaluate(&k, 0.37, 2, false, false).unwrap())
+            .collect();
+        let translation = Vec3::new(2.0, -3.0, 4.0);
+        curves[0]
+            .transform(
+                &k,
+                &Axis2Placement::new(translation, Vec3::X, Vec3::Y),
+                None,
+            )
+            .unwrap();
+        assert_ne!(payload(on_screw(&curves[0]).surface()), pointers[0]);
+        let changed = curves[0].evaluate(&k, 0.37, 2, false, false).unwrap();
+        assert!((changed[0] - before[0][0] - translation).length() < 1e-12);
+        for (i, curve) in curves.iter().enumerate().skip(1) {
+            assert_eq!(payload(on_screw(curve).surface()), pointers[i % 2]);
+            assert_eq!(
+                curve.evaluate(&k, 0.37, 2, false, false).unwrap(),
+                before[i]
+            );
+        }
+        assert_eq!(owners.each_ref().map(payload), pointers);
+        // Editing a pool owner after construction must likewise leave its existing
+        // edge owners untouched; sharing is storage, not shared editable geometry.
+        owners[1]
+            .transform(
+                &k,
+                &Axis2Placement::new(-translation, Vec3::X, Vec3::Y),
+                None,
+            )
+            .unwrap();
+        assert_ne!(payload(&owners[1]), pointers[1]);
+        for (i, curve) in curves.iter().enumerate().skip(1) {
+            assert_eq!(payload(on_screw(curve).surface()), pointers[i % 2]);
+            assert_eq!(
+                curve.evaluate(&k, 0.37, 2, false, false).unwrap(),
+                before[i]
+            );
+        }
     }
 
     #[test]

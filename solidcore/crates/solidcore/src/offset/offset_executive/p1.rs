@@ -218,6 +218,8 @@ pub struct OffsetExecutive {
     /// its neighbours' offsets to meet its own ([`super::reach::extension_reach`]), by the
     /// face and by each of its face uses, recorded as the face is offset.
     extension_reaches: BTreeMap<FaceId, f64>,
+    /// Certified reach for the retained periodic-thread local operation only.
+    thread_extension_reach: Option<f64>,
     faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
     /// Not upstream: the edge bounds the local operation's reaches have found, each edge's
     /// taken again from here for its other face ([`super::reach::EdgeBounds`]); forgotten
@@ -295,6 +297,7 @@ impl OffsetExecutive {
             blend_to_faces: Relation::default(),
             extended_surfaces: BTreeMap::new(),
             extension_reaches: BTreeMap::new(),
+            thread_extension_reach: None,
             faceuse_extension_reaches: BTreeMap::new(),
             edge_bounds: super::reach::EdgeBounds::default(),
             moved_faces: Vec::new(),
@@ -660,7 +663,9 @@ impl OffsetExecutive {
         // surfaces of their own, and the move takes the offset's place: the margin is the
         // reach of the new surfaces' meetings and the largest move beside the face, and
         // at least the body's tolerance.
-        let reach = if self.local_faces.is_empty() {
+        let reach = if let Some(reach) = self.thread_extension_reach {
+            reach
+        } else if self.local_faces.is_empty() {
             super::reach::extension_reach(
                 kernel,
                 original,
@@ -707,6 +712,12 @@ impl OffsetExecutive {
             self.faceuse_extension_reaches.insert(faceuse, reach);
         }
         Ok(())
+    }
+
+    /// Supply the reach proved by the retained-thread operation's section certificate.
+    /// Other local operations continue to derive each face's reach from its neighbours.
+    pub(crate) fn set_thread_extension_reach(&mut self, reach: Option<f64>) {
+        self.thread_extension_reach = reach;
     }
 
     /// The largest reach recorded: the margin of a surface no recorded face accounts for
@@ -866,8 +877,33 @@ impl OffsetExecutive {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 // The obsolete offset-specific `else` at cpp:2158 is unreachable:
                 // NER(pBase) already established pOrigSurf == pBase != NULL.
+                let eligible_screw = if margin == 0.0 {
+                    false
+                } else if let Some(sweep) = base.procedural_sweep() {
+                    sweep.definition().screw_offset_section()?.is_some()
+                } else {
+                    false
+                };
+                let cylinder = if margin > 0.0 && self.thread_extension_reach.is_some() {
+                    match base.kind_with_nurb(kernel)? {
+                        SurfaceKind::Cone(cone) => {
+                            cone.extended_cylinder_keeping_parameters(kernel, margin)?
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 let extension = if margin == 0.0 {
                     base.clone()
+                } else if let Some(sweep) = base.procedural_sweep().filter(|_| eligible_screw) {
+                    sweep.definition().extended_for_offset(
+                        sweep.net(),
+                        margin,
+                        self.approximation_tol_3d,
+                    )?
+                } else if let Some(cylinder) = cylinder {
+                    base.carry_round_on_continuation(Surface::from(cylinder))
                 } else {
                     let extend = |asked: f64| {
                         base.extended_sides_keeping_parameters(
@@ -4024,6 +4060,76 @@ mod tests {
     }
 
     #[test]
+    fn cylinder_continuation_retains_native_angular_and_height_parameters() {
+        use crate::surface::cone::Cone;
+
+        let k = Kernel::default();
+        let placement = Axis2Placement::from_stored(
+            Vec3::new(-1.0, -64.0, 0.46774999999999944),
+            Vec3::new(3.061616997868383e-16, 1.0, 0.0),
+            Vec3::new(-1.0, 3.061616997868383e-16, 0.0),
+        );
+        for swapped in [false, true] {
+            let source = Cone::create_canonical(
+                &k,
+                &placement,
+                8.646835306586814,
+                8.646835306586814,
+                2.8145000000000007,
+                swapped,
+                false,
+            )
+            .unwrap();
+            let original = Surface::from(source.clone());
+            let domain = original.natural_uv_domain_with_nurb(&k).unwrap();
+            let mut executive = executive();
+            executive.set_thread_extension_reach(Some(0.21693393959008678));
+            let grown = executive
+                .get_create_extended_surface(&k, 1, &original, 0.21693393959008678)
+                .unwrap();
+            let SurfaceKind::Cone(target) = grown.kind() else {
+                panic!("the exact cylinder carrier was discarded before common-section SSI")
+            };
+            assert_eq!(target.canonical(), source.canonical());
+            let old_polar = source.rev().polar_curve().unwrap().base();
+            let new_polar = target.rev().polar_curve().unwrap().base();
+            assert_eq!(
+                old_polar.control_points().unwrap(),
+                new_polar.control_points().unwrap()
+            );
+            assert_eq!(
+                old_polar.knots(None).unwrap(),
+                new_polar.knots(None).unwrap()
+            );
+            let wider = grown.natural_uv_domain_with_nurb(&k).unwrap();
+            let old_height = if swapped {
+                domain.u_interval()
+            } else {
+                domain.v_interval()
+            };
+            let new_height = if swapped {
+                wider.u_interval()
+            } else {
+                wider.v_interval()
+            };
+            let step_height = target.rev().step_uv_domain().v_interval();
+            assert_eq!(
+                new_height, step_height,
+                "the literal height map stays h(v)=v"
+            );
+            assert!(new_height.min() < old_height.min() && new_height.max() > old_height.max());
+            let cap = source.cylinder_runtime_allowance(&k).unwrap().unwrap()
+                + target.cylinder_runtime_allowance(&k).unwrap().unwrap();
+            for fraction in [0.0, 0.137, 0.53, 0.891, 1.0] {
+                let uv = domain.evaluate(fraction, 1.0 - fraction);
+                let before = original.evaluate_point(&k, uv).unwrap();
+                let after = grown.evaluate_point(&k, uv).unwrap();
+                assert!(before.distance(after) <= cap);
+            }
+        }
+    }
+
+    #[test]
     fn extension_cache_hits_by_caller_identity_and_keeps_keys_distinct() {
         let kernel = Kernel::default();
         let mut executive = executive();
@@ -4078,6 +4184,37 @@ mod tests {
             7.0
         );
         assert_eq!(executive.extended_surfaces.len(), 2);
+    }
+
+    #[test]
+    fn non_affine_screw_extension_uses_the_general_surface_path() {
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+
+        let frame = Axis2Placement::new(Vec3::new(3.0, 0.0, 0.0), Vec3::X, Vec3::Z);
+        let profile = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            0.5,
+            0.0,
+            90.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 1.5, None).unwrap();
+        let stations = [0.0, 0.3];
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+        let mut base = Surface::from(net);
+        base.set_sweep_definition(definition);
+        let kernel = Kernel::default();
+        let expected =
+            base.extended_sides_keeping_parameters(&kernel, &BoxSide::ALL, Continuity::Ruled, 0.3);
+        let mut executive = executive();
+        let actual = executive.get_create_extended_surface(&kernel, 1, &base, 0.3);
+        assert_eq!(actual.is_ok(), expected.is_ok());
+        if let (Err(actual), Err(expected)) = (actual, expected) {
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]

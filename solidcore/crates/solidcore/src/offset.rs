@@ -9,4 +9,5 @@ pub mod draft;
 pub mod offset_executive;
 pub mod offset_faces;
 pub mod offset_geometry_creation;
+pub(crate) mod procedural_screw;
 pub mod wall_room;

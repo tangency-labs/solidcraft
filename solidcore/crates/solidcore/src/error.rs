@@ -2302,6 +2302,67 @@ mod tests {
     }
 
     #[test]
+    fn offset_refusals_name_their_entities_and_statuses() {
+        use offset::{LoopCrossing, OffsetFailure};
+        let face = FaceId::from_index(4);
+        let section = OffsetFailure::SectionOrderLost {
+            faces: [face, FaceId::from_index(7)],
+            distance: 0.3,
+            limit: [0.27, 0.28],
+        };
+        assert_eq!(section.kind(), ErrorKind::OffsetWallsTouch);
+        assert_eq!(section.entity(), Some(EntityRef::Face(face)));
+        assert_eq!(section.comparison_status(), SM_ERR_OFFSET_WALLS_TOUCH);
+        assert_eq!(
+            section.to_string(),
+            "thread faces 4 and 7 lose their section ordering at offset magnitude 0.3: the largest offset preserving their ordered lands is bounded by [0.27, 0.28] (the limiting zero-width land is refused)"
+        );
+        let folds = OffsetFailure::Folds {
+            face,
+            distance: -11.0,
+            largest: 10.0,
+        };
+        assert_eq!(folds.comparison_status(), SM_ERR);
+        assert_eq!(folds.kind(), ErrorKind::OffsetFolds);
+        assert_eq!(folds.entity(), Some(EntityRef::Face(face)));
+        assert_eq!(
+            folds.to_string(),
+            "the offset of face 4 by -11 folds: the wall is thicker than a radius of curvature \
+             of the face on that side (the largest wall that works is 10)"
+        );
+        let cross = OffsetFailure::LoopsCross {
+            face: None,
+            crossing: LoopCrossing::ThreeAtOnePoint,
+        };
+        assert_eq!(cross.comparison_status(), SM_ERR_BAD_INTERSECTIONS);
+        assert_eq!(cross.entity(), None);
+        assert_eq!(cross.on_face(face).entity(), Some(EntityRef::Face(face)));
+        assert_eq!(
+            cross.on_face(face).to_string(),
+            "the loops of the offset of face 4 cross in a way the offset cannot resolve: three \
+             loops cross at one point"
+        );
+        // a face already named, or an edge, is kept
+        let other = FaceId::from_index(9);
+        assert_eq!(cross.on_face(face).on_face(other), cross.on_face(face));
+        let edge = OffsetFailure::EdgeVanishes {
+            edge: Some(EdgeId::from_index(2)),
+            face: None,
+        };
+        assert_eq!(edge.on_face(face), edge);
+        assert_eq!(
+            OffsetFailure::EdgeVanishes {
+                edge: None,
+                face: None
+            }
+            .on_face(face)
+            .to_string(),
+            "the offset moves a vertex of an edge of face 4 to or past the edge's other end: the \
+             edge would vanish, a change of topology the offset does not make"
+        );
+    }
+
+    #[test]
     fn display_includes_operation_and_entity() {
         let e = SolidError::NotFound {
             operation: "topology::Brep::face",

@@ -21,6 +21,8 @@ const OP: &str = "surface::procedural_sweep::checked";
 // a failed check and is included explicitly in the model-space certificate.
 const ACCURACY_UNITS: usize = 256;
 type Box3 = [Ivl; 3];
+/// Original affine controls, their source interval, and signed normal distance.
+pub(crate) type RetainedAffineSource = ([Vec3; 2], [f64; 2], f64);
 
 /// The exact screw section and its source interval
 /// ([`ProceduralSweep::screw_offset_section`]).
@@ -587,6 +589,20 @@ impl ProceduralSweep {
             }
             None => offset.derivatives(motion, w, order),
         }
+    }
+
+    /// The retained affine coefficients used by common-section operation proofs.
+    /// Equal rational weights are deliberately excluded: their dehomogenization
+    /// is rounded, whereas these coordinates must be literal source coefficients.
+    pub(crate) fn retained_affine_source(&self) -> Result<Option<RetainedAffineSource>> {
+        let (source, distance) = self.offset.as_ref().map_or((&self.profile, 0.0), |offset| {
+            (&offset.source, offset.distance)
+        });
+        if source.is_rational()? {
+            return Ok(None);
+        }
+        Ok(super::offset_profile::affine_source(source)?
+            .map(|(points, domain)| (points, domain, distance)))
     }
 
     fn checked_span(&self, t: f64, ending: bool) -> Result<(f64, f64, f64)> {

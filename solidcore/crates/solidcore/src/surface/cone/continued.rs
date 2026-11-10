@@ -9,20 +9,130 @@
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::nurbs::math::gamma;
 use crate::surface::cone::Cone;
 use crate::surface::continued::{at_most_a_turn, step_rows, widen};
-use crate::surface::extend::ExtendRefusal;
+use crate::surface::extend::{Continuity, ExtendRefusal};
 use crate::surface::implicit::AnalyticSupport;
 use crate::surface::side::BoxSide;
-use crate::surface::surface::Surface;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "surface::cone::Cone::continued";
 
 impl Cone {
+    /// Continue a full cylinder whose native height map is literally `h(v)=v`,
+    /// retaining both that map and the original rational polar converter.
+    ///
+    /// The ordinary analytic extension already constructs the continued net on
+    /// the cylinder, but returns a bare B-spline. Rebuilding a canonical cylinder
+    /// from its enlarged box would change the polar parameters. Here only the
+    /// height interval changes, identically in STEP and native coordinates; the
+    /// real affine conversion remains `a+(v-a)/(b-a)*(b-a)=v`. Placement, radius,
+    /// polar coefficients and conversion metadata are copied exactly. Thus every
+    /// retained UV trim still names the same mathematical point. Native arithmetic
+    /// is covered by the cylinder's checked runtime point allowance.
+    ///
+    /// `None` denotes a different parameterization or an unproved analytic label,
+    /// before construction. A failed continuation is an error, not a fallback.
+    pub(crate) fn extended_cylinder_keeping_parameters(
+        &self,
+        k: &Kernel,
+        distance: f64,
+    ) -> Result<Option<Self>> {
+        const OP_MAP: &str = "surface::cone::Cone::extended_cylinder_keeping_parameters";
+        if !distance.is_finite() || distance <= 0.0 {
+            return Err(SolidError::invalid_input(
+                OP_MAP,
+                "invalid cylinder continuation distance",
+            ));
+        }
+        let step = self.rev.step_uv_domain();
+        let native = self.rev.base.natural_uv_domain();
+        let (angle, height) = if self.rev.swap_uv {
+            (native.v_interval(), native.u_interval())
+        } else {
+            (native.u_interval(), native.v_interval())
+        };
+        if self.semi_angle_deg != 0.0
+            || self.inside_out
+            || step.u_min() != 0.0
+            || step.u_max() != 360.0
+            || height != step.v_interval()
+            || !self.rev.is_bounded()?
+            || self.rev.polar_curve().is_none()
+            || !matches!(
+                self.rev.gen_curve.as_ref().map(Curve::kind),
+                Some(CurveKind::Line(_))
+            )
+        {
+            return Ok(None);
+        }
+        let mut exact_source = self.clone();
+        exact_source.rev = self.rev.clone_exact();
+        let source = Surface::from(exact_source);
+        if !AnalyticSupport::label_stands(k, &source)? {
+            return Ok(None);
+        }
+        let extension = source.extended_sides_keeping_parameters(
+            k,
+            &BoxSide::ALL,
+            Continuity::Natural,
+            distance,
+        )?;
+        let SurfaceKind::BSpline(form) = extension.surface.into_kind() else {
+            return Err(SolidError::invalid_input(
+                OP_MAP,
+                "cylinder height continuation has no extended net",
+            ));
+        };
+        let extended = form.natural_uv_domain();
+        let (new_angle, new_height) = if self.rev.swap_uv {
+            (extended.v_interval(), extended.u_interval())
+        } else {
+            (extended.u_interval(), extended.v_interval())
+        };
+        if new_angle != angle
+            || !new_height.min().is_finite()
+            || !new_height.max().is_finite()
+            || new_height.min() >= height.min()
+            || new_height.max() <= height.max()
+        {
+            return Err(SolidError::invalid_input(
+                OP_MAP,
+                "cylinder continuation changed its angular chart or failed to extend its height",
+            ));
+        }
+        let mut result = self.clone();
+        result.rev = self.rev.clone_exact();
+        result.rev.base = form;
+        result.rev.anal_uv_domain = Extent2d::from_bounds(
+            step.u_min(),
+            new_height.min(),
+            step.u_max(),
+            new_height.max(),
+        );
+        let Some(CurveKind::Line(generator)) = result.rev.gen_curve.as_mut().map(Curve::kind_mut)
+        else {
+            return Err(SolidError::invalid_input(
+                OP_MAP,
+                "cylinder continuation lost its linear generator",
+            ));
+        };
+        generator.adjust_step_interval(&new_height)?;
+        if generator.natural_interval() != new_height {
+            return Err(SolidError::invalid_input(
+                OP_MAP,
+                "cylinder generator did not retain its height interval",
+            ));
+        }
+        AnalyticSupport::check(k, &Surface::from(result.clone()))?;
+        Ok(Some(result))
+    }
+
     /// The cone continued naturally `distance` past side `side` of the face box `dom` (in the
     /// cone's NURBS parameters): its STEP domain widened at that side, by the angle
     /// `distance / r` (degrees) where the side runs along the axis (`r` the radius at the
