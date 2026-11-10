@@ -198,10 +198,12 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
         if (leg0.length() - leg1.length()).abs() > scaled_zero {
             return Ok(None);
         }
-        let Ok(normal) = leg0.cross(leg1).unitize() else {
+        // the legs made unit before their cross product: a short arc's legs are short, and
+        // the product of their lengths would fall under the unit vector's absolute floor
+        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
             return Ok(None);
         };
-        let Ok(tangent) = leg0.unitize() else {
+        let Ok(normal) = tangent.cross(next).unitize() else {
             return Ok(None);
         };
         // the half sweep, from the leg and the chord
