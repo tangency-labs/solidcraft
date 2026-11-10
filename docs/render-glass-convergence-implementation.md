@@ -8,19 +8,27 @@ sampling controls and supported clear-glass reconstruction from
 Rendering PR #12546 merged on 9 November 2026 as
 `ed2bafe7e312ff38f1d957a511d4c8e529dc4e32`.
 
-The implementation is integrated on pinned main
+The evaluated snapshot was integrated on pinned main
 `1ab3a5b1796564bc76dc57a513115f521edd0e90`, preserving graphics backend recovery,
 optional indirect-clamp behavior and the shared `solidcraft-look` assets.
+The published implementation was subsequently rebased to parent `201de37b9`
+as commit `c47c2a676`. The [publication qualification](render-glass-convergence-validation.md#publication-and-evaluated-snapshot)
+preserves its implementation-path identities. The [separate publication gate](render-glass-convergence-validation.md#publication-snapshot-gate)
+records the actual command outcome on that newer base; earlier UI and
+image measurements retain the evaluated snapshot.
 The [current integration record](render-glass-convergence-validation.md#current-integration)
-separates this source's qualification from the failed or interrupted `a3475683`
-attempts. Earlier `42918fe5` results retain their original source and do not
-qualify this newer integration.
+identifies each executed check's source, actual outcome and hardware scope. It
+keeps the failed or interrupted `a3475683` attempts and earlier `42918fe5`
+measurements attached to their original source.
 
 The current restack preserves upstream product-preview and backend controls,
 the optional GPU indirect clamp, shared look setup and the recovered convergence
-features. All 106 implementation file blobs and worktree byte hashes were
-unchanged when transferred from `a3475683` to `1ab3a5b1`, before this documentation
-update.
+features. The transfer from `a3475683` to `1ab3a5b1` preserved all 106
+implementation file blobs and worktree byte hashes. Subsequent GPU qualification
+changed three GPU files to use the shared sixteen-medium producer with the
+opaque specialization disabled, followed by one formatter-only descriptor
+reflow. The current validation record keeps those later source identities
+separate from the restack proof.
 The former `42918fe5` checkpoint, its nonzero full gate, targeted baseline
 reproductions, clear images, controls and public strategy measurements remain
 [historical evidence](render-glass-convergence-validation.md#merged-dependency-and-completion-qualification).
@@ -380,9 +388,18 @@ allocation, so an unselected probe is distinct from a selected zero contribution
 
 ## Validation and interpretation
 
-The [measured validation record](render-glass-convergence-validation.md) retains
-source and executable identities, actual image measurements and numerical findings.
-The selected `42918fe5` candidate's completed full gate exited 1, with 14,687
+The [current integration record](render-glass-convergence-validation.md#current-integration)
+reports the evaluated snapshot's actual gate, parent reproductions, device checks and
+image evidence, with source and executable identities. On tree `4861c922`,
+the CPU renderer passed 934 tests, GPU library passed 268, and main UI library
+passed 5,226. The complete gate still exited 1: 15,248 passed, 24 failed and
+71 were ignored; every failure has a corresponding targeted parent
+reproduction. The separate web-offline check passed its 20 scenarios.
+Current public comparisons and anonymized private diagnostics have their
+own measured outcomes and limitations. Earlier measurements below retain
+their original scope.
+
+The historical `42918fe5` candidate's completed full gate exited 1, with 14,687
 passes, 28 failures and 68 ignored tests across 100 native binaries. Both side jobs
 passed. The strict comparison retains 23 exact matches and five changed
 panic-header locations. All five failures reproduced on bare selected main,
@@ -503,7 +520,7 @@ original stage's acceptance criterion complete.
 
 | Area | Delivered mechanism | Remaining qualification or implementation boundary |
 | --- | --- | --- |
-| Dependency | Integrated on pinned main `1ab3a5b1`, preserving upstream render, UI and shared look changes | The current integration record reports its own checks; earlier `42918fe5` results retain their original scope |
+| Dependency | Earlier measurements evaluate `1ab3a5b1`/`4861c922`; the patch is preserved in `c47c2a676` on `201de37b9` | The publication snapshot gate has its own actual outcome; earlier UI/image and `42918fe5` results retain their original scope |
 | Photon diagnosis | Local/camera rankings, query support and complete raw-pixel accounting | Interpret independent-seed OPUS measurements without claiming a converged reference |
 | Glossy receivers | Optional exclusive area/environment continuation at selected mapped opaque base roughness | Independent energy/detail and rare-tail qualification; difficult hard-source families retain the existing estimator |
 | Photon radius | Independent-map decreasing bandwidth with surface/volume normalization | Radius-dependent energy, detail and leakage qualification; measured variance can increase |
@@ -513,8 +530,9 @@ original stage's acceptance criterion complete.
 
 The glossy strategy and bounded splitting implement the concrete mechanisms
 from stages 2 and 6. Their presence and ownership tests do not close the energy,
-detail or equal-time gates. The earlier sampling experiment does not evaluate
-these additions. The historical and selected-source clear repeats demonstrate
+detail or equal-time gates. The original audit's sampling experiment did not
+evaluate these additions; later public receiver and splitting studies have their
+own recorded scope. Historical and current clear repeats demonstrate
 their stated supported domain and reference preservation. They do not establish
 independent reconstruction-error or photon-bias bounds. These limits
 prevent an all-stages-complete claim.

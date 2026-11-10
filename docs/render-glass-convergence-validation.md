@@ -8,7 +8,120 @@ independently measured bound on photon-density bias.
 
 ## Current integration
 
-The implementation is integrated on pinned main
+### Publication and evaluated snapshot
+
+Implementation commit `c47c2a676c938f8d0b323a27c1fd48a83a5ffcbb` was
+already present in PR #13904 on parent
+`201de37b96e812faa8c21e0cad26c6be5fc78efc` when this documentation
+follow-up was prepared. **The earlier CI, UI, public-render and
+private-diagnostic measurements evaluate parent `1ab3a5b1` plus frozen tree
+`4861c92228b0d2aecd465ad77466ea83ade51b3c`. The separate publication
+snapshot gate below records its actual outcome on `c47c2a676` and parent
+`201de37b9`; earlier images and UI captures retain their original identities.**
+
+The existing rebase preserves the exact blob, type and mode delta of all
+**107 implementation paths: 100 non-document paths and seven documents**.
+Its 30 added and 77 modified paths have no overlap with the intervening upstream
+changes. All eight documents selected for this follow-up are also identical
+between the evaluated and published snapshots before this edit.
+
+The upstream advance contains **37 commits and 395 changed paths without rename
+detection**: 273 modified, 76 added and 46 deleted. Rename-aware comparison
+reports 371 entries, including 24 renames. These include substantive code
+changes. Every published-versus-evaluated tree difference is exactly that
+upstream advance; preserving the implementation patch does not preserve the
+whole tested program or qualify those upstream changes.
+
+This follow-up retains `c47c2a676` and changes exactly eight documentation
+files. All other blobs and modes are preserved from that publication commit.
+The reconciliation proof `concurrent-pr-reconciliation-01/comparison-v2.json`
+has SHA-256
+`59f29dc3eee2bd16885efed0e29951798a54468f7e089c0c7344e50d639c6f23`.
+The remaining draft acceptance gates stay open. The earlier evaluated CI
+retains exit 1; the publication gate's outcome is recorded separately below.
+
+### Publication snapshot gate
+
+The actual publication-snapshot `cargo xtask ci` run **did not pass**. It ran on commit `c47c2a676c938f8d0b323a27c1fd48a83a5ffcbb`, above parent `201de37b96e812faa8c21e0cad26c6be5fc78efc`, with tree `85ca46cd6dbb9cf6162eb8fd3db2989bdcabab64`. The command started at 20:33:22 UTC on 2026-11-10 and exited **1** at 21:15:48 UTC after **2,545.666 seconds**, without a timeout. Before/after source identities are equal, with no unstaged changes or untracked files. The fixture guard also completed, restored the original fixture bytes, mode and inode, and reported no errors.
+
+This was the ordinary `nice -n 10 cargo xtask ci` command with no test filters or tolerance changes: two Cargo jobs, two native test workers, four libtest threads, two action-matrix jobs, two Rayon threads, both GPU-required flags set to `1`, and both GPU selectors set to `auto`. The hardware test stages were not reached. The isolated shared-crate stage uses its official separate target directory; subsequent workspace commands were configured to use the dedicated publication target. The recorded wall time includes compilation.
+
+Formatting, asset attribution, icon, licence, list, skill and layer checks completed. The first three isolated shared-crate commands passed; the fourth stopped at a UI-kit library test:
+
+| Official isolated workspace | Library tests passed | Failed | Result |
+|---|---:|---:|---|
+| `solidcraft-color` | 3 | 0 | Passed |
+| `solidcraft-control` | 25 | 0 | Passed |
+| `solidcraft-control-egui` | 31 | 0 | Passed, including its copied control crate |
+| `solidcraft-look` | 330 | 1 | Stopped after the UI-kit library reported **294 passed / 1 failed / 0 ignored** |
+
+These are executed library-test counts within the isolated commands. Some crates recur in more than one isolated workspace. Within `look`, color, look and theme completed before UI-kit failed; the other member binaries were not run. These are not full-workspace native totals. The remaining eight shared-crate commands, UI-container and mesh checks, workspace Clippy, full native dispatch, Wasm and doctest side jobs, and the full gate's web-offline stage were **not reached**. The original native-accounting analyzer consequently preserves `native_counts: null` and its missing-dispatch diagnostic; the separate early-stage analysis records the actual results above.
+
+#### Isolated upstream UI test blocker
+
+The failing test is `menu::tests::a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name`. Its complete diagnostic reports an `epaint` 0.37.0 `TexturesDelta` drop assertion: one texture update remains unapplied. The test calls `run_ui` and retains its output without clearing the texture delta; the nearby menu test and the kit's `raw_frame` helper clear those deltas. The test uses the kit's embedded English catalog, egui's bundled default fonts and a synthetic host texture ID. The reviewed path loads no external model, image or host-font fixture.
+
+This test was introduced by upstream commit `46bb71b5e1707b7a93712dd52f9367372ad22ca6`; it is absent from the earlier `1ab`/`4861` source. Its file is identical in parent `201de` and publication commit `c47`. The input-equivalence review goes beyond the test text: all **8,607 entries** in the reviewed repository input superset have identical blobs, types and modes between those two commits, with no overlap with the 107 implementation paths. Both reconstructed shared-dependency closures and generated manifest agree; all **593 copied source files** match parent blobs and modes. The standalone lock resolves **240 packages**; all package identities and applicable registry checksums occur in the identical parent/head root lock. The five egui text/font packages were checked against their checksum-authenticated cached archives. The sole local build script's 381 declared inputs and 403 generated embedded-file references stay within the copied look crate and match the parent inputs.
+
+A separately recorded replay of the retained UI-kit test binary, using the standalone package directory and recorded policy with the official shared-target override, reproduced the failure in **0.016589 seconds**: **0 passed / 1 failed / 294 filtered**, exit **101**, no timeout, unchanged source and binary. The complete failure bodies are byte-identical after replacing only the single thread PID in each body. This is an **isolated reproduction with parent-identical source/dependency inputs**. It is not a fresh whole-parent build or a new full-suite parent qualification.
+
+The 24 failures from the earlier full native run were not exercised by this early-stopped gate. Their earlier `1ab` reproduction records retain that scope; this run supplies no new result for those tests.
+
+#### Focused publication renderer checks
+
+Separate native renderer-library checks completed on the same unchanged `c47`/`85ca` source. Both exited **0**, without a timeout or test-name filter; both reported zero measured tests and zero filtered tests.
+
+| Focused library | Passed | Failed | Ignored | Libtest execution time |
+|---|---:|---:|---:|---:|
+| CPU renderer, `solidcraft-render --lib --features raytrace-cpu` | **934** | **0** | **2** | 4.36 s |
+| GPU renderer, `solidcraft-gpu --lib` | **268** | **0** | **3** | 71.17 s |
+
+The CPU command used `--locked --profile ci --jobs 2` and took **451.118949 seconds including compilation**, finishing at 21:56:29 UTC. Its two ignored tests are the recorded manual sampler and parallel-timing probes. The GPU library was built separately with the locked `ci` profile and `solidcraft-engine/profile,solidcraft-engine/raytrace-cpu`; the build-only command took **1,065.826489 seconds**. Cargo identified one test executable, which was hashed before and after its independent run. That runtime command took **71.201076 seconds**, finishing at 21:49:47 UTC. Its three ignored tests are `glass_transport_evidence`, `path_performance` and `bench_plate`.
+
+For this GPU runtime, the executed command explicitly overrode both GPU selectors to `hardware` and used `--nocapture`; the required flags remained set to `1`. The retained log contains **165** identical path-adapter identifications for **AMD Radeon 780M Graphics (RADV PHOENIX), IntegratedGpu, Vulkan**, plus four matching named-GPU lines and no device-unavailable skip messages. This supplies direct hardware-adapter evidence for this focused current-snapshot run. It is separate from the earlier CI05 result under auto selectors, whose successful adapter output was not retained.
+
+#### Publication UI integration type-check
+
+The native main UI library and its test targets also passed a separate compile-only check on unchanged `c47`/`85ca`: `cargo check --locked --profile ci --jobs 2 -p solidcraft-ui-egui --lib --tests --features solidcraft-engine/profile,solidcraft-engine/raytrace-cpu --message-format=json-render-diagnostics`, run under `nice -n 10`. It exited **0**, without a timeout, after **257.835059 seconds**, finishing at 22:03:31 UTC.
+
+Cargo reported successful checking of the normal UI library, its unit-test library target and **21 integration-test targets**. All 23 library/test artifacts have `executable: null`, and the terminal Cargo record reports `build-finished: success`. This checks the rebased UI's native library/test code for compilation compatibility. **No UI tests were executed**, so there is no new UI test-pass total. These focused renderer and UI checks do not complete the failed full gate.
+
+#### Separate publication web-offline check
+
+A separate `nice -n 10 cargo xtask web-offline-test` invocation on the same unchanged `c47`/`85ca` source passed **all 20 logged scenarios**, exited **0**, and completed in **47.278860 seconds** without a timeout at 21:26:59 UTC. It used the pinned isolated Chrome and the recorded policy. The scenarios cover online/offline startup, incomplete and overlapping updates, retirement of cached builds, multiple deployment paths, sign-in interception and development builds.
+
+This is the repository's default stand-in shell check of its current registration/service-worker behavior, without `--site`. It does not establish real-build application/API behavior and does not complete the failed full gate.
+
+#### Publication evidence identifiers
+
+The completed evidence is retained under the labels below. SHA-256 values identify the actual source-pinned receipts and analyses; the earlier `4861` image and CI evidence remains separately scoped below.
+
+| Artifact | SHA-256 |
+|---|---|
+| `ci-publication-c47-01/receipt.json` | `47e6ded717b8705a18ed6440f16f0083a7294a9d391fecdd70469fbbef593c5d` |
+| `ci-publication-c47-01/output.log` | `926228846fad90beaf123f8d11b8ea960d9b99be432189b86cdf973bbf2c4d90` |
+| Publication fixture-guard receipt | `c0fd44f85b2e5f0fbb7d948c74b6b9174d8753ac27119ebf6c30bad987f6339a` |
+| Original native parser summary | `6ab61f5aeda71a95c04c1e1344909a9201a04442d3ab431e0494f63d65dc74df` |
+| Early-stage analysis summary | `d45cc4805d94ea63d352d359c9da81b1eb3fbe49cc7c6c1e9e05751e85b2c045` |
+| Complete parent-input equivalence proof | `e2ac90875635136f5a9c2746201b7111b23a0e648098e565af65af38ad371349` |
+| Isolated replay receipt | `0834a29b5a57b095ceca4cb88b8ae88b76b43e0b1904c334ea1991feae10a0c7` |
+| PID-only replay comparison | `8f6f5eadb14f1705e41ed2d8948351cf2c6f29cf28b5afaf9bd7c6fc82deaf4e` |
+| GPU build-only receipt | `91c7cdd33ee3265c7c37f8331bd7d1c92f41eab02ce30bd049b9d7a199b3c93c` |
+| GPU build-only log | `9dc89bce088d1ca7345dec7037a21499a4eaf14903270f03fd26c9eeee34ed93` |
+| Focused GPU runtime receipt | `21fd777a0396411b4d8ebdb2cb111fce410350326f0c5bb1ca29df2e9ce5d389` |
+| Focused GPU runtime log | `2bc648ab1fb92f5cdf8b214209aca308d24f880ca4c7f99eb6eb39d6217fa4ac` |
+| Focused GPU test executable | `eb49f1618cf025485257fb1a244951724bfe7605c3a71d8d34d856b6b515a422` |
+| Focused CPU command receipt | `7b4c246d6a98fe82b032cc8ea8b9867188e2b37f79af38a642580e07d51bc394` |
+| Focused CPU command log | `79c2490bbac94f7dc4e60e16ec8dcc0cb0f6e56ac47c0ec2a19ede4250d30795` |
+| Focused CPU test executable | `f967ef45db80fb83f8d5ace7fd3120a25ff6d8832459b41578b7ad7443a24218` |
+| UI compile-only receipt | `3a759f69d0481b93d48e9ca11464392f7a46e3b2ad3f11b7a3dca40dd5eb7d35` |
+| UI compile-only log | `8a33cb71872fa3f7ab753d8e2714fb44a5111a330dbdf884036e7168c9500e28` |
+| Separate web-offline receipt | `465ea549332087ac7871a2a5cf019529adeca3c7bea34175f63458d484152894` |
+| Separate web-offline log | `5aa7290195b7f4dbc578da1835623319669062ddc16b66a4a6fd7041b53c769a` |
+
+### Earlier evaluated snapshot
+
+The evaluated implementation was integrated on pinned main
 `1ab3a5b1796564bc76dc57a513115f521edd0e90`. The preceding `a3475683` restack
 reconciled 20 of the 106 implementation paths with upstream changes since
 `42918fe5`, preserving render UI, backend recovery and the optional GPU indirect
@@ -27,10 +140,408 @@ and worktree byte hashes exactly matched the retained `a3475683` tree
 `0513ae496b5feecc3681a5801643ac538054fb53`. The remaining tree delta was exactly
 the selected upstream delta. An explicit task stash retains the original source;
 no existing user stash was changed. The restack receipt below records that proof.
+This preservation statement describes the transfer itself. The later three-file
+GPU producer correction and formatter-only reflow have separate source records
+in the current qualification below.
 
-Qualification of pinned `1ab3a5b1` remains open. No earlier test total or image
-is represented as a passing result of this source. Its final record must retain
-actual command outcomes, source identities and any remaining failures.
+### Earlier evaluated snapshot gate
+
+The evaluated snapshot's `cargo xtask ci` run completed on 10 November 2026 with **exit 1**:
+**15,248 passed, 24 failed and 71 ignored tests across all 104 native binaries**.
+Ninety-eight binaries succeeded and six failed. All 24 remaining failure
+identities and diagnostics are accounted for by actual targeted runs on pristine
+parent `1ab3a5b1`, with the comparison qualifications below. **The full gate did
+not pass.**
+
+This run, `ci-main-1ab-05`, binds frozen source tree
+`4861c92228b0d2aecd465ad77466ea83ade51b3c` to pinned main
+`1ab3a5b1796564bc76dc57a513115f521edd0e90`. It ran from **17:58:42.949905 to
+19:24:54.239770 UTC**, taking **5,171.249 seconds**, without a timeout or source
+change. The native-test phase took 1,845.9 seconds. Formatting, shared-crate
+isolation, Clippy with `-D warnings`, and the workspace test build passed before
+native dispatch. Two top-level jobs, four test threads, two action-matrix workers
+and two Rayon workers bounded concurrency. GPU availability was required
+(`SOLIDCRAFT_REQUIRE_GPU=1`, `VIEWPORT_TEST_REQUIRE_GPU=1`), with both
+adapter selectors set to `auto`. The full-CI log retains the passing GPU
+library summary but not its adapter identity; it does not establish a
+hardware-only selection policy for that run.
+
+| Evaluated snapshot check | Passed | Failed | Ignored | Scope |
+| --- | ---: | ---: | ---: | --- |
+| All native binaries | 15,248 | 24 | 71 | All 104 binaries; the rows below are included in this total |
+| CPU renderer library | 934 | 0 | 2 | Renderer contracts and CPU execution |
+| GPU library | 268 | 0 | 3 | Complete unfiltered library suite; GPU required, selectors `auto`; adapter identity not retained in the full-CI log |
+| Main egui UI library | 5,226 | 0 | 22 | UI library tests; separate control captures have their own evidence |
+| Boolean property tests | 16 | 0 | 2 | This fresh property-test run passed |
+| WebAssembly check | — | — | — | All 27 crates passed in 91.4 seconds |
+| Documentation tests | — | — | — | Side job passed in 22.8 seconds; the retained output supplies no aggregate doctest count |
+
+The totals count one final outer summary per dispatched native binary. They
+exclude the earlier shared-crate isolation results and both side jobs. The gate
+stopped after the native failures and did not dispatch `web-offline-test`; it
+supplies no standalone web-offline result.
+
+A separate guard kept the existing Boolean regression fixture readable but
+nonwritable during this run, preventing a failing property test from appending
+to tracked source. It preserved the fixture bytes, existing seed replay, test
+case policy and failure behavior. The guard restored the original `0600` mode,
+inode and hash afterward; its own source check passed and its error list is
+empty. The original command and actual nonzero result remain unchanged.
+
+### Remaining failures and parent reproductions
+
+The six failing binaries contain eight kernel-library failures, eleven
+engine-library failures, one SMLib-library failure, one naming-corpus failure,
+one action-matrix failure and two pleat-regression failures. Separate targeted
+runs reproduced all 24 on pristine parent `1ab3a5b1`. They used a dedicated
+parent build target, actual Cargo-reported executables, and matching native
+feature, profile and toolchain fingerprints. These targeted runs do not claim
+a complete parent-workspace CI pass.
+
+All 23 non-action failure bodies match the earlier integrated CI03 run after
+normalizing panic process IDs and whitespace. Twenty also match the parent
+under those same rules; three additionally differ only by the incidental
+backtrace hint. The action matrix retains **138 identical case identities and
+per-case counts, totaling 1,359 outcomes**, plus an identical complete remaining
+failure diagnostic and summary. Its elapsed/load timings and parallel progress
+order differ. The original strict action-body comparison remains false; the
+separate structured comparison accounts for those differences without making a
+performance claim. No CI05 failure is left without a corresponding parent
+reproduction.
+
+The earlier CI03 `scale_invariant` counterexample was checked separately. Parent
+production and test Rust code reproduced the exact diagnostic and complete
+minimal input after adding only the retained 210-byte regression-fixture entry.
+That replay used zero new random cases and the test's unchanged 200-shrink
+limit; it failed with exit 101. It is **parent code with retained input**, not a
+pristine whole-checkout run. The original strict surrounding-body comparison
+remains false because of the documented save notices, success counter and
+`--nocapture` wrapper. Only the known fixture was then restored, returning the
+parent checkout to clean tree `d3916d65206e9e5d66dacab0815b85f02ee303e5`.
+CI05's 16 passing fresh Boolean tests are a distinct result, not a claimed code
+fix for that counterexample.
+
+### GPU producer correction
+
+CI03 exposed 15 GPU tests rejecting invalid path radiance. Three unchanged
+controls—opaque box with coat/maps, fixed-seed furnace and indirect clamp—were
+replayed on the tested RADV PHOENIX adapter:
+
+| Source and producer | Box | Furnace | Clamp |
+| --- | --- | --- | --- |
+| Pristine parent `1ab3a5b1` | Pass | Pass | Pass |
+| Integrated `3a88dee1`, opaque specialization enabled, one medium entry | Fail | Fail | Fail |
+| Diagnostic `4fac244f`, opaque specialization enabled, sixteen entries | Fail | Fail | Fail |
+| Diagnostic `d6d6ae54`, sixteen entries, both opaque overrides disabled | Pass | Pass | Pass |
+
+Increasing stack capacity alone did not resolve the failure. With both opaque
+overrides disabled, all sixteen printed box raw-float fingerprints and the
+furnace centre matched the parent exactly. The clamp control passed the same
+assertions; no separate whole-image equality comparison was recorded for it.
+The guard reports invalid radiance without distinguishing nonfinite from
+negative values. These checks isolate dependence on specialization; they do
+not establish a compiler or driver cause, or qualify opaque throughput.
+
+The retained fix uses one shared sixteen-medium scene shader with
+`OPAQUE_SCENE=0`. Scene classification, cache routing, admission, texture/clamp
+flags and transport formulas remain intact. The signed-primary-hook comparison
+uses the actual production shader while retaining its eight cases and existing
+source, uniform, classification and image-prefix checks.
+
+The complete focused GPU suite passed **268 tests, zero failed and three
+ignored**, with no filters and unchanged source
+`9fdbe15d90d9c7b84a273f837c32188019c5c4a6`. Its retained `--nocapture` log
+identifies the path executor as AMD Radeon 780M Graphics (RADV PHOENIX), an
+integrated GPU using Vulkan. Its selectors were `auto`; these are direct
+observations for that focused run. All fifteen CI03 GPU failures passed.
+The three existing ignored tests cover glass-transport evidence, path performance
+and the plate benchmark. The later mapping to final tree `4861c922` changes
+only one descriptor's rustfmt layout and an optional trailing comma; the retained
+receipt explicitly records that this is not a whitespace-only change. CI05
+independently reran the complete GPU library on that final tree with the same
+268/0/3 outcome. Neither suite duration is a throughput benchmark.
+
+### Earlier attempts on the same pinned dependency
+
+| Attempt | Source tree | Actual retained outcome |
+| --- | --- | --- |
+| `ci-main-1ab-03` | `3a88dee1abafe5002304853bad5ee80514a7a339` | Exit 1 after 5,741.417 seconds; 15,232 passed, 40 failed, 71 ignored across 104 native binaries. Fifteen GPU failures and the Boolean counterexample are absent from CI05's failure list. |
+| `ci-main-1ab-04` | `9fdbe15d90d9c7b84a273f837c32188019c5c4a6` | Exit 1 after 26.016 seconds at the formatting check. No native tests or side jobs were dispatched; there is no native test total for this attempt. |
+
+CI03's original receipt retains **`source_unchanged=false`**: the property test
+appended its counterexample to the tracked regression fixture while HEAD and
+the index stayed fixed. The before/after fixture, patch and original receipt
+were preserved, and only that generated append was restored. This later
+restoration does not turn CI03 into a source-stable gate. CI04 was source-stable
+and did not time out; its formatting stop preceded the separately recorded
+formatter correction and final CI05 run. These attempts retain their own source
+identities and do not qualify final-source image results.
+
+### Current gate evidence identifiers
+
+These relative labels identify retained external evidence, not files committed
+to the repository. Hashes bind the final outcome and comparisons; the named
+reports retain the underlying command, artifact and failure-body records.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `ci-main-1ab-05/receipt.json` | `503eb988de4ab1407d4130a1009e711a0bbdcc3f39f3674bc05c262218d25fc6` |
+| `ci-main-1ab-05/output.log` | `dff7460fd8b13edf9d178c4db8df57654fa1ed97b04dbe221894846f99149a02` |
+| `ci-main-1ab-05-fixture-protection.json` | `8514f3089a989afdd81e6ecaec4142cf10378af9cbd1905f7f231c552ffe8d59` |
+| `ci-main-1ab-05-analysis/summary.json` | `9f490a9db47a43519abe9b6bf4f72502bf020175495df07b804c94c2497f1a49` |
+| `ci-main-1ab-05-parent-comparison/summary.json` | `3762c7193232e75c45765246007dc2427d9b4f9804ccde49f3b09405f613f264` |
+| `gpu-opaque-off-diagnostic-01/controls-and-comparison.json` | `635c9aa81c3580bcc1bddc5da1406ec65d828d1f47aeddf276ecd5e5ac9e982f` |
+| `gpu-full-producer-final-01/qualification.json` | `a7a8760d73e721328b7d44c3e6496a96ebfdf73ffa86f9e3fc109a99b85f82ef` |
+| `gpu-final-format-01/receipt.json` | `34854c248e359df5aed46936971b979d34b1c6ab7fb0f57dbd6c305921e72709` |
+| `parent-repro-analysis-01/parent-main-1ab-boolean-retained-input-01/retained-input-semantic-comparison.json` | `ce06ca171163d33d246c068be18cce02ad2c62836d316653cc2d1af260ffa1d2` |
+| `parent-retained-input-preparation-01/restoration.json` | `3559e1bd64e89afd4c815a6538714295c4a60c1774e032a64a490a437a501d94` |
+| `ci-main-1ab-03/receipt.json` | `0461228a5aa8b4fe5da9f6446f6556965a7a21d3d292b09cdbfc904f46f5ff52` |
+| `ci-main-1ab-04/receipt.json` | `ccb91a39885846b941729fd6d4b0722ff13e200fd893a6865e1a2463423e0716` |
+
+### Current application-control capture
+
+The accepted capture, `ui-20261110T193345Z-3nnfy7i4`, completed on
+10 November 2026 at **19:34:55.202430 UTC** with unchanged source tree
+`4861c92228b0d2aecd465ad77466ea83ade51b3c`. Library discovery, linking the
+external driver and capturing the controls all passed. The driver used the
+application's actual egui meshes, texture uploads and bundled fonts on a new
+empty in-memory design. Live rendering was paused, no user session or private
+design was loaded, and no image job ran.
+
+Both **476 × 1,599** light-theme panels were visually inspected. Labels and
+explanations were readable, with no overlap, clipping or text elision. Five
+integration controls were verified for each backend:
+
+| Control | CPU view | GPU view |
+| --- | --- | --- |
+| Point/directional caustics | Enabled | Enabled |
+| Area-light caustics | Enabled | Enabled |
+| Use camera paths for glossy caustics | Enabled | Enabled |
+| Maximum base roughness | 0.35 | 0.35 |
+| Trace both glass branches | Enabled | Enabled |
+
+The demonstration keeps one Fresnel stratum while splitting is enabled. Saved
+state preserves the separately authored GPU `clamp_indirect=8` through paint
+and Glass-control edits. That clamp has no visible widget in these captures;
+photon probes remain absent. The control receipt verifies both state and
+visible bounds.
+
+These images show **actual application controls rendered in software**. The
+capture helper skips GPU callback primitives, so its scope excludes a native
+presented window and GPU viewport rendering. Both panels were accepted for
+public attachment after visual review; this capture record does not assert
+that an upload has completed.
+
+The first attempt, `ui-20261110T192503Z-utje877s`, stopped before linking or
+capture when its unchanged provenance guard detected five rebuilt registry TLS
+libraries. Source stayed unchanged. Dependency analysis placed all five outside
+the driver's complete **414-node** library, procedural-macro and build-script
+closure; no local normal library was rebuilt. Build-script fingerprints differed
+in inherited Cargo package environment between nested xtask execution and direct
+discovery. That analysis uses a preserved pre-CI05 fingerprint, without claiming
+a post-CI05/pre-discovery snapshot.
+
+The successful retry used the original helper, the same discovery command and
+the existing guard. All 448 normal libraries were fresh. **All six direct rlib
+hashes and twelve fingerprint-file hashes matched the first discovery**; the
+first failed receipt remains unchanged. This establishes the capture's library
+provenance without relaxing the guard or changing implementation source.
+
+### Current standalone web-offline check
+
+`web-offline-main-1ab-01` completed with **exit 0**, no timeout and unchanged
+source tree `4861c92228b0d2aecd465ad77466ea83ade51b3c`. The separate
+`cargo xtask web-offline-test` run took **60.692524 seconds**, from
+19:35:43.285265 to 19:36:44.016420 UTC. Its full log records **20 passing
+scenarios** and the terminal `web-offline-test: passed` result.
+
+The run explicitly selected isolated official **Chrome for Testing
+157.0.8103.50** through `CHROME`. It exercised initial online/offline launch,
+failed and interrupted updates, multiple paths/tabs, slow networks, cache
+retirement, overlapping deployments, missing deployments, sign-in redirects
+and development-build behavior.
+
+This was the default small stand-in application, using the production web
+application's service-worker registration and `web-offline` generator. It
+qualifies those service-worker/cache/update scenarios. A real built web
+application was not supplied through `--site`, so this run does not establish
+end-to-end application or API behavior. The final CI's separate 27-crate
+WebAssembly compilation remains a distinct successful check. Neither result
+changes the full workspace gate's exit 1.
+
+### UI and web evidence identifiers
+
+These relative labels identify retained external artifacts. The two control
+PNGs contain the public empty-design fixture; their visual-review receipt
+records acceptance for attachment separately from any later publication.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `ui-20261110T193345Z-3nnfy7i4/receipt.json` | `0903a77d8b0d49321fee7ac7656dc217291d55e55ee64a1fa7314d7357919eeb` |
+| `ui-20261110T193345Z-3nnfy7i4/captures/controls.json` | `5d0f263af0a01ea8704edbaeb8de3fc228b072d0375063cb9727c1e9a5faa4a2` |
+| `ui-discovery-provenance-01/retry-comparison.json` | `f718a5879a0a6bb147203501dd7bc17a537868dd2e940f1426ab23d281049d2a` |
+| `ui-final-visual-review-01.json` | `acdb5ac9e1b91d890337ff7c3132ca42607b722d50f1af5b3b76b3d5915fcfa5` |
+| `ui-20261110T193345Z-3nnfy7i4/captures/cpu-glass-controls-light.png` | `be673ff5f07e7e1c66023f38dca61c3e292773d1bd77160e0944435e38bc3691` |
+| `ui-20261110T193345Z-3nnfy7i4/captures/gpu-glass-controls-light.png` | `dd09eb687526a984b830f9c645400538cd7950979a7ddec7a4960fc01f8d3516` |
+| `web-offline-main-1ab-01/receipt.json` | `306fb5e5efea59fd0e5a18107d8868e63fd5a74319cddbcb9f48d47f6f789f3c` |
+| `web-offline-main-1ab-01/output.log` | `b8f70d3654cc1a23da1f627d343e919bb21e0ab8385c0b2f2548952b87bb9727` |
+| `chrome-for-testing-157.0.8103.50/receipt.json` | `68f565a30ef7baf531ff96e82d117d0f88478d39e339e651dad738afcce323d1` |
+
+### Current public evidence
+
+The complete public suite finished on 2026-11-10 at 19:58:45 UTC on the frozen implementation tree `4861c92228b0d2aecd465ad77466ea83ade51b3c`, above parent `1ab3a5b1796564bc76dc57a513115f521edd0e90`. Both example builds and all four execution commands exited zero; source checks before and after each command matched. The actual Cargo-produced executables were copied and hashed before use. The clear comparison used the CPU renderer and required hardware GPU; the receiver and split matrices used the CPU renderer.
+
+#### Clear reconstruction isolation
+
+Both reconstruction modes rendered 256 × 192 pixels at 32 samples per pixel. Within each backend, the decoded FLOAT32 raw RGBA and the complete EXR file bytes were identical between off and filter. Display alpha remained opaque and exact; only display RGB changed. All raw RGB values were finite and nonnegative, with coverage in [0, 1]. Each captured frame reported 49,152 pixels and 1,572,864 complete observations across the six additive components.
+
+| Backend | Display RGB pixels changed | Maximum component recombination error | Fixed absolute limit | Optical-guide pixels |
+|---|---:|---:|---:|---:|
+| CPU | 38,193 | 5.5511151e-16 | 1e-10 | 6,441 |
+| GPU | 38,355 | 4.7683716e-07 | 1e-05 | 6,441 |
+
+Aggregate component sums matched reported beauty at the unchanged relative limits of 1e-10 for CPU and 1e-6 for GPU; raw EXR sums matched beauty at 1e-6. The limits were not widened. The combined CPU/GPU off command took 17.174 seconds and the filter command 33.705 seconds; these are command times for different capture/filter workloads, not a throughput comparison.
+
+Visual inspection of all four retained PNGs found the checkerboard and clear object intact, smoother surroundings after filtering, and remaining noise in the refracted region. The GPU images also retain a black polygon at the upper-left edge in both modes. Source inspection and projection of the recorded rectangular light identify this as its non-emitting back face: GPU emitter intersections are two-sided and terminate with coverage one when back-face emission is zero, while CPU rectangle intersections reject the back face. Both policies already exist on parent 1ab3a5b; the relevant intersection and PDF functions are unchanged. The GPU polygon contains 1,041 fully black pixels, and the guide classifies 1,072 emitter pixels. This backend visibility difference is disclosed rather than treated as backend parity. The pictures establish neither physical accuracy nor native-window behavior; they are headless public-fixture evidence.
+
+#### Independently recomputed strategy matrices
+
+A separate pinned analyzer decoded all 320 FLOAT32 EXRs and recomputed pixelwise RGB and luminance means and sample variances across eight randomizations with float64 Welford accumulation. Every producer group statistic matched; all raw values and coverage passed the stated validity checks. The 128-image receiver matrix covers six cases and 16 groups at 32 complete camera observations per pixel with 4,096 configured photons per fixed map. All 48 receiver RGBA pairs were bitwise exact: four supported glossy/polished cases matched their camera-reference estimator, and the diffuse and hard-source controls matched unchanged gather. Gather differed from the camera reference in all eight randomizations of each supported case, so those checks exercised the selected continuation path.
+
+The 192-image split matrix covers four cases and 24 groups at 32 requested lane evaluations per pixel. Independent and Sobol variants use 32 complete observations; two strata and first-interface split use 16; four strata use eight. The configured map budget is one photon, so this matrix targets camera sampling rather than photon-map convergence. Both matrices use 32 × 32 images and one CPU worker. The receiver command took 125.326 seconds and the split command 127.726 seconds.
+
+In the following table, variance is the frame average of the per-pixel variance across the eight images, and mean change is the relative change in frame-averaged luminance. Receiver rows compare continuation with gather; sampling rows compare the named strategy with independent sampling. Seconds are measured means per render. The complete 40-group table, including all measured strategies and timings, is retained in the independent analysis.
+
+| Matrix / case | Strategy | Luminance variance ratio | Mean luminance change | Baseline seconds | Strategy seconds |
+|---|---|---:|---:|---:|---:|
+| Receiver / area glossy | continue-glossy | 3.77976 | +0.09566% | 1.0326 | 0.9848 |
+| Receiver / area polished | continue-glossy | 0.216373 | +2.03744% | 1.0523 | 1.0169 |
+| Receiver / environment glossy | continue-glossy | 0.966563 | +0.00364% | 0.7720 | 0.7258 |
+| Receiver / environment polished | continue-glossy | 0.000189852 | -0.84729% | 0.7111 | 0.6828 |
+| Sampling / area diffuse | sobol | 1.00456 | -1.48484% | 0.6128 | 0.6300 |
+| Sampling / area diffuse | split | 1.55393 | -0.25648% | 0.6128 | 0.5933 |
+| Sampling / area glossy | sobol | 0.657507 | -1.10459% | 0.6124 | 0.6394 |
+| Sampling / area glossy | split | 1.54183 | -0.52108% | 0.6124 | 0.5661 |
+| Sampling / environment polished | sobol | 0.52935 | +0.02125% | 0.5279 | 0.5502 |
+| Sampling / environment polished | split | 1.74762 | -0.00276% | 0.5279 | 0.4884 |
+| Sampling / dispersive area | sobol | 0.830184 | -0.14601% | 0.6255 | 0.6431 |
+| Sampling / dispersive area | split | 1.56382 | -0.39563% | 0.6255 | 0.5832 |
+
+Two-strata variance ratios were 1.3359–1.6782, and four-strata ratios were 2.4900–3.4395; all exceeded one in these four cases. Sobol plus splitting had ratios 1.39827, 0.92414, 0.91771, 1.0138 in the same case order. Thus continuation and Sobol have mixed measured outcomes, while first-interface splitting and extra strata did not improve this matched-requested-lane experiment. All remain opt-in.
+
+Eight randomizations do not establish rare-event tails, expected energy, density bias, or error against an independent physical reference. The large polished-environment improvement and the area-glossy worsening are both retained, including their finite-seed mean shifts. The receiver reference shares geometry and geometric-normal policy, so exact pairing establishes accounting identity only. Requested observations and lanes do not match actual traversal work or elapsed time; timing was measured but not calibrated or held equal. Variance multiplied by elapsed time is only a descriptive proxy. These results do not qualify equal-time efficiency, GPU throughput, general denoising quality, or production rough-transmission footprints, and they do not change the full CI exit status of one.
+
+#### Public evidence identifiers
+
+The following retained artifact SHA-256 values identify this current run; older evidence remains historical.
+
+| Artifact | SHA-256 |
+|---|---|
+| `public-20261110T193738Z-mf87czdu/receipt.json` | `035baf8818882cf6ab1f95929b446227b0e6c629d93baf28bcb58775127bc678` |
+| `public-20261110T193738Z-mf87czdu/analysis.json` | `01363543ad4d22275553c3851139ea1ddf7b95c4ea7197da0ef8a747d7635e22` |
+| `public-20261110T193738Z-mf87czdu/artifacts.json` | `da1837caad14442f26e497a318c1750496eef8b7af5d19639d99d7c89269cf0c` |
+| `public-strategies-independent-01/summary.json` | `4a14169107eac393348f26d4629eafa8a573ca66278238c137470d23da43a9e0` |
+| `public-strategies-independent-01/input-manifest.json` | `36fa5a666ed2cc336b150b2e21eadabf2ae0bf5a949dd32bb13404b7badd3eed` |
+| `public-clear-classification-01/summary.json` | `9e26e8cfad514911c0d292bbd4a69d92d336bb8ab6feace7a5a24ed8f43ae0f2` |
+| `public-clear-classification-01/parent-policy-comparison-v2.json` | `a82a71b432d049179442697077c9804178696c187afdcbee81d940e4652b80f6` |
+| CPU clear EXR, identical in both reconstruction modes | `48a7ce8bfa20eb578757bfcdbd46d7ea919fcfb3620276f8ce16bc613c966835` |
+| GPU clear EXR, identical in both reconstruction modes | `4b375dbd558680917fba2e56d213a7c36ae38aaf4ab503bca131f35a1d0062b7` |
+
+### Current private diagnostics
+
+These measurements belong to evaluated index tree `4861c92228b0d2aecd465ad77466ea83ade51b3c` on parent `1ab3a5b1796564bc76dc57a513115f521edd0e90`. They do not establish fresh validation of the later publication rebase. The six diagnostics completed with unchanged evaluated source and the prescribed controls. Decoded raw exports contained finite, non-negative RGB and valid coverage; the selected-pixel estimator ledgers passed their existing closure checks.
+
+The two groups vary different factors. Reference runs A/E/F vary **map A/B/C while holding camera A fixed**. Continuation runs B/C/D vary **camera A/B/C while holding map A fixed**. The groups support descriptive map sensitivity and camera scatter. They are not an off/on variance-reduction experiment.
+
+| Run | Comparison | Map | Camera | Original selected-pixel Y | Actual global maximum Y |
+| --- | --- | --- | --- | ---: | ---: |
+| A | Reference | A | A | 2,877.519255 | 6,154.899696 |
+| B | Continuation | A | A | 0.636577 | 6,154.899696 |
+| C | Continuation | A | B | 2.206454 | 2,806.913149 |
+| D | Continuation | A | C | 1.670677 | 4,934.413172 |
+| E | Reference | B | A | 0.492024 | 6,154.899696 |
+| F | Reference | C | A | 0.492024 | 6,154.899696 |
+
+Here Y is scene-linear `0.2126 R + 0.7152 G + 0.0722 B`, computed in float64 from the retained raw output. The table is rounded for readability.
+
+At the original selected pixel, A's photon estimator contributed Y = 2,877.027135 and the other estimators contributed Y = 0.492024. In B these totals were 0.144553 and 0.492024. The photon shares of accounted beauty were approximately 99.9829% and 22.7079%. Reference map variants E/F also had zero photon contribution at this selected point; their other-estimator total remained 0.492024. C/D had zero selected-point photon contribution, with their other-estimator totals accounting for their selected values.
+
+These are complete **photon versus all other estimators** totals at the original selected point. They are not a physical caustic/non-caustic partition or a complete six-component decomposition. Retained photon event-family totals are bounded summaries; their numerical remainder can include rounding error. Rebuilt maps may also change GPU atomic storage order. The selected-point reduction therefore does not establish a general quality, energy, or tail improvement.
+
+A separate raw reader examined **every run's actual global luminance maximum**, including the baseline and stationary maxima. Each run had one unique maximum. A/B/E/F shared the same location, raw RGBA and Y; C and D had separate maximum locations. None of the six global maxima was at the original selected probe. The original selected-point ledgers consequently do not attribute those maxima.
+
+All six complete-frame inspection overviews and all six actual-maximum figures were visually reviewed. The maximum figures pair original display pixels with exact raw Y neighborhoods. Around the shared A/B/E/F maximum, all eight neighboring Y values were below 3; around C they were below 0.57; around D they were below 2.54. These are isolated raw peaks. Their physical path families were not inferred from visual appearance. Grain and isolated bright points remained visible in the overviews.
+
+The mean per-pixel luminance sample variance was 0.453543040 for the reference map A/B/C group with camera A fixed. It was 5.528541577 for the continuation camera A/B/C group with map A fixed. These statistics measure different axes and cannot be divided into an off/on variance-reduction ratio. Mean image Y changed by +0.0000395453 from A to B (`mean(Y_B) - mean(Y_A)`, in absolute scene-linear Y units), with unchanged coverage. Image-space luminance summaries do not establish integrated physical energy, bias, calibrated confidence, equal-time efficiency or a general rare-event bound.
+
+#### Targeted measurements at retained maxima
+
+The targeted repeats at the three selected maximum locations A/C/D each reproduced their original float32 RGBA bits exactly. Each selected location remained the fresh frame's unique global maximum. In all three **fresh** ledgers, photon RGB was zero, the other estimators equaled raw beauty, and the RGB recombination residual was zero.
+
+| Targeted repeat | Retained maximum Y | Fresh Y at that location | Fresh photon Y | Fresh other-estimator Y |
+| --- | ---: | ---: | ---: | ---: |
+| A | 6,154.899696 | 6,154.899696 | 0 | 6,154.899696 |
+| C | 2,806.913149 | 2,806.913149 | 0 | 2,806.913149 |
+| D | 4,934.413172 | 4,934.413172 | 0 | 4,934.413172 |
+
+These ledgers establish estimator partitions of the fresh measurements. They do not identify the physical subfamilies of the other-estimator contributions. Equal raw values do not establish identical paths or full-image identity, and fresh ledgers are not transferred to any of the original six captures. Runs B/E/F were not separately reprobed at their maxima. The original reports' maximum-attribution status remains incomplete.
+
+Completed-evidence SHA256 bindings:
+
+| Evidence | SHA256 |
+| --- | --- |
+| Six-run protocol receipt | `1698a7d3a94e6e74061d95e6b5d49fcf62d1cd83cf93705c6dc1248fab51b03f` |
+| Every-maximum raw review | `246f5640c7c805f4367a2da3c30205465278cfc0360171c1a6113e053ffb612b` |
+| Complete selected-point estimator ledger | `307bfbc3370d6d7cb9fa75c86745bb0e46aaa5b6e2517dc5d1ec0b2e78cea41b` |
+| Root visual inspection completion | `612f174da6b5d39aafa23296938bac5b47adef534f5168dce4f1d9bf51a156d1` |
+| Targeted A receipt | `a1556cb7cf1cdf88062594939081671b0478ec6702369f482bb1ac2896edd9fa` |
+| Targeted A raw comparison and fresh ledger | `e7ef6d45c97117a7c4300ec8aae644097a41385920d862b0ac6c7ce734c07618` |
+| Targeted C receipt | `27c23442778a49c8d0699e9f17d019a357c11fbf494b1112956e48ed16dd29dd` |
+| Targeted C raw comparison and fresh ledger | `fce44fd5d1963aea4b01a4107d5d6304169c3b1afb24be7abcb43745610580b6` |
+| Targeted D receipt | `1d92d33493d261c9da9270d4fc48bd326b0002fec2c29b2b10aa8cf77f461422` |
+| Targeted D raw comparison and fresh ledger | `5df3f2dfaa5028416ffb254d14f7517e3d6a8494fe6803fc7bc755e0925c1511` |
+
+### Publication follow-up and remaining scope
+
+The earlier CI, UI, public-render and private-diagnostic records evaluate
+frozen tree `4861c92228b0d2aecd465ad77466ea83ade51b3c` above parent
+`1ab3a5b1796564bc76dc57a513115f521edd0e90`. They remain separate from
+the [publication snapshot gate](#publication-snapshot-gate), which records the
+actual command outcome for `c47c2a676` on parent `201de37b9`. The earlier
+image and UI artifacts are not relabeled as captures from the publication base.
+
+The separate publication proof preserves all 107 implementation-path blobs,
+types and modes across the existing rebase. It does not establish equality of
+the complete evaluated and published source trees. The publication gate has its
+own actual outcome and source checks; neither that gate nor patch identity turns
+earlier images into new image-quality evidence.
+
+The final documentation follow-up changes exactly these eight documents from
+`c47c2a676` and preserves every other blob and mode from that publication
+commit. It preserves the existing implementation commit rather than rewriting
+its history. The draft PR records the final follow-up commit, immutable document
+links and separately reviewed public attachments. Capture receipts establish
+what was produced and reviewed; they do not retroactively assert that an upload
+had completed at capture time.
+
+Only the two empty-design control panels and four public clear-glass
+comparisons are selected for attachment. Private images, source inputs,
+settings, coordinates, input hashes, logs and physical paths remain excluded.
+
+The completed checks do not close every original acceptance gate. Integrated
+energy and independent-seed robustness, caustics viewed through another specular
+surface, increasing-budget error, and radius-dependent energy, leakage and
+detail still need qualification. Accounting and pilot tests do not establish
+calibrated production confidence with reused photon maps or Sobol dependence.
+Rough-transmission capture and filtering remain unimplemented Stage 5 work;
+broader glint, caustic, texture, coverage and depth-of-field preservation are
+also open. Equal-time efficiency and expected-energy qualification remain open.
+Admitted memory is not a measured peak resident-set size.
+
+The private review supports only the explicitly inspected contributions and
+does not establish a general rare-event bound. Advanced manifold connections,
+broader merging, continuous spectral transport and rough-glass multiple
+scattering remain separate research. PR #13904 remains draft.
 
 ### Retained a347 integration attempts
 
@@ -58,10 +569,11 @@ does not establish a completed compilation or test result.
 
 The optional GPU [indirect clamp](render-path.md#clamping-indirect-light) is
 separate from denoising and [photon diagnostics](render-photon-convergence.md#controls-and-compatibility).
-It remains off by default and round-trips through saved setups. Component
-capture uses the same aggregate clamping factor as beauty, preserving additive
-accounting. A request combining this clamp with a photon pixel probe is refused
-before rendering because per-photon post-clamp attribution is not supported.
+It remains off by default and round-trips through saved setups. Where the
+upstream clamp applies, component capture uses beauty's aggregate scale;
+deferred optical handling remains unchanged. A request combining this clamp
+with a photon pixel probe is refused before rendering because per-photon
+post-clamp attribution is not supported.
 
 The following sections retain completed evidence from the earlier `42918fe5`
 checkpoint and its predecessors. Those results do not qualify the newer restack.
@@ -463,9 +975,10 @@ policy/camera-seed comparisons distinguish the paired policy change from
 camera-seed scatter; they do not estimate off/on variance reduction from one
 baseline. Energy, detail, rare-tail and equal-time acceptance remain separate.
 
-PR #13904 remains draft against main. Public image attachments remain pending
-explicit sharing permission. No private scene, camera configuration, coordinates
-or physical artifact paths are included here.
+No public image attachment was uploaded for this historical checkpoint. The
+[current integration record](#current-integration) records final publication
+status. No private scene, camera configuration, coordinates or physical artifact
+paths are included here.
 
 ### Current source and prepared-tool artifacts
 
@@ -1148,10 +1661,10 @@ and successful fresh smoke profiles are recorded above. They do not complete thi
 quality matrix. A77 CI02 later failed with a new test-isolation defect. Completed
 a77 CI03 retained 28 exact known-premerge failures with no new or changed failure;
 the repaired case passed. Fresh complete comparisons are assigned to the selected
-`42918fe5` candidate and have not started.
+`42918fe5` candidate; they had not started at this historical checkpoint.
 
-Public image attachments are **pending explicit sharing permission**. No image
-attachment was uploaded.
+No public image attachment was uploaded at this checkpoint. Later publication
+status belongs to the [current integration record](#current-integration).
 
 #### Preserved completion and historical evidence
 
@@ -2045,33 +2558,33 @@ These measurements use the frozen implementation based on `84bda659`, with the s
 
 The first attempt built successfully but refused the unchanged fixture at preflight because its CLI lacked the optional `bundled-render-library` asset pack. It started no render job and exported no images. Its failed receipt and clean CLI exit remain recorded. A new versioned wrapper enabled that existing feature, verified it in the compiler artifact, and completed the three-seed sequence. This was a build-configuration correction; the source and recorded scene setup were not changed. [^opus-refusal] [^opus-attestation]
 
-The completed sequence used photon seeds 81, 82 and 83 with unchanged camera settings and the full original grid. The analyzer decoded every raw grid and recorded finite RGBA, nonnegative RGB and valid coverage throughout. Its source/binary checks passed. The governing **CI05 gate still exited 1**, with 19 failures matching its pinned parent; evidence eligibility does not turn that gate green. [^opus-seeds] [^opus-attestation]
+The completed sequence used three independent photon-map replicates, labeled Map A, Map B and Map C with unchanged camera settings and the full original grid. The analyzer decoded every raw grid and recorded finite RGBA, nonnegative RGB and valid coverage throughout. Its source/binary checks passed. The governing **CI05 gate still exited 1**, with 19 failures matching its pinned parent; evidence eligibility does not turn that gate green. [^opus-seeds] [^opus-attestation]
 
 ### The original bright location, with final-camera accounting
 
 Here `Y = 0.2126R + 0.7152G + 0.0722B` is computed from scene-linear raw RGB. Photon and other-estimator columns are the final output partition, after the complete camera prefix and actual averaging. [^opus-accounting]
 
-| Photon seed | Actual gathers | Contributing events | Photon Y | Other-estimator Y | Raw Y |
+| Photon-map replicate | Actual gathers | Contributing events | Photon Y | Other-estimator Y | Raw Y |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 81 | 3 | 2 | 4920.245699 | 0.469897 | 4920.715741 |
-| 82 | 3 | 0 | 0.000000 | 0.469897 | 0.469897 |
-| 83 | 3 | 0 | 0.000000 | 0.469897 | 0.469897 |
+| Map A | 3 | 2 | 4920.245699 | 0.469897 | 4920.715741 |
+| Map B | 3 | 0 | 0.000000 | 0.469897 | 0.469897 |
+| Map C | 3 | 0 | 0.000000 | 0.469897 | 0.469897 |
 
-For seed 81, the photon estimator supplies **99.99045%** of final raw Y. Its dominant event has receiver-local Y **3,908.84618** but final camera-weighted Y **4,919.75251**. That single event supplies **99.98042%** of the complete raw pixel. The earlier receiver-local fraction therefore cannot be substituted for a final-pixel fraction. The nonuniform RGB prefix is part of the estimator weight. [^opus-accounting]
+For Map A, the photon estimator supplies **99.99045%** of final raw Y. Its dominant event has receiver-local Y **3,908.84618** but final camera-weighted Y **4,919.75251**. That single event supplies **99.98042%** of the complete raw pixel. The earlier receiver-local fraction therefore cannot be substituted for a final-pixel fraction. The nonuniform RGB prefix is part of the estimator weight. [^opus-accounting]
 
-Seeds 82 and 83 still complete all three receiver queries at that location. They find no eligible contributing photons there, and the raw result equals the unchanged other-estimator value. These are explicit zero-contribution observations, not missing or unreached diagnostics. All three reported raw pixels exactly match the independently decoded EXR values. [^opus-seeds] [^opus-accounting]
+Maps B and C still complete all three receiver queries at that location. They find no eligible contributing photons there, and the raw result equals the unchanged other-estimator value. These are explicit zero-contribution observations, not missing or unreached diagnostics. All three reported raw pixels exactly match the independently decoded EXR values. [^opus-seeds] [^opus-accounting]
 
 ### New bright locations and their completed reprobes
 
-The full-grid comparison selected each new seed’s largest positive Y change relative to seed 81. Each location was then rendered again using the same attested executable, unchanged camera setup and the same photon seed. Both fresh **selected raw pixels exactly match their initial same-seed pixels**. This statement is limited to those selected pixels; the reprobe wrapper does not assert full-image byte equality. All source/code/binary/driver/original-evidence guards passed, and both owned CLIs exited cleanly. [^opus-reprobes]
+The full-grid comparison selected each new seed’s largest positive Y change relative to Map A. Each location was then rendered again using the same attested executable, unchanged camera setup and the same photon seed. Both fresh **selected raw pixels exactly match their initial same-seed pixels**. This statement is limited to those selected pixels; the reprobe wrapper does not assert full-image byte equality. All source/code/binary/driver/original-evidence guards passed, and both owned CLIs exited cleanly. [^opus-reprobes]
 
 | Diagnosed observation | Dominant receiver-local Y | Dominant final-output Y | Other-estimator Y | Complete raw Y | Dominant event share of raw Y |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Original location, seed 81 | 3908.846183 | 4919.752509 | 0.469897 | 4920.715741 | 99.980425% |
-| Positive-delta location, seed 82 | 2302.752196 | 737.501443 | 0.049984 | 737.551470 | 99.993217% |
-| Positive-delta location, seed 83 | 190.275986 | 186.861331 | 2.465900 | 189.327240 | 98.697541% |
+| Original location, Map A | 3908.846183 | 4919.752509 | 0.469897 | 4920.715741 | 99.980425% |
+| Positive-delta location, Map B | 2302.752196 | 737.501443 | 0.049984 | 737.551470 | 99.993217% |
+| Positive-delta location, Map C | 190.275986 | 186.861331 | 2.465900 | 189.327240 | 98.697541% |
 
-The seed 82 reprobe has four gathers and one eligible/contributing photon; seed 83 has three gathers and one. The same area-emitter identity supplies the dominant event in all three diagnosed observations. The dominant receivers are opaque glossy surfaces, with reported roughness approximately **0.316–0.32**. Each dominant query has **one positive contribution event**, effective event support **1**, and reservoir visits **1**. This support statistic describes weight concentration; it is not an independent photon sample count or a confidence interval. Private emitter identities, scene coordinates and geometry are omitted. [^opus-accounting]
+The Map B reprobe has four gathers and one eligible/contributing photon; Map C has three gathers and one. The same area-emitter identity supplies the dominant event in all three diagnosed observations. The dominant receivers are opaque glossy surfaces. Each dominant query has **one positive contribution event**, effective event support **1**, and reservoir visits **1**. This support statistic describes weight concentration; it is not an independent photon sample count or a confidence interval. Private emitter identities, scene coordinates and geometry are omitted. [^opus-accounting]
 
 The surface-gather calculation is
 
@@ -2088,13 +2601,13 @@ Recomputing those local and prefix products from the recorded factors differs by
 
 The table describes spatial statistics over each unchanged full grid. A “sum of pixel luminance” is an unweighted image sum, not a solid-angle integral or total physical energy. Spatial quantiles are not Monte Carlo confidence intervals. [^opus-seeds]
 
-| Photon seed | Sum of pixel luminance | Mean Y | Median Y | 99th percentile Y | 99.9th percentile Y | 99.99th percentile Y |
+| Photon-map replicate | Sum of pixel luminance | Mean Y | Median Y | 99th percentile Y | 99.9th percentile Y | 99.99th percentile Y |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 81 | 2,055,325.136643 | 0.247796723 | 0.090403380 | 3.061040 | 9.211917 | 31.938682 |
-| 82 | 2,047,826.361800 | 0.246892646 | 0.090382905 | 3.052124 | 9.201578 | 32.026696 |
-| 83 | 2,046,870.709068 | 0.246777429 | 0.090393812 | 3.058676 | 9.212494 | 31.598021 |
+| Map A | 2,055,325.136643 | 0.247796723 | 0.090403380 | 3.061040 | 9.211917 | 31.938682 |
+| Map B | 2,047,826.361800 | 0.246892646 | 0.090382905 | 3.052124 | 9.201578 | 32.026696 |
+| Map C | 2,046,870.709068 | 0.246777429 | 0.090393812 | 3.058676 | 9.212494 | 31.598021 |
 
-The global maximum Y is **11,820.47759 in every seed**, even though large seed-dependent events move. Using the global maximum alone would miss those changes. The largest positive changes are **+737.50149** for seed 82 and **+186.86134** for seed 83; their initial raw Y values are **737.55147** and **189.32724**, respectively. The sums of pixel luminance differ from seed 81 by **−0.36485%** and **−0.41134%**. No alpha value changes. These differences do not establish that either darker realization is a physical correction. [^opus-seeds]
+The global maximum Y is **11,820.47759 in every seed**, even though large seed-dependent events move. Using the global maximum alone would miss those changes. The largest positive changes are **+737.50149** for Map B and **+186.86134** for Map C; their initial raw Y values are **737.55147** and **189.32724**, respectively. The sums of pixel luminance differ from Map A by **−0.36485%** and **−0.41134%**. No alpha value changes. These differences do not establish that either darker realization is a physical correction. [^opus-seeds]
 
 Three map seeds, one camera setup and two locations selected after inspecting their deltas do not establish convergence, unbiased transport, absence of grain or a general outlier distribution. GPU atomic insertion order can also affect map ordering and roundoff. The completed reprobes support the sparse-photon/glossy-receiver diagnosis at the measured locations. They do not demonstrate a new glossy-receiver connection strategy, reference agreement, or energy-preserving removal of the events. They do not justify clamping real highlights. [^opus-seeds] [^opus-reprobes]
 
@@ -2111,26 +2624,30 @@ The initial build took **196.569 seconds**. Initial CLI-session times were **312
 
 ### OPUS evidence artifacts
 
-| Artifact name | SHA-256 |
-| --- | --- |
-| `opus-camera-final-01/receipt.json` | `6a1fdb4ab8e869469d1d59d8d89c4d5067bbd69a87ab7011d9c5f12dc757a46e` |
-| `opus-camera-final-02/receipt.json` | `7dfe6d07bd5e20132c7e683f90ec716db588645fb24f1822f499ae8561ca3876` |
-| `opus-camera-seed-analysis-02.json` | `9f5ef4e15af4b72f0d20a128460924f9acdd9c9dd0a133c85511ba75f8a09879` |
-| `opus-camera-final-02-seed81/report.json` | `2c67bc2d5fafb1e369c60076022aa6c762f05c0470d4279cdd80663bf080d46f` |
-| `opus-camera-final-02-seed82/report.json` | `76ca0e3522d2fa3829f2eb607b9c4ee3507a33870df81c8488881cc675c9dd68` |
-| `opus-camera-final-02-seed83/report.json` | `086d7cc363b72f43b3ba007af4c9037c7a3b9b94cd49a4878f982ecc7d696b45` |
-| `opus-camera-seed82-delta-probe-02/receipt.json` | `1aa4343bb2808629cb6227228fb33803efd85e8661d77306a2da76c1b022ed47` |
-| `opus-camera-seed83-delta-probe-02/receipt.json` | `425a546200a51cffdf300fff9d43747be080759ef070d6b5981a255d059da0bf` |
-| `opus-camera-seed82-delta-probe-02-image/report.json` | `dbb399ffde443c3a670e27a48fb79b4cac6b2d6af8426caea1c406fe09916b62` |
-| `opus-camera-seed83-delta-probe-02-image/report.json` | `0ecc2865b77b52ec2414b71fba2eb36fed93806b5758a5aad60c3400c0a701ec` |
-| `analyze_opus_camera_seeds.py` | `f1e18638d9028032869a8afda5864ce89ce92368b8269241d13ba3c123b01d57` |
-| `opus-accounting-review-02.json` | `b2488dc5297b3bc31cfb65c3ccec9af6d08db7ae3d9cff9052e097d813be200f` |
+The following public labels replace private artifact filenames. Their hashes
+continue to identify the original, unmodified external receipts and analyses.
+The footnotes use the same labels; they are not filesystem paths.
 
-[^opus-attestation]: `opus-camera-final-02/receipt.json` binds the build, copied executable, source/code identities, actual CI05 outcome, three reports, exports and cleanup. Its hash is listed under [OPUS evidence artifacts](#opus-evidence-artifacts).
-[^opus-seeds]: `opus-camera-seed-analysis-02.json` is the completed full-grid decoder/analysis receipt. Its immutable analyzer hash is listed in the same table.
-[^opus-accounting]: `opus-accounting-review-02.json` retains public-safe scalar calculations and exact report hashes. It preserves receiver-local versus final-camera units and the source scope, without private coordinates, scene settings or geometry.
-[^opus-reprobes]: `opus-camera-seed82-delta-probe-02/receipt.json` and `opus-camera-seed83-delta-probe-02/receipt.json` bind the completed fresh reports, selected EXR decoding, settings-only probe changes, same-seed selected-pixel comparison and unchanged evidence checks.
-[^opus-refusal]: `opus-camera-final-01/receipt.json` retains the failed default-feature attempt. It has no rendered image result and is not presented as a rendering-quality experiment.
+| Public evidence label | SHA-256 |
+| --- | --- |
+| `Historical private artifact A` | `6a1fdb4ab8e869469d1d59d8d89c4d5067bbd69a87ab7011d9c5f12dc757a46e` |
+| `Historical private artifact B` | `7dfe6d07bd5e20132c7e683f90ec716db588645fb24f1822f499ae8561ca3876` |
+| `Historical private artifact C` | `9f5ef4e15af4b72f0d20a128460924f9acdd9c9dd0a133c85511ba75f8a09879` |
+| `Historical private artifact D` | `2c67bc2d5fafb1e369c60076022aa6c762f05c0470d4279cdd80663bf080d46f` |
+| `Historical private artifact E` | `76ca0e3522d2fa3829f2eb607b9c4ee3507a33870df81c8488881cc675c9dd68` |
+| `Historical private artifact F` | `086d7cc363b72f43b3ba007af4c9037c7a3b9b94cd49a4878f982ecc7d696b45` |
+| `Historical private artifact G` | `1aa4343bb2808629cb6227228fb33803efd85e8661d77306a2da76c1b022ed47` |
+| `Historical private artifact H` | `425a546200a51cffdf300fff9d43747be080759ef070d6b5981a255d059da0bf` |
+| `Historical private artifact I` | `dbb399ffde443c3a670e27a48fb79b4cac6b2d6af8426caea1c406fe09916b62` |
+| `Historical private artifact J` | `0ecc2865b77b52ec2414b71fba2eb36fed93806b5758a5aad60c3400c0a701ec` |
+| `Historical private artifact K` | `f1e18638d9028032869a8afda5864ce89ce92368b8269241d13ba3c123b01d57` |
+| `Historical private artifact L` | `b2488dc5297b3bc31cfb65c3ccec9af6d08db7ae3d9cff9052e097d813be200f` |
+
+[^opus-attestation]: `Historical private artifact B` binds the build, copied executable, source/code identities, actual CI05 outcome, three reports, exports and cleanup. Its hash is listed under [OPUS evidence artifacts](#opus-evidence-artifacts).
+[^opus-seeds]: `Historical private artifact C` is the completed full-grid decoder/analysis receipt. Its immutable analyzer hash is listed in the same table.
+[^opus-accounting]: `Historical private artifact L` retains public-safe scalar calculations and exact report hashes. It preserves receiver-local versus final-camera units and the source scope, without private coordinates, scene settings or geometry.
+[^opus-reprobes]: `Historical private artifact G` and `Historical private artifact H` bind the completed fresh reports, selected EXR decoding, settings-only probe changes, same-seed selected-pixel comparison and unchanged evidence checks.
+[^opus-refusal]: `Historical private artifact A` retains the failed default-feature attempt. It has no rendered image result and is not presented as a rendering-quality experiment.
 
 
 ## Reproduce the public experiments

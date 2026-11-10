@@ -1,12 +1,17 @@
 # Optional spatial denoising
 
-The implementation is integrated on pinned main
+The evaluated snapshot was integrated on pinned main
 `1ab3a5b1796564bc76dc57a513115f521edd0e90`, preserving graphics backend recovery,
 optional indirect-clamp behavior and the shared `solidcraft-look` assets.
+The published implementation was subsequently rebased to parent `201de37b9`
+as commit `c47c2a676`. The [publication qualification](render-glass-convergence-validation.md#publication-and-evaluated-snapshot)
+preserves its implementation-path identities. The [separate publication gate](render-glass-convergence-validation.md#publication-snapshot-gate)
+records the actual command outcome on that newer base; earlier UI and
+image measurements retain the evaluated snapshot.
 The [current integration record](render-glass-convergence-validation.md#current-integration)
-separates this source's qualification from the failed or interrupted `a3475683`
-attempts. Earlier `42918fe5` results retain their original source and do not
-qualify this newer integration.
+identifies each executed check's source, actual outcome and hardware scope. It
+keeps the failed or interrupted `a3475683` attempts and earlier `42918fe5`
+measurements attached to their original source.
 
 CPU ray-traced requests accept `raytrace.denoise: true`; saved CPU jobs store
 `job.options.denoise`. GPU path requests keep their existing `denoise` flag and
@@ -280,6 +285,16 @@ receipt records its own build; it does not validate a later restack. Native 4K c
 transport within floating-point precision, but their low sample counts do not
 establish converged image quality. See [OPUS qualification](render-opus-quality.md).
 
+## Evaluated snapshot evidence
+
+The evaluated-snapshot [public clear-glass record](render-glass-convergence-validation.md#current-public-evidence)
+compares each backend's raw off/filter outputs separately from its display
+images. It records decoded raw identity, finite-value and component-accounting
+checks, together with visual review and remaining image limitations. Raw
+preservation does not establish cross-backend image parity, independent
+physical reference agreement or preservation of every resolved glint,
+caustic and texture. Broader coverage and depth-of-field checks remain open.
+
 ## Completion qualification
 
 The historical a77 CPU/GPU clear-glass repeat completed: each backend's
@@ -292,11 +307,11 @@ one-example-file mapping and later test-only repair are recorded separately.
 A77 CI02 did not pass; completed a77 CI03 also exited 1, with 28 exact known-premerge
 failures. The selected `42918fe5` gate also exited 1, with 23 strict matches and
 five changed panic-header locations. All five failures reproduced on bare
-selected main. The current clear repeat then completed under the separate
+selected main. The `42918fe5` clear repeat then completed under its separate
 image-eligibility proof: each backend's raw/display/mask bytes match its own
 reference. Independent decoding confirms the 6,441 supported optical pixels.
 Aggregate raw/component accounting is distinct from reported per-observation
-maxima, as detailed in the current qualification record. No new visual judgment
+maxima, as detailed in that checkpoint's qualification record. No new visual judgment
 was made by that auditor; exact file identity permits reuse of earlier inspection.
 No later source identity relabels this image result. Grain remains; there is no
 independent reference-error or noiselessness claim. Earlier reconstruction

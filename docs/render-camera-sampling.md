@@ -1,12 +1,17 @@
 # Camera sampling and bounded optical path groups
 
-The implementation is integrated on pinned main
+The evaluated snapshot was integrated on pinned main
 `1ab3a5b1796564bc76dc57a513115f521edd0e90`, preserving graphics backend recovery,
 optional indirect-clamp behavior and the shared `solidcraft-look` assets.
+The published implementation was subsequently rebased to parent `201de37b9`
+as commit `c47c2a676`. The [publication qualification](render-glass-convergence-validation.md#publication-and-evaluated-snapshot)
+preserves its implementation-path identities. The [separate publication gate](render-glass-convergence-validation.md#publication-snapshot-gate)
+records the actual command outcome on that newer base; earlier UI and
+image measurements retain the evaluated snapshot.
 The [current integration record](render-glass-convergence-validation.md#current-integration)
-separates this source's qualification from the failed or interrupted `a3475683`
-attempts. Earlier `42918fe5` results retain their original source and do not
-qualify this newer integration.
+identifies each executed check's source, actual outcome and hardware scope. It
+keeps the failed or interrupted `a3475683` attempts and earlier `42918fe5`
+measurements attached to their original source.
 
 The implementation provides an opt-in randomized low-discrepancy sampler,
 independent adaptive pilots, a conservative optical allocation floor, CPU
@@ -442,11 +447,16 @@ own renderer policy; enabling the CPU option does not modify GPU saved intent.
 
 ## Verification and remaining evaluation
 
-The completed `42918fe5` CPU splitting comparisons and their finite-budget limits
-are retained in the [public comparison record](render-glass-convergence-validation.md#public-cpu-receiver-and-splitting-comparisons-on-42918).
-Qualification of pinned `1ab3a5b1` is tracked separately in the
-[current integration record](render-glass-convergence-validation.md#current-integration).
-The pre-restack focused results retain their original source; a suite name alone
+The evaluated-snapshot CPU receiver and splitting measurements are retained in the
+[current public evidence](render-glass-convergence-validation.md#current-public-evidence),
+including independently decoded raw estimates, seed variation, mean shifts
+and actual elapsed times. Requested lane counts do not establish equal
+traversal work or elapsed time, and admitted memory is not measured peak RSS.
+Equal-time efficiency and expected-energy qualification remain open.
+
+The earlier `42918fe5` CPU comparisons retain their own
+[public comparison record](render-glass-convergence-validation.md#public-cpu-receiver-and-splitting-comparisons-on-42918).
+Pre-restack focused results retain their original source; a suite name alone
 does not establish that every case performed GPU device work.
 
 The regression suite covers:

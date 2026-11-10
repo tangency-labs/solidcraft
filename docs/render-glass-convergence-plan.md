@@ -6,13 +6,26 @@
 
 PR #12546 merged on 9 November 2026 as
 [ed2bafe7e312ff38f1d957a511d4c8e529dc4e32][merged-renderer].
-The current implementation is integrated on
+The evaluated implementation snapshot was integrated on
 [1ab3a5b1796564bc76dc57a513115f521edd0e90][current-dependency].
 This restack preserves main's shared `solidcraft-look` icons, fonts and themes.
 Its [implementation record](render-glass-convergence-implementation.md) describes
 the delivered modules, controls, resource contracts and remaining limits.
 The [validation record](render-glass-convergence-validation.md#current-integration)
 separates current checks from completed measurements of earlier source.
+The evaluated snapshot's gate completed with 15,248 passing, 24 failing and 71 ignored native
+tests; all 24 failures reproduced in targeted parent runs. The full gate did
+not pass. Current UI, public images and private diagnostics retain their own
+source, actual outcomes and limits in that record.
+
+The existing implementation commit `c47c2a676` is based on newer parent
+`201de37b9`. Its 107 implementation-path blobs are preserved, while the
+upstream advance includes substantive code changes. The earlier measurements
+qualify `1ab3a5b1`/`4861c922`; the [publication snapshot gate](render-glass-convergence-validation.md#publication-snapshot-gate)
+records the separate actual command outcome on the published base. Earlier
+UI and image evidence is not relabeled. This follow-up preserves that
+implementation commit and updates exactly eight documents. See the
+[publication qualification](render-glass-convergence-validation.md#publication-and-evaluated-snapshot).
 
 Implemented areas include bounded photon reports with camera/raw-output
 accounting; six additive components and moments; independent map assessment;
@@ -116,12 +129,13 @@ Other low-sample OPUS comparisons retain large raw values. Some coherent
 highlights persist. Display cleanup must therefore not assume that every intense
 sample is disposable. See the original context in [the OPUS record][opus].
 
-## 3. Current source map and concrete gaps
+## 3. Audited source map and original gaps
 
-These links are pinned to the audited commit. They are implementation starting
-points, not a guarantee that paths remain unchanged after #12546 merges.
+These links are pinned to the 8 November audited commit. They identify the
+original implementation starting points; use the implementation record for
+delivered behavior after #12546's merge.
 
-| Concern | Current source |
+| Concern | Audited source |
 | --- | --- |
 | GPU photon generation, receiver reservoir and gather | [photons.wgsl][gpu-photons] and [photons.rs][gpu-photon-host] |
 | CPU photon preparation, refresh, receiver handling and gather | [image_caustics.rs][cpu-photons] |
@@ -204,7 +218,7 @@ separate from that source audit.
 
 - [x] Record #12546's actual merge `ed2bafe7e312ff38f1d957a511d4c8e529dc4e32` and merge time.
 - [x] Compare the premerge bc9 source with the merge and its direct child `a77b7ab2e463e41ae3ac27a05250765f0db0123d`; record all 17 changed paths and no overlap with this implementation's 106 paths.
-- [ ] Qualify the final restacked main-based source with its own full gate and image receipts; retain the bc9 failures only as a known premerge comparison.
+- [x] Record the earlier `1ab3a5b1`/`4861c922` snapshot's actual full-gate outcome and scoped image receipts separately from the publication snapshot gate; retain every outcome under its own source identity. The earlier gate remains failed, and the publication gate has its own actual result.
 - [x] Check all open rendering PRs, issues and file ownership before claiming a stage; coordinate ownership within this draft.
 - [x] Record effective saved, UI and runtime limits and compatibility defaults in the implementation and feature documents.
 - [x] Add a deterministic public-safe sphere/receiver benchmark and reuse the existing glass/checker scene matrix.
@@ -654,8 +668,8 @@ unreviewable renderer change.
 ## 15. Handoff checklist
 
 - [x] #12546 has merged; its actual merge, direct-child main revision and exact source delta are recorded.
-- [x] The plan's dependency status reflects the merged source; the 17-path delta changes no contribution-rule file.
-- [ ] The final main-based implementation has completed its own gate and image qualification.
+- [x] The historical direct-child merge comparison records its 17-path delta, with no contribution-rule changes; later restacks retain their own source records.
+- [x] The earlier evaluated snapshot's gate and image receipts and the separate publication gate outcome are recorded under their own identities; recording the results is not a passing-CI or completed-stage qualification claim.
 - [x] Historical measurements remain labeled with their original provenance.
 - [x] Related issues and open PRs have been checked before claiming implementation.
 - [x] The implementation has a concrete scope, module ownership and published dependency baseline.

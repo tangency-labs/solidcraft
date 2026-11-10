@@ -7,16 +7,20 @@ This is the implementation-ready design requested by Stage 5, item 7 of
 bounded first implementation and its acceptance tests. It does **not** enable
 rough-transmission filtering. The capture and reconstruction described here are
 not implemented; production still uses the conservative bypass described in
-[denoising](render-denoise.md). The [completion qualification record](render-glass-convergence-validation.md#completion-evidence-and-publication-status)
+[denoising](render-denoise.md). The [current integration record](render-glass-convergence-validation.md#current-integration)
 does not change this design's implementation status or supply its missing
 production qualification.
 
-The surrounding renderer is integrated on pinned main
+The evaluated renderer snapshot was integrated on pinned main
 `1ab3a5b1796564bc76dc57a513115f521edd0e90`, preserving the shared look and asset
 setup. That source restack does not implement this design. The
 [current integration record](render-glass-convergence-validation.md#current-integration)
-keeps its qualification separate from the failed or interrupted `a3475683`
-attempts and earlier `42918fe5` measurements.
+records the earlier evaluated-snapshot checks separately from the failed or
+interrupted `a3475683` attempts and earlier `42918fe5` measurements. Those
+checks do not implement or qualify the proposed rough-path capture. The
+[publication qualification](render-glass-convergence-validation.md#publication-and-evaluated-snapshot)
+also separates those evaluated-snapshot measurements from the later
+`c47c2a676` publication on parent `201de37b9`.
 
 The design estimates the distribution of actual sampled transmission endpoints.
 A centre ray supplies neither that distribution nor evidence that a broad lobe

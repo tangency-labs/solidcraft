@@ -1,12 +1,17 @@
 # Progressive photon density and bounded probes
 
-The implementation is integrated on pinned main
+The evaluated snapshot was integrated on pinned main
 `1ab3a5b1796564bc76dc57a513115f521edd0e90`, preserving graphics backend recovery,
 optional indirect-clamp behavior and the shared `solidcraft-look` assets.
+The published implementation was subsequently rebased to parent `201de37b9`
+as commit `c47c2a676`. The [publication qualification](render-glass-convergence-validation.md#publication-and-evaluated-snapshot)
+preserves its implementation-path identities. The [separate publication gate](render-glass-convergence-validation.md#publication-snapshot-gate)
+records the actual command outcome on that newer base; earlier UI and
+image measurements retain the evaluated snapshot.
 The [current integration record](render-glass-convergence-validation.md#current-integration)
-separates this source's qualification from the failed or interrupted `a3475683`
-attempts. Earlier `42918fe5` results retain their original source and do not
-qualify this newer integration.
+identifies each executed check's source, actual outcome and hardware scope. It
+keeps the failed or interrupted `a3475683` attempts and earlier `42918fe5`
+measurements attached to their original source.
 
 ## Controls and compatibility
 
@@ -29,7 +34,8 @@ The probe controls are intended for a small reproducible diagnostic run.
 GPU requests cannot combine `probe_pixel` with the optional upstream
 `clamp_indirect`: validation refuses that combination before rendering.
 A post-clamp per-photon attribution is not implemented. Component capture remains
-supported with the clamp and shares the beauty contribution's aggregate scale.
+supported: where the upstream clamp applies, it uses beauty's aggregate scale.
+Deferred optical handling remains unchanged.
 
 
 ## Estimator and radius schedule
@@ -383,11 +389,17 @@ readbacks. A controlled GPU replay retains one emitted map and all hash links
 while comparing probe-off/on raw bits. Runtime receipts belong in the PR;
 the presence of these tests alone is not a claim that a particular device ran them.
 
-The completed `42918fe5` public receiver comparisons are retained in the
+The evaluated-snapshot [public receiver comparisons](render-glass-convergence-validation.md#current-public-evidence)
+and [anonymized private diagnostics](render-glass-convergence-validation.md#current-private-diagnostics)
+retain actual source, copied-executable and accounting evidence. The private
+groups vary different sampling axes; their comparison does not establish a
+variance-reduction effect. Complete photon-versus-other estimator accounting
+is distinct from bounded photon-family lower bounds and from full physical
+component attribution. Only explicitly inspected peaks support the recorded
+diagnostic conclusions; general rare-tail and energy gates remain open.
+
+The earlier `42918fe5` receiver results retain their own
 [public comparison record](render-glass-convergence-validation.md#public-cpu-receiver-and-splitting-comparisons-on-42918).
-Qualification of pinned `1ab3a5b1`, including any private camera-seed/accounting
-comparison, requires its own actual receipts in the
-[current integration record](render-glass-convergence-validation.md#current-integration).
 Historical probe results retain their original source and executable identities.
 
 Under the smooth-density, finite-variance and fixed-domain assumptions in the
