@@ -560,6 +560,12 @@ it to remove it. Each input has its own Clear button. Source inputs show a count
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
 
+A click inside a closed profile adds the curves of its outline to the entities. A shape drawn
+inside that profile is a profile of its own: click inside it to add it too. So a click between
+two nested rectangles picks the outer rectangle alone. To have the click also pick the shapes
+inside the profile, as earlier versions did, turn on **Preferences > Sketch > A click inside a
+profile also picks the shapes inside it**.
+
 If your preselection includes exactly one straight construction line of the active sketch,
 opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction
 lines in the sketch do not count unless selected. With none or multiple selected construction
