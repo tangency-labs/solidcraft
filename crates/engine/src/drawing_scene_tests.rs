@@ -905,6 +905,27 @@ fn a_sheet_makes_one_copy_for_each_choice_it_draws() {
     built(&s, sheet);
 }
 
+/// An exploded view's copy holds its moves in its own design (#13048), so every reader of where the
+/// parts are sees them. Its bodies are placed as `explode.show`'s pending moves place them, body for
+/// body, nothing is left pending, and the design keeps its placements.
+#[test]
+fn an_exploded_copy_holds_its_moves_in_its_own_design() {
+    use crate::cmd::motion::{explode_moves, exploded_at};
+    let (s, _, [.., apart], _) = two_assembled_one_apart();
+    let placed = s.doc.occurrences.clone();
+    let view = s.drawing("test").unwrap().resolve_view(apart).unwrap();
+    let copy = crate::drawing_view::copy_for(&s, &Choice::of(&view)).unwrap();
+    let mut shown = s.scratch();
+    shown.pending_moves = exploded_at(&explode_moves(&shown, &s.doc.assembly.exploded[0]), 1.0);
+    let boxes = |s: &Session| -> Vec<(String, String)> {
+        s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), format!("{:?}", b.body.exact_bounds().unwrap()))).collect()
+    };
+    assert_eq!(boxes(&copy), boxes(&shown));
+    assert_ne!(copy.doc.occurrences, placed, "the moves are in the copy's design");
+    assert!(copy.pending_moves.is_empty());
+    assert_eq!(s.doc.occurrences, placed);
+}
+
 /// Two views at one step of a motion study share one copy, and a view at another step has its own.
 #[test]
 fn views_at_one_study_step_share_one_copy() {

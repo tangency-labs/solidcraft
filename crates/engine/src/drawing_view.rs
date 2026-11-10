@@ -260,8 +260,9 @@ impl<'a> ViewSessions<'a> {
 /// values as `joint.drive` drives them (the limits, closed loops, motion links and contact sets
 /// alike), or to a study step's as `motion.play` drives them (a step past the study's end at its
 /// last), skipping a joint or study the design no longer has, then its exploded view's parts moved
-/// out from there, as `explode.show` shows them. Or why it can't be: the exploded view is no longer
-/// in the design or moves a part out of range (a hostile file), or the joints can't be driven.
+/// out from there, as `explode.show` shows them, written into the copy's own design so every reader
+/// of where the parts are sees them. Or why it can't be: the exploded view is no longer in the design
+/// or moves a part out of range (a hostile file), or the joints can't be driven.
 pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Session, Unmeasured> {
     use crate::cmd::motion::{drive_with_contact, explode_moves, exploded_at, keyed, values_at};
     // From where the design places its parts: an occurrence move not captured yet is left out.
@@ -290,7 +291,12 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Sessio
         if !moves.values().all(solidcraft_doc::is_placement) {
             return Err(Unmeasured::NotPlaced);
         }
-        copy.pending_moves = moves;
+        // What `world_state` would do with them as pending moves, once, in the copy's design.
+        for o in &mut copy.doc_mut().occurrences {
+            if let Some(m) = moves.get(&o.id) {
+                o.transform = *m;
+            }
+        }
     }
     Ok(copy)
 }
