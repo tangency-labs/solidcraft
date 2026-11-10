@@ -249,6 +249,8 @@ pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64
     }
 }
 
+/// Expire previous hover contributions owned by browser or content trees before applying
+/// new actions for the current frame, returning the previous bodies and construction plane.
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let old_bodies = std::mem::take(&mut app.tree.content.last_bodies);
     let old_plane = app.tree.content.last_plane.take();
@@ -436,6 +438,8 @@ fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// Finalize content tree hover state, pointer ownership, and drag interactions across panels
+/// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     ensure_session(app, ctx);
     if app.tree.content.finalized {
