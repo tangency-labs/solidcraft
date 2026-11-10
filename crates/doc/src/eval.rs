@@ -1106,7 +1106,7 @@ impl<S> CachedEval<S> {
 /// What one evaluation of a feature leaves in the cache: the model after it, by the whole model
 /// it started from, and what it changed, by what it read, when that is all it changed.
 #[derive(Debug)]
-pub(crate) struct CacheEntry {
+struct CacheEntry {
     key: u64,
     whole: CachedEval<Arc<ModelState>>,
     bytes: usize,
@@ -1115,7 +1115,7 @@ pub(crate) struct CacheEntry {
 
 impl CacheEntry {
     /// Stores the entry in `cache`, and its whole result in `kept`.
-    pub(crate) fn put(self, cache: &std::sync::Mutex<EvalCache>, kept: &KeptSlot) {
+    fn put(self, cache: &std::sync::Mutex<EvalCache>, kept: &KeptSlot) {
         if let Some(k) = &kept.0 {
             k.put(self.key, &self.whole);
         }
@@ -3353,10 +3353,9 @@ impl Model {
                 }
                 // Or what it changed when what it reads was as it is now, made again on the rest of the
                 // model as it is now. Never in place of a result a check refused.
-                let reads = key
-                    .reads
-                    .as_ref()
-                    .filter(|_| !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n)));
+                let reads = key.reads.as_ref().filter(|_| {
+                    !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
+                });
                 let reused = reads
                     .and_then(|(k, _)| self.cache.lock().ok().and_then(|mut m| m.change(*k)))
                     .and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c)));

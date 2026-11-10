@@ -178,8 +178,8 @@ impl Checks {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::CachedEval;
+    use super::*;
     use kernel::KernelError;
 
     fn saved() -> Saved {
