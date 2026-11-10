@@ -97,17 +97,6 @@ pub struct SharedState {
 
 pub type Viewports = egui::OrderedViewportIdMap<Viewport>;
 
-/// SolidCraft (#743): a surface acquire this slow means the compositor hands this window's
-/// frames at roughly one per second (screen off, off-screen window), so the next pass runs
-/// its logic without the GPU paint.
-const SLOW_ACQUIRE_SECS: f32 = 0.25;
-
-/// SolidCraft (#743): logic-only frames between probe paints while the compositor throttles.
-/// At one frame a second that is a one-in-thirty chance of a request meeting the probe's
-/// blocking acquire; at display rate the probe fires within a frame of the compositor
-/// recovering, so the window repaints as soon as it can.
-const PROBE_EVERY: u32 = 30;
-
 pub struct Viewport {
     ids: ViewportIdPair,
     class: ViewportClass,
@@ -128,17 +117,6 @@ pub struct Viewport {
 
     /// `window` and `egui_winit` are initialized together.
     egui_winit: Option<egui_winit::State>,
-
-    /// SolidCraft (#743): consecutive slow surface acquires — the compositor handing this
-    /// window's frames at ~1Hz (screen off, window off-screen). Two in a row and the pass
-    /// runs its logic without the GPU paint, so the event loop — and the control channel it
-    /// serves — is not frozen for a whole second at a time.
-    slow_acquires: u32,
-
-    /// SolidCraft (#743): logic-only frames since the last probe paint. A probe paints a frame
-    /// to notice when the compositor presents at display rate again: after every
-    /// `PROBE_EVERY` logic-only frames, and at once when new geometry waits to be shown.
-    logic_frames_since_probe: u32,
 }
 
 impl Drop for Viewport {
@@ -384,8 +362,6 @@ impl<'app> WgpuWinitApp<'app> {
                 window: Some(window),
                 egui_winit: Some(egui_winit),
                 pending_delta: Default::default(),
-                slow_acquires: 0,
-                logic_frames_since_probe: 0,
             },
         );
 
@@ -661,7 +637,7 @@ impl WgpuWinitRunning<'_> {
         let mut frame_timer = crate::stopwatch::Stopwatch::new();
         frame_timer.start();
 
-        let (viewport_ui_cb, raw_input, is_visible, show_ui, skip_this_paint) = {
+        let (viewport_ui_cb, raw_input, is_visible, show_ui) = {
             profiling::scope!("Prepare");
             let mut shared_lock = shared.borrow_mut();
 
@@ -713,17 +689,6 @@ impl WgpuWinitRunning<'_> {
                     .iter()
                     .any(egui_winit::ActionRequested::wants_paint);
 
-            // SolidCraft (#743): skip this frame's GPU paint when the compositor is throttling
-            // this window's frames — the surface acquire inside the paint would block for the
-            // whole second, freezing the event loop and the control channel the app serves in
-            // its logic pass. The compositor's next frame presents the result whenever it comes.
-            // A probe paints when there is new geometry to show, or every PROBE_EVERY
-            // logic-only frames, to notice the compositor presenting at display rate again.
-            let probe_due = viewport.logic_frames_since_probe >= PROBE_EVERY
-                || !pending_deltas.is_empty();
-            let skip_this_paint =
-                mode == PassMode::LogicOnly || (is_visible && viewport.slow_acquires >= 2 && !probe_due);
-
             {
                 profiling::scope!("set_window");
                 pollster::block_on(painter.set_window(viewport_id, Some(Arc::clone(window))))?;
@@ -745,7 +710,7 @@ impl WgpuWinitRunning<'_> {
                 .map(|(id, viewport)| (*id, viewport.info.clone()))
                 .collect();
 
-            (viewport_ui_cb, raw_input, is_visible, show_ui, skip_this_paint)
+            (viewport_ui_cb, raw_input, is_visible, show_ui)
         };
 
         if !show_ui {
@@ -765,9 +730,6 @@ impl WgpuWinitRunning<'_> {
 
                 if let Some(viewport) = viewports.get_mut(&viewport_id) {
                     viewport.info.events.clear(); // they should have been processed
-                    // SolidCraft (#743): a logic-only frame while the compositor throttles.
-                    viewport.logic_frames_since_probe =
-                        viewport.logic_frames_since_probe.saturating_add(1);
                     if let Viewport {
                         window: Some(window),
                         egui_winit: Some(egui_winit),
@@ -856,7 +818,7 @@ impl WgpuWinitRunning<'_> {
 
         egui_winit.handle_platform_output_with_event_loop(window, event_loop, platform_output);
 
-        let vsync_secs = if is_visible && !skip_this_paint {
+        let vsync_secs = if is_visible {
             let clipped_primitives = egui_ctx.tessellate(shapes, pixels_per_point);
 
             let mut screenshot_commands = vec![];
@@ -911,23 +873,8 @@ impl WgpuWinitRunning<'_> {
 
             integration.post_rendering(window);
 
-            // SolidCraft (#743): bookkeep the compositor's frame handoff time for this window.
-            // The acquire time inside the paint is the compositor's (a slow GPU shows up as a
-            // fast acquire and a slow frame, not as a slow acquire), so it is the right thing
-            // to watch. After the lines above nothing of the shared borrow is live anymore, so
-            // the viewport's counters may be updated on the spot.
-            viewport.slow_acquires = if vsync_secs > SLOW_ACQUIRE_SECS {
-                viewport.slow_acquires.saturating_add(1)
-            } else {
-                0
-            };
-            viewport.logic_frames_since_probe = 0;
-
             vsync_secs
         } else {
-            // SolidCraft (#743): a logic-only frame while the compositor throttles.
-            viewport.logic_frames_since_probe =
-                viewport.logic_frames_since_probe.saturating_add(1);
             0.0
         };
 
@@ -1078,10 +1025,6 @@ impl WgpuWinitRunning<'_> {
                     && let Some(viewport) = shared.viewports.get_mut(&viewport_id)
                 {
                     viewport.info.occluded = Some(*is_occluded);
-                    // SolidCraft (#743): the window's visibility changed; the compositor's frame
-                    // cadence may have too, so paint the next frame whatever the strikes say.
-                    viewport.slow_acquires = 0;
-                    viewport.logic_frames_since_probe = 0;
                 }
             }
 
@@ -1481,8 +1424,6 @@ fn initialize_or_update_viewport<'a>(
                 window: None,
                 egui_winit: None,
                 pending_delta: Default::default(),
-                slow_acquires: 0,
-                logic_frames_since_probe: 0,
             })
         }
 

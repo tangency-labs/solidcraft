@@ -198,7 +198,7 @@ pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context, wake: &Wake)
         }
     };
     // The chat's endpoint lives as long as the app.
-    listen_on_listener(listener, token, tx, ctx, true, wake).map(|(port, _)| port)
+    listen_on_listener(listener, token, tx, ctx, true, wake.clone()).map(|(port, _)| port)
 }
 
 /// Serve `listener` (loopback) with `token`; the port it listens on and how to stop it.

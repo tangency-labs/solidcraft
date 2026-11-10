@@ -133,3 +133,9 @@ SolidCraft changes:
   `NativeOptions.event_loop_ready` hook hands the app the event loop's proxy before the loop
   starts, so the control server can send the event from its own thread; a wake with no proxy yet
   (the loop not started) is a no-op.
+- `src/epi.rs`: add `EventLoopReadyHook` and `NativeOptions::event_loop_ready`. The hook
+  defaults to `None` and is dropped when cloning `NativeOptions`, like the other native hooks.
+
+Normal redraws still paint visible windows, even after slow surface acquires. Only the explicit
+logic-only pass skips the UI and paint. Acquire latency alone cannot distinguish compositor
+throttling from GPU back-pressure, so it never suppresses a normal redraw.

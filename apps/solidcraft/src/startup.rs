@@ -994,6 +994,100 @@ mod tests {
     }
 
     #[test]
+    fn logic_only_ticks_and_extra_ui_passes_do_not_finish_startup() {
+        use eframe::App as _;
+
+        let d = scratch("logic-only");
+        assert_eq!(begin(&d), 0);
+        let path = d.join("graphics.json");
+        std::fs::write(&path, pending_backend("auto").to_string()).unwrap();
+        let attempt = prepare_backend_start(&path, true).unwrap().attempt.unwrap();
+        let ctx = egui::Context::default();
+        let solve = solidcraft_ui_egui::SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
+        let mut app = crate::App {
+            prefs_writer: crate::PrefsWriter::read(solve.prefs()),
+            solve,
+            setup: Default::default(),
+            gpu_job: None,
+            window_frames: 0,
+            starting: Some(d.clone()),
+            backend_attempt: Some((path.clone(), attempt)),
+            frames: 0,
+            take_focus_unwanted: true,
+            come_forward: crate::come_forward::ComeForward::default(),
+            gpu: None,
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+            space_mouse: Some(crate::space_mouse::SpaceMouse::inactive()),
+            #[cfg(target_os = "macos")]
+            native_menu: None,
+            nav_bridge: crate::nav_bridge::NavBridge::inactive(),
+            dialog_folder: crate::DialogFolder::default(),
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput::default();
+        for _ in 0..3 {
+            let _ = ctx.run_logic(&input, |ctx| app.logic(ctx, &mut frame));
+            assert_eq!(app.frames, 0, "a logic-only update has not drawn a frame");
+            assert_eq!(app.window_frames, 0, "logic alone cannot show or focus the starting window");
+            assert!(app.starting.is_some());
+            assert!(app.backend_attempt.is_some());
+            assert!(backend_settings(&path).get(BACKEND_TRIAL).is_some());
+            assert!(d.join(MARKER).exists(), "a launch without a drawn window still counts as failed");
+        }
+
+        // A staged startup can remain busy across control updates and painted starting pages.
+        let ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let setup_ready = ready.clone();
+        app.setup = solidcraft_ui_egui::starting::Starting::default().until("", move |_, _| setup_ready.load(std::sync::atomic::Ordering::SeqCst));
+        ctx.run_ui(input.clone(), |ui| {
+            app.logic(ui.ctx(), &mut frame);
+            app.ui(ui, &mut frame);
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(app.window_frames, 1);
+        assert_eq!(app.frames, 0, "a starting page is not an app frame");
+        assert!(app.backend_attempt.is_some());
+        ready.store(true, std::sync::atomic::Ordering::SeqCst);
+        let _ = ctx.run_logic(&input, |ctx| app.logic(ctx, &mut frame));
+        assert!(app.setup.done(), "control updates can finish background setup");
+        assert_eq!(app.frames, 0, "finishing setup does not present an app frame");
+        assert!(d.join(MARKER).exists());
+
+        // Layout may discard its first pass: two UI calls still make only one drawn frame.
+        ctx.options_mut(|options| options.max_passes = 2.try_into().unwrap());
+        let mut passes = 0;
+        ctx.run_ui(input.clone(), |ui| {
+            app.logic(ui.ctx(), &mut frame);
+            app.ui(ui, &mut frame);
+            passes += 1;
+            ui.ctx().request_discard("exercise another layout pass during startup");
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(passes, 2);
+        assert_eq!(app.frames, 1);
+        assert!(d.join(MARKER).exists(), "the first frame must be presented before startup completes");
+        assert!(app.backend_attempt.is_some());
+        assert!(backend_settings(&path).get(BACKEND_TRIAL).is_some());
+
+        for _ in 0..3 {
+            let _ = ctx.run_logic(&input, |ctx| app.logic(ctx, &mut frame));
+            assert_eq!(app.frames, 1);
+            assert!(d.join(MARKER).exists());
+        }
+        ctx.run_ui(input, |ui| {
+            app.logic(ui.ctx(), &mut frame);
+            app.ui(ui, &mut frame);
+        })
+        .drop_without_applying_deltas();
+        assert_eq!(app.frames, 2);
+        assert!(app.starting.is_none());
+        assert!(app.backend_attempt.is_none());
+        assert!(backend_settings(&path).get(BACKEND_TRIAL).is_none());
+        assert!(!d.join(MARKER).exists(), "the second drawn frame completes startup");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
     fn launches_that_never_got_a_window_are_counted_until_one_does() {
         let d = scratch("marker");
         assert_eq!(begin(&d), 0);
