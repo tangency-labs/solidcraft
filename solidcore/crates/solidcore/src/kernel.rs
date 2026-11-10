@@ -162,6 +162,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    cache_handle_uses: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -190,11 +191,20 @@ impl WorkCounters {
         self.wall_body_copies.get()
     }
 
+    /// Loop, edge and vertex uses read to translate the topology handles of a face's
+    /// trimmed surface cache, made for a ray or a check on a B-rep: one per handle
+    /// translated (#14329). Not the fork's.
+    #[must_use]
+    pub fn cache_handle_uses(&self) -> u64 {
+        self.cache_handle_uses.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.cache_handle_uses.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -212,6 +222,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts uses read to translate a trimmed surface cache's handle.
+    pub(crate) fn add_cache_handle_uses(&self, uses: u64) {
+        self.cache_handle_uses
+            .set(self.cache_handle_uses.get().saturating_add(uses));
     }
 }
 
@@ -1846,18 +1862,25 @@ mod tests {
     fn work_counters_count_until_reset() {
         let k = Kernel::default();
         let w = &k.work_counters;
-        let counts =
-            |w: &WorkCounters| (w.face_pairs(), w.loops_classified(), w.wall_body_copies());
-        assert_eq!(counts(w), (0, 0, 0));
+        let counts = |w: &WorkCounters| {
+            (
+                w.face_pairs(),
+                w.loops_classified(),
+                w.wall_body_copies(),
+                w.cache_handle_uses(),
+            )
+        };
+        assert_eq!(counts(w), (0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
         w.add_wall_body_copy();
-        assert_eq!(counts(w), (2, 1, 1));
+        w.add_cache_handle_uses(3);
+        assert_eq!(counts(w), (2, 1, 1, 3));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0));
     }
 
     #[test]

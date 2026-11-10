@@ -31,6 +31,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::query::face::p2::BrepCacheFace;
@@ -42,7 +43,7 @@ use crate::surface::surface_cache::face_context::{
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
-use crate::topology::loopuse::notify_ref;
+use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
 use crate::topology::{Brep, EdgeuseId, FaceId};
 
 const OP: &str = "query::brep::ray";
@@ -181,26 +182,27 @@ fn face_surface_cache(
         .clone_for_evaluation()?;
     // upstream reuses a cache whose tree is built, with the built tree's state bits
     let get_tree = get_tree || surface.cache_tree_state() == CacheTreeState::Built;
-    let entities: BTreeMap<_, _> = b
-        .loopuses()
-        .iter()
-        .map(|(id, _)| EntityRef::Loopuse(id))
-        .chain(b.edgeuses().iter().map(|(id, _)| EntityRef::Edgeuse(id)))
-        .chain(
-            b.vertexuses()
-                .iter()
-                .map(|(id, _)| EntityRef::Vertexuse(id)),
-        )
-        .map(|entity| (notify_ref(entity), entity))
-        .collect();
-    let entity_of = |handle| match handle {
+    // The loop, edge and vertex uses a topology handle can name. A handle names one by its
+    // notification key ([`notify_ref`]), which is decoded and looked up in the B-rep when
+    // asked. Listing every use of the B-rep into a map for each face made the check of a
+    // body with thousands of faces quadratic (#14329). Arena slots are never reused, so a
+    // use made while the cache is built (a slot past these counts) is left out, as it was
+    // from the list. A use removed meanwhile is no longer named: the list still named it,
+    // and reading the removed use then failed instead.
+    let slots = (
+        b.loopuses().slot_count(),
+        b.edgeuses().slot_count(),
+        b.vertexuses().slot_count(),
+    );
+    let entity_of = move |b: &Brep, handle| match handle {
         CacheObject::Face(f) => Ok(EntityRef::Face(f)),
         CacheObject::Edge(e) => Ok(EntityRef::Edge(e)),
         CacheObject::Vertex(v) => Ok(EntityRef::Vertex(v)),
-        CacheObject::Other(key) => entities
-            .get(&key)
-            .copied()
-            .ok_or_else(|| SolidError::invalid_input(OP, "unknown cache topology handle")),
+        CacheObject::Other(key) => {
+            k.work_counters.add_cache_handle_uses(1);
+            topology_use(b, slots, key)
+                .ok_or_else(|| SolidError::invalid_input(OP, "unknown cache topology handle"))
+        }
         _ => Err(SolidError::invalid_input(
             OP,
             "unexpected cache geometry handle",
@@ -216,7 +218,8 @@ fn face_surface_cache(
     if editing && !loops_close(b, face)? {
         return Err(unavailable);
     }
-    let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, &cache_handle, &entity_of)?;
+    let mut mapped =
+        MappedCacheFace::new_reading_brep(BrepCacheFace { b, f: face }, &cache_handle, &entity_of)?;
     if editing {
         mapped = mapped.implanting_while_editing();
     }
@@ -244,6 +247,19 @@ fn face_surface_cache(
             .map_err(trims_failed)?;
     }
     Ok(cache.into_base())
+}
+
+/// The loop, edge or vertex use of `b` whose notification key ([`notify_ref`]) is `key`,
+/// if it is one of the first `slots` (loop uses, edge uses, vertex uses) and still there.
+fn topology_use(b: &Brep, slots: (usize, usize, usize), key: ObjectRef) -> Option<EntityRef> {
+    let entity = entity_of_notify_key(key.key)?;
+    let (index, slots, live) = match entity {
+        EntityRef::Loopuse(id) => (id.index(), slots.0, b.loopuses().get(id).is_some()),
+        EntityRef::Edgeuse(id) => (id.index(), slots.1, b.edgeuses().get(id).is_some()),
+        EntityRef::Vertexuse(id) => (id.index(), slots.2, b.vertexuses().get(id).is_some()),
+        _ => return None,
+    };
+    (live && (index as usize) < slots && notify_ref(entity) == key).then_some(entity)
 }
 
 /// Whether every loop use of face `f` closes: each edge use ends where the next one
@@ -594,5 +610,100 @@ mod tests {
             preparation.prepare(&k, &mut b, request),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// An `n`-sided prism: one body with `n + 2` faces.
+    fn prism(k: &mut Kernel, n: usize) -> Brep {
+        use crate::curve::curve::Curve;
+        use crate::primitive::api_curves::create_line_segment;
+        let point = |i: usize| {
+            let t = core::f64::consts::TAU * i as f64 / n as f64;
+            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), 0.0)
+        };
+        let curves: Vec<Curve> = (0..n)
+            .map(|i| Curve::from(create_line_segment(point(i), point(i + 1)).unwrap()))
+            .collect();
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        crate::sweep::api_brep::create_linear_sweep(
+            k,
+            &refs,
+            crate::math::Vec3::new(0.0, 0.0, 2.0),
+            0.035,
+            true,
+        )
+        .unwrap()
+    }
+
+    fn uses(b: &Brep) -> Vec<EntityRef> {
+        b.loopuses()
+            .ids()
+            .map(EntityRef::Loopuse)
+            .chain(b.edgeuses().ids().map(EntityRef::Edgeuse))
+            .chain(b.vertexuses().ids().map(EntityRef::Vertexuse))
+            .collect()
+    }
+
+    /// A cache handle names the use the list of every use of the B-rep gave it before
+    /// (#14329): the same use for each key of a use, and none for any other key (a removed
+    /// use, a slot made after the cache started, another kind, another type code).
+    #[test]
+    fn a_cache_handle_names_the_use_the_list_of_uses_named() {
+        let mut k = Kernel::default();
+        let mut b = prism(&mut k, 12);
+        let removed = b.edgeuses().ids().nth(3).unwrap();
+        b.remove_edgeuse_record(removed).unwrap();
+        let listed: BTreeMap<ObjectRef, EntityRef> =
+            uses(&b).into_iter().map(|e| (notify_ref(e), e)).collect();
+        let slots = (
+            b.loopuses().slot_count(),
+            b.edgeuses().slot_count(),
+            b.vertexuses().slot_count(),
+        );
+        let mut keys: Vec<ObjectRef> = listed.keys().copied().collect();
+        keys.push(notify_ref(EntityRef::Edgeuse(removed)));
+        let past = u32::try_from(slots.1).unwrap();
+        keys.push(notify_ref(EntityRef::Edgeuse(EdgeuseId::from_index(past))));
+        keys.push(notify_ref(EntityRef::Face(b.faces().ids().next().unwrap())));
+        let edgeuse = notify_ref(EntityRef::Edgeuse(b.edgeuses().ids().next().unwrap()));
+        keys.push(ObjectRef {
+            type_code: edgeuse.type_code + 1,
+            key: edgeuse.key,
+        });
+        for key in keys {
+            assert_eq!(
+                topology_use(&b, slots, key),
+                listed.get(&key).copied(),
+                "{key:?}"
+            );
+        }
+        // a use made after the cache started is not named
+        let last = b.edgeuses().ids().last().unwrap();
+        let fewer = (slots.0, last.index() as usize, slots.2);
+        assert_eq!(
+            topology_use(&b, fewer, notify_ref(EntityRef::Edgeuse(last))),
+            None
+        );
+    }
+
+    /// Checking a body reads, to translate its faces' cache handles, one use per handle:
+    /// work that grows with the body. It used to list every use of the B-rep for each face
+    /// whose cache it made, uses × faces, so checking an extrusion of an outline of
+    /// thousands of lines took minutes (#14329). With 96 sides the body has 98 faces and
+    /// 2,500 uses: the check now reads 3,750, where the lists held up to 245,000.
+    #[test]
+    fn checking_a_body_reads_each_cache_handle_once() {
+        use crate::topology::brep::validation::{check_brep, CheckLevel};
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut b = prism(&mut k, 96);
+        let uses = uses(&b).len() as u64;
+        k.work_counters.reset();
+        let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+        assert_eq!(check.assert_valid, Some(true));
+        let read = k.work_counters.cache_handle_uses();
+        assert!(read > 0);
+        assert!(read <= 2 * uses, "{read} uses read for a body of {uses}");
     }
 }

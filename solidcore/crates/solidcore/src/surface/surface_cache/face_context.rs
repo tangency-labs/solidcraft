@@ -72,8 +72,15 @@ pub struct MappedCacheFace<'a, O> {
     inner: BrepCacheFace<'a>,
     face_handle: O,
     handle_of: &'a dyn Fn(EntityRef) -> Result<O>,
-    entity_of: &'a dyn Fn(O) -> Result<EntityRef>,
+    entity_of: EntityOf<'a, O>,
     implants_while_editing: bool,
+}
+
+/// How a [`MappedCacheFace`] finds the entity of a handle: by the handle alone, or by the
+/// handle and the B-rep as it is when asked.
+enum EntityOf<'a, O> {
+    Handle(&'a dyn Fn(O) -> Result<EntityRef>),
+    InBrep(&'a dyn Fn(&Brep, O) -> Result<EntityRef>),
 }
 
 impl<O> Debug for MappedCacheFace<'_, O> {
@@ -95,19 +102,51 @@ impl<'a, O: Copy + PartialEq> MappedCacheFace<'a, O> {
         handle_of: &'a dyn Fn(EntityRef) -> Result<O>,
         entity_of: &'a dyn Fn(O) -> Result<EntityRef>,
     ) -> Result<Self> {
+        Self::with_entity_of(inner, handle_of, EntityOf::Handle(entity_of))
+    }
+
+    /// [`MappedCacheFace::new`] with a reverse mapping that also reads the B-rep, as it
+    /// is when a handle is translated. A caller whose handles encode their entities can
+    /// then check that the entity exists without listing every entity of the B-rep
+    /// beforehand, for each face (#14329).
+    ///
+    /// # Errors
+    ///
+    /// As [`MappedCacheFace::new`].
+    pub fn new_reading_brep(
+        inner: BrepCacheFace<'a>,
+        handle_of: &'a dyn Fn(EntityRef) -> Result<O>,
+        entity_of: &'a dyn Fn(&Brep, O) -> Result<EntityRef>,
+    ) -> Result<Self> {
+        Self::with_entity_of(inner, handle_of, EntityOf::InBrep(entity_of))
+    }
+
+    fn with_entity_of(
+        inner: BrepCacheFace<'a>,
+        handle_of: &'a dyn Fn(EntityRef) -> Result<O>,
+        entity_of: EntityOf<'a, O>,
+    ) -> Result<Self> {
         inner.b.face(inner.f)?;
         let entity = inner.face();
         let face_handle = handle_of(entity)?;
-        if entity_of(face_handle)? != entity {
-            return Err(Self::mapping_error());
-        }
-        Ok(Self {
+        let mapped = Self {
             inner,
             face_handle,
             handle_of,
             entity_of,
             implants_while_editing: false,
-        })
+        };
+        if mapped.entity_for(face_handle)? != entity {
+            return Err(Self::mapping_error());
+        }
+        Ok(mapped)
+    }
+
+    fn entity_for(&self, handle: O) -> Result<EntityRef> {
+        match &self.entity_of {
+            EntityOf::Handle(entity_of) => entity_of(handle),
+            EntityOf::InBrep(entity_of) => entity_of(self.inner.b, handle),
+        }
     }
 
     /// This adapter with the face's trims implanted even while its B-rep is being
@@ -127,14 +166,14 @@ impl<'a, O: Copy + PartialEq> MappedCacheFace<'a, O> {
 
     fn handle(&self, entity: EntityRef) -> Result<O> {
         let handle = (self.handle_of)(entity)?;
-        if (self.entity_of)(handle)? != entity {
+        if self.entity_for(handle)? != entity {
             return Err(Self::mapping_error());
         }
         Ok(handle)
     }
 
     fn entity(&self, handle: O) -> Result<EntityRef> {
-        let entity = (self.entity_of)(handle)?;
+        let entity = self.entity_for(handle)?;
         if (self.handle_of)(entity)? != handle {
             return Err(Self::mapping_error());
         }
