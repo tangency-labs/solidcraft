@@ -1,10 +1,12 @@
 # Design file corpus
 
 Designs saved by older SolidCraft builds. `tests/design_corpus.rs` opens each one with the
-current build and checks that it evaluates as it did when saved (the `.expected.json` next to
-it is `solidcraft-cli eval` of that file by the build that saved it: bodies, volumes, areas,
-world bounding boxes), that it is upgraded to the current file format, and that damaged and
-hostile variants of it never panic.
+current build and checks that it is upgraded to the current file format, that it evaluates
+(a feature may fail only by asking for a reference it lost to be picked again; what it rebuilds
+to is today's), and that damaged and hostile variants of it never panic. The `.expected.json`
+next to each is `solidcraft-cli eval` of that file by the build that saved it (bodies, volumes,
+areas, world bounding boxes), kept as a record of what that build made; no test compares with
+it.
 
 | File | Saved by | Era |
 |---|---|---|

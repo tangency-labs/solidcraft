@@ -13,7 +13,7 @@ fn rectangle(h: &mut Harness) -> u64 {
 }
 
 fn volume(h: &Harness) -> f64 {
-    h.app.session.world_state().bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum()
+    h.app.session.world_state().unwrap().bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum()
 }
 
 #[test]

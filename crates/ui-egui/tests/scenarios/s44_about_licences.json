@@ -1,5 +1,6 @@
 [
   {"note": "Help ▸ About ▸ Licenses shows SolidCraft's licenses and every third-party crate's, built into the program."},
+  {"call": "ui.prefs", "params": {"language": "en"}},
   {"call": "ui.help", "params": {"item": "about"}},
   {"widget": "Licenses"},
   {"expect": {"shown": "Third-party licenses"}},

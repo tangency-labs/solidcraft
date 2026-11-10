@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2810",
+    "tangency-labs/solidcraft#2813"
+  ],
+  "what": "a tapered extrude of a loop of arcs on three circles meeting at sharp corners (a circle with a lobe on each side); the walls must meet at the corners",
+  "source": "analytic",
+  "method": "the section at depth z is the profile offset inward by z*tan45 = z: the union of the circle R 49.2 -> 49.2-z (centre 0) and two lobes r 16.2 -> 16.2-z (centres +-41). Area(z) = pi*R'^2 + 2*(pi*r'^2 - lens(R', r', d=41)) with the circle-circle lens in closed form; V = Int Area(z) dz over z in 0..2.5 (Simpson) = 18907.67. Faces: top, bottom, 4 walls",
+  "body_count": 1,
+  "volume_mm3": 18907.67402576133,
+  "faces": 6
+}

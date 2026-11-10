@@ -1,0 +1,70 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Thick",
+    "thickness": "4 mm",
+    "active": true,
+    "bend_radius": "4 mm",
+    "k_factor": 0.44
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     60,
+     40
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     30,
+     0,
+     2
+    ],
+    "direction": [
+     0,
+     1,
+     0
+    ],
+    "diameter": 2,
+    "depth": 10
+   }
+  },
+  {
+   "command": "sheet.flat_pattern",
+   "params": {}
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

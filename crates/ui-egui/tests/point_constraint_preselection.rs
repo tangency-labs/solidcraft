@@ -1,5 +1,7 @@
 use serde_json::json;
-use solidcraft_engine::{Sel, geom::Vec2, sketch::ConstraintKind};
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> Harness {
@@ -36,7 +38,7 @@ fn clicked_point_constraint_preselection_applies_and_undoes_once() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "coincident" => matches!(c.kind, ConstraintKind::Coincident { .. } | ConstraintKind::PointOnCurve { .. }),
@@ -99,7 +101,7 @@ fn two_lines() -> Harness {
 }
 
 fn line_ends(h: &Harness, id: &str) -> (Vec2, Vec2) {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let p = |end: &str| sk.point(sk.resolve_point(&format!("{id}.{end}")).unwrap()).unwrap();
     (p("start"), p("end"))
@@ -138,13 +140,13 @@ fn midpoint_tool_takes_two_preselected_lines() {
 }
 
 fn midpoint_ids(h: &Harness) -> Vec<String> {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     sk.constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })).map(|c| c.id.clone()).collect()
 }
 
 fn point_count(h: &Harness) -> usize {
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.points.len()
 }
 

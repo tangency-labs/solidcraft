@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "a 10x10x20 post's side face (+X) aligned onto a plate's top face: the post turns 90 deg to lie flat",
+ "source": "analytic",
+ "method": "+X turns onto -Z: 90 deg about +Y through (110,5,10), the post becomes 20 along X, 10 along Z (x 100..120, z 10..20); the point then moves to (20,20,10): x 10..30, y 15..25, z 10..20. Unturned it would reach z 30. COM z = (16000*5 + 2000*15)/18000",
+ "body_count": 2,
+ "volume_mm3": 18000.0,
+ "center_of_mass": [
+  20,
+  20,
+  6.111111111111111
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   40,
+   20
+  ]
+ }
+}

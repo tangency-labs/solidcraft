@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3456",
+    "tangency-labs/solidcraft#3497"
+  ],
+  "what": "a deep cut that removes everything above z=2 of a tapered body with nine through-bores, leaving the 2 mm drilled base",
+  "source": "analytic",
+  "method": "cone frustum r=30 at z=0 to r=20 at z=100 (a tapered extrude, narrowing by atan(0.1)=5.7106 deg) (r(z)=30-0.1z) with nine r=1.5 bores (centre + eight on r=10). Removing z>2 leaves the slab z 0..2: frustum slice pi*2/3*(30^2+30*29.8+29.8^2) minus 9*pi*1.5^2*2. Faces: base, top, cone side, nine bore walls = 12",
+  "body_count": 1,
+  "volume_mm3": 5490.0169,
+  "faces": 12
+}

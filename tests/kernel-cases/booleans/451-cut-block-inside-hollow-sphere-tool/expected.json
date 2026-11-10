@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#451"
+ ],
+ "what": "a block wholly inside the void of a hollow spherical-shell tool (r 18.5 to 40): cutting leaves it untouched, the tool never reaches it",
+ "source": "analytic",
+ "method": "the tool is the material between r=18.5 and r=40; the 8 mm block centred on the origin lies within r<=6.93 < 18.5, so it shares no volume with the tool: V = 8^3 = 512, still one body, centroid at the origin",
+ "body_count": 1,
+ "volume_mm3": 512.0,
+ "center_of_mass": [
+  0,
+  0,
+  0
+ ]
+}

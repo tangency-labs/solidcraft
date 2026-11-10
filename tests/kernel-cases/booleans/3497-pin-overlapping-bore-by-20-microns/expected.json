@@ -1,0 +1,12 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3497",
+    "tangency-labs/solidcraft#3456"
+  ],
+  "what": "a pin r=3.02 intersected with a tube whose bore is r=3: a thin annulus (0.02 mm overlap on a curved wall)",
+  "source": "analytic",
+  "method": "overlap is the annulus r 3..3.02, h=6: V = pi*(3.02^2 - 3^2)*6 = 2.2695 (the PR quotes 2.269486533). Faces: 2 rings + inner + outer wall = 4",
+  "body_count": 1,
+  "volume_mm3": 2.269487,
+  "faces": 4
+}

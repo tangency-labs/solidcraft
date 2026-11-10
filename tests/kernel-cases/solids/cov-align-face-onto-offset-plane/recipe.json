@@ -1,0 +1,43 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 20,
+    "corner": [
+     100,
+     0,
+     0
+    ],
+    "body_name": "Post"
+   }
+  },
+  {
+   "command": "solid.align",
+   "params": {
+    "bodies": [
+     "Post"
+    ],
+    "from_face": [
+     105,
+     5,
+     0
+    ],
+    "to_plane": {
+     "origin": [
+      0,
+      0,
+      50
+     ],
+     "normal": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  }
+ ]
+}

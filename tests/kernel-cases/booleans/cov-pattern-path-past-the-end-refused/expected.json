@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "6 instances 20 mm apart need 100 mm of an 80 mm path: refused",
+ "source": "analytic",
+ "method": "(6 - 1) * 20 = 100 > 80: the last instances would leave the path; a clean refusal naming its length",
+ "outcome": "refused",
+ "refusal": "run past the end of the path (80.000 mm long)"
+}

@@ -1,0 +1,53 @@
+{
+ "sources": [],
+ "what": "assembly.mass_properties of two boxes in one rigid group",
+ "source": "analytic",
+ "method": "material 2 g/cm3; A: box 20x10x10 from the origin, V 2000, m 0.004 kg, centre (10,5,5); B: box 10x10x10 from (30,0,0), V 1000, m 0.002 kg, centre (35,5,5); the rigid group: m = 0.006 kg, centre x = (0.004*10 + 0.002*35)/0.006 = 18.333333, y = z = 5; about it, each box's own m/12 (b^2 + c^2) plus m d^2 along x (parallel axes): Ixx = 0.004/12*200 + 0.002/12*200 = 0.100000, Iyy = Izz = 0.004/12*500 + 0.002/12*200 + 0.004*(10 - x)^2 + 0.002*(35 - x)^2 = 1.033333 kg mm^2, no products of inertia (both boxes symmetric about y = 5 and z = 5). Groups: the design's own (no bodies), then A with B",
+ "body_count": 2,
+ "volume_mm3": 3000.0,
+ "results": [
+  {
+   "step": 10,
+   "pointer": "/occurrences/2/mass/center_of_mass_mm",
+   "json": [
+    35.0,
+    5.0,
+    5.0
+   ]
+  },
+  {
+   "step": 10,
+   "pointer": "/groups/1/mass",
+   "json": {
+    "mass_kg": 0.006,
+    "center_of_mass_mm": [
+     18.333333,
+     5.0,
+     5.0
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "pointer": "/groups/1/mass/inertia_world_kg_mm2",
+   "abs_mm": 1e-06,
+   "json": [
+    [
+     0.1,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     1.033333,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     1.033333
+    ]
+   ]
+  }
+ ]
+}

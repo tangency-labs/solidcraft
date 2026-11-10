@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a screw of lead 4 mm between a revolute and a slider",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear: box 10x10x10 from (60,-5,0), centre (65,0,5), on revolute G2 about z through (50,0,0), here on a slider along +x at (50,0,0); joint.screw a Hinge, b Rack, pitch 4: 90 degrees advance 4/4 = 1 mm: Gear centre (66,0,5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 13,
+   "json": {
+    "ratio": 0.011111
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      66.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

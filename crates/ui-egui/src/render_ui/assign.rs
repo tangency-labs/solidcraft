@@ -42,7 +42,7 @@ fn component(app: &SolveApp, sel: &Sel) -> Option<u64> {
     match sel {
         Sel::Occurrence { path } => app.session.placed_document().path_placement(path).map(|(id, _)| id).filter(|id| *id != 0),
         Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } => {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             state.body(name).map(|body| app.session.doc.model_body_component(body)).filter(|id| *id != 0)
         }
         _ => None,
@@ -253,9 +253,7 @@ fn drop_preview(app: &SolveApp, look: Value, hit: &Hit, sel: &Sel, mods: Modifie
     }
     let whole_component = mods.ctrl || mods.command || app.ui.pick_components;
     if whole_component && let Some(id) = component(app, sel) {
-        let bodies = app
-            .session
-            .world_state()
+        let bodies = crate::open_meshing::session_world(&app.session)
             .bodies
             .iter()
             .filter(|b| {
@@ -349,7 +347,7 @@ pub(crate) fn banner(app: &mut SolveApp, ui: &mut egui::Ui) {
     let text = if s.sampling {
         app.tr("render.pick_up_prompt").to_string()
     } else {
-        crate::i18n::format("render.painting_with", &[("name", s.look.as_ref().and_then(|l| l["name"].as_str()).unwrap_or(""))])
+        solidcraft_ui_text::format("render.painting_with", &[("name", s.look.as_ref().and_then(|l| l["name"].as_str()).unwrap_or(""))])
     };
     ui_kit::text(ui, &text, ui_kit::Text::Inline);
     if ui_kit::button(ui, app.tr_label("Done"), ui_kit::Button::Normal).clicked() {
@@ -397,8 +395,9 @@ pub(crate) fn preview_scene(scene: &mut ProductScene, preview: Option<&Preview>)
     Ok(())
 }
 
-pub(crate) fn menu(app: &SolveApp, body: &str) -> crate::context_menu::Item {
-    use crate::context_menu::{Item, cmd};
+pub(crate) fn menu(app: &SolveApp, body: &str) -> crate::ui_kit::Item {
+    use crate::context_menu::cmd;
+    use crate::ui_kit::Item;
     let selected_face = app
         .render_workspace
         .view
@@ -450,7 +449,7 @@ pub(crate) fn context(app: &mut SolveApp, candidate: &(Hit, Sel)) {
 pub(crate) fn assigned(app: &mut SolveApp, result: &Value) {
     if let Some(look) = result.get("appearance").filter(|look| !look.is_null()) {
         remember(app, look.clone());
-        app.set_status(crate::i18n::format("render.look_applied", &[("name", look["name"].as_str().unwrap_or(""))]), false);
+        app.set_status(solidcraft_ui_text::format("render.look_applied", &[("name", look["name"].as_str().unwrap_or(""))]), false);
         app.status_undo = true;
     }
 }
@@ -487,8 +486,10 @@ pub(crate) fn hover_tooltip(app: &mut SolveApp, response: &egui::Response, candi
     let Some((_, sel)) = candidate else { return };
     let Ok(target) = chain_target(app, sel) else { return };
     let Ok(reply) = app.session.execute("appearance.pick_up", &json!({"target":target})) else { return };
-    let tip =
-        crate::i18n::format("render.hover_look", &[("object", &selection_name(app, sel)), ("look", reply["look"]["name"].as_str().unwrap_or(""))]);
+    let tip = solidcraft_ui_text::format(
+        "render.hover_look",
+        &[("object", &selection_name(app, sel)), ("look", reply["look"]["name"].as_str().unwrap_or(""))],
+    );
     ui_kit::Container::tooltip(response, &tip);
 }
 
@@ -506,7 +507,7 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
     for x in [bounds.min.x, bounds.max.x] {
         for y in [bounds.min.y, bounds.max.y] {
             for z in [bounds.min.z, bounds.max.z] {
-                if let Some(p) = proj.to_screen(solidcraft_engine::geom::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
+                if let Some(p) = proj.to_screen(solidcore_record::Vec3::new(x, y, z)).filter(|p| p.is_finite()) {
                     screen.extend_with(p);
                 }
             }
@@ -531,11 +532,11 @@ pub(crate) fn selection_bar(app: &mut SolveApp, ui: &mut egui::Ui, free: egui::R
         })
         .collect::<Vec<_>>();
     let anchor = egui::pos2(
-        crate::shell::within(screen.center().x, free.left(), free.right()),
-        crate::shell::within(screen.top() - crate::theme::Tokens::get().space_12, free.top(), free.bottom()),
+        crate::ui_kit::within(screen.center().x, free.left(), free.right()),
+        crate::ui_kit::within(screen.top() - solidcraft_theme::Tokens::get().space_12, free.top(), free.bottom()),
     );
     let ctx = ui.ctx().clone();
-    let pill = ui_kit::Container::selection_card(&ctx, egui::Id::new("render_selection"), anchor, free, |ui| {
+    let pill = ui_kit::Container::selection_card(&ctx, egui::Id::unique("render_selection"), anchor, free, |ui| {
         ui_kit::selection_actions(ui, &selection_name(app, &sel), &actions)
     });
     crate::scenario::publish_rect("render:selection", pill.response.rect);
@@ -574,7 +575,7 @@ pub(crate) fn replacement_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let entries: Vec<_> = entries.into_iter().filter(|entry| entry["available"] != false).collect();
     let mut selected = app.render_workspace.view.assign.replacement_index;
     let title = app.tr("render.replace_all").to_string();
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_replace_look"), "reorder", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("render_replace_look"), "reorder", &title)
         .actions(&title, app.tr_label("Cancel"), None)
         .show(ctx, !entries.is_empty(), |ui| {
             ui_kit::text(ui, from["name"].as_str().unwrap_or(""), ui_kit::Text::Inline);

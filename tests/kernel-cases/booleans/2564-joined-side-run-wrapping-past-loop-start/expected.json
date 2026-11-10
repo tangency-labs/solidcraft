@@ -1,0 +1,15 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#2564",
+    "tangency-labs/solidcraft#1949"
+  ],
+  "what": "an extrude of an outline whose bottom side is drawn as two collinear pieces that wrap past the loop's first segment ((10,0)->(20,0) ... (0,0)->(10,0)): the bottom is one face",
+  "source": "analytic",
+  "method": "outline (10,0),(20,0),(20,10),(0,10),(0,0) is the rectangle 20x10 extruded 5: V = 200*5 = 1000, area = 2*200 + 60*5 = 700. Faces: 4 sides (the bottom one joined from its two pieces) + top + bottom = 6, edges 12, vertices 8",
+  "body_count": 1,
+  "volume_mm3": 1000.0,
+  "area_mm2": 700.0,
+  "faces": 6,
+  "edges": 12,
+  "vertices": 8
+}

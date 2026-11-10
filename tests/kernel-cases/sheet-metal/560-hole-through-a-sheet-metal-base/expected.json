@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#560",
+  "tangency-labs/solidcraft#656"
+ ],
+ "what": "solid.hole square to a flat sheet metal panel was refused as sheet machining that cannot be preserved",
+ "source": "analytic",
+ "method": "T = 2: V = 60*40*2 - pi*2.5^2*2 = 4800 - 12.5*pi",
+ "body_count": 1,
+ "volume_mm3": 4760.730091830128
+}

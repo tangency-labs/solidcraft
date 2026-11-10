@@ -61,7 +61,10 @@ fn format20_scalar_looks_upgrade_and_format21_setups_keep_their_meaning() {
     assert_eq!(d.render.setups["Studio"].width, 320);
     for version in [crate::doc::format::FORMAT + 1, crate::doc::format::FORMAT + 2] {
         saved["format"] = json!(format!("solidcraft/{version}"));
-        assert!(crate::doc::Document::from_json(&saved.to_string()).is_err());
+        // A newer build's file opens, says so, and keeps its number.
+        let newer = crate::doc::Document::from_json(&saved.to_string()).unwrap();
+        assert_eq!(newer.newer_file.as_ref().unwrap().format, version);
+        assert_eq!(newer.format, format!("solidcraft/{version}"));
     }
 }
 
@@ -955,7 +958,7 @@ fn appearance_reads_and_scopes_take_a_placed_copys_name() {
     s.execute("component.create", &json!({"name":"K"})).unwrap();
     s.execute("solid.box", &json!({"body_name":"KB","length":10,"width":10,"height":10})).unwrap();
     s.execute("occurrence.copy", &json!({"component":"K","translate":[30,0,0]})).unwrap();
-    let world: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let world: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!(world.iter().any(|n| n == "KB (K:2)"), "{world:?}");
     s.execute("appearance.assign", &json!({"bodies":["KB"],"appearance":"ABS - Red"})).unwrap();
     s.execute("appearance.assign", &json!({"components":["K"],"appearance":"ABS - Blue"})).unwrap();

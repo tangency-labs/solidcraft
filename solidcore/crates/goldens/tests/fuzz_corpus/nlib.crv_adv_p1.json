@@ -1,0 +1,8 @@
+{
+  "unit": "nlib.crv_adv_p1",
+  "cases": [
+    {"name": "fuzz00548_extend_by_distance_g2_extension_too", "origin": "fuzz-out/n2000/nlib.crv_adv_p1/fuzz00548.json (timeout: rust: no result after 20 s)", "issue": "HANG-6", "cpp": "harness: invalid argument: extend by distance: G2 extension too short", "rust": "ok", "inputs": {"cont": "g2", "crv": {"smc": {"$upstream_file": "closedCurve.smc"}}, "dist": 1e-300, "end": "start", "op": "extend_dist"}},
+    {"name": "fuzz01820_bad_index_count_9223372036854776000", "origin": "fuzz-out/n2000/nlib.crv_adv_p1/fuzz01820.json (panic: rust: attempt to add with overflow at crates/solidcore/src/nurbs/crv_adv/p1.rs:791)", "cpp": "harness: invalid argument: bad index/count 9223372036854776000", "rust": "ok", "inputs": {"cont": "g1", "crv": {"cpts": [[5, 3, 0, -1.7976931348623157e+308]], "p": 9223372036854775807, "u": [1.0]}, "dist": 2.0, "end": "end", "op": "extend_dist"}},
+    {"name": "fuzz01836_curve_non_positive_weight", "origin": "fuzz-out/n2000/nlib.crv_adv_p1/fuzz01836.json (timeout: rust: no result after 20 s)", "issue": "HANG-22", "cpp": "harness: invalid argument: curve: non-positive weight", "rust": "ok", "inputs": {"cont": "g2", "crv": {"cpts": [[0, 0, 1.7976931348623157e+308, 0], [1, 2, 1.7976931348623157e+308, 2], [3, 3, 1.7976931348623157e+308, 1], [5, 2, 1.7976931348623157e+308, 0.5], [6, 0, 1.7976931348623157e+308, 1]], "p": 2, "u": [0, 0, 0, 0.25, 0.5, 1, 1, 1]}, "dist": 3.0, "end": "end", "op": "extend_dist"}}
+  ]
+}

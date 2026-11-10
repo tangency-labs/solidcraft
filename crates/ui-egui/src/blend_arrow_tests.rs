@@ -6,8 +6,9 @@ use crate::canvas::{anchor, blend_grow_dir};
 use crate::dialogs::Kind;
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 /// A 40 x 30 x 20 block with a 20 x 30 x 10 step on its left half: the edge along y at x 20,
 /// z 20 is inside (concave); the block's right top edge (x 40, z 20) and the step's top right
@@ -21,7 +22,7 @@ fn l_step() -> Harness {
 }
 
 fn edge(h: &Harness, p: Vec3) -> Sel {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let m = st.body("Body1").unwrap().mesh();
     let i = m.edges.iter().position(|e| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-9)).expect("an edge there");
     Sel::Edge { body: "Body1".into(), index: i, point: p }
@@ -29,7 +30,7 @@ fn edge(h: &Harness, p: Vec3) -> Sel {
 
 fn grow(h: &Harness, s: &Sel) -> Vec3 {
     let Sel::Edge { body, index, point } = s else { panic!("an edge") };
-    blend_grow_dir(&h.app.session.world_state().body(body).unwrap().mesh(), *index, *point).unwrap()
+    blend_grow_dir(&h.app.session.world_state().unwrap().body(body).unwrap().mesh(), *index, *point).unwrap()
 }
 
 fn close(a: Vec3, b: Vec3) -> bool {

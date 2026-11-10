@@ -1,0 +1,198 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 10,
+    "operation": "new",
+    "body_name": "B"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "B",
+    "edges": [
+     [
+      0,
+      0,
+      5
+     ],
+     [
+      40,
+      0,
+      5
+     ],
+     [
+      40,
+      20,
+      5
+     ],
+     [
+      0,
+      20,
+      5
+     ]
+    ],
+    "radius": 5,
+    "type": "g2"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      20,
+      10,
+      0
+     ]
+    },
+    "project_edges": true,
+    "name": "Bottom"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      15,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "RB"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -0.2,
+      -0.2
+     ],
+     [
+      0.8,
+      -0.2
+     ]
+    ],
+    "ids": [
+     "o1"
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0.8,
+      -0.2
+     ],
+     [
+      0.8,
+      0
+     ]
+    ],
+    "ids": [
+     "o2"
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0.8
+     ],
+     [
+      -0.2,
+      0.8
+     ]
+    ],
+    "ids": [
+     "o3"
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -0.2,
+      0.8
+     ],
+     [
+      -0.2,
+      -0.2
+     ]
+    ],
+    "ids": [
+     "o4"
+    ]
+   }
+  },
+  {
+   "command": "sketch.blend_curve",
+   "params": {
+    "a": "o2.end",
+    "b": "o3.start",
+    "continuity": "g2"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "RB",
+    "path_sketch": "Bottom",
+    "path": [
+     "s2",
+     "l3"
+    ],
+    "orientation": "perpendicular",
+    "operation": "new",
+    "body_name": "Tool"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "B",
+    "tools": [
+     "Tool"
+    ],
+    "operation": "cut"
+   }
+  }
+ ]
+}

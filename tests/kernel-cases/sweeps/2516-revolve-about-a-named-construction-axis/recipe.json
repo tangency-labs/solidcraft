@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "construct.axis.two_points",
+   "params": {
+    "a": {
+     "point": [
+      5,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "point": [
+      5,
+      0,
+      10
+     ]
+    },
+    "name": "Axis1"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     10,
+     0
+    ],
+    "p1": [
+     20,
+     15
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "Axis1",
+    "angle": "360 deg",
+    "operation": "new"
+   }
+  }
+ ]
+}

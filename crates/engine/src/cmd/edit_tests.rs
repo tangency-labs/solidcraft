@@ -1,6 +1,7 @@
 //! Edit Feature must replace the selections as well as the numerical definition.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::{Sel, Session};
 
@@ -10,7 +11,7 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
 
 #[test]
 fn select_geometry_resolves_points_and_indices_without_changing_history() {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name":"Block", "corner":[20,30,40], "length":10, "width":10, "height":10}));
@@ -47,7 +48,7 @@ fn select_geometry_curved_picks_round_trip_and_add_without_duplicates() {
         let index = serde_json::to_value(&s.selection[0]).unwrap()["index"].clone();
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Round","index":index}]}));
         let complete = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
         assert!((pick.x.hypot(pick.y) - 5.0).abs() < 1e-6, "the inferred point lies on the cylinder: {complete}");
         let mut partial = complete.clone();
         partial.as_object_mut().unwrap().remove("index");
@@ -73,7 +74,7 @@ fn select_geometry_uses_the_placed_body_in_world_coordinates() {
         assert_eq!(complete["body"], name);
         run(&mut s, "select.set", json!({"items":[{"type":kind,"body":name,"index":complete["index"]}]}));
         let inferred = serde_json::to_value(&s.selection[0]).unwrap();
-        let pick: solidcraft_geom::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
+        let pick: solidcore_record::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
         assert!((pick.z - 4.0).abs() < 1e-9 && (7.0..=10.0).contains(&pick.x) && (20.0..=22.0).contains(&pick.y), "{inferred}");
         assert!(s.execute("select.set", &json!({"items":[{"type":kind,"body":name,"point":[1,1,4]}]})).is_err());
         assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), inferred);
@@ -249,9 +250,11 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
     let volume = |s: &Session| {
         let bodies = &s.model.state().bodies;
         assert_eq!(bodies.len(), 1);
-        bodies.first().unwrap().body.tessellate(0.0001).unwrap().measure().volume
+        bodies.first().unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap().measure().volume
     };
-    let expected = |r: f64| 12000.0 - 40.0 * 113.0 / 756.0 * r.powi(2) + 13711.0 / 486486.0 * r.powi(3);
+    // The curvature section at its equal-area thumbweight removes (1 - pi/4) r² at the square
+    // corner, first moment 0.0474559669443 r³ (Green's theorem on the section).
+    let expected = |r: f64| 12000.0 - 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r.powi(2) + 0.0474559669443 * r.powi(3);
     let actual = volume(&s);
     assert!((actual - expected(5.0)).abs() < 0.05, "{actual} vs {}", expected(5.0));
     let edited = s.doc.clone();
@@ -489,17 +492,17 @@ fn redefine_keeps_allocator_above_component_and_occurrence_ids() {
     assert!(
         matches!(&s.doc.features[combine_index + 1].kind, solidcraft_doc::FeatureKind::BodyTransfer { bodies, to, .. } if bodies == &["Base"] && *to == destination)
     );
-    assert!((solidcraft_kernel::measure(&s.world_state().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
-    assert_eq!(s.world_state().bodies.len(), 1);
+    assert!((solidcraft_kernel::measure(&s.world_state().unwrap().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     run(&mut s, "timeline.rollback", json!({"position":combine_index + 1}));
-    assert_eq!(s.world_state().body("Base").unwrap().component, 0, "the result transfers only AFTER Combine");
+    assert_eq!(s.world_state().unwrap().body("Base").unwrap().component, 0, "the result transfers only AFTER Combine");
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(*s.doc, *original);
     run(&mut s, "edit.redo", json!({}));
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    assert_eq!(reopened.world_state().body("Base").unwrap().component, destination);
-    assert!((solidcraft_kernel::measure(&reopened.world_state().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
+    assert_eq!(reopened.world_state().unwrap().body("Base").unwrap().component, destination);
+    assert!((solidcraft_kernel::measure(&reopened.world_state().unwrap().body("Base").unwrap().body).unwrap().volume - 6000.0).abs() < 1e-6);
     let max_id =
         s.doc.components.iter().map(|c| c.id).chain(s.doc.occurrences.iter().map(|o| o.id)).chain(s.doc.features.iter().map(|f| f.id)).max().unwrap();
     assert!(s.doc.next_id > max_id);
@@ -531,7 +534,7 @@ fn redefine_cannot_publish_a_second_transfer_that_breaks_existing_ownership() {
         assert_eq!(s.pending_moves, pending);
     }
     let reopened = Session::new(solidcraft_doc::Document::from_json(&full).unwrap());
-    assert_eq!(reopened.world_state().body("Base").unwrap().component, reopened.doc.find_component("Original").unwrap());
+    assert_eq!(reopened.world_state().unwrap().body("Base").unwrap().component, reopened.doc.find_component("Original").unwrap());
     assert!(reopened.doc.features.iter().all(|feature| reopened.model.result(feature.id).is_some_and(|result| result.error.is_none())));
 }
 
@@ -1513,8 +1516,8 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     let history = (s.undo.len(), s.redo.len(), s.evaluations);
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
-    let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
-    let face = solidcraft_doc::appearance::face_index_at(s.world_state().body("C").unwrap(), point).unwrap();
+    let point = solidcore_record::Vec3::new(40.0, 5.0, 5.0);
+    let face = solidcraft_doc::appearance::face_index_at(s.world_state().unwrap().body("C").unwrap(), point).unwrap();
     run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
     run(&mut s, "select.same_look", json!({}));
     assert_eq!(s.selection.len(), 3);
@@ -1685,4 +1688,469 @@ fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
     assert_eq!((s.doc.to_json(), s.undo.len()), before);
     let spec = crate::find_command("ui.assistant").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Ctrl+Shift+A"), "", false));
+    // Command search likewise (#12190): S is its default key, not a reserved one.
+    let error = s.execute("ui.palette", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.palette").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("S"), "", false));
+    // Show/Hide likewise (#13241): V is its default key, and a script names what to hide.
+    let error = s.execute("ui.toggle_visibility", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.toggle_visibility").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("V"), "", false));
+}
+
+#[test]
+fn reorder_reports_where_the_feature_is_or_why_it_did_not_move() {
+    // #12140: a reorder never reports success while the feature stays put without saying so.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [50, 0, 0], "operation": "new_body", "name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [10, 10], [0, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "new_body", "name": "Pad"}));
+    let names = |s: &Session| s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    // A position past the end, where the feature already is: nothing moved, and the note says why.
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Pad", "position": 9}));
+    assert_eq!((out["position"].as_u64(), out["from"].as_u64(), out["moved"].as_bool()), (Some(2), Some(2), Some(false)));
+    assert!(out["note"].as_str().is_some_and(|n| n.contains("nothing moved") && n.contains("past the end")), "{out}");
+    // Ahead of its own sketch: refused, naming the cause.
+    let e = s.execute("timeline.reorder", &json!({"feature": "Pad", "position": 0})).unwrap_err().to_string();
+    assert!(e.contains("breaks Pad") && e.contains("move that feature earlier first"), "{e}");
+    assert_eq!(names(&s), ["Block", "Profile", "Pad"], "a refused move leaves the order");
+    // Moving the sketch first lets the extrude follow; the reply gives the real index.
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Profile", "position": 0}));
+    assert_eq!((out["position"].as_u64(), out["from"].as_u64(), out["moved"].as_bool()), (Some(0), Some(1), Some(true)));
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Pad", "position": 1}));
+    assert_eq!((out["position"].as_u64(), out["moved"].as_bool()), (Some(1), Some(true)));
+    assert!(out.get("note").is_none(), "{out}");
+    assert_eq!(names(&s), ["Profile", "Pad", "Block"]);
+    // `active` on a feature left in place: the note says only the marker moved.
+    run(&mut s, "timeline.reorder", json!({"feature": "Block", "position": 2, "active": false}));
+    let out = run(&mut s, "timeline.reorder", json!({"feature": "Block", "position": 2, "active": true}));
+    assert_eq!((out["moved"].as_bool(), s.doc.marker), (Some(false), None));
+    assert!(out["note"].as_str().is_some_and(|n| n.contains("only the history marker moved")), "{out}");
+}
+
+#[test]
+fn reorder_refusal_after_a_feature_that_removes_its_body_does_not_blame_the_order_of_its_inputs() {
+    // A fillet moved behind a cut that removes its whole body fails though what it uses is earlier.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"}));
+    run(&mut s, "solid.box", json!({"length": 30, "width": 30, "height": 30, "corner": [-10, -10, -10], "operation": "cut", "name": "Clear"}));
+    let e = s.execute("timeline.reorder", &json!({"feature": "Round", "position": 2})).unwrap_err().to_string();
+    assert!(e.contains("breaks Round") && e.contains("changes what it works on") && !e.contains("earlier first"), "{e}");
+}
+
+/// A model parameter named on a segment's height stays on that stretch when the feature is
+/// redefined with a stretch inserted before it (#5927, #5928): each segment input is keyed by its
+/// edge and segment, so the name cannot land on another stretch that shares the "Segment height"
+/// label. The corner relief's name keeps its own input too.
+#[test]
+fn redefining_a_segmented_flange_keeps_a_named_height_on_its_stretch() {
+    fn value(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).and_then(|p| p["value"].as_f64()).unwrap_or(f64::NAN)
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg","corner_relief":"2 mm","name":"Lip"}),
+    );
+    // The model parameter of each segment height, in input order, and the corner relief's.
+    let (heights, relief) = {
+        let f = s.doc.find_feature("Lip").unwrap();
+        let inputs = f.kind.inputs();
+        let heights: Vec<String> =
+            inputs.iter().enumerate().filter(|(_, (label, _, _))| *label == "Segment height").map(|(i, _)| f.param_names[i].clone()).collect();
+        let relief = inputs.iter().position(|(label, _, _)| *label == "Corner relief").map(|i| f.param_names[i].clone()).unwrap();
+        (heights, relief)
+    };
+    assert_eq!(heights.len(), 2, "{heights:?}");
+    run(&mut s, "parameters.rename", json!({"name": heights[1], "new_name": "Tall"}));
+    run(&mut s, "parameters.rename", json!({"name": relief, "new_name": "Relief"}));
+    assert_eq!(value(&mut s, "Tall"), 15.0);
+    assert_eq!(value(&mut s, "Relief"), 2.0);
+    // A stretch inserted before the named one: the name stays on the 15 mm stretch.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Lip","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0,"to":0.25,"height":"20 mm"},
+                {"from":0.25,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg","corner_relief":"2 mm"}}),
+    );
+    assert_eq!(value(&mut s, "Tall"), 15.0, "the name reads the stretch it was put on");
+    assert_eq!(value(&mut s, "Relief"), 2.0, "the corner relief keeps its own name");
+    let f = s.doc.find_feature("Lip").unwrap();
+    let inputs = f.kind.inputs();
+    let named: Vec<(String, String)> = inputs
+        .iter()
+        .enumerate()
+        .filter(|(_, (label, _, _))| *label == "Segment height")
+        .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+        .collect();
+    assert!(named.iter().any(|(name, expression)| name == "Tall" && expression == "15 mm"), "{named:?}");
+    let relief_index = inputs.iter().position(|(label, _, _)| *label == "Corner relief").unwrap();
+    assert_eq!(f.param_names[relief_index], "Relief");
+}
+
+/// A name follows the material it was given to, not the order of the input list: deleting one of two
+/// named stretches keeps the survivor's own name, drops the deleted stretch's, and an expression that
+/// reads the survivor's name still reads its height. A deleted stretch's name never lands on a
+/// stretch whose value came from elsewhere (#5927, #5928).
+#[test]
+fn deleting_a_stretch_keeps_the_surviving_stretches_own_name() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn has(s: &mut Session, name: &str) -> bool {
+        param(s, name)["value"].as_f64().is_some()
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Segment height" input of `Lip`, in the walk's order.
+    fn segment_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Lip").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Segment height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    // A 200 × 100 base, a two-stretch flange on its y = 0 edge with each height named, and a flange on
+    // the opposite edge whose height reads one of those names.
+    fn built(heights: [&str; 2], spans: [f64; 2], reader: &str) -> Session {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0,"to":spans[0],"height":heights[0]},
+                {"from":spans[0],"to":1,"height":heights[1]}]}],
+                "height":"20 mm","angle":"90 deg","name":"Lip"}),
+        );
+        let names: Vec<String> = segment_names(&mut s).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        run(&mut s, "parameters.rename", json!({"name": names[0], "new_name": "Short"}));
+        run(&mut s, "parameters.rename", json!({"name": names[1], "new_name": "Tall"}));
+        run(&mut s, "sheet.flange", json!({"edges":[[100,100,2]],"height":reader,"angle":"90 deg","name":"Reader"}));
+        s
+    }
+    let redefine = |s: &mut Session, segments: Value| {
+        run(
+            s,
+            "timeline.redefine",
+            json!({"feature":"Lip","command":"sheet.flange","params":{
+                "type":"edge","edges":[{"point":[100,0,2],"segments":segments}],
+                "height":"20 mm","angle":"90 deg"}}),
+        );
+    };
+    // Deleting the first stretch: the survivor is the 15 mm stretch, and keeps its own name.
+    let mut s = built(["20 mm", "15 mm"], [0.5, 1.0], "Tall");
+    assert_eq!(param(&mut s, "Short")["value"].as_f64(), Some(20.0));
+    assert_eq!(param(&mut s, "Tall")["value"].as_f64(), Some(15.0));
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"15 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Tall".to_string(), "15 mm".to_string())], "the survivor keeps its own name");
+    assert!(has(&mut s, "Tall") && !has(&mut s, "Short"), "the deleted stretch's name is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Tall");
+    assert_eq!(reader["value"].as_f64(), Some(15.0), "an expression reading Tall still reads the survivor's height: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    // Deleting the second stretch: the survivor is the 20 mm stretch, and keeps its own name.
+    let mut s = built(["20 mm", "15 mm"], [0.5, 1.0], "Short");
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"20 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Short".to_string(), "20 mm".to_string())], "the survivor keeps its own name");
+    assert!(has(&mut s, "Short") && !has(&mut s, "Tall"), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Short");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "an expression reading Short still reads the survivor's height: {reader}");
+    // A merge whose surviving value came from the first stretch: it keeps the first stretch's name
+    // even though the second stretch's span is the larger part of the merged stretch.
+    let mut s = built(["20 mm", "15 mm"], [0.25, 1.0], "Short");
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"20 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Short".to_string(), "20 mm".to_string())], "the merged stretch keeps the name of the value it carries");
+    assert!(has(&mut s, "Short") && !has(&mut s, "Tall"), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Two edges of one flange, each split into stretches with named heights, swapped in the `edges`
+/// list: each name stays on its own physical edge, the point the flange was made on, not on the
+/// list position. Swapping moved the names between the edges' heights, so an expression reading the
+/// 20 mm name read 15 mm (#5927, #5928).
+#[test]
+fn swapping_two_edges_keeps_each_named_height_on_its_own_edge() {
+    fn param(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).and_then(|p| p["value"].as_f64()).unwrap_or(f64::NAN)
+    }
+    fn segment_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Segment height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Both edges are split at the same fractions; the y = 0 edge's first stretch is 20 mm, the
+    // y = 100 edge's first is 15 mm.
+    let front = json!({"point":[100,0,2],"segments":[
+        {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]});
+    let back = json!({"point":[100,100,2],"segments":[
+        {"from":0,"to":0.5,"height":"15 mm"},{"from":0.5,"to":1,"height":"20 mm"}]});
+    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[front, back],"height":"20 mm","angle":"90 deg","name":"Bands"}));
+    let names = segment_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm", "15 mm", "20 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[2].0, "new_name": "Back15"}));
+    assert_eq!((param(&mut s, "Front20"), param(&mut s, "Back15")), (20.0, 15.0));
+    // The same two edges, swapped in the list: the physical edges did not change.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[back, front],"height":"20 mm","angle":"90 deg"}}),
+    );
+    assert_eq!(param(&mut s, "Front20"), 20.0, "the name on the y = 0 edge's 20 mm stretch now reads another height: {:?}", segment_names(&mut s));
+    assert_eq!(param(&mut s, "Back15"), 15.0, "the name on the y = 100 edge's 15 mm stretch now reads another height: {:?}", segment_names(&mut s));
+    let names = segment_names(&mut s);
+    assert!(names.iter().any(|(name, expression)| name == "Front20" && expression == "20 mm"), "{names:?}");
+    assert!(names.iter().any(|(name, expression)| name == "Back15" && expression == "15 mm"), "{names:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// An edge-level height name follows the edge it was put on, by the pick point its key carries:
+/// deleting one edge and inserting another in the same redefine must not put the deleted edge's
+/// name on the new edge's height, which matched by label and kind alone (#5927, #5928).
+#[test]
+fn deleting_an_edge_does_not_move_its_named_height_to_another_edge() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Edge height" input of `Bands`, in the walk's order.
+    fn edge_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Edge height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Two edges with their own heights: 20 mm on the y = 0 edge, 15 mm on the y = 100 edge.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg","name":"Bands"}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[1].0, "new_name": "Back15"}));
+    assert_eq!((param(&mut s, "Front20")["value"].as_f64(), param(&mut s, "Back15")["value"].as_f64()), (Some(20.0), Some(15.0)));
+    // The y = 0 edge is deleted and an edge on the x = 0 edge is inserted in the same redefine.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100,100,2],"height":"15 mm"},{"point":[0,50,2],"height":"25 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    assert_eq!(param(&mut s, "Back15")["value"].as_f64(), Some(15.0), "the surviving edge keeps its own name");
+    assert!(param(&mut s, "Front20")["value"].is_null(), "the deleted edge's name is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["15 mm", "25 mm"], "{names:?}");
+    assert!(names.iter().any(|(name, expression)| name == "Back15" && expression == "15 mm"), "{names:?}");
+    assert!(names.iter().all(|(name, _)| name != "Front20"), "the new edge's height took the deleted edge's name: {names:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A pick point that moves by a hair still names the same edge: the height named on that edge, and
+/// an expression reading it downstream, keep their values. Matching the point by its f64 bits gave
+/// every key a new identity, so the edge's inputs fell back to the constructor's names and the
+/// expression that read the user's name broke (#5927, #5928).
+#[test]
+fn a_pick_point_that_moves_a_hair_keeps_the_edges_name() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Edge height" input of `Bands`, in the walk's order.
+    fn edge_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Edge height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Two edges with their own heights: 20 mm on the y = 0 edge, 15 mm on the y = 100 edge.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg","name":"Bands"}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[1].0, "new_name": "Back15"}));
+    // A later flange whose height reads the named edge's height.
+    run(&mut s, "sheet.flange", json!({"edges":[[0,50,2]],"height":"Front20","angle":"90 deg","name":"Reader"}));
+    assert_eq!(param(&mut s, "Front20")["value"].as_f64(), Some(20.0), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Front20");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
+    // The same physical edge picked a hair away: only the pick point moves.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100.001,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(
+        names,
+        [("Front20".to_string(), "20 mm".to_string()), ("Back15".to_string(), "15 mm".to_string())],
+        "the edge whose pick moved lost its name: {names:?}"
+    );
+    assert_eq!(param(&mut s, "Front20")["value"].as_f64(), Some(20.0), "the named height is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    assert_eq!(param(&mut s, "Back15")["value"].as_f64(), Some(15.0), "the other edge's name moved: {:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Front20");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "the expression reading Front20 broke: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A stretch's name follows its edge through a pick point that moved by a hair, and an edge
+/// inserted in the same redefine keeps the constructor's name rather than taking a name that
+/// belongs to another edge or stretch (#5927, #5928).
+#[test]
+fn a_pick_point_that_moves_a_hair_keeps_its_stretches_name_and_a_new_edge_keeps_its_own() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The names and expressions of `Lip`'s inputs with `label`, in the walk's order.
+    fn names(s: &mut Session, label: &str) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Lip").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (l, _, _))| *l == label)
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    let segments = json!([{"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":segments}],
+            "height":"20 mm","angle":"90 deg","name":"Lip"}),
+    );
+    let stretches = names(&mut s, "Segment height");
+    assert_eq!(stretches.len(), 2, "{stretches:?}");
+    run(&mut s, "parameters.rename", json!({"name": stretches[1].0, "new_name": "Tall"}));
+    run(&mut s, "sheet.flange", json!({"edges":[[0,50,2]],"height":"Tall","angle":"90 deg","name":"Reader"}));
+    assert_eq!(param(&mut s, "Tall")["value"].as_f64(), Some(15.0));
+    // The y = 0 edge's pick moves by a hair and a genuinely different edge (y = 100) is inserted.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Lip","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100.001,0,2],"segments":segments},{"point":[100,100,2],"height":"25 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    let stretches = names(&mut s, "Segment height");
+    assert!(
+        stretches.iter().any(|(name, expression)| name == "Tall" && expression == "15 mm"),
+        "the stretch lost its name with the pick: {stretches:?}"
+    );
+    assert_eq!(
+        param(&mut s, "Tall")["value"].as_f64(),
+        Some(15.0),
+        "the named stretch height is gone: {:?}",
+        run(&mut s, "parameters.list", json!({}))
+    );
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Tall");
+    assert_eq!(reader["value"].as_f64(), Some(15.0), "the expression reading Tall broke: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    // The inserted edge is its own edge: it took neither the moved edge's nor the stretch's name.
+    let edges = names(&mut s, "Edge height");
+    assert_eq!(edges.len(), 1, "the inserted edge's height is not one input: {edges:?}");
+    assert_eq!(edges[0].1, "25 mm", "{edges:?}");
+    assert!(edges[0].0 != "Tall", "the new edge took the stretch's name: {edges:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
 }

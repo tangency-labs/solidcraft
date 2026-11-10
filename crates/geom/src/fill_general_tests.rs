@@ -30,7 +30,7 @@ fn tube_end(r: f64, g2: bool) -> impl FnMut(usize, &[f64]) -> Result<Vec<Station
             .iter()
             .map(|t| {
                 let a = t * TAU;
-                let across = Across { leave: Vec3::Z, normal: radial(a), bend: g2.then_some(Vec3::ZERO) };
+                let across = Across { leave: Vec3::Z, normal: radial(a), bend: g2.then_some(Vec3::ZERO), jet: None };
                 Station { p: radial(a) * r, up: around(a).cross(Vec3::Z), across: Some(across), corner: false, clash: false }
             })
             .collect())
@@ -52,7 +52,7 @@ fn window(r: f64, a: f64, h: f64) -> impl FnMut(usize, &[f64]) -> Result<Vec<Sta
                 };
                 let p = radial(angle) * r + Vec3::Z * z;
                 let up = tangent.cross(leave);
-                Station { p, up, across: Some(Across { leave, normal: radial(angle), bend: None }), corner: t == 0.0, clash: false }
+                Station { p, up, across: Some(Across { leave, normal: radial(angle), bend: None, jet: None }), corner: t == 0.0, clash: false }
             })
             .collect())
     }
@@ -118,7 +118,13 @@ fn a_planar_polygon_is_its_plane_and_a_point_lifts_it() {
             .iter()
             .map(|t| {
                 let p = Vec3::new(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, 0.0);
-                Station { p, up: Vec3::Z, across: Some(Across { leave: inward, normal: Vec3::Z, bend: None }), corner: *t == 0.0, clash: false }
+                Station {
+                    p,
+                    up: Vec3::Z,
+                    across: Some(Across { leave: inward, normal: Vec3::Z, bend: None, jet: None }),
+                    corner: *t == 0.0,
+                    clash: false,
+                }
             })
             .collect())
     };

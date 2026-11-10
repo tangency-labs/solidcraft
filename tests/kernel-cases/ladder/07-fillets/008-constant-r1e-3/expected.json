@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a constant 1e-3 mm round on the top front edge",
+ "source": "analytic",
+ "method": "removed (1-pi/4) 1e-6 60, a valid 1e-3 round face",
+ "body_count": 1,
+ "volume_mm3": 47999.999987124,
+ "faces": 7
+}

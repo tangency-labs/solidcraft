@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     60,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cyl",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "inspect.curvature_comb",
+   "params": {
+    "edges": [
+     [
+      65,
+      0,
+      10
+     ]
+    ]
+   }
+  }
+ ]
+}

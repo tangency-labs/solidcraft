@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a square thread on a d10 x 30 cylinder: refused, no current standard defines one",
+ "source": "invariants",
+ "method": "ISO, ASME and DIN define no square thread (Machinery's Handbook gives only historical proportions), so no dimension of it can be taken from a standard: the right answer is a refusal pointing to trapezoidal (ISO 2904) or acme (ASME B1.5)",
+ "outcome": "refused",
+ "refusal": "no current standard defines a square thread"
+}

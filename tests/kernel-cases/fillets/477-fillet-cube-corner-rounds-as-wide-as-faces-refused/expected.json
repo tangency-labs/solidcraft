@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#477"
+ ],
+ "what": "the three edges at a 20 mm cube's corner rounded R20, as wide as their faces: refused as too large, naming the largest radius that fits",
+ "source": "analytic",
+ "method": "at r = 20 each round uses both its faces up and the corner's ball would be the cube's far corner: no edge is left to end the rounds on. Refused as too large, so a fit can reduce it.",
+ "outcome": "refused",
+ "refusal": "the largest radius that fits is"
+}

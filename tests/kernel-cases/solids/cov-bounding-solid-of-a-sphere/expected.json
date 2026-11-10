@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "the bounding box of a sphere r10 at (5,5,5): a curved body's exact extremes, not its mesh's",
+ "source": "analytic",
+ "method": "the sphere spans 5 +- 10 on each axis: the box (-5,-5,-5)-(15,15,15) = 20^3 = 8000; with the sphere kept: V = 8000 + 4/3 pi 1000; faces 6 + 1",
+ "body_count": 2,
+ "faces": 7,
+ "volume_mm3": 12188.79020478639,
+ "bbox": {
+  "min": [
+   -5,
+   -5,
+   -5
+  ],
+  "max": [
+   15,
+   15,
+   15
+  ]
+ }
+}

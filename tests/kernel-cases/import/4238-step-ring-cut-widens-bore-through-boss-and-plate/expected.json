@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4238"
+ ],
+ "what": "after a STEP round trip, a ring (r 4..6) sketched on a bored boss's top face and cut 15 mm down through the boss and the plate to widen the bore: 'boolean Cut: no result' on the imported body (the same cut worked on the part built in SolidCraft)",
+ "source": "analytic",
+ "method": "plate 60x40x5 + boss r10 x 10 less the bore, widened from r4 to r6 through both: V = 12000 + pi*100*10 - pi*36*15. The ring's sketch lies on the boss top (z 15); the cut's 15 mm reach the plate's bottom face (z 0) exactly",
+ "body_count": 1,
+ "volume_mm3": 13445.1326
+}

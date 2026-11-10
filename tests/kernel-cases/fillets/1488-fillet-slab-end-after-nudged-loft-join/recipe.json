@@ -1,0 +1,254 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -60,
+     0,
+     0
+    ],
+    "length": 120,
+    "width": 3.5,
+    "height": 95,
+    "body_name": "Wall"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -24,
+     -0.5,
+     -1
+    ],
+    "length": 48,
+    "width": 4.5,
+    "height": 91,
+    "operation": "cut",
+    "targets": [
+     "Wall"
+    ]
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Bottom"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "closed": true,
+    "infer": false,
+    "connect": false,
+    "points": [
+     [
+      -26,
+      3
+     ],
+     [
+      -24.76384,
+      3
+     ],
+     [
+      -16.0568,
+      14.97217
+     ],
+     [
+      -8,
+      4.90117
+     ],
+     [
+      0,
+      14.90117
+     ],
+     [
+      8,
+      4.90117
+     ],
+     [
+      16.0568,
+      14.97217
+     ],
+     [
+      24.76384,
+      3
+     ],
+     [
+      26,
+      3
+     ],
+     [
+      26,
+      0
+     ],
+     [
+      23.23616,
+      0
+     ],
+     [
+      15.9432,
+      10.02783
+     ],
+     [
+      8,
+      0.09883
+     ],
+     [
+      0,
+      10.09883
+     ],
+     [
+      -8,
+      0.09883
+     ],
+     [
+      -15.9432,
+      10.02783
+     ],
+     [
+      -23.23616,
+      0
+     ],
+     [
+      -26,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 90.5,
+    "name": "Top"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "closed": true,
+    "infer": false,
+    "connect": false,
+    "points": [
+     [
+      -26,
+      3
+     ],
+     [
+      -24,
+      3
+     ],
+     [
+      -16,
+      3
+     ],
+     [
+      -8,
+      3
+     ],
+     [
+      0,
+      3
+     ],
+     [
+      8,
+      3
+     ],
+     [
+      16,
+      3
+     ],
+     [
+      24,
+      3
+     ],
+     [
+      26,
+      3
+     ],
+     [
+      26,
+      0
+     ],
+     [
+      24,
+      0
+     ],
+     [
+      16,
+      0
+     ],
+     [
+      8,
+      0
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      -8,
+      0
+     ],
+     [
+      -16,
+      0
+     ],
+     [
+      -24,
+      0
+     ],
+     [
+      -26,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "Bottom"
+     },
+     {
+      "sketch": "Top"
+     }
+    ],
+    "operation": "join",
+    "targets": [
+     "Wall"
+    ],
+    "name": "Pleat"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Wall",
+    "edges": [
+     [
+      -60,
+      1.75,
+      95
+     ]
+    ],
+    "radius": 1
+   }
+  }
+ ]
+}

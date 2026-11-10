@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 10x10 rectangle 10 mm off the axis revolved 90 deg",
+ "source": "analytic",
+ "method": "a quarter of the tube: V = (90/360) pi (20^2 - 10^2) 10; faces: 2 ends, 2 cylinders, top, bottom",
+ "body_count": 1,
+ "volume_mm3": 2356.194490192,
+ "faces": 6
+}

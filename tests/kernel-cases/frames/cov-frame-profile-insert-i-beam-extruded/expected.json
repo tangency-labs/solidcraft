@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "an I-beam profile (100x50, web 4.5, flanges 7, sharp roots) inserted into a sketch and extruded 100",
+ "source": "analytic",
+ "method": "section 2*50*7 + 4.5*(100-14) = 1087, centred on the origin: V = 108700; faces 12 sides + 2 ends",
+ "body_count": 1,
+ "faces": 14,
+ "volume_mm3": 108700.0,
+ "bbox": {
+  "min": [
+   -25,
+   -50,
+   0
+  ],
+  "max": [
+   25,
+   50,
+   100
+  ]
+ }
+}

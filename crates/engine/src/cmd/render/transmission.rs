@@ -2,12 +2,10 @@
 //! Keep wire details here until the CPU contract is published. Never save them.
 use crate::{Result, params::bad};
 use serde::Deserialize;
-use solidcraft_geom::Vec3;
-use solidcraft_render::{
-    ProductScene,
-    surface::{OpaqueSurface, srgb8_to_linear},
-    transmission::Transmission,
-};
+use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
+use solidcraft_render::{ProductScene, transmission::Transmission};
+use solidcraft_viewport::surface::{OpaqueSurface, srgb8_to_linear};
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct Raytrace {
@@ -21,7 +19,7 @@ fn bounded_dielectrics<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::R
     impl<'de> serde::de::Visitor<'de> for Inputs {
         type Value = Vec<Override>;
         fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("at most 32 disjoint dielectric body overrides")
+            f.write_str("at most 128 dielectric body overrides")
         }
         fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
             let mut result = Vec::new();
@@ -41,6 +39,8 @@ fn bounded_dielectrics<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::R
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Override {
+    #[serde(default)]
+    model: Option<solidcraft_render::glass_model::GlassModel>,
     body_index: usize,
     body_name: String,
     ior: f64,
@@ -72,7 +72,7 @@ impl TryFrom<String> for Boundary {
 }
 pub(super) fn apply(scene: &mut ProductScene, overrides: &[Override], command: &str) -> Result<()> {
     if overrides.len() > solidcraft_render::job::MAX_GPU_DIELECTRICS {
-        return Err(bad(command, "at most 32 runtime dielectric overrides are supported"));
+        return Err(bad(command, "at most 128 runtime dielectric overrides are supported"));
     }
     let mut ordinals = std::collections::BTreeSet::new();
     for input in overrides {
@@ -92,6 +92,10 @@ pub(super) fn apply(scene: &mut ProductScene, overrides: &[Override], command: &
         }
         let [r, g, b] = input.absorption_per_mm;
         let mut transmission = Transmission::new(Vec3::new(r, g, b), thickness).map_err(|e| bad(command, e.to_string()))?;
+        if let Some(model) = input.model {
+            model.validate(input.ior).map_err(|e| bad(command, e.to_string()))?;
+            transmission = transmission.with_model(model).map_err(|e| bad(command, e.to_string()))?;
+        }
         if let Some(enabled) = input.shadow_transmission {
             transmission = transmission.with_shadow_transmission(enabled);
         }

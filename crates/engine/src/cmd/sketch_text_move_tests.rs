@@ -87,7 +87,7 @@ fn live_text_resize_follows_each_frame_and_rebuilds_downstream_on_release() {
         assert!((*angle + 10_f64.to_radians()).abs() < 1e-12);
         // Same letters, same outlines: what references them keeps working.
         assert_eq!(sk.link_curves(&link).len(), curves);
-        let shown = s.world_state();
+        let shown = s.world_state().unwrap();
         assert!(shown.sketch(1).unwrap().profiles.len() >= 2, "the sketch shown follows the frame");
     }
     run(&mut s, "sketch.drag_end", json!({}));
@@ -122,13 +122,13 @@ fn text_move_in_a_rotated_component_preserves_font_and_local_coordinates() {
     let sid = created["sketch"].as_u64().unwrap();
     let result = run(&mut s, "sketch.text", json!({"text":"I","at":[0,0],"height":10,"font":solidcraft_sketch::DEFAULT_FONT_FAMILY}));
     let link = result["link"].as_str().unwrap();
-    let before = s.world_state().sketch(sid).unwrap().plane;
+    let before = s.world_state().unwrap().sketch(sid).unwrap().plane;
     run(&mut s, "sketch.move", json!({"entities":[result["curves"][0]],"translate":[5,2]}));
     let sk = s.doc.sketch(sid).unwrap();
     let LinkSource::Text { at, font, .. } = &sk.link(link).unwrap().source else { panic!() };
     assert!(at.dist(Vec2::new(5.0, 2.0)) < 1e-9);
     assert_eq!(font.as_deref(), Some(solidcraft_sketch::DEFAULT_FONT_FAMILY));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     assert!(state.sketch(sid).unwrap().plane.to_world(*at).dist(before.to_world(Vec2::new(5.0, 2.0))) < 1e-9);
     let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(reopened.doc.sketch(sid).unwrap().link(link).unwrap().source, sk.link(link).unwrap().source);
@@ -153,7 +153,7 @@ fn text_move_rejects_malformed_values_without_changing_history() {
 
 /// The box around the solved outlines of text `link` in sketch 1: (min, max).
 fn text_box(s: &Session, link: &str) -> (Vec2, Vec2) {
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let sk = &state.sketch(1).unwrap().sketch;
     let pts: Vec<Vec2> = sk.link_curves(link).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
     let lo = pts.iter().fold(Vec2::new(f64::MAX, f64::MAX), |m, p| Vec2::new(m.x.min(p.x), m.y.min(p.y)));
@@ -384,7 +384,7 @@ fn a_text_on_a_spline_turns_its_path_into_a_guide() {
     let t = run(&mut s, "sketch.text", json!({"text":"Phago","at":[0,0],"height":10,"path":spline}));
     assert_eq!(t["guide"], json!(spline));
     assert!(construction(&s));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
     for (i, p) in ss.profiles.iter().enumerate() {
         let alone = p.curve_ids().iter().all(|id| ss.sketch.curves.iter().any(|c| &c.id == id && c.link.is_some()));

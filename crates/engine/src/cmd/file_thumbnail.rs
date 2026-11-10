@@ -1,7 +1,8 @@
 //! A portable picture from warm display meshes only; never evaluate on save.
 use crate::Session;
 use solidcraft_geom::Aabb3;
-use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
+use solidcraft_geom::MeshGeom;
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
     let (scene, camera) = scene(s)?;
@@ -37,14 +38,14 @@ fn scene(s: &Session) -> Option<(Scene, Camera)> {
         let face_colors =
             s.doc.face_colors(body).into_iter().map(|(face, look)| (face as u32, Rgb(look.color[0], look.color[1], look.color[2]))).collect();
         let opacity = s.doc.model_body_opacity(body) as f32;
-        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity });
+        scene.meshes.push(SceneMesh { mesh, color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
     }
     if bounds.is_empty() {
         return None;
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_render::view_bounds(&bounds));
     camera.distance *= 0.7;
     scene.radius = (bounds.diagonal() * 0.5).max(camera.half_height()).max(10.);
     scene.background = Some((crate::view::colors::BG_TOP, crate::view::colors::BG_BOTTOM));
@@ -62,7 +63,7 @@ mod tests {
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30,"body_name":"Visible"})).unwrap();
         session.execute("solid.box", &serde_json::json!({"length":100,"width":100,"height":100,"body_name":"Hidden"})).unwrap();
         session.execute("browser.visibility", &serde_json::json!({"items":["Hidden"],"visible":false})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         for body in &world.bodies {
             body.mesh();
         }
@@ -85,7 +86,7 @@ mod tests {
         crate::capture::install_test_renderer();
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        let world = session.world_state();
+        let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
         assert!(saved(&session).is_none());
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
@@ -106,7 +107,7 @@ mod tests {
     fn without_a_renderer_a_save_has_no_thumbnail() {
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let (scene, camera) = scene(&session).unwrap();

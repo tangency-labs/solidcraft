@@ -9,7 +9,8 @@
 //! and the engine maps a new feature's geometry into the active component's frame.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::{DocError, Document, FeatureKind, PlaneRef, Result};
 
@@ -82,6 +83,23 @@ pub fn mat_inverse(m: &Mat) -> Option<Mat> {
     let it = apply_vector(&out, t);
     out[3] = [-it.x, -it.y, -it.z, 1.0];
     Some(out)
+}
+
+/// Whether `m` is a placement an occurrence may have: finite, a rotation (orthonormal axes, not
+/// mirrored) and a translation within 1e9 mm, its last column `0, 0, 0, 1`. Every placement is
+/// checked against this where it enters the document (a design file, a command, an import).
+pub fn is_placement(m: &Mat) -> bool {
+    let axis = |i: usize| Vec3::new(m[i][0], m[i][1], m[i][2]);
+    let (x, y, z) = (axis(0), axis(1), axis(2));
+    m.iter().flatten().all(|v| v.is_finite())
+        && m[3][..3].iter().all(|v| v.abs() <= 1e9)
+        && [x, y, z].iter().all(|v| (v.dot(*v) - 1.0).abs() < 1e-6)
+        && x.dot(y).abs() < 1e-6
+        && x.dot(z).abs() < 1e-6
+        && y.dot(z).abs() < 1e-6
+        && x.cross(y).dot(z) > 0.0
+        && [m[0][3], m[1][3], m[2][3]].iter().all(|v| v.abs() < 1e-9)
+        && (m[3][3] - 1.0).abs() < 1e-9
 }
 
 /// A rigid transform: rotation by `angle` about `axis` through `origin`, then a translation.
@@ -192,11 +210,14 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             map_plane_ref(m, base);
             map_geo_ref(m, point);
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } => {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, pivot, .. } => {
             map_plane_ref(m, base);
             *axis_origin = apply_point(m, *axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
             if let Some(g) = line {
+                map_geo_ref(m, g);
+            }
+            if let Some(g) = pivot {
                 map_geo_ref(m, g);
             }
         }
@@ -335,25 +356,7 @@ impl Document {
     /// Every placement of each component: (component, occurrence path ids, world transform).
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
-        let mut out = vec![(0, Vec::new(), IDENTITY)];
-        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
-        while let Some((comp, path, m)) = stack.pop() {
-            if out.len() > MAX_PLACEMENTS {
-                break;
-            }
-            // Only this branch stops past the depth limit; the others are still walked.
-            if path.len() > MAX_PLACEMENT_DEPTH {
-                continue;
-            }
-            for o in self.occurrences.iter().filter(|o| o.parent == comp) {
-                let mut p = path.clone();
-                p.push(o.id);
-                let w = mat_mul(&m, &o.transform);
-                out.push((o.component, p.clone(), w));
-                stack.push((o.component, p, w));
-            }
-        }
-        out
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
     }
 
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
@@ -443,13 +446,14 @@ impl Document {
         if self.component_within(parent, component) {
             return true;
         }
+        let tree = crate::occurrence_tree::OccurrenceTree::new(self);
         let mut stack = vec![component];
         let mut seen = std::collections::BTreeSet::new();
         while let Some(c) = stack.pop() {
             if !seen.insert(c) || seen.len() > MAX_PLACEMENTS {
                 continue;
             }
-            for o in self.occurrences.iter().filter(|o| o.parent == c) {
+            for o in tree.children(c) {
                 if o.component == parent {
                     return true;
                 }
@@ -459,7 +463,8 @@ impl Document {
         false
     }
 
-    /// Add an occurrence of an existing component into `parent`.
+    /// Add an occurrence of an existing component into `parent`, placed by `transform` (which
+    /// must pass [`is_placement`]).
     pub fn add_occurrence(&mut self, component: u64, parent: u64, transform: Mat) -> Result<u64> {
         if component == 0 || !self.components.iter().any(|c| c.id == component) {
             return Err(DocError::Unknown(format!("component {component}")));
@@ -469,6 +474,9 @@ impl Document {
         }
         if self.occurrences.len() >= 100_000 {
             return Err(DocError::Invalid("too many occurrences".into()));
+        }
+        if !is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
         }
         let id = self.next_id.max(1);
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;

@@ -3,8 +3,9 @@
 //! profile.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
-use solidcraft_sketch::{CurveKind, Sketch};
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
+use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::Session;
 
@@ -27,6 +28,44 @@ fn new_sketch() -> Session {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     s
+}
+
+#[test]
+fn a_short_horizontal_reference_holds_through_dimension_edits_drag_and_reopen() {
+    let mut s = new_sketch();
+    let id = s.active_sketch.unwrap();
+    // A saved infinite line may have very close defining points (#11001).
+    let sk = s.doc_mut().sketch_mut(id).unwrap();
+    let end = sk.add_point(Vec2::new(6.36e-8, 0.0), Some("axis.end")).unwrap();
+    let arm_end = sk.add_point(Vec2::new(12.0, 10.0), Some("arm.end")).unwrap();
+    let axis = sk.add_line_pts(0, end, Some("axis")).unwrap();
+    sk.curves[axis].infinite = true;
+    sk.curves[axis].construction = true;
+    sk.add_line_pts(0, arm_end, Some("arm")).unwrap();
+    sk.add_constraint(solidcraft_sketch::ConstraintKind::Horizontal { l: axis }, None).unwrap();
+    s.refresh();
+
+    let check = |s: &Session, degrees: f64| {
+        let state = s.model.state();
+        let solved = state.sketch(id).unwrap();
+        assert!(solved.report.ok(), "{:?}", solved.report);
+        let axis = solved.sketch.points[end].pos.normalized().unwrap();
+        let arm = solved.sketch.points[arm_end].pos.normalized().unwrap();
+        assert!(axis.dist(Vec2::X) < 1e-6, "the horizontal reference rotated: {axis:?}");
+        assert!((arm.y.atan2(arm.x) - degrees.to_radians()).abs() < 1e-6, "the free line has the wrong angle: {arm:?}");
+    };
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["axis", "arm"], "type": "angle", "value": "30 deg"}));
+    check(&s, 30.0);
+    run(&mut s, "parameters.change", json!({"name": out["param"], "expression": "15 deg"}));
+    check(&s, 15.0);
+    let at = sketch(&s).points[arm_end].pos;
+    run(&mut s, "sketch.drag", json!({"entity": "arm.end", "from": [at.x, at.y], "to": [14, 10]}));
+    run(&mut s, "sketch.drag_end", json!({}));
+    check(&s, 15.0);
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    *s.doc_mut() = doc;
+    s.refresh();
+    check(&s, 15.0);
 }
 
 fn profiles(s: &Session) -> usize {
@@ -55,6 +94,91 @@ fn construction_line_methods_make_infinite_lines_with_direction_constraints() {
         assert_eq!(out["constraints"].as_array().unwrap().len(), 1);
     }
     assert!(s.execute("sketch.construction_line", &json!({"mode": "parallel", "at": [0, 0], "curve": "missing"})).is_err());
+}
+
+fn line_anchor(s: &Session, id: &str) -> Vec2 {
+    let sk = sketch(s);
+    let CurveKind::Line { a, .. } = curve(&sk, id).kind else { panic!("line") };
+    sk.point(a).unwrap()
+}
+
+#[test]
+fn construction_offset_is_a_driving_constraint_on_the_chosen_side() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name":"gap","expression":"5 mm"}));
+    run(&mut s, "sketch.line", json!({"points":[[0, 0],[20, 0]],"ids":["a"],"infer":false}));
+    let through = run(&mut s, "sketch.construction_line.parallel", json!({"curve":"a","at":[4, 1]}));
+    assert!((line_anchor(&s, through["curves"][0].as_str().unwrap()).y - 1.0).abs() < 1e-6);
+    assert!(sketch(&s).constraints.iter().all(|c| !matches!(c.kind, ConstraintKind::PointLineDistance { .. })));
+
+    let parallel = run(&mut s, "sketch.construction_line.parallel", json!({"curve":"a","at":[4, 1],"offset":"gap"}));
+    let id = parallel["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), id).infinite, "an offset stays infinite");
+    assert!((line_anchor(&s, id).y - 5.0).abs() < 1e-6);
+    let distance = sketch(&s).constraints.iter().find(|c| matches!(c.kind, ConstraintKind::PointLineDistance { .. })).unwrap().clone();
+    assert!((distance.kind.value().unwrap() - 5.0).abs() < 1e-6);
+    assert_eq!(s.doc.param(distance.param.as_deref().unwrap()).unwrap().expr, "gap");
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { .. })));
+    run(&mut s, "parameters.change", json!({"name":"gap","expression":"9 mm"}));
+    let sk = sketch(&s);
+    let CurveKind::Line { a, b } = curve(&sk, id).kind else { panic!("line") };
+    let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((pa.y - 9.0).abs() < 1e-6 && (pb.y - 9.0).abs() < 1e-6, "the distance follows the parameter: {pa:?} -> {pb:?}");
+    let CurveKind::Line { a, b } = curve(&sk, "a").kind else { panic!("reference") };
+    let (ra, rb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!(ra.dist(Vec2::new(0.0, 0.0)) < 1e-6 && rb.dist(Vec2::new(20.0, 0.0)) < 1e-6, "the reference stays: {ra:?} -> {rb:?}");
+
+    let below = run(&mut s, "sketch.construction_line.parallel", json!({"curve":"a","at":[4, -2],"offset":3}));
+    assert!((line_anchor(&s, below["curves"][0].as_str().unwrap()).y + 3.0).abs() < 1e-6);
+
+    let horizontal = run(&mut s, "sketch.construction_line.horizontal", json!({"at":[2, -4],"offset":6}));
+    let hid = horizontal["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), hid).infinite && curve(&sketch(&s), hid).construction, "a horizontal offset stays an infinite construction line");
+    assert!((line_anchor(&s, hid).y + 6.0).abs() < 1e-6);
+    assert!((line_anchor(&s, hid).x - 2.0).abs() < 1e-6);
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::DistanceY { value, .. } if (value - 6.0).abs() < 1e-6)));
+
+    let vertical = run(&mut s, "sketch.construction_line.vertical", json!({"at":[-1, 3],"offset":"span = 4"}));
+    let vid = vertical["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), vid).infinite, "a vertical offset stays infinite");
+    assert!((line_anchor(&s, vid).x + 4.0).abs() < 1e-6);
+    assert!(s.doc.param("span").is_some());
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::DistanceX { value, .. } if (value - 4.0).abs() < 1e-6)));
+    run(&mut s, "parameters.change", json!({"name":"span","expression":"7 mm"}));
+    assert!((line_anchor(&s, vid).x + 7.0).abs() < 1e-6);
+
+    let through_null = run(&mut s, "sketch.construction_line.horizontal", json!({"at":[3, 5], "offset": null}));
+    let nid = through_null["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), nid).infinite);
+    assert!((line_anchor(&s, nid).y - 5.0).abs() < 1e-6, "a null offset is through the click");
+    run(&mut s, "sketch.construction_line.perpendicular", json!({"curve":"a","at":[4, 1],"offset":null}));
+
+    let before = s.doc.to_json();
+    for p in [
+        json!({"mode":"parallel","curve":"a","at":[4, 1],"offset":0}),
+        json!({"mode":"parallel","curve":"a","at":[4, 1],"offset":-2}),
+        json!({"mode":"horizontal","at":[1, 1],"offset":"not a length"}),
+        json!({"mode":"perpendicular","curve":"a","at":[4, 1],"offset":2}),
+    ] {
+        assert!(s.execute("sketch.construction_line", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}
+
+#[test]
+fn an_offset_and_a_length_shift_a_segment_off_the_click() {
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.construction_line.horizontal", json!({"at":[2, -4], "offset": 6, "length": 10, "near": [12, -4]}));
+    let sk = sketch(&s);
+    let c = curve(&sk, out["curves"][0].as_str().unwrap());
+    assert!(c.construction && !c.infinite, "length still makes a segment");
+    let CurveKind::Line { a, b } = c.kind else { panic!("a line") };
+    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((a.y + 6.0).abs() < 1e-6 && (b.y + 6.0).abs() < 1e-6, "the offset shifts it: {a:?} {b:?}");
+    assert!((a.dist(b) - 10.0).abs() < 1e-6, "{a:?} {b:?}");
+    assert!(a.dist(Vec2::new(2.0, -4.0)) > 1.0, "the click is not the segment start: {a:?}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::DistanceY { .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Length { .. })));
 }
 
 #[test]
@@ -285,6 +409,25 @@ fn construction_tangents_respect_arc_sweeps_and_invalid_inputs_are_atomic() {
         assert!(s.execute("sketch.construction_line", &p).is_err(), "{p}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
+}
+
+#[test]
+fn a_second_point_next_to_the_first_is_refused() {
+    // #11001: a through-point 0.0000001 mm from the start made an infinite line whose direction
+    // Horizontal no longer held, and a line that short collapsed onto the origin.
+    let mut s = new_sketch();
+    for (id, p) in [
+        ("sketch.construction_line", json!({"at":[0,0],"through":[0.0000001,0]})),
+        ("sketch.construction_line", json!({"at":[5,5],"through":[5,5.0000005]})),
+        ("sketch.line", json!({"points":[[0,0],[0.0000001,0]]})),
+        ("sketch.line", json!({"points":[[5,5],[10,5],[10,5.0000005]]})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &p).is_err(), "{id} {p}");
+        assert_eq!(s.doc.to_json(), before, "{id} {p}");
+    }
+    run(&mut s, "sketch.construction_line", json!({"at":[0,0],"through":[0.00001,0]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,5],[5.00001,5]]}));
 }
 
 #[test]

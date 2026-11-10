@@ -972,12 +972,22 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let a = one()?;
             unit_fn(a.v.abs(), a)
         }
-        "sign" => Value::num(one()?.v.signum()),
+        "sign" => {
+            let x = one()?.v;
+            // `f64::signum` gives 1 for +0 and -1 for -0; the sign of zero is 0.
+            Value::num(if x == 0.0 { 0.0 } else { x.signum() })
+        }
         "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
             let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
             let x = if scale != 0.0 { a.v / scale } else { a.v };
+            // Unit conversions leave a rounding error of an ulp or two (`3 in / 1 in` is
+            // 2.9999999999999996): a value that close to a whole number is that number, so `floor`
+            // does not drop to 2. The tolerance is relative to the whole number, so a tiny value
+            // never snaps to 0, and it stays under 1/8 so no real fraction is absorbed.
+            let nearest = x.round();
+            let x = if (x - nearest).abs() <= (4.0 * f64::EPSILON * nearest.abs()).min(0.125) { nearest } else { x };
             let r = match f {
                 "floor" => x.floor(),
                 "ceil" => x.ceil(),
@@ -1427,6 +1437,53 @@ mod tests {
         ] {
             let err = ev(e, Kind::Unitless).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
             assert!(err.contains(says), "{e}: {err}");
+        }
+    }
+
+    /// `sign(0)` is 0, not 1 (Rust's `signum` takes the sign bit, so it calls zero positive).
+    #[test]
+    fn sign_of_zero_is_zero() {
+        for (e, want) in
+            [("sign(0)", 0.0), ("sign(-0)", 0.0), ("sign(0 mm)", 0.0), ("sign(5)", 1.0), ("sign(-2 mm)", -1.0), ("sign(width - 40)", 0.0)]
+        {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+    }
+
+    /// `floor`, `ceil`, `trunc` and `round` work on the number a person typed, not on float noise:
+    /// `3 in / 1 in` is 2.9999999999999996 in floats, and `floor` of it must still be 3.
+    #[test]
+    fn rounding_functions_ignore_float_noise() {
+        for (e, want) in [("floor(3 in / 1 in)", 3.0), ("ceil(3 in / 1 in)", 3.0), ("trunc(3 in / 1 in)", 3.0), ("floor(-3 in / 1 in)", -3.0)] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+        let d = Defaults { len: 25.4, ang: std::f64::consts::PI / 180.0 };
+        let look = |_: &str| Err(DocError::Expr("no parameters".into()));
+        for e in ["floor(3 in)", "ceil(3 in)", "trunc(3 in)", "round(3 in)"] {
+            let got = eval_with_defaults(e, &look, d).unwrap().to_kind_in(Kind::Length, d).unwrap();
+            assert!((got - 76.2).abs() < 1e-9, "{e} gave {got}");
+        }
+        let got = eval_with_defaults("floor(30 deg)", &look, Defaults::default()).unwrap().to_kind(Kind::Angle).unwrap();
+        assert!((got - 30f64.to_radians()).abs() < 1e-9, "floor(30 deg) gave {got}");
+        // A real fraction still rounds the way its name says, however small, and large values keep working.
+        for (e, want) in [
+            ("floor(2.9999)", 2.0),
+            ("ceil(3.0001)", 4.0),
+            ("floor(100.99999995)", 100.0),
+            ("ceil(100.00000005)", 101.0),
+            ("floor(1000000000.7)", 1_000_000_000.0),
+            ("ceil(1000000000.7)", 1_000_000_001.0),
+            ("trunc(1000000000.7)", 1_000_000_000.0),
+            ("round(1000000000.7)", 1_000_000_001.0),
+            ("ceil(1e-16)", 1.0),
+            ("floor(-1e-16)", -1.0),
+            ("trunc(1e-16)", 0.0),
+            ("trunc(-1e-16)", 0.0),
+            ("round(1e-16)", 0.0),
+            ("round(-1e-16)", 0.0),
+            ("floor(1000000000000000.5)", 1_000_000_000_000_000.0),
+        ] {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
         }
     }
 

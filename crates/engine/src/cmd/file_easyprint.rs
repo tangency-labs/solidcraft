@@ -17,7 +17,9 @@ pub(super) struct Exported {
     pub ext: &'static str,
     /// A 3MF was asked for and couldn't be written, so this is an STL.
     pub fell_back: bool,
-    /// The bodies that went in: the ones named, else the selected ones.
+    /// The bodies that went in: the ones named, else the selected ones (read by `file.send`, which
+    /// the browser build doesn't have).
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub bodies: Vec<String>,
     /// The bodies laid on their print face, and the ones that couldn't be.
     pub laid: super::print_face::Laid,
@@ -33,7 +35,7 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     if bodies.is_empty() {
         return Err(bad(cmd, "select the bodies to send, or give `bodies`"));
     }
-    let mut doc = s.doc.painted(&s.world_state());
+    let mut doc = s.doc.painted(&*s.world_state()?);
     let laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
     let write = |format| solidcraft_io::export_with_metadata(&doc, &bodies, format, &s.doc.name, &s.doc.metadata);
     let mut fell_back = false;

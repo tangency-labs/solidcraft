@@ -7,10 +7,11 @@
 use crate::selection::SelectionExt as _;
 use crate::ui_kit::{choice_row, expr_row};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{Mat, apply_point, apply_vector, is_identity, mat_inverse, mat_mul, rigid};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
@@ -260,9 +261,12 @@ fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
     let s = s?;
     match s {
         Sel::Edge { body, index, point } => {
+            // As every pick reads the placed model: one that cannot be placed has no bodies here.
             let st = match d.editing {
-                Some((id, _)) => std::sync::Arc::new(solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id))),
-                None => app.session.world_state(),
+                Some((id, _)) => std::sync::Arc::new(
+                    solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id)).unwrap_or_default(),
+                ),
+                None => crate::open_meshing::session_world(&app.session),
             };
             // The centre is found where the body was modelled; the picked point is where it stands.
             Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| carried(d, on_moved(&bodies_of(app, d), s), c)))
@@ -537,11 +541,10 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
     d.extra.insert("value_field".into(), json!(next));
 }
 
-pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
-    // The box shows the value the handle drives: the distance along a dragged arrow, the angle
-    // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and
-    // leaves it as it is.
-    let field = match g.handle {
+/// Show the value `handle` drives in the box: the distance along an arrow, the angle of a ring
+/// (#4776). A plane square or the ball moves along two or three axes and leaves it as it is.
+pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
+    let field = match handle {
         crate::gizmo::Handle::Axis(i) => Some(i.min(2)),
         crate::gizmo::Handle::Ring(i) => Some(3 + i.min(2)),
         _ => None,
@@ -551,6 +554,10 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     {
         d.extra.insert("value_field".into(), json!(f));
     }
+}
+
+pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+    show_handle_value(d, g.handle);
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
     if g.started || !d.extra.contains_key("drag0") {
         let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));

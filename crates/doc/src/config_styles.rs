@@ -3,9 +3,10 @@ use super::Column;
 use crate::{DocError, Document, FeatureKind, ModelState, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
-pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcraft_geom::Plane>>) -> bool {
+pub(crate) fn shell_plane_family(planes: impl IntoIterator<Item = Option<solidcore_record::Plane>>) -> bool {
     let mut planes = planes.into_iter();
     let Some(Some(first)) = planes.next() else { return false };
     first.origin.is_finite() && first.x.is_finite() && first.y.is_finite() && planes.all(|plane| plane == Some(first))
@@ -279,13 +280,13 @@ impl Document {
             let count = body.body.face_sources().map_or(0, |sources| sources.len());
             let mut indices: Vec<_> = (0..count).filter(|index| side(*index, true)).collect();
             // A side drawn in collinear pieces is one face over all of them (#1788): a certificate
-            // made when the pieces were faces of their own finds it by the piece's name, which
-            // the joined face answers to.
+            // made when the pieces were faces of their own finds it by the piece's name, which is
+            // a name of the joined face too (one of its synonyms).
             if indices.is_empty() {
                 let names = crate::naming::names(body);
                 indices = (0..count)
                     .filter(|index| {
-                        side(*index, false) && crate::history_names::matches(&names, *index, &target.name) == Some(crate::history_names::Match::Alias)
+                        side(*index, false) && crate::history_names::matches(&names, *index, &target.name) == Some(crate::history_names::Match::Exact)
                     })
                     .collect();
             }
@@ -299,7 +300,34 @@ impl Document {
                 matches!(source, Some(solidcraft_kernel::FaceSource::Imported { item: current_item, face: current_face, payload_sha256: Some(digest), producer: Some(producer) }) if current_item == item && current_face == face && digest == payload_sha256 && *producer == target.origin_feature).then_some(index)
             }).collect();
             if indices.is_empty() {
-                return Err(DocError::Unknown("immutable import face certificate no longer exists".into()));
+                // A linked design's face is named after its name in that design (`link:…`, see
+                // lineage::link_role): Update Links brings in a new file, whose digest no
+                // certificate matches, but a face it left as it was keeps that name. Find it by
+                // the name, as joints on linked faces do (#3330); a face numbered by its place
+                // (`face:<k>`) is not followed, since another face may take that place.
+                let linked = crate::persistent_name::split_feature(&target.name)
+                    .is_some_and(|(id, role)| id == target.origin_feature && role.starts_with("link:"));
+                let names = crate::naming::face_names(body);
+                let named: Vec<usize> = if linked {
+                    names
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, name)| {
+                            crate::naming::strip_piece(name) == target.name
+                                && matches!(
+                                    body.body.face_sources().and_then(|sources| sources.get(*index)),
+                                    Some(Some(solidcraft_kernel::FaceSource::Imported { producer: Some(producer), .. })) if *producer == target.origin_feature
+                                )
+                        })
+                        .map(|(index, _)| index)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                if named.is_empty() {
+                    return Err(DocError::Unknown("immutable import face certificate no longer exists".into()));
+                }
+                return Ok(self.without_copies(body, named));
             }
             return Ok(self.without_copies(body, indices));
         }

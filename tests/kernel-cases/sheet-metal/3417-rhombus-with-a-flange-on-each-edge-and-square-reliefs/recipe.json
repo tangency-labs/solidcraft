@@ -1,0 +1,93 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "Sheet 2 mm",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5,
+    "gap": "0.5 mm",
+    "corner_relief_shape": "rectangular",
+    "corner_relief": "8 mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Rhombus"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      60,
+      0
+     ],
+     [
+      90,
+      51.96152422706631
+     ],
+     [
+      30,
+      51.96152422706631
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Rhombus"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "height": 20,
+    "angle": 90,
+    "edges": [
+     [
+      30.0,
+      0,
+      2
+     ],
+     [
+      75.0,
+      25.980762,
+      2
+     ],
+     [
+      60.0,
+      51.961524,
+      2
+     ],
+     [
+      15.0,
+      25.980762,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

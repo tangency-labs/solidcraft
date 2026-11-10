@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "a 10 mm cube scaled 2x about its far corner (10,10,10)",
+ "source": "analytic",
+ "method": "p -> o + 2(p - o) with o = (10,10,10): the corner 0 goes to -10, 10 stays: a 20 mm cube from -10 to 10; V = 8000, A = 6*400",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 8000.0,
+ "area_mm2": 2400.0,
+ "center_of_mass": [
+  0,
+  0,
+  0
+ ],
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   -10
+  ],
+  "max": [
+   10,
+   10,
+   10
+  ]
+ }
+}

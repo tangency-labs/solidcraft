@@ -10,8 +10,9 @@
 //! size), and the decoder itself runs under the same limit.
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_doc::canvas::{Canvas, base64_decode, image_info};
-use solidcraft_geom::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_io::Geom2;
 
 use super::CommandSpec;

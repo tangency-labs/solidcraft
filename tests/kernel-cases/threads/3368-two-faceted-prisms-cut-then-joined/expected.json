@@ -1,0 +1,23 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3368"
+ ],
+ "what": "two finely faceted bodies (1000-sided prisms, flat faces only): a faceted stud cut out of a faceted disc, then a faceted cap joined on top touching in a plane; both booleans must finish in bounded time with the exact result",
+ "source": "analytic",
+ "method": "A regular N-gon of circumradius R (one vertex on +x) has area N/2 R^2 sin(2 pi/N). Disc: 1000-gon R=30, h=10 (z 0..10). Stud: 1000-gon R=6, z -2..12, coaxial with the same vertex angles, so it removes its 10 mm inside the disc: -A6*10. Cap: 1000-gon R=20, z 10..14, touching the disc's top face in a plane and covering the hole's top (the hole stays open at the bottom, no sealed void): +A20*4. V = 500*sin(0.36 deg)*(900*10 - 36*10 + 400*4) = 32169.6971 mm3.",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 32169.6971,
+ "bbox": {
+  "min": [
+   -30,
+   -30,
+   0
+  ],
+  "max": [
+   30,
+   30,
+   14
+  ]
+ }
+}

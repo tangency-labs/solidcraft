@@ -1,0 +1,10 @@
+{
+ "commands": [
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$CASE/input.igs"
+   }
+  }
+ ]
+}

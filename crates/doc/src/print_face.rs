@@ -3,7 +3,8 @@
 //! sketch on a face holds ([`Document::flat_face_target`]), so a rebuild that adds, removes or
 //! reorders faces finds the same face again, or says it is gone.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::config::ConfigFaceTarget;
 use crate::{DocError, Document, ModelBody, ModelState, Result};

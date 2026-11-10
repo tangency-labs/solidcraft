@@ -1,0 +1,152 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     57,
+     42
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 6,
+    "body_name": "H"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     45,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 35,
+    "taper": "-2 deg",
+    "operation": "join",
+    "profiles": [
+     {
+      "point": [
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      45,
+      30,
+      20
+     ],
+     [
+      -45,
+      30,
+      20
+     ],
+     [
+      45,
+      -30,
+      20
+     ],
+     [
+      -45,
+      -30,
+      20
+     ]
+    ],
+    "radius": 6
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      35
+     ]
+    ],
+    "thickness": 2.5
+   }
+  },
+  {
+   "command": "construct.plane.offset",
+   "params": {
+    "base": "XY",
+    "offset": 6,
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "P",
+    "name": "T"
+   }
+  },
+  {
+   "command": "sketch.text",
+   "params": {
+    "text": "AB",
+    "at": [
+     -5,
+     -39.5
+    ],
+    "height": 4
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.emboss",
+   "params": {
+    "sketch": "T",
+    "depth": 0.6,
+    "mode": "deboss"
+   }
+  }
+ ]
+}

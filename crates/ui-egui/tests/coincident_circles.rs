@@ -1,4 +1,5 @@
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::scenario::Harness;
 
 /// The Coincident tool takes two circles clicked by their edges and lays the second on the first.
@@ -14,7 +15,7 @@ fn the_coincident_tool_lays_one_circle_on_another() {
     h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
     h.step(&json!({"click":{"world":[0,10,0]}})).unwrap();
     h.step(&json!({"click":{"world":[30,6,0]}})).unwrap();
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     use solidcraft_engine::sketch::ConstraintKind;
     let laid = sk.constraints.iter().filter(|k| matches!(k.kind, ConstraintKind::Concentric { .. } | ConstraintKind::Equal { .. })).count();

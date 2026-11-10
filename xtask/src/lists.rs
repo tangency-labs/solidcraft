@@ -5,6 +5,10 @@
 //!
 //! - The message catalogs (`assets/locales/*.json`): one message per line, sorted by id, no
 //!   duplicate ids, as `serde_json` pretty-prints them.
+//! - `tests/KNOWN_FAILING_TESTS`: one test a line with its cause, sorted, each test once
+//!   (checked only; `cargo xtask known-failing` reads it).
+//! - `tests/kernel-cases/CASES`: every kernel rig case, sorted; it only shrinks, since new kernel
+//!   cases go to solidcore's corpus (checked only).
 //! - Growing Rust lists: no written array lengths on more than ten lines of entries.
 
 use std::path::Path;
@@ -41,7 +45,11 @@ pub fn run(root: &Path, fix: bool) -> Result<(), String> {
     check_arrays(root)?;
     crate::pending::check_locales(root)?;
     crate::pending::check_attribution(root)?;
-    println!("lists: growing arrays checked; message catalogs sorted; pending locale and attribution files fold cleanly");
+    crate::known_failing::check_list(root)?;
+    crate::kernel_cases::check_cases_list(root)?;
+    println!(
+        "lists: growing arrays checked; message catalogs, the known-failing tests and the kernel rig cases sorted (no new rig case); pending locale and attribution files fold cleanly"
+    );
     Ok(())
 }
 

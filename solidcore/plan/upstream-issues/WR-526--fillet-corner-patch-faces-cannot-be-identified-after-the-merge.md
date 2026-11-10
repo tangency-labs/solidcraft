@@ -1,0 +1,10 @@
+#### WR-526. The faces a set-back fillet corner's patch makes cannot be identified once the merge has copied them into the target
+- **Severity:** Wrong result (missing information: a caller cannot find the faces it needs)
+- **Area:** Blends
+- **Location:** `source/SMLib/src/SmFilletExecutive.cpp`, `SmFilletExecutive::DoFilleting` (the merge of `m_pFilletBrep` into `m_pTargetBrep`); `SmFilletCorner::m_vSurfaces` names the patch's surfaces only in the fillet B-rep, which the merge copies and deletes.
+- **What happens:** after filleting, nothing on the target tells which faces a corner's patch made, so a caller that wants to remove the patch of a set-back corner (and fill the hole itself) cannot find it.
+- **Trigger:** a 60 x 40 x 20 box with r5 rounds on the three edges at (60, 40, 20) and that corner set back 8: the patch is six faces whose rim is twelve edges through the six section ends; removing it leaves 9 faces, 30 edges and 22 vertices.
+- **How found:** SolidCraft's `blend_setback_open`, tangency-labs/solidcore#1439.
+- **Confirmed:** the fork (tangency-labs/smlib `60af574`) adds `SmFilletExecutive::SetMarkCornerPatches`, `SmFilletCorner::GetPatchFaces` and the `SM_AI_FILLET_CORNER_FACE` (132) tag mark set before the merge; its test of the same box gives the same counts.
+- **Fix:** none in the C++ at the pin.
+- **Rust port:** behaves as upstream by default (no mark). `FilletSession::set_mark_corner_patches(true)` (per session, before filleting) tags each patch face of every set-back corner with `SmTagAttribute(SM_AI_FILLET_CORNER_FACE, corner index)` (`ids::FILLET_CORNER_FACE`, `Behavior::Copy`) in the session's attribute store before the merge; the merge copies it to the target faces, and `FilletSession::corner_patch_faces` returns them with the corner's index in `fillet_corners()`. Regression test: `crates/solidcore/tests/issue_1439_mark_corner_patches.rs` (on: the six patch faces, their twelve-edge rim and the 9/30/22 remainder; off and default: no mark, the same body).

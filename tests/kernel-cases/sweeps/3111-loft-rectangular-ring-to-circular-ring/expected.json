@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3111"
+ ],
+ "what": "a loft from a rectangular ring (two nested rectangles) to a circular ring (two concentric circles) 30 mm above: a hollow transition piece",
+ "source": "invariants",
+ "method": "no closed form for the ring-to-ring pairing, so only invariants are graded: the loft succeeds as one closed valid solid (outer wall, hole wall and two caps), and since every ruling joins a point of one section to a point of the other, the solid lies in the hull of both sections: bbox x +-20, y +-15 (the 40 x 30 outer rectangle), z 0 to 30.",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -20,
+   -15,
+   0
+  ],
+  "max": [
+   20,
+   15,
+   30
+  ]
+ }
+}

@@ -254,7 +254,7 @@ fn ribbon_edit_sketch_handles_an_empty_design_without_running_a_command() {
 mod exit_keeps_view {
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// Start a sketch on XY from the iso view, then orbit and pan into a 3D view of the user's own.
     fn sketching_in_3d() -> (Harness, Camera) {
@@ -438,7 +438,7 @@ mod exit_view_preference {
     use crate::prefs::SketchExitView;
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// A sketch on XY started from the iso view with `choice` set, and that iso view.
     fn sketching(choice: SketchExitView) -> (Harness, Camera) {
@@ -568,7 +568,7 @@ mod exit_view_preference {
 mod extrude_view_preference {
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     /// A finished sketch on XY, seen from the top, with the two preferences set; and that view.
     fn from_the_top(isometric: bool, back: bool) -> (Harness, Camera) {
@@ -639,6 +639,29 @@ mod extrude_view_preference {
             open_extrude(&mut h);
             assert_eq!(h.app.cam, iso_of(top), "{close}: isometric again");
         }
+    }
+
+    /// #10571: Extrude clicked with the sketch still open ends the sketch on its way, and that
+    /// end turns the view back where it opened (Preferences › Sketch). The turn must not become
+    /// the view Extrude goes back to: it is the view the command was clicked in.
+    #[test]
+    fn extrude_from_an_open_sketch_goes_back_to_the_view_it_was_clicked_in() {
+        let mut h = Harness::new();
+        h.app.preferences.extrude_view_isometric = true;
+        h.app.preferences.extrude_view_return = true;
+        h.app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let top = h.app.cam;
+        open_extrude(&mut h);
+        assert_eq!(h.app.cam, iso_of(top), "isometric while Extrude is open");
+        h.step(&json!({"widget": "Cancel"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.active_sketch, None, "Extrude ended the sketch");
+        assert_eq!(h.app.cam, top, "back to the sketch view it was clicked in");
     }
 }
 

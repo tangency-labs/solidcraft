@@ -1,0 +1,27 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "inspect.isocurve",
+   "params": {
+    "faces": [
+     [
+      20,
+      15,
+      20
+     ]
+    ],
+    "count": 0
+   }
+  }
+ ]
+}

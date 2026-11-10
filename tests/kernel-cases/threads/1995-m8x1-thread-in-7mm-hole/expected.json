@@ -1,0 +1,31 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1995"
+ ],
+ "what": "an M8x1 modelled thread in a 7 mm hole through a block (the report: the thread also changed the block's outer surface and made too many faces)",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. Internal groove: P/8 wide at the major radius d/2, widening by 2 tan30 per unit of radius toward the axis (3P/4 at the minor radius d/2 - 5H/8 = 3.4587), cut only where there is material (r >= hole radius 3.5). Volume per turn = 2 pi * integral from 3.5 to 4 of (P/8 + 2 tan30 (4 - r)) r dr = 4.79792 mm3 for P=1. Block 20x20x10 with a 7 mm through hole (rho=3.5), M8x1 over the full 10 mm (10 turns, both ends free): V = 4000 - pi 3.5^2 10 - 10 x 4.79792 = 3567.1757 mm3. The outer surface is untouched: the bbox stays the block's 20x20x10 and COM stays on the axis at z=5. Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall).",
+ "outcome": "solid",
+ "body_count": 1,
+ "volume_mm3": 3567.1757,
+ "center_of_mass": [
+  0,
+  0,
+  5.0
+ ],
+ "tolerance": {
+  "rel": 0.01
+ },
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   10
+  ]
+ }
+}

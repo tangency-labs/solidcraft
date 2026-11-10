@@ -2,11 +2,12 @@
 //! Sampling estimates the area integral; it is not an exact solid-angle integral.
 //! No emitter geometry, indirect bounce or calibrated photometric units are implied.
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use super::lighting::MAX_LINEAR_RADIANCE;
 use super::{MAX_COORDINATE_MM, MAX_DISTANCE_MM, Ray, Result, TraceError};
-use crate::surface::{OpaqueSurface, unit_direction};
+use solidcraft_viewport::surface::{OpaqueSurface, unit_direction};
 
 pub const MAX_AREA_LIGHTS: usize = 4;
 pub const MAX_AREA_SAMPLES: u32 = 64;

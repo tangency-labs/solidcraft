@@ -260,7 +260,7 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 /// asks for a float one only when whichever it picks has it.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
-    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+    let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(setup.instance_descriptor.backends));
@@ -277,7 +277,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
-    desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
+    desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
@@ -311,13 +311,18 @@ pub const SYSTEM_VERSION_COMPAT_ENV: &str = "SYSTEM_VERSION_COMPAT";
 #[cfg(target_os = "macos")]
 pub const OCLP_NVRAM_KEY: &str = "4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:OCLP-Version";
 
+/// Where macOS keeps its `nvram` tool.
+#[cfg(target_os = "macos")]
+const NVRAM_TOOL: &str = "/usr/sbin/nvram";
+
 /// `true` if the OCLP NVRAM key is present on this system.
 ///
-/// Runs `nvram <key>` and treats exit 0 as present. Any error (missing binary,
-/// permission denied, key absent) returns `false` — this is a best-effort probe.
+/// Runs `/usr/sbin/nvram <key>` and treats exit 0 as present. The full path keeps a `PATH` that
+/// lacks `/usr/sbin`, or lists a look-alike first, from changing the answer. Any error (missing
+/// binary, permission denied, key absent) returns `false`: this is a best-effort probe.
 #[cfg(target_os = "macos")]
 pub fn oclp_nvram_present() -> bool {
-    std::process::Command::new("nvram").arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
+    std::process::Command::new(NVRAM_TOOL).arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 /// Whether to re-launch with `SYSTEM_VERSION_COMPAT=1`: it is not set yet and OCLP shows through
@@ -334,8 +339,8 @@ fn compat_wanted(compat_set: bool, nvram: impl FnOnce() -> bool) -> bool {
 ///
 /// `SYSTEM_VERSION_COMPAT=1` must be present **before** the process starts: setting it
 /// with `std::env::set_var` inside `main` is too late because the macOS frameworks have
-/// already queried the OS version by then. Re-launching is the only safe approach that
-/// works without `unsafe` (a true `execve` replacement would require it).
+/// already queried the OS version by then, so the program starts itself again with the variable
+/// set and waits for that child.
 ///
 /// Returns `Ok(false)` immediately when:
 /// - `SYSTEM_VERSION_COMPAT` is already set (re-launched process, no loop), or
@@ -352,7 +357,7 @@ pub fn relaunch_with_version_compat() -> Result<bool, String> {
         return Ok(false);
     }
     log::info!("startup: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
-    eprintln!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    solidcraft_engine::note!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
     let exe = std::env::current_exe().map_err(|e| format!("could not find own executable: {e}"))?;
     let status = std::process::Command::new(&exe)
         .args(std::env::args_os().skip(1))
@@ -693,7 +698,7 @@ mod tests {
         if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
             assert_eq!(backends, eframe::wgpu::Backends::DX12);
         }
-        let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+        let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
         desc.backends = backends;
         let instance = eframe::wgpu::Instance::new(desc);
         let adapters = pollster::block_on(instance.enumerate_adapters(backends));

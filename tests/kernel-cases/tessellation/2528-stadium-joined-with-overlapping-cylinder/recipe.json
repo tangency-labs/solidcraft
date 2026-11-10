@@ -1,0 +1,7 @@
+{"commands": [
+  {"command": "solid.box", "params": {"corner": [0, -10, 0], "length": 40, "width": 20, "height": 12, "body_name": "Slot"}},
+  {"command": "solid.cylinder", "params": {"radius": 10, "height": 12, "base": [0, 0, 0], "body_name": "EndA"}},
+  {"command": "solid.cylinder", "params": {"radius": 10, "height": 12, "base": [40, 0, 0], "body_name": "EndB"}},
+  {"command": "solid.cylinder", "params": {"radius": 8, "height": 12, "base": [50, 0, 0], "body_name": "Peg"}},
+  {"command": "solid.combine", "params": {"target": "Slot", "tools": ["EndA", "EndB", "Peg"], "operation": "join"}}
+]}
