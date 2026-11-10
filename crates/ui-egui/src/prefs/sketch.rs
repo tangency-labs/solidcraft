@@ -103,6 +103,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.project_face_edges_sketch",
             "ui.project_references_construction",
             "prefs.sketch.project_options",
+            "prefs.sketch.cursor_coordinates",
         ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
@@ -213,6 +214,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "prefs.sketch.project_options",
                     Some("prefs.project_options_dialog_note"),
                     &mut app.preferences.project_options_dialog,
+                );
+                check(
+                    ui,
+                    "sketch_cursor_coordinates",
+                    "prefs.sketch.cursor_coordinates",
+                    Some("prefs.sketch.cursor_coordinates_note"),
+                    &mut app.preferences.sketch_cursor_coordinates,
                 );
             });
         });
