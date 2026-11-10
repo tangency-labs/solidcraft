@@ -231,7 +231,7 @@ pub fn show<S: Host>(ctx: &egui::Context, host: &mut S, pages: &[Page<S>], optio
         return None;
     }
     hold(host);
-    if host.window_ref().reveal.as_ref().is_some_and(|reveal| crate::now_ms() > reveal.until) {
+    if host.window_ref().reveal.as_ref().is_some_and(settings_search::Reveal::expired) {
         host.window().reveal = None;
     }
     let sink = settings_search::shift_key_sink(ctx);

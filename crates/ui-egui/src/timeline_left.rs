@@ -413,7 +413,7 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         } else {
             Rect::from_min_size(pos2(header.center().x - side / 2.0, header.top() + i as f32 * (side + t.space_2)), vec2(side, side))
         };
-        let response = control.show(ui, rect, app.timeline_playback.is_some());
+        let response = control.show(ui, rect, app.timeline_playback.is_some(), crate::timeline::play_labels());
         crate::timeline::transport_response(app, control, &response);
     }
 }
@@ -571,7 +571,7 @@ fn vertical_drop_bar_left(panel_left: f32, target: Option<u64>, groups: &[solidc
 fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag>) -> f32 {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
-    crate::ui_kit::history_marker(ui.painter(), rect, true, solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::ui_kit::history_marker(ui.painter(), rect, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("timeline:rollback", rect.center());
     crate::scenario::publish_rect("history:marker", rect);
     if response.drag_started() {
@@ -1604,7 +1604,7 @@ fn feature_row_body(
     crate::ui_kit::HistoryChip {
         icon,
         name,
-        kind: ty,
+        icon_accent: crate::workspace::feature_icon_accent(ty, icon),
         selected,
         hovered: response.hovered() || rows.from_view.contains(&Some(id)) || rows.linked_hover == Some(id),
         dim: rolled,
@@ -1613,7 +1613,7 @@ fn feature_row_body(
         warning: warning.is_some(),
         reference,
         ink: sketch_state.and_then(|state| state.ink(&t)),
-        accent: solidcraft_theme::TabAccent::for_tab(&t, if dragged { "SKETCH" } else { &app.ui.tab }),
+        accent: crate::workspace::tab_accent(&t, if dragged { "SKETCH" } else { &app.ui.tab }),
     }
     .paint(ui.painter(), chip, style);
     if fold.is_some() {

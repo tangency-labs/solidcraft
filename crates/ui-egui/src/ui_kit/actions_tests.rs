@@ -220,6 +220,7 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
 
 #[test]
 fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
+    crate::test_support::host_data();
     use egui::{Color32, Shape};
     use solidcraft_theme::{Tokens, scoped_tokens};
 
@@ -268,6 +269,7 @@ fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
 
 #[test]
 fn persistent_native_selected_recipe_is_opt_in_and_preserves_small_selected_controls() {
+    crate::test_support::host_data();
     fn flatten(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
         match shape {
             egui::Shape::Vec(shapes) => {

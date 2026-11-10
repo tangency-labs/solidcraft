@@ -83,8 +83,8 @@ pub const LOCALES: &[&Catalog] = &[
     &CHINESE_TRADITIONAL,
 ];
 
-/// Install SolidCraft's catalogs for every lookup: once, at startup, before the first message is
-/// read. Calling it again does nothing.
+/// Install SolidCraft's catalogs for every lookup, and how the kit's tree rows show labels: once,
+/// at startup, before the first message is read. Calling it again does nothing.
 pub fn install() {
     // This crate's own tests read English whatever the PC's language (#10297): the shared crate
     // only sees `cfg!(test)` in its own tests. Pinned before installing, so no test thread reads
@@ -92,6 +92,12 @@ pub fn install() {
     #[cfg(test)]
     solidcraft_ui_text::pin_system_language();
     solidcraft_ui_text::install(LOCALES);
+    crate::ui_kit::install_row_names(row_name);
+}
+
+/// How the kit's tree rows show a label: a given name with [`tr_name`], any other with [`tr_dyn`].
+fn row_name(label: &str, name: bool) -> String {
+    if name { tr_name(label) } else { tr_dyn(label) }
 }
 
 /// The names SolidCraft gives and the engine messages it shows, translated with a [`Locale`].

@@ -1000,6 +1000,7 @@ mod selection_ink_tests {
     /// selected elements.
     #[test]
     fn only_themes_whose_primary_vanishes_switch_to_the_selected_ink() {
+        crate::test_support::host_data();
         for t in [Tokens::dark(), Tokens::light()] {
             assert_eq!(selection_ink(&t), t.form_primary);
         }

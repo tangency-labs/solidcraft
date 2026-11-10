@@ -125,6 +125,30 @@ pub(crate) struct RowResp {
     pub(crate) actions: Vec<egui::Response>,
 }
 
+/// How a host shows a row's label: `name` when the label is a name someone gave (shown as typed,
+/// with the host's own default names translated), otherwise a label the host may translate.
+pub type RowNames = fn(label: &str, name: bool) -> String;
+
+static ROW_NAMES: std::sync::OnceLock<RowNames> = std::sync::OnceLock::new();
+
+/// Install the host's row-label translator, once per process, before the first frame. Calling
+/// it again does nothing. Without one, a given name is shown as typed (in display order) and any
+/// other label through the installed catalogs.
+pub fn install_row_names(names: RowNames) {
+    if ROW_NAMES.set(names).is_err() {
+        log::debug!("a row-label translator is already installed");
+    }
+}
+
+/// The text a row shows for `label`.
+fn row_text(label: &str, name: bool) -> String {
+    match ROW_NAMES.get() {
+        Some(names) => names(label, name),
+        None if name => solidcraft_ui_text::bidi::visual(label).into_owned(),
+        None => solidcraft_ui_text::tr_label(label).to_string(),
+    }
+}
+
 /// The state a drag over the eyes sets them to: the first eye's new state, while the button is
 /// down (egui temporary data). Absent when no eye drag is under way.
 pub(crate) fn eye_drag_id() -> egui::Id {
@@ -325,7 +349,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     } else {
         row.color.unwrap_or(if row.dim { t.text_dim } else { t.text })
     };
-    let label_display = if row.name { crate::i18n::tr_name(row.label) } else { crate::i18n::tr_dyn(row.label) };
+    let label_display = row_text(row.label, row.name);
     let font = if row.selected { crate::ui_kit::type_face::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
     // The label stops before the badges and the card's edge; a longer name ends in an ellipsis
     // and its full text is in the tooltip.

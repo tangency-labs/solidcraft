@@ -21,7 +21,7 @@ const APP_ELEMENTS: &[Element] = &[
     }),
     element!("workspace_menu", |ui, _| {
         let app = crate::test_support::sample_app();
-        workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
+        crate::context_menu::workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
     }),
     element!("continuity_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         let mut order = Continuity::G1;
@@ -31,6 +31,12 @@ const APP_ELEMENTS: &[Element] = &[
         let mut order = Continuity::G2;
         let allowed = [Continuity::G1, Continuity::G2];
         continuity_row_explained(ui, "Gallery", "gallery_continuity", &mut order, &allowed, &continuity_tip(&allowed));
+    }),
+    element!("preference_specimens", |ui, _| {
+        crate::prefs::figures::scale_specimen(ui, 1.1);
+        crate::prefs::figures::status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
+        crate::prefs::figures::autosave_timeline(ui, 5.0);
+        crate::prefs::figures::pointer_preview(ui, true, "Normal", true);
     }),
     element!("continuity_tip", "dialog:row:Gallery", None, |ui, _| {
         let tip = continuity_tip(&[Continuity::G0, Continuity::G1]);
@@ -326,7 +332,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                         HistoryChip {
                             icon,
                             name: "Extrude1",
-                            kind,
+                            icon_accent: crate::workspace::feature_icon_accent(kind, icon),
                             selected: false,
                             hovered: false,
                             dim: false,
@@ -334,7 +340,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             error: false,
                             warning: false,
                             reference: false,
-                            accent: solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "MODEL"),
+                            accent: crate::workspace::tab_accent(&Tokens::get(), "MODEL"),
                             ink: None,
                         }
                         .paint(
