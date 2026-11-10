@@ -1028,6 +1028,11 @@ pub struct ExportDxfParams {
     /// `per_body`, one file per sheet body, `<path>-<body>.dxf`.
     #[serde(default)]
     pub path: Option<String>,
+    /// mm: the drawing in millimetres ($INSUNITS 4). inches: every coordinate, radius and text
+    /// height in inches ($INSUNITS 1, $MEASUREMENT 0), the bend notes' radii and the pocket
+    /// layers' depths in inches too. Default: mm.
+    #[serde(default)]
+    pub units: Option<DxfUnitsParam>,
     /// exact: an ellipse as ELLIPSE, splines, text outlines and the other Béziers as SPLINE.
     /// arcs: tangent arcs and lines within 0.001 mm, for machines that read only those.
     /// Default: exact.
@@ -1061,6 +1066,26 @@ pub struct ExportDxfParams {
     /// Default: false.
     #[serde(default)]
     pub per_body: Option<bool>,
+}
+
+/// A DXF export's `units`: millimetres or inches, in any case (read by `sheet::dxf_units`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DxfUnitsParam(pub(crate) crate::cmd::DxfUnits);
+
+impl<'de> Deserialize<'de> for DxfUnitsParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str().and_then(crate::cmd::dxf_units).map(DxfUnitsParam).ok_or_else(|| D::Error::custom("must be mm or inches"))
+    }
+}
+
+impl JsonSchema for DxfUnitsParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DxfUnits".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "mm or inches, in any case.", "type": "string", "pattern": "^([Mm][Mm]|[Ii][Nn][Cc][Hh][Ee][Ss])$"})
+    }
 }
 
 /// A DXF export's `curves`: exact or arcs, in any case (read by `sheet::dxf_curves`).
