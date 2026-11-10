@@ -2189,6 +2189,28 @@ fn the_first_dimension_measuring_to_a_sketch_axis_endpoint_uses_its_fixed_positi
     assert_eq!(pt(&s, &end), end_pos);
 }
 
+/// #11043: a centre rectangle drawn away from the origin, with nothing tying it there, keeps
+/// its centre when its first dimension scales it; it does not run off along the line from the
+/// origin. `scale_about_origin` keeps the scaling about the origin, as before.
+#[test]
+fn the_first_dimension_scales_a_free_shape_about_its_own_centre() {
+    for about_origin in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.center", json!({"center": [100, 100], "corner": [105, 105]}));
+        let before = sketch(&s);
+        let out =
+            run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "500 mm", "scale_sketch": true, "scale_about_origin": about_origin}));
+        assert_eq!(out["scaled"], 50.0, "{out}");
+        assert_eq!(out["measured"], 500.0, "{out}");
+        let after = sketch(&s);
+        let anchor = if about_origin { v(0.0, 0.0) } else { v(100.0, 100.0) };
+        for (p, q) in before.points.iter().zip(&after.points) {
+            let want = if p.fixed { p.pos } else { anchor + (p.pos - anchor) * 50.0 };
+            assert!(q.pos.dist(want) < 1e-6, "about origin {about_origin}, {}: {:?} -> {:?}, expected {want:?}", p.id, p.pos, q.pos);
+        }
+    }
+}
+
 #[test]
 fn the_first_dimension_does_not_scale_a_sketch_that_has_a_size() {
     // A sketch with projected or fixed geometry, or another length dimension, already has a
@@ -2368,6 +2390,69 @@ fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
     assert_eq!(s.active_sketch, None);
     assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
     assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// #14010: a sketch with features after it, opened by `sketch.edit` without `restore_marker`
+/// (as MCP calls it), is edited with the timeline rolled to it: each sketch command evaluates up
+/// to the sketch only, and the later features are rebuilt once, at Finish. A save made during the
+/// edit (which names an unnamed design after its file) holds the whole timeline and leaves Finish
+/// and Cancel working, Cancel puts the design back, and `restore_marker: false` keeps the old
+/// in-place edit that rebuilds the later features after every command.
+#[test]
+fn editing_a_mid_timeline_sketch_rebuilds_later_features_once_at_finish() {
+    let (mut s, id) = sketch_below_a_solid();
+    for x in [40, 60, 80] {
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [x, 0, 0]}));
+    }
+    let bodies = s.model.state().bodies.len();
+    let before = (*s.doc).clone();
+    // The design as it was, under the name the last save gave it.
+    let unchanged = |s: &Session| {
+        let mut doc = (*s.doc).clone();
+        doc.name.clone_from(&before.name);
+        doc == before
+    };
+    let dir = std::env::temp_dir().join(format!("solidcraft-mid-edit-save-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    for y in [20, 30] {
+        run(&mut s, "sketch.line", json!({"points": [[0, y], [10, y]]}));
+        assert!(s.model.last_recomputed <= 1, "only the sketch is evaluated, not the 4 features after it: {}", s.model.last_recomputed);
+        let shown = s.model.result(id).and_then(|r| r.state.sketch(id)).map(|k| k.sketch.curves.len());
+        assert_eq!(shown, Some(s.doc.sketch(id).unwrap().curves.len()), "the sketch's own solve is shown");
+    }
+    // A save during the edit holds the whole timeline, not the temporary rollback.
+    let path = dir.join("Mid edit.solidcraft");
+    run(&mut s, "file.save_as", json!({"path": path.to_string_lossy()}));
+    let saved = solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!((saved.name.as_str(), saved.marker), ("Mid edit", None));
+    assert_eq!(saved.sketch(id).unwrap().curves.len(), 6);
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.model.state().bodies.len(), bodies);
+    assert!(s.model.results.iter().all(|r| !r.stale && !r.skipped));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(unchanged(&s), "the edit is one Undo step");
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.model.state().bodies.len(), bodies);
+
+    // Cancel puts the timeline back as well, a save during the edit included.
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    run(&mut s, "file.save_as", json!({"path": dir.join("Renamed.solidcraft").to_string_lossy()}));
+    run(&mut s, "sketch.cancel", json!({}));
+    assert!(unchanged(&s));
+    assert_eq!(s.model.state().bodies.len(), bodies);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // The old in-place edit, kept behind `restore_marker: false`.
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": false}));
+    assert_eq!(s.doc.marker, None);
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    assert!(s.model.last_recomputed > 1, "in place, the later features are rebuilt");
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": true})).is_err());
 }
 
 #[test]

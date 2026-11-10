@@ -111,6 +111,8 @@ use crate::topology::{
 };
 use crate::{Result, SolidError};
 
+use super::p2::{ClosedGap, ClosedGapKind};
+
 const OP: &str = "heal::stitch::p1";
 /// The operation of the `SM_API` entry points' `SM_ERR_INVALID_INPUT` (null arguments).
 const API_OP: &str = "heal::stitch::p1::api";
@@ -932,6 +934,47 @@ pub struct Stitch<'c> {
     /// Remove sliver faces smaller than tolerance first (`m_bRemoveLaminarSlivers`,
     /// default `FALSE`).
     pub remove_laminar_slivers: bool,
+    /// When `Some`, the stitch records what it closed: the entities, the gap it
+    /// enclosed, and the tolerance growth its editing applied (not upstream,
+    /// solidcore#2975). Nothing else changes.
+    pub report_gaps: Option<Vec<ClosedGap>>,
+}
+
+impl Stitch<'_> {
+    /// The collected gap records, taking them out (`Ok(vec![])` when the caller did
+    /// not ask for them).
+    pub(crate) fn take_gaps(&mut self) -> Vec<ClosedGap> {
+        self.report_gaps.take().unwrap_or_default()
+    }
+
+    /// Records one closed gap when the caller asked for the report. The growth is
+    /// an outward-rounded bound on how much the surviving entity's tolerance rose
+    /// over its own tolerance before the closure, including inherited tolerance.
+    pub(crate) fn record_gap(
+        &mut self,
+        kind: ClosedGapKind,
+        gap: f64,
+        before: f64,
+        after: f64,
+    ) -> Result<()> {
+        if let Some(gaps) = self.report_gaps.as_mut() {
+            let growth = super::bounds::growth(before, after)?;
+            if !gap.is_finite() || gap < 0.0 {
+                return Err(SolidError::invalid_input(
+                    "heal::stitch::bounds",
+                    "non-finite or negative gap bound",
+                ));
+            }
+            gaps.push(ClosedGap {
+                kind,
+                gap,
+                growth,
+                tolerance_before: before,
+                tolerance_after: after,
+            });
+        }
+        Ok(())
+    }
 }
 
 impl core::fmt::Debug for Stitch<'_> {
@@ -1151,6 +1194,7 @@ impl<'c> Stitch<'c> {
             split_edges_with_vertices: true,
             making_manifold_solid: true,
             remove_laminar_slivers: false,
+            report_gaps: None,
         }
     }
 
@@ -2483,8 +2527,9 @@ pub(crate) fn glue_edges_general(
     // (not upstream) with `b`'s own attributes, given back afterwards, and the kernel's
     // reused record map (the same records a fresh state has)
     let (tag, records) = take_arena_records(k, b);
+    let serial = k.context.issued_brep_serial(b.notify_identity());
     let mut state =
-        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b);
+        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
         crate::topology::brep::p7::glue_edges_general(
@@ -2509,7 +2554,7 @@ pub(crate) fn glue_edges_general(
 /// `b`'s progress tag to keep it under: the map kept for this B-rep value, or an empty
 /// one when it was kept for another value (record keys are arena identities, which
 /// repeat across B-reps).
-fn take_arena_records(
+pub(crate) fn take_arena_records(
     k: &mut Kernel,
     b: &mut Brep,
 ) -> (
@@ -2563,8 +2608,9 @@ pub(crate) fn make_vertex_split_edge(
     // a default record per object (upstream every object has its `SmTopology` part), in
     // the kernel's reused record map
     let (tag, records) = take_arena_records(k, b);
+    let serial = k.context.issued_brep_serial(b.notify_identity());
     let mut state =
-        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b);
+        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     // The kernel's context is the split's own `k`; no separate object context.
     let out = crate::topology::brep::p9::make_vertex_split_edge(
         k,
@@ -3079,7 +3125,7 @@ mod tests {
         let edit = |k: &mut Kernel, b: &mut Brep, reused: bool| {
             let (tag, records) = take_arena_records(k, b);
             assert_eq!(records.is_empty(), !reused);
-            let mut state = ArenaNotifyState::with_attributes_of_reusing(records, b);
+            let mut state = ArenaNotifyState::with_attributes_of_reusing(records, b, None);
             assert_eq!(*state.records, fresh(b));
             let key = *state.records.keys().next().unwrap();
             state.records.get_mut(&key).unwrap().set_user_index1(5);

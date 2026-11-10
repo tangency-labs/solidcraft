@@ -2374,10 +2374,14 @@ impl<O: LoopObject> FaceProps<O> {
             // (the status is only reported upstream; a handle type that cannot name the
             // loop bisector's objects is a limitation of the caller, not a status)
             match classify_result {
-                Err(
-                    e @ (SolidError::InvalidInput { reason, .. }
-                    | SolidError::PortInvariant { reason, .. }),
-                ) if reason == crate::query::face::p3::NO_CURVE_HANDLES => {
+                Err(e)
+                    if matches!(
+                        &e,
+                        SolidError::InvalidInput { reason, .. }
+                        | SolidError::PortInvariant { reason, .. }
+                            if *reason == crate::query::face::p3::NO_CURVE_HANDLES
+                    ) =>
+                {
                     return Err(e);
                 }
                 r => Ok(ignored(r)?),

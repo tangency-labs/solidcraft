@@ -1,0 +1,938 @@
+//! Shared preference compositions and explanatory figures. Figures are cheap painter content,
+//! never additional application viewports; every colour and control metric comes from tokens.
+pub use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
+pub use super::preferences_figure_ops::paint_colour_vision;
+use super::{metrics::dimension, text::paint_text};
+use crate::BackingTooltipExt as _;
+use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
+
+pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
+
+pub fn blur_cost_bars(radius: f32) -> usize {
+    if radius.is_finite() && radius > 0.0 { (radius / 8.0).ceil().clamp(1.0, 5.0) as usize } else { 0 }
+}
+
+pub fn blur_meter_width(t: &Tokens) -> f32 {
+    t.space_4 * 5.0 + t.space_2 * 4.0
+}
+
+pub fn blur_cost_meter(ui: &mut Ui, radius: f32, tip: &str) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(blur_meter_width(&t), t.control_height), Sense::hover());
+    let filled = blur_cost_bars(radius);
+    if filled == 0 {
+        ui.painter().rect_filled(Rect::from_center_size(rect.center(), vec2(rect.width(), t.space_2)), t.radius_sm, t.form_dim);
+    } else {
+        let heights = [t.space_4, t.space_6, t.space_8, t.space_8 + t.space_3, t.space_14];
+        for (i, height) in heights.into_iter().enumerate() {
+            let bar = Rect::from_min_size(
+                pos2(rect.left() + i as f32 * (t.space_4 + t.space_2), rect.center().y + t.space_8 - height),
+                vec2(t.space_4, height),
+            );
+            ui.painter().rect_filled(bar, t.radius_sm, if i < filled { t.form_primary } else { t.dialog_rule });
+        }
+    }
+    solidcraft_ui_registry::publish_rect("prefs:blur_cost", rect);
+    response.backing_on_hover_text(tip);
+}
+
+/// Theme problems stay inline when space permits, with stacked text and wrapping actions otherwise.
+/// `dismiss_label` is the host's name for the action that hides the notice.
+pub fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, dismiss_label: &str, can_undo: bool) -> (bool, bool) {
+    let mut undo = false;
+    let mut dismiss = false;
+    let response = ui.push_id(("theme_notice", id, text), |ui| {
+        let t = Tokens::get();
+        let actions = super::ContentWidth::button(ui, dismiss_label)
+            + t.space_8
+            + if can_undo { super::ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo")) + t.space_8 } else { 0.0 };
+        let mut draw_actions = |ui: &mut Ui| {
+            if can_undo {
+                let response = super::text_button(ui, solidcraft_ui_text::tr("ui.undo"), true);
+                solidcraft_ui_registry::publish_target("prefs:theme_notice_undo:guard", response.rect);
+                undo = response.clicked();
+            }
+            let response = super::text_button(ui, dismiss_label, true);
+            solidcraft_ui_registry::publish_target(&format!("prefs:theme_notice_dismiss:{id}"), response.rect);
+            dismiss = response.clicked();
+        };
+        let width = dimension(ui.available_width());
+        let text_minimum =
+            ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim).size().x.min(t.form_label_width);
+        if width >= actions + text_minimum {
+            ui.horizontal_top(|ui| {
+                let width = dimension(ui.available_width() - actions);
+                ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    super::text(ui, text, super::Text::Hint(id));
+                });
+                draw_actions(ui);
+            });
+        } else {
+            ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(width);
+                // The form normally truncates controls; a long translated action may wrap here.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                super::text(ui, text, super::Text::Hint(id));
+                ui.horizontal_wrapped(draw_actions);
+            });
+        }
+    });
+    solidcraft_ui_registry::publish_rect(&format!("prefs:theme_notice:{id}"), response.response.rect);
+    (undo, dismiss)
+}
+
+/// The host's text for [`theme_options_list`].
+pub struct ThemeOptionsText<'a> {
+    /// The note beside the theme's name for its number of options.
+    pub count: fn(usize) -> String,
+    /// The title of the fold holding the options past the first rows, for their number.
+    pub more: fn(usize) -> String,
+    /// Restores the theme's own values.
+    pub reset: &'a str,
+    /// A blur radius of 0, as its readout shows it.
+    pub blur_off: &'a str,
+    /// The blur cost meter's hover text.
+    pub blur_cost: &'a str,
+}
+
+/// Presentation data is resolved by the caller; controls never distinguish standard/custom ids.
+pub struct ThemeOptionRow<'a> {
+    pub definition: &'a crate::theme_files::OptionDef,
+    pub label: String,
+    pub help: String,
+    pub choices: Vec<String>,
+    pub reason: Option<String>,
+    pub blur: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct ThemeOptionMetrics {
+    label: f32,
+    readout: f32,
+    reason: f32,
+    minimum: f32,
+}
+
+pub fn theme_option_slider_minimum(t: &Tokens) -> f32 {
+    t.space_24 * 2.0 + t.space_8
+}
+
+/// Measure the same fonts, gutters and control sizes used by `theme_option_control`.
+pub fn theme_option_metrics(
+    ui: &Ui,
+    option: &ThemeOptionRow<'_>,
+    value: Option<&crate::theme_files::OptionValue>,
+    text: &ThemeOptionsText<'_>,
+) -> ThemeOptionMetrics {
+    use crate::theme_files::{OptionKind, OptionValue};
+    let t = Tokens::get();
+    let label = super::ContentWidth::label(ui, &option.label) + t.space_4;
+    let mut readout = 0.0;
+    let control = match &option.definition.kind {
+        OptionKind::Bool { .. } => t.space_24 + t.space_8,
+        OptionKind::Range { default, min, max, step, unit } => {
+            let current = match value {
+                Some(OptionValue::Num(n)) => *n,
+                _ => *default,
+            };
+            // Endpoints and adjacent steps reserve fractional readouts before the first edit.
+            readout = [*min, *max, *default, current, (*min + *step).min(*max), (*max - *step).max(*min)]
+                .into_iter()
+                .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
+                .fold(0.0, f32::max);
+            if option.blur {
+                readout = readout.max(super::ContentWidth::label(ui, text.blur_off));
+            }
+            theme_option_slider_minimum(&t) + t.space_8 + readout + if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 }
+        }
+        OptionKind::Choice { values, .. } => {
+            if values.len() > 5 {
+                let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
+                super::ContentWidth::dropdown(ui, &labels).min(t.form_label_width + t.space_24)
+            } else {
+                // Compact segments use equal widths based on the widest semibold label.
+                let widest = option.choices.iter().map(|s| super::ContentWidth::name(ui, s)).fold(0.0, f32::max);
+                (widest + t.space_16) * values.len() as f32
+            }
+        }
+    };
+    let reason = option
+        .reason
+        .as_ref()
+        .map_or(0.0, |reason| ui.painter().layout_no_wrap(reason.clone(), FontId::proportional(t.font_body), t.form_dim).size().x.ceil() + t.space_8);
+    // settings_form/row use the measured label plus a fixed space_14 gutter.
+    ThemeOptionMetrics { label, readout, reason, minimum: label + t.space_14 + control + reason }
+}
+
+/// Ordered two-column list, with composite children sharing their parent's cell and hit row.
+/// Returns Reset; edited values are returned through `values` for the caller's preference merge.
+pub fn theme_options_list(
+    ui: &mut Ui,
+    theme_id: &str,
+    name: &str,
+    options: &[ThemeOptionRow<'_>],
+    values: &mut std::collections::BTreeMap<String, crate::theme_files::OptionValue>,
+    text: &ThemeOptionsText<'_>,
+) -> bool {
+    use super::preferences_layout::{Entry, Width, choice_width, layout};
+    use crate::theme_files::OptionKind;
+    // Label/help/choice text is already resolved, including the theme's English fallback.
+    let _labels = solidcraft_ui_text::resolved_labels();
+    if options.is_empty() {
+        return false;
+    }
+    let t = Tokens::get();
+    let mut cells: Vec<Vec<usize>> = Vec::new();
+    for (i, option) in options.iter().enumerate() {
+        if option.definition.parent.as_ref().is_some_and(|id| options.iter().any(|o| &o.definition.id == id)) {
+            continue;
+        }
+        let mut cell = vec![i];
+        let mut parent = option.definition.id.as_str();
+        for _ in 0..crate::theme_files::MAX_OPTIONS {
+            let Some((j, child)) = options.iter().enumerate().find(|(_, o)| o.definition.parent.as_deref() == Some(parent)) else { break };
+            if cell.contains(&j) {
+                break;
+            }
+            cell.push(j);
+            parent = &child.definition.id;
+        }
+        cells.push(cell);
+    }
+    let metrics: Vec<_> = options.iter().map(|option| theme_option_metrics(ui, option, values.get(&option.definition.id), text)).collect();
+    let entries: Vec<_> = cells
+        .iter()
+        .map(|cell| {
+            let mut width = if cell.len() > 1 { Width::Composite } else { Width::Narrow };
+            let mut minimum = t.space_8 * cell.len().saturating_sub(1) as f32;
+            let mut advanced = false;
+            for &index in cell {
+                let Some(option) = options.get(index) else { continue };
+                advanced |= option.definition.advanced;
+                if option.blur && cell.len() == 1 {
+                    width = Width::Wide;
+                }
+                if let OptionKind::Choice { values, .. } = &option.definition.kind
+                    && choice_width(values.len()) == Width::Wide
+                {
+                    width = Width::Wide;
+                }
+                minimum += metrics.get(index).map_or(0.0, |m| m.minimum);
+            }
+            Entry { width, advanced, minimum }
+        })
+        .collect();
+    let plan = layout(&entries, dimension(ui.available_width()) - t.space_16);
+    let mut reset = false;
+    let header = ui.horizontal_wrapped(|ui| {
+        super::text(ui, name, super::Text::Inline);
+        super::settings_inline_note(ui, &(text.count)(options.len()));
+        if options.iter().any(|option| values.get(&option.definition.id).is_some_and(|v| *v != option.definition.default_value())) {
+            let response = super::text_button(ui, text.reset, true);
+            solidcraft_ui_registry::publish_target("prefs:theme_options_reset", response.rect);
+            reset = response.clicked();
+        }
+    });
+    solidcraft_ui_registry::publish_rect("prefs:theme_options_header", header.response.rect);
+    let mut draw_rows = |ui: &mut Ui, rows: &[Vec<usize>]| {
+        let mut section = None;
+        for row in rows {
+            // Labels are theme-authored metadata, shown only above the six-cell threshold.
+            let label =
+                row.iter().filter_map(|i| cells.get(*i)).flatten().filter_map(|i| options.get(*i)).find_map(|o| o.definition.section.as_deref());
+            if plan.section_labels && label != section {
+                if let Some(label) = label {
+                    super::text(ui, label, super::Text::Hint("theme_option_section"));
+                }
+                section = label;
+            }
+            let width = dimension(ui.available_width());
+            let cell_width = (width - t.space_16) / 2.0;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_16;
+                for &index in row {
+                    let Some(cell) = cells.get(index) else { continue };
+                    let full = entries.get(index).is_some_and(|e| e.width == Width::Wide || e.minimum > cell_width);
+                    let width = if full { width } else { cell_width };
+                    ui.allocate_ui_with_layout(vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(width.max(0.0));
+                        let stack = entries.get(index).is_some_and(|e| e.minimum > width);
+                        let direction =
+                            if stack { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Center) };
+                        let response = ui.with_layout(direction, |ui| {
+                            ui.spacing_mut().item_spacing.x = t.space_8;
+                            let total: f32 = cell.iter().filter_map(|i| metrics.get(*i)).map(|m| m.minimum).sum();
+                            let usable = (width - t.space_8 * cell.len().saturating_sub(1) as f32).max(0.0);
+                            for &i in cell {
+                                if let (Some(option), Some(metrics)) = (options.get(i), metrics.get(i)) {
+                                    let option_width = if stack { width } else { usable * metrics.minimum / total.max(1.0) };
+                                    ui.allocate_ui_with_layout(
+                                        vec2(option_width.max(0.0), t.control_height),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            theme_option_control(ui, option, options, values, metrics, cell.len() == 1, text);
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                        if let Some(option) = cell.first().and_then(|i| options.get(*i)) {
+                            solidcraft_ui_registry::publish_rect(
+                                &format!("prefs:theme_option_cell:{}", option.definition.id),
+                                response.response.rect,
+                            );
+                        }
+                    });
+                }
+            });
+        }
+    };
+    ui.push_id(("theme_options", theme_id), |ui| {
+        draw_rows(ui, &plan.rows);
+        if plan.more_count > 0 {
+            let title = (text.more)(plan.more_count);
+            super::section(ui, "more", &title, false, |ui| draw_rows(ui, &plan.more));
+            if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:section:{title}")) {
+                solidcraft_ui_registry::publish_target("prefs:theme_options_more", rect);
+            }
+        }
+    });
+    reset
+}
+
+pub fn theme_option_control(
+    ui: &mut Ui,
+    option: &ThemeOptionRow<'_>,
+    options: &[ThemeOptionRow<'_>],
+    values: &mut std::collections::BTreeMap<String, crate::theme_files::OptionValue>,
+    metrics: &ThemeOptionMetrics,
+    fill_range: bool,
+    text: &ThemeOptionsText<'_>,
+) {
+    use crate::theme_files::{OptionKind, OptionValue};
+    let t = Tokens::get();
+    let def = option.definition;
+    let mut active = option.reason.is_none();
+    let mut parent = def.parent.as_deref();
+    for _ in 0..crate::theme_files::MAX_OPTIONS {
+        let Some(id) = parent else { break };
+        active &= values.get(id) == Some(&OptionValue::Bool(true));
+        let ancestor = options.iter().find(|o| o.definition.id == id);
+        active &= ancestor.is_some_and(|o| o.reason.is_none());
+        parent = ancestor.and_then(|o| o.definition.parent.as_deref());
+    }
+    let mut value = values.get(&def.id).cloned().unwrap_or_else(|| def.default_value());
+    let before = value.clone();
+    let control_width = (ui.available_width() - metrics.reason).max(0.0);
+    let response = ui.allocate_ui_with_layout(vec2(control_width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.push_id(&def.id, |ui| {
+            ui.add_enabled_ui(active, |ui| {
+                // `row` owns the accessible control label and the shared control geometry.
+                super::settings_form(ui, metrics.label, |ui| {
+                    super::row(ui, &option.label, |ui| {
+                        match (&def.kind, &mut value) {
+                            (OptionKind::Bool { .. }, OptionValue::Bool(on)) => {
+                                theme_option_switch(ui, &option.label, on);
+                            }
+                            (OptionKind::Range { min, max, step, unit, .. }, OptionValue::Num(n)) => {
+                                let meter = if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 };
+                                let available = dimension(ui.available_width() - metrics.readout - t.space_8 - meter);
+                                // Standalone ranges fill their cell; composites retain their compact control alignment.
+                                let width =
+                                    if fill_range { available } else { available.min(t.form_label_width.max(theme_option_slider_minimum(&t))) };
+                                ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    super::slider(
+                                        ui,
+                                        n,
+                                        *min..=*max,
+                                        super::Slider {
+                                            step: Some(f64::from(*step)),
+                                            show_value: false,
+                                            off_endpoint: option.blur,
+                                            ..Default::default()
+                                        },
+                                    );
+                                });
+                                // Keep fractional theme values visible, including sliders with fractional steps.
+                                let readout = ui.allocate_ui_with_layout(
+                                    vec2(metrics.readout, t.control_height),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        let label = if option.blur && *n == 0.0 {
+                                            text.blur_off.to_owned()
+                                        } else {
+                                            format!("{}{}", *n, unit.as_deref().unwrap_or(""))
+                                        };
+                                        super::text(ui, &label, super::Text::Inline);
+                                    },
+                                );
+                                solidcraft_ui_registry::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
+                                if option.blur {
+                                    blur_cost_meter(ui, *n, text.blur_cost);
+                                }
+                            }
+                            (OptionKind::Choice { values, .. }, OptionValue::Choice(selected)) => {
+                                let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
+                                let mut index = values.iter().position(|v| &v.id == selected).unwrap_or(0);
+                                let changed = if values.len() > 5 {
+                                    super::dropdown_picked(ui, &def.id, &mut index, &labels)
+                                } else {
+                                    super::segmented(ui, &mut index, &labels, super::Segments { compact: true, ..Default::default() })
+                                };
+                                if changed && let Some(choice) = values.get(index) {
+                                    *selected = choice.id.clone();
+                                }
+                            }
+                            _ => {}
+                        }
+                    })
+                });
+            })
+        })
+        .inner
+        .response
+    });
+    let response = response.inner.backing_on_hover_text(&option.help);
+    solidcraft_ui_registry::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
+    if let Some(reason) = &option.reason {
+        let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
+        solidcraft_ui_registry::publish_rect(&format!("prefs:theme_option_reason:{}", def.id), note.response.rect);
+    }
+    if active && value != before {
+        values.insert(def.id.clone(), value);
+    }
+}
+
+pub fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(t.space_24 + t.space_8, t.control_height), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+    }
+    let track = Rect::from_center_size(rect.center(), vec2(rect.width(), t.space_16 + t.space_2));
+    ui.painter().rect_filled(track, t.radius_xl, if *on { t.form_primary_fill } else { t.control_border });
+    let x = if *on { track.right() - t.space_8 - t.space_2 } else { track.left() + t.space_8 + t.space_2 };
+    ui.painter().circle_filled(pos2(x, track.center().y), t.space_6, if *on { t.on_accent } else { t.form_ink });
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
+    solidcraft_ui_registry::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
+}
+
+/// Page scroller keeps content aligned while centring its bar in the window's right inset.
+/// Nested pages (including Shortcuts) inherit the same gutter and height contract.
+pub fn settings_scroll<R>(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl FnOnce(&mut Ui) -> R) -> egui::scroll_area::ScrollAreaOutput<R> {
+    let t = Tokens::get();
+    let gutter = ui.stack().iter().find_map(|node| node.tags().get_downcast::<f32>(PAGE_SCROLL_GUTTER)).copied().unwrap_or(0.0);
+    let width = dimension(ui.available_width());
+    let height = if ui.available_height().is_finite() { dimension(ui.available_height()) } else { t.control_height * 16.0 };
+    let bar = ui.spacing().scroll.floating_width;
+    let extension = if gutter > 0.0 { gutter / 2.0 + bar / 2.0 } else { 0.0 };
+    let host = Rect::from_min_size(ui.next_widget_position(), vec2(width + extension, height));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(host).layout(egui::Layout::top_down(egui::Align::Min)), |ui| {
+        if gutter > 0.0 {
+            let scroll = &mut ui.style_mut().spacing.scroll;
+            scroll.floating = true;
+            scroll.floating_allocated_width = 0.0;
+            scroll.bar_outer_margin = 0.0;
+        }
+        let mut scroll = egui::ScrollArea::vertical().id_salt(id).max_height(height).auto_shrink([false, false]).show(ui, |ui| {
+            if gutter > 0.0 {
+                // The scrollbar host extends into the gutter. Its content must neither use
+                // that extension nor grow the page/window when a child requests extra width.
+                let bounds = Rect::from_min_size(ui.next_widget_position(), vec2(width, ui.available_height()));
+                let mut content = ui.new_child(egui::UiBuilder::new().max_rect(bounds));
+                let clip = content.clip_rect();
+                content.set_clip_rect(clip.intersect(Rect::from_min_max(pos2(bounds.left(), clip.top()), pos2(bounds.right(), clip.bottom()))));
+                let result = add(&mut content);
+                ui.allocate_exact_size(vec2(width, content.min_size().y), Sense::hover());
+                result
+            } else {
+                add(ui)
+            }
+        });
+        // Consumers publish the page's content well, not the extended scrollbar host.
+        if gutter > 0.0 {
+            scroll.inner_rect.max.x = scroll.inner_rect.left() + width;
+        }
+        scroll
+    })
+    .inner
+}
+
+pub fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
+    settings_heading_with_tag(ui, title, description, None);
+}
+
+pub fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &str, tag: Option<fn(&mut Ui)>) {
+    if super::settings_search::querying(ui) {
+        return;
+    }
+    let t = Tokens::get();
+    let page = super::settings_page_active(ui);
+    let heading = ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = t.space_3;
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(dimension(ui.available_width()), if page { t.space_24 } else { t.space_16 + t.space_3 }), Sense::hover());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
+        paint_text(ui, rect, title, crate::type_face::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
+        if let Some(tag) = tag {
+            let width = ui
+                .painter()
+                .layout_no_wrap(title.to_owned(), crate::type_face::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink)
+                .size()
+                .x;
+            let start = (rect.left() + width + t.space_8).min(rect.right());
+            let tag_rect = Rect::from_min_max(egui::pos2(start, rect.top()), rect.max);
+            ui.scope_builder(
+                egui::UiBuilder::new().max_rect(tag_rect).layout(if page { egui::Layout::right_to_left(egui::Align::Center) } else { *ui.layout() }),
+                tag,
+            );
+        }
+        super::text(ui, description, super::Text::Hint("settings_heading"));
+    });
+    if page {
+        solidcraft_ui_registry::publish_rect("prefs:page_heading", heading.response.rect);
+    }
+}
+
+/// Settings reuse the same disclosure, uppercase typography and rule as the design system.
+pub fn settings_section<R>(ui: &mut Ui, key: &str, title: &str, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count(ui, key, title, None, add)
+}
+
+/// A settings disclosure with a real item count, using the shared section badge.
+pub fn settings_section_count<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, false, add)
+}
+
+/// A list section directly following its search toolbar uses the compact page rhythm.
+pub fn settings_list_section<R>(ui: &mut Ui, key: &str, title: &str, count: Option<&str>, add: impl FnMut(&mut Ui) -> R) -> Option<R> {
+    settings_section_count_spaced(ui, key, title, count, true, add)
+}
+
+fn settings_section_count_spaced<R>(
+    ui: &mut Ui,
+    key: &str,
+    title: &str,
+    count: Option<&str>,
+    compact: bool,
+    mut add: impl FnMut(&mut Ui) -> R,
+) -> Option<R> {
+    if super::settings_search::querying(ui) {
+        super::settings_search::begin_section(ui, title);
+        if !ui.is_visible() {
+            return Some(add(ui));
+        }
+        if super::settings_search::shows_all(ui) {
+            let mut child = super::settings_search::detached_child(ui, ("prefs-search-section", key), false);
+            let result = add(&mut child);
+            super::settings_search::place_search_child(ui, &child);
+            return Some(result);
+        }
+        let mark = super::settings_search::search_layout_mark(ui);
+        let before = super::settings_search::hits(ui);
+        let (gained, missed) = {
+            let mut probe = super::settings_search::detached_child(ui, ("prefs-search-section-probe", key), true);
+            let missed = add(&mut probe);
+            (super::settings_search::hits(ui) > before, missed)
+        };
+        super::settings_search::restore_search_layout(ui, mark);
+        if !gained {
+            return Some(missed);
+        }
+        // Keep search headings outside wrapped rows in this section.
+        super::settings_search::reveal(ui);
+        let mut child = super::settings_search::detached_child(ui, ("prefs-search-section", key), false);
+        let result = add(&mut child);
+        super::settings_search::place_search_child(ui, &child);
+        return Some(result);
+    }
+    let t = Tokens::get();
+    let page = super::settings_page_active(ui);
+    if page {
+        // The page's 10 pt item gap plus the shared disclosure's 2 pt inset complete 38 pt.
+        ui.add_space(if compact { 0.0 } else { t.space_24 + t.space_14 - t.space_10 - t.space_2 });
+    } else {
+        ui.add_space(t.space_8);
+    }
+    let gap = ui.spacing().item_spacing.y;
+    if page {
+        ui.spacing_mut().item_spacing.y = t.space_10;
+    }
+    let result = super::section_count(ui, key, title, true, count, |ui| {
+        if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:section:{title}")) {
+            solidcraft_ui_registry::publish_rect(&format!("prefs:section:{key}"), rect);
+        }
+        ui.spacing_mut().item_spacing.y = if page { t.space_14 } else { t.space_8 };
+        let start = ui.next_widget_position();
+        let result = add(ui);
+        if page {
+            solidcraft_ui_registry::publish_rect(&format!("prefs:section:{key}:body"), Rect::from_min_max(start, ui.min_rect().max));
+        }
+        result
+    });
+    ui.spacing_mut().item_spacing.y = gap;
+    result
+}
+
+/// Full-width settings detail group. Container owns its surface; content cannot shrink the card.
+pub fn settings_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+    let t = Tokens::get();
+    let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
+    let frame = settings_card_frame(ui).inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8));
+    container.show_frame(ui, frame, ui.max_rect(), |ui| {
+        ui.set_min_width(dimension(ui.available_width()));
+        add(ui)
+    })
+}
+
+/// The theme browser and its options panel share exactly the same themed backing.
+pub(super) fn settings_card_frame(ui: &Ui) -> egui::Frame {
+    super::Container::new(ui.ctx(), super::Surface::Navigation).frame(ui.ctx(), Tokens::get().dialog_footer, crate::frame::Side::Left)
+}
+
+/// Controls and one explanatory specimen side by side, stacked on narrow viewports.
+pub fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R, preview: impl FnOnce(&mut Ui, R)) {
+    if super::settings_search::suppress_chrome(ui) {
+        let _ = controls(ui);
+        return;
+    }
+    let t = Tokens::get();
+    let preview_width = t.form_card_width - t.space_8;
+    let gap = t.space_16 + t.space_4;
+    let width = dimension(ui.available_width());
+    if width < preview_width * 2.0 + gap {
+        let state = controls(ui);
+        preview(ui, state);
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            let state = ui
+                .allocate_ui_with_layout(vec2(width - preview_width - gap, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing.x = t.space_6;
+                    controls(ui)
+                })
+                .inner;
+            ui.allocate_ui_with_layout(vec2(preview_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| preview(ui, state));
+        });
+    }
+}
+
+/// Compact informational state badge for settings; never an interactive control.
+pub fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
+    if super::settings_search::suppress_chrome(ui) && !super::settings_search::texts_hit(ui, &[text]) {
+        return;
+    }
+    let t = Tokens::get();
+    if super::settings_page_active(ui) {
+        super::settings_state_badge(ui, text, if warning { super::SettingsBadgeTone::Warning } else { super::SettingsBadgeTone::Success });
+        return;
+    }
+    let ink =
+        if warning { if solidcraft_theme::contrast_ratio(t.warning, t.dialog_body) >= 4.5 { t.warning } else { t.form_ink } } else { t.form_success };
+    let fill = if warning { t.warning.gamma_multiply(0.1) } else { t.form_success_fill };
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), crate::type_face::semibold(t.font_small), ink);
+    let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_16, t.space_24), Sense::hover());
+    ui.painter().rect_filled(r, t.radius_xl, fill);
+    ui.painter().galley(r.center() - galley.size() / 2.0, galley, ink);
+}
+
+pub use super::preferences_figure_data::{
+    paint_select_bodies, paint_select_faces_edges, paint_sketch_conflict, paint_sketch_exit_keep, paint_sketch_exit_previous,
+    paint_sketch_exit_unless_turned, paint_sketch_guides, paint_sketch_hide_glyphs, paint_sketch_state_icons,
+};
+
+#[derive(Clone, Copy)]
+pub enum PreferenceFigure {
+    #[cfg(any(test, feature = "test-support"))]
+    Pivot(usize),
+    Quality(usize),
+    Antialiasing(u32),
+    ContactShading(bool),
+    UpAxis(bool),
+}
+
+/// Reusable illustrated radio card. Width comes from the figure, and wrapping is owned by
+/// the parent; labels remain accessible even when translations need an ellipsis.
+pub fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected: bool, enabled: bool, figure: PreferenceFigure) -> Response {
+    if super::settings_search::querying(ui) {
+        let show = match note {
+            Some(note) => super::settings_search::visible(ui, &[label, note]),
+            None => super::settings_search::visible(ui, &[label]),
+        };
+        if !show {
+            return super::settings_search::hidden_response(ui);
+        }
+    }
+    let t = Tokens::get();
+    let width = match figure {
+        PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0 + t.space_16,
+        PreferenceFigure::UpAxis(_) => t.space_24 * 6.0 + t.space_6,
+        _ => t.form_label_width + t.space_24 * 2.0 + t.space_6,
+    };
+    let preview_height = match figure {
+        PreferenceFigure::UpAxis(_) => t.space_24 * 4.0 + t.space_2,
+        PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0,
+        _ => t.space_24 * 3.0 + t.space_3,
+    };
+    let label_height = if matches!(figure, PreferenceFigure::ContactShading(_)) { t.space_16 * 2.0 } else { t.space_16 };
+    let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
+    let enabled = enabled && ui.is_enabled();
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(width.min(dimension(ui.available_width())), height), if enabled { Sense::click() } else { Sense::hover() });
+    let hover = enabled && response.hovered();
+    let ink = if !enabled {
+        t.form_dim
+    } else if selected {
+        t.selected_ink
+    } else {
+        t.form_ink
+    };
+    ui.painter().rect(
+        rect,
+        t.radius_lg,
+        if selected {
+            t.selected_bg
+        } else if hover {
+            t.hover
+        } else {
+            t.control_fill
+        },
+        if selected { Stroke::new(2.0, t.form_primary) } else { t.control_border_stroke(t.control_border) },
+        egui::StrokeKind::Inside,
+    );
+    let mut preview = Rect::from_min_size(rect.min + vec2(t.space_6, t.space_6), vec2((rect.width() - t.space_12).max(0.0), preview_height));
+    if matches!(figure, PreferenceFigure::Antialiasing(_)) {
+        preview = Rect::from_center_size(preview.center(), vec2(preview.height(), preview.height()));
+    }
+    let figure_rect = if matches!(figure, PreferenceFigure::UpAxis(_)) {
+        Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0))
+    } else {
+        preview
+    };
+    paint_preference_figure(ui.painter(), figure_rect, figure, enabled);
+    let label_rect =
+        Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
+    centred_text_rows(
+        ui.painter(),
+        label_rect,
+        label,
+        if selected { crate::type_face::semibold(t.font_label) } else { FontId::proportional(t.font_label) },
+        ink,
+        if matches!(figure, PreferenceFigure::ContactShading(_)) { 2 } else { 1 },
+    );
+    if let Some(note) = note {
+        centred_text(
+            ui.painter(),
+            Rect::from_min_size(pos2(label_rect.left(), label_rect.bottom()), vec2(label_rect.width(), t.space_16)),
+            note,
+            FontId::proportional(t.font_small),
+            t.form_dim,
+        );
+    }
+    if selected {
+        let centre = pos2(rect.right() - t.space_6 - t.space_8, rect.top() + t.space_6 + t.space_8);
+        ui.painter().circle_filled(centre, t.space_8, t.form_primary);
+        let ink = t.on_accent;
+        ui.painter().line_segment([centre + vec2(-t.space_4, 0.0), centre + vec2(-t.space_2, t.space_2)], Stroke::new(2.0, ink));
+        ui.painter().line_segment([centre + vec2(-t.space_2, t.space_2), centre + vec2(t.space_4, -t.space_3)], Stroke::new(2.0, ink));
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, label));
+    solidcraft_ui_registry::publish_target(&format!("prefs:option:{label}"), rect);
+    let response = response.backing_on_hover_text(label);
+    if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
+}
+
+pub fn centred_text(p: &egui::Painter, rect: Rect, label: &str, font: FontId, ink: Color32) {
+    centred_text_rows(p, rect, label, font, ink, 1);
+}
+
+fn centred_text_rows(p: &egui::Painter, rect: Rect, label: &str, font: FontId, ink: Color32, rows: usize) {
+    let mut job = egui::text::LayoutJob::simple(label.to_owned(), font, ink, rect.width());
+    job.wrap.max_rows = rows;
+    job.halign = egui::Align::Center;
+    let galley = p.layout_job(job);
+    p.with_clip_rect(rect).galley(rect.center() - galley.rect.center().to_vec2(), galley, ink);
+}
+
+fn point(r: Rect, x: f32, y: f32) -> Pos2 {
+    pos2(r.left() + r.width() * x, r.top() + r.height() * y)
+}
+
+pub fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
+    if !p.clip_rect().intersects(rect) {
+        return;
+    }
+    let t = Tokens::get();
+    let p = p.with_clip_rect(rect);
+    let alpha = if enabled { 1.0 } else { 0.4 };
+    let accent = t.form_primary.gamma_multiply(alpha);
+    p.rect_filled(rect, t.control_radius, t.viewport_top);
+    t.container_rect(&p, rect, t.control_radius, egui::Color32::TRANSPARENT, t.dialog_rule);
+    match figure {
+        PreferenceFigure::Quality(sides) => {
+            let n = sides.clamp(3, 96);
+            let centre = rect.center();
+            let radius = rect.height() * 0.34;
+            let guide: Vec<_> = (0..=96)
+                .map(|i| {
+                    let a = std::f32::consts::TAU * i as f32 / 96.0;
+                    centre + vec2(a.cos(), a.sin()) * radius
+                })
+                .collect();
+            p.extend(egui::Shape::dashed_line(&guide, t.control_border_stroke(t.control_border), t.space_2, t.space_3));
+            let points = (0..n)
+                .map(|i| {
+                    let a = std::f32::consts::TAU * i as f32 / n as f32;
+                    centre + vec2(a.cos(), a.sin()) * radius
+                })
+                .collect();
+            p.add(egui::Shape::convex_polygon(points, accent.gamma_multiply(0.15), Stroke::new(1.5, accent)));
+        }
+        PreferenceFigure::Antialiasing(samples) => {
+            let n = 10;
+            let s = samples.clamp(1, 8);
+            for y in 0..n {
+                for x in 0..n {
+                    let mut covered = 0;
+                    for sy in 0..s {
+                        for sx in 0..s {
+                            let px = (x as f32 + (sx as f32 + 0.5) / s as f32) / n as f32;
+                            let py = (y as f32 + (sy as f32 + 0.5) / s as f32) / n as f32;
+                            if py > 0.3 + px * 0.35 {
+                                covered += 1;
+                            }
+                        }
+                    }
+                    let cell = Rect::from_min_max(
+                        point(rect, x as f32 / n as f32, y as f32 / n as f32),
+                        point(rect, (x + 1) as f32 / n as f32, (y + 1) as f32 / n as f32),
+                    );
+                    p.rect_filled(cell, 0, t.viewport_top.lerp_to_gamma(accent, covered as f32 / (s * s) as f32));
+                }
+            }
+        }
+        PreferenceFigure::UpAxis(y_up) => super::preferences_figures::paint_orientation(&p, rect, y_up),
+        #[cfg(any(test, feature = "test-support"))]
+        PreferenceFigure::Pivot(pivot) => super::preferences_figures::paint_orbit(&p, rect, pivot),
+        PreferenceFigure::ContactShading(on) => super::preferences_figures::paint_contact_shading(&p, rect, on),
+    }
+}
+
+/// Clockwise rounded boundary shared by dashed outlines and clipped palette specimens.
+pub(super) fn rounded_perimeter(r: Rect, radius: f32) -> Vec<Pos2> {
+    let radius = radius.min(r.width() / 2.0).min(r.height() / 2.0).max(0.0);
+    let corners = [
+        (pos2(r.right() - radius, r.top() + radius), -std::f32::consts::FRAC_PI_2),
+        (pos2(r.right() - radius, r.bottom() - radius), 0.0),
+        (pos2(r.left() + radius, r.bottom() - radius), std::f32::consts::FRAC_PI_2),
+        (pos2(r.left() + radius, r.top() + radius), std::f32::consts::PI),
+    ];
+    corners
+        .into_iter()
+        .flat_map(|(centre, start)| {
+            (0..=8).map(move |step| {
+                let angle = start + std::f32::consts::FRAC_PI_2 * step as f32 / 8.0;
+                centre + vec2(angle.cos(), angle.sin()) * radius
+            })
+        })
+        .collect()
+}
+
+pub use super::preferences_figure_data::{
+    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
+};
+
+#[derive(Clone, Copy)]
+pub struct LayoutPreview {
+    pub compact: bool,
+    pub labels: bool,
+    pub history: usize,
+    pub translucent: bool,
+    pub dialog_left: bool,
+}
+
+/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices;
+/// `note` is the host's hover text for it.
+pub fn layout_preview(ui: &mut Ui, state: LayoutPreview, note: &str) {
+    super::preferences_figures::paint_layout(ui, state, note);
+}
+
+/// Font picker and auxiliary actions share one line, with the specimen below.
+pub fn settings_font_row(ui: &mut Ui, label: &str, mut add: impl FnMut(&mut Ui, usize)) {
+    let t = Tokens::get();
+    if dimension(ui.available_width()) < t.form_label_width + t.space_24 * 14.0 {
+        super::settings_form(ui, t.form_label_width, |ui| {
+            let shown = super::row(ui, label, |ui| {
+                add(ui, 0);
+                ui.is_visible()
+            });
+            if shown {
+                super::below_row_control(ui, label, ui.available_width(), |ui| {
+                    ui.horizontal_wrapped(|ui| add(ui, 1));
+                });
+            }
+        });
+        return;
+    }
+    super::settings_form(ui, t.form_label_width, |ui| {
+        super::row(ui, label, |ui| {
+            let actions = t.space_24 * 8.0 + t.space_8;
+            let picker = (dimension(ui.available_width()) - actions - t.space_8).max(t.space_24);
+            ui.allocate_ui_with_layout(vec2(picker, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| add(ui, 0));
+            ui.add_space(t.space_4);
+            add(ui, 1);
+        });
+    });
+}
+
+/// Natural-width dim text, for inline suffixes and metadata without a full-width note row.
+pub fn settings_inline_note(ui: &mut Ui, text: &str) {
+    if super::settings_search::suppress_chrome(ui) {
+        return;
+    }
+    let t = Tokens::get();
+    let galley = if super::settings_page_active(ui) && ui.layout().main_wrap() {
+        ui.painter().layout(text.to_owned(), FontId::proportional(t.font_body), t.form_dim, dimension(ui.max_rect().width()))
+    } else {
+        ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim)
+    };
+    let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
+    ui.painter().galley(r.min, galley, t.form_dim);
+}
+
+/// Framed font specimen, inheriting the chosen application font and its fallback glyphs.
+pub fn font_specimen(ui: &mut Ui, text: &str) {
+    if super::settings_search::suppress_chrome(ui) {
+        return;
+    }
+    let t = Tokens::get();
+    let (r, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.control_height + t.space_10), Sense::hover());
+    t.container_rect(ui.painter(), r, t.control_radius, t.control_fill, t.dialog_rule);
+    paint_text(ui, r.shrink2(vec2(t.space_12, 0.0)), text, FontId::proportional(t.font_button), t.form_ink, false);
+}
+
+/// Intrinsically sized segments, retaining the usual row label for accessibility and automation.
+pub fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, options: &[&str]) -> bool {
+    if super::settings_search::suppress_chrome(ui)
+        && !super::settings_search::texts_hit(ui, &[label])
+        && !super::settings_search::texts_hit(ui, options)
+    {
+        return false;
+    }
+    let t = Tokens::get();
+    let widest = options.iter().map(|s| super::ContentWidth::name(ui, s)).fold(0.0, f32::max);
+    let width = ((widest + t.space_16) * options.len() as f32).min(dimension(ui.available_width()));
+    ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.scope_builder(
+            egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(super::layout::LABEL, label.to_owned())),
+            |ui| super::segmented(ui, selected, options, super::Segments { compact: true, ..Default::default() }),
+        )
+        .inner
+    })
+    .inner
+}

@@ -12,6 +12,7 @@ use solidcraft_doc::joints::{Coupling, JointExprs, JointKind, Snap};
 use solidcraft_geom::Vec3Geom;
 
 use super::check::whole;
+use super::component::OccurrencePath;
 use super::motion::require;
 use super::types::{AngleExpr, IdOrName, LengthExpr, present};
 use crate::cmd::joints::{MAX_FACE_NAME, MAX_REACH_JOINTS};
@@ -38,7 +39,7 @@ impl JsonSchema for JointOriginParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
+            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with path?, z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
                 {"type": "object"}
@@ -360,7 +361,8 @@ impl JsonSchema for JointOriginArg {
     fn schema_name() -> Cow<'static, str> {
         "JointOriginArg".into()
     }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let path = generator.subschema_for::<OccurrencePath>();
         // `params::vec3` reads [x, y, z] and {x, y, z}.
         let forms = [
             json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}),
@@ -376,6 +378,7 @@ impl JsonSchema for JointOriginArg {
                     "type": "object",
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
+                        "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
                         "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
@@ -652,6 +655,10 @@ pub struct DriveJointParams {
     /// Default: false.
     #[serde(default)]
     pub continuous: Option<bool>,
+    /// Where a contact check runs past its sample or work budget: false fails the drive; true
+    /// stops it at the last placement checked clear (`stopped_by_budget`). Default: false.
+    #[serde(default)]
+    pub stop_at_budget: Option<bool>,
 }
 
 fn drive_required(schema: &mut Schema) {
@@ -683,7 +690,15 @@ impl<'de> Deserialize<'de> for DriveJointParams {
             let value = if values.is_some() { None } else { given(&m, "value", JointValue::read)? };
             (values, value)
         };
-        Ok(DriveJointParams { joint, values, value, index, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        Ok(DriveJointParams {
+            joint,
+            values,
+            value,
+            index,
+            quiet: flag(&m, "quiet")?,
+            continuous: flag(&m, "continuous")?,
+            stop_at_budget: flag(&m, "stop_at_budget")?,
+        })
     }
 }
 
@@ -1218,6 +1233,10 @@ pub struct JointSide {
     pub component_name: String,
     /// The occurrence names from the top of the assembly down, with `/` between.
     pub path: String,
+    /// The occurrences inside it down to the part the snap is on, by id: set for an origin on a
+    /// part in a later copy of a sub-assembly. Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inside: Vec<u64>,
     /// The snap as saved, in the component's coordinates.
     #[schemars(with = "SnapShape")]
     pub snap: Snap,
@@ -1340,6 +1359,15 @@ pub struct LoopStop {
     pub fraction: f64,
 }
 
+/// Where a contact check's budget stopped a drive (`stop_at_budget`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BudgetStop {
+    /// Which budget ran out: `samples`, `work` or `intersections`.
+    pub budget: String,
+    /// How far from the start to the asked-for values the drive got (0 to 1).
+    pub fraction: f64,
+}
+
 /// What `joint.drive` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DriveJointResult {
@@ -1356,6 +1384,9 @@ pub struct DriveJointResult {
     pub stopped_by_contact: Option<ContactStop>,
     /// The closed loop that stopped the drive short; `null` otherwise.
     pub stopped_by_loop: Option<LoopStop>,
+    /// With `stop_at_budget`: the budget that stopped the drive short; left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_by_budget: Option<BudgetStop>,
     /// Whether any occurrence moved.
     pub moved: bool,
     /// The values asked for, in the same form as `values`.
@@ -1769,6 +1800,12 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OccurrenceKey")]
     pub occurrence: Option<OccurrenceKey>,
+    /// The placement picked on: occurrence ids from the top of the assembly down, ending at
+    /// `occurrence`, so a part in a sub-assembly placed more than once is on that copy. Default:
+    /// the occurrence's first placement, or with no occurrence the placement nearest the pick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<OccurrencePath>")]
+    pub path: Option<Value>,
     /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
     /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1891,6 +1928,10 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
+        // The path is read first, by the same rule `occurrence.move` uses; `null` is left out.
+        if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
+            OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
+        }
         // A face or circle given by its name: the first of the two that is text.
         let named = ["face", "circle"].into_iter().find_map(|k| m.get(k).and_then(Value::as_str).map(|n| (k, n)));
         if let Some((what, name)) = named {
@@ -1960,6 +2001,8 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
         Ok(MakeJointOriginParams {
             name: text(&m, "name")?,
             occurrence: m.get("occurrence").and_then(|v| OccurrenceKey::read(v).ok()),
+            // Read by the handler's path parser, which `occurrence.move` shares.
+            path: raw("path"),
             face: raw("face"),
             circle: raw("circle"),
             edge: raw("edge"),

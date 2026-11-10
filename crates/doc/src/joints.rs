@@ -216,8 +216,33 @@ impl Snap {
 /// A joint origin: a snap on an occurrence's component (occurrence 0 = the root design).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct JointOrigin {
+    /// What the origin is on: the occurrence a joint at it holds or moves.
     pub occurrence: u64,
+    /// The occurrences below `occurrence`, one per level, down to the part whose geometry `snap`
+    /// names (its [`JointOrigin::part`]). Set when that part sits in a sub-assembly placed more
+    /// than once and the origin was picked on another copy than the first: the part's own
+    /// occurrence is shared by every copy, so the origin is on the copy instead (#11426).
+    /// Empty: the snap is on `occurrence`'s own component.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inside: Vec<u64>,
     pub snap: Snap,
+}
+
+impl JointOrigin {
+    /// An origin on `occurrence`'s own component.
+    pub fn new(occurrence: u64, snap: Snap) -> Self {
+        JointOrigin { occurrence, inside: Vec::new(), snap }
+    }
+
+    /// The occurrence whose component the snap's geometry and face names belong to.
+    pub fn part(&self) -> u64 {
+        self.inside.last().copied().unwrap_or(self.occurrence)
+    }
+
+    /// Every occurrence the origin needs: it is lost when any of them goes.
+    pub fn occurrences(&self) -> impl Iterator<Item = u64> + '_ {
+        std::iter::once(self.occurrence).chain(self.inside.iter().copied())
+    }
 }
 
 /// A named joint origin (Joint Origin command), referenced by joints by name.
@@ -800,7 +825,7 @@ fn named_pick(doc: &Document, st: &ModelState, component: u64, pick: Vec3, face:
 /// planar face nearest `pick` (component coordinates; a body moved in from another component
 /// placed by its offset, as a named face is).
 fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -> Result<(Vec3, Vec3)> {
-    let comp = component_of(doc, o.occurrence)?;
+    let comp = component_of(doc, o.part())?;
     let mut best: Option<(f64, &crate::ModelBody, solidcraft_kernel::FaceInfo, Vec3)> = None;
     for b in component_bodies(doc, st, comp) {
         let offset = doc.model_body_offset(b);
@@ -825,8 +850,13 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     })
 }
 
-/// Resolve a joint origin to a frame in its component's coordinates.
+/// Resolve a joint origin to a frame in its component's coordinates (its `occurrence`'s: an
+/// origin with occurrences `inside` is resolved on its part and carried up through them).
 pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
+    if !o.inside.is_empty() {
+        let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
+        return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
+    }
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
@@ -853,12 +883,28 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
     }
 }
 
+/// The transform from an origin's part to its `occurrence`, through the occurrences `inside`
+/// (each placed in the one before). An error when they no longer lead from one to the next.
+fn inside_transform(doc: &Document, o: &JointOrigin) -> Result<Mat> {
+    let lost = || DocError::Invalid("joint origin: its part is no longer in that sub-assembly".into());
+    if o.inside.len() > crate::MAX_PLACEMENT_DEPTH {
+        return Err(lost());
+    }
+    let (mut m, mut component) = (IDENTITY, component_of(doc, o.occurrence)?);
+    for id in &o.inside {
+        let x = doc.occurrences.iter().find(|x| x.id == *id && x.parent == component).ok_or_else(lost)?;
+        m = mat_mul(&m, &x.transform);
+        component = x.component;
+    }
+    Ok(m)
+}
+
 /// A circle-centre snap's cylinder and the end it takes (component coordinates): through its
 /// named face when it names a cylinder, else the cylindrical face at its pick and the end nearer
 /// it, as older builds found them. Any other snap is refused.
 fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Round> {
     let Snap::CircleCenter { pick, face, end, .. } = &o.snap else { return Err(DocError::Invalid("pick a round face".into())) };
-    let comp = component_of(doc, o.occurrence)?;
+    let comp = component_of(doc, o.part())?;
     if let Some(n) = face.as_deref()
         && let Some(r) = face::named_round(doc, st, comp, *pick, n, end.as_deref())?
     {
@@ -889,6 +935,24 @@ fn round_of(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<face::Ro
 /// The cylindrical face of a circle-centre snap (component coordinates).
 fn circle_at(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<solidcraft_kernel::CylinderFace> {
     round_of(doc, st, o).map(|r| r.cylinder)
+}
+
+/// Where a joint origin picked on the placement `path` (occurrence ids from the root) goes: the
+/// deepest occurrence of the path that [`occurrence_world`] places there (every occurrence above
+/// it is its component's first), and the occurrences below it, which the origin is `inside`. A
+/// path through first occurrences only gives its last occurrence and nothing inside, as an
+/// origin was before; an empty path, the root.
+pub fn origin_anchor(doc: &Document, path: &[u64]) -> (u64, Vec<u64>) {
+    let first = |id: &u64| {
+        let component = doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.component);
+        component.and_then(|c| doc.occurrence_of(c)).is_some_and(|f| f.id == *id)
+    };
+    let last = path.len().saturating_sub(1);
+    let k = path.iter().take(last).position(|id| !first(id)).unwrap_or(last);
+    match path.get(k) {
+        Some(anchor) => (*anchor, path.get(k + 1..).unwrap_or_default().to_vec()),
+        None => (0, Vec::new()),
+    }
 }
 
 /// World transform of an occurrence (through its parents).
@@ -2013,7 +2077,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
     let mut resolve = |o: &JointOrigin| -> Result<Mat> {
         let Ok(comp) = component_of(doc, o.occurrence) else { return resolve_origin(doc, st, o) };
         found
-            .entry((comp, format!("{:?}", o.snap)))
+            .entry((comp, format!("{:?}", (&o.inside, &o.snap))))
             .or_insert_with(|| resolve_origin(doc, st, o).map_err(|e| e.to_string()))
             .clone()
             .map_err(DocError::Invalid)
@@ -2393,7 +2457,7 @@ mod tests {
     /// Revolute joints 1…n (joint 1 at `start`, the others at 0) linked 1 → 2 → … → n with
     /// ratio 2, the links stored from the end of the chain; joint 3 limited to ±50.
     pub(super) fn chain(n: u64, start: f64) -> Assembly {
-        let origin = JointOrigin { occurrence: 0, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let origin = JointOrigin::new(0, Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joints = (1..=n)
             .map(|id| Joint {
                 id,
@@ -2468,7 +2532,7 @@ mod tests {
         let back = serde_json::to_value(&l).unwrap();
         assert_eq!(back["coupling"], serde_json::json!({"type": "gear", "ra": 10.0, "rb": "r2 * 2", "internal": true}));
         let picked: Size = serde_json::from_str(r#"{"occurrence": 3, "snap": {"type": "circle_center", "pick": [1, 0, 0]}}"#).unwrap();
-        assert!(matches!(picked, Size::Circle(JointOrigin { occurrence: 3, snap: Snap::CircleCenter { .. } })));
+        assert!(matches!(picked, Size::Circle(JointOrigin { occurrence: 3, snap: Snap::CircleCenter { .. }, .. })));
         let screw: Coupling = serde_json::from_str(r#"{"type": "screw", "pitch": 1.5, "reverse": true}"#).unwrap();
         assert_eq!(screw, Coupling::Screw { pitch: Size::Length(1.5), reverse: true });
     }

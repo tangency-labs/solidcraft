@@ -709,7 +709,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 }
 
                 bez = crv_trim(&bez, span_ivl.min(), span_ivl.max())
-                    .map_err(SolidError::nl_ser(OP_TESS))?;
+                    .map_err(SolidError::nurbs_routine(OP_TESS))?;
             }
 
             // control-polygon properties while checking all tolerances
@@ -773,7 +773,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             // split pBez into two equal halves: the stack holds [max, min]
             let mut stack: Vec<Nurb> = Vec::new();
             let (bez_min, bez_max) = if is_bspline {
-                crv_split(&bez, span_ivl.mid()).map_err(SolidError::nl_ser(OP_TESS))?
+                crv_split(&bez, span_ivl.mid()).map_err(SolidError::nurbs_routine(OP_TESS))?
             } else {
                 split_segment(k, &bez, &self.curve)?
             };
@@ -855,7 +855,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
                 // split the current span in half, children onto the stack
                 let (bez_min, bez_max) = if is_bspline {
-                    crv_split(&top, ivl.mid()).map_err(SolidError::nl_ser(OP_TESS))?
+                    crv_split(&top, ivl.mid()).map_err(SolidError::nurbs_routine(OP_TESS))?
                 } else {
                     split_segment(k, &top, &self.curve)?
                 };
@@ -1523,7 +1523,7 @@ pub fn create_bezier_segment_block(
         if span_count < 1 {
             return Err(SolidError::sm_err(OP_BLOCK));
         }
-        create_bez_segments(n).map_err(SolidError::nl_ser(OP_BLOCK))
+        create_bez_segments(n).map_err(SolidError::nurbs_routine(OP_BLOCK))
     } else {
         // the knot vector matches CalculateContinuities (status ignored)
         let (knots, _) = knots_ignoring_status(curve.knots_with_status(k, None))?;

@@ -15,7 +15,7 @@ The UI is thin: it reads engine state and acts through `app.run(id, params)` or 
 
 ## Controls and colour
 - Colours, typography, dimensions and spacing come from `theme::Tokens` (`crates/ui-egui/src/theme.rs`). No literal colours in feature code.
-- Sliders only through `ui_kit::slider`. Form rows use `row`, `expr_row`, `text_row`, `choice_row` and `count_row` from `crate::ui_kit` (`crates/ui-egui/src/ui_kit/`).
+- Sliders only through `ui_kit::slider`. Form rows use `row`, `expr_row`, `text_row`, `choice_row` and `count_row` from `crate::ui_kit` (`crates/ui-kit/src/`).
 - Confirmations use `ui_kit::Confirm`; the old `Prompt` element is gone.
 
 ## One set of camera controls

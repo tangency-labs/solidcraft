@@ -261,7 +261,11 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
+    /// The frame's input before egui reads it: the release of a press handed to a window move
+    /// or resize, the macOS menu and full-screen fixes, the 3D mouse, then the app's own hook.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // First: the release of a press the last frame handed to a window move or resize (#13334).
+        solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
@@ -844,16 +848,10 @@ fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
 }
 
-/// The viewport scene's sample count: the app's anti-aliasing (the window's pass is 1x), clamped
-/// by the backend's policy (OpenGL renders 1x, see `effective_msaa_samples`). A count the device
-/// cannot render with falls back to the supported default.
+/// The viewport scene's sample count, by the rule the web app shares
+/// (`solidcraft_ui_egui::gpu::scene_samples`).
 fn scene_samples(backend: eframe::wgpu::Backend, samples: u32, supported: &[u32]) -> u32 {
-    let requested = eframe::egui_wgpu::effective_msaa_samples(backend, samples.max(1));
-    if requested <= 1 || supported.is_empty() || supported.contains(&requested) {
-        requested
-    } else {
-        supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
-    }
+    solidcraft_ui_egui::gpu::scene_samples(backend, samples, supported)
 }
 
 /// Keep the default until the installed renderer's startup check proves a fallback is needed.
@@ -936,6 +934,10 @@ fn main() -> eframe::Result {
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
     solidcraft_ui_egui::i18n::install();
+    solidcraft_ui_egui::icon_svg::install();
+    solidcraft_ui_egui::workspace::install_tabs();
+    solidcraft_ui_egui::navigation_slots::install();
+    solidcraft_ui_egui::theme::install_builtin_themes();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with
@@ -1229,7 +1231,7 @@ fn main() -> eframe::Result {
                 app.session.undo.clear();
                 // Built straight into the session, so nothing asked for a fit: frame it at the
                 // home view as any opened design is (#9195). The fit waits for the first layout.
-                app.cam.set_view(solidcraft_engine::render::StandardView::Iso);
+                app.cam.set_view(solidcraft_viewport::StandardView::Iso);
                 app.fit_view();
             }
             // Lock files next to open designs: a design open on another computer says so (#5467),
@@ -1346,7 +1348,10 @@ fn startup_step(step: &'static str, detail: &str) {
 /// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+    // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
+    // `WgpuConfiguration::default()` is HIGH_THROUGHPUT (two frames queued), which added a frame
+    // of input-to-display latency to every pan, orbit and drag.
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let env_set = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
@@ -1360,7 +1365,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let indirect = std::env::var(startup::INDIRECT_VALIDATION_ENV).ok();
         setup.instance_descriptor.flags = startup::window_instance_flags(setup.instance_descriptor.flags, intel_mac, indirect.as_deref());
         // Never a `dxcompiler.dll` another program put on PATH (#6756).
-        setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
+        setup.instance_descriptor.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
         let environment = std::env::var("WGPU_ADAPTER_NAME").ok();
         let adapter = graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string));
         startup::configure_adapter(setup, cpu, environment, adapter);

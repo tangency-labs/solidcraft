@@ -33,7 +33,7 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");
+    assert_eq!(keys.len(), 104, "Appearance includes its two system-theme slots");
     for key in [
         "nav",
         "mouse_gestures",
@@ -703,7 +703,12 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
 
     h.step(&json!({"choose_file":"Laptop.solidcraft-profile.json"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile:import"}})).unwrap();
-    h.frames(6);
+    for _ in 0..600 {
+        if h.app.settings_profiles.names() == ["Travel", "Desk", "Laptop"] {
+            break;
+        }
+        h.frames(1);
+    }
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk", "Laptop"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse, "import keeps the active settings");
@@ -860,6 +865,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "sketch_face_activates_part",
         "sketch_open_look_at",
         "sketch_recent_snap",
+        "sketch_snap_to_visible_grid",
         "sketch_state_icons",
         "sketch_tab_always",
         "sketch_tracking_guides",
@@ -897,7 +903,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 103);
+    assert_eq!(expected.len(), 104);
     assert_eq!(actual, expected);
 }
 

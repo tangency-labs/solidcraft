@@ -940,7 +940,7 @@ impl Bezier {
             _ => {
                 let nurb = curve_nurb(curve)?;
                 let mut out = Vec::new();
-                for seg in create_bez_segments(&nurb).map_err(SolidError::nl_ser(OP))? {
+                for seg in create_bez_segments(&nurb).map_err(SolidError::nurbs_routine(OP))? {
                     let (Some(&k0), Some(&k1)) = (seg.knots().first(), seg.knots().last()) else {
                         continue;
                     };

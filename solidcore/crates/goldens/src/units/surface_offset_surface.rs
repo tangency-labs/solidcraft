@@ -731,7 +731,9 @@ fn param_of(v: u8) -> Result<SurfParamType, HarnessError> {
 /// The `SmStatus` of a Rust error.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         // SM_ERR_INVALID_INPUT (the zero-vector status of Unitize)
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,
