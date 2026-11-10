@@ -689,8 +689,7 @@ fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_compo
 fn step_source_link_is_recorded_saved_relative_updated_and_broken() {
     let dir = temp_dir("source-link");
     let path = part_file(&dir, "bracket");
-    let mut s = Session::default();
-    s.param_check = crate::schema::ParamCheck::Strict;
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Default::default() };
     let inserted = run(&mut s, "file.insert_step", json!({"path": path, "up": "y"}));
     let comp = inserted["component"].as_u64().unwrap();
     let feature = inserted["feature"].as_u64().unwrap();

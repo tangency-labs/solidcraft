@@ -1302,8 +1302,7 @@ fn step_and_component_link_schema_keys_and_replies() {
         let schema = spec.output.unwrap()();
         assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{id}: {reply}");
     }
-    let mut s = crate::Session::default();
-    s.param_check = ParamCheck::Strict;
+    let mut s = crate::Session { param_check: ParamCheck::Strict, ..Default::default() };
     for (id, params) in [
         ("file.insert_step", json!({"path": "part.step", "link": "yes"})),
         ("file.insert_step", json!({"path": "part.step", "unknown": true})),
