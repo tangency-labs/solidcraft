@@ -749,3 +749,64 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
 }
+
+/// The Move dialog on the 20 × 30 × 10 box with the triad drawn, and the screen point of a handle.
+fn move_triad_fixture() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    h.frames(3);
+    h
+}
+
+fn pointer_button(p: [f64; 2], pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos: egui::pos2(p[0] as f32, p[1] as f32),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    }
+}
+
+fn pointer_at(p: [f64; 2]) -> egui::Event {
+    egui::Event::PointerMoved(egui::pos2(p[0] as f32, p[1] as f32))
+}
+
+fn box_label(h: &mut crate::scenario::Harness) -> Option<&'static str> {
+    h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0)
+}
+
+/// A press and release on an arrow, with no drag between, puts the canvas box on that arrow's value,
+/// and moves nothing.
+#[test]
+fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
+    // The press and the release in frames of their own, and both in one frame (input queued while
+    // the window is busy arrives together, #8265), there with the pointer then moved off the triad.
+    for (handle, label, one_frame, off) in [
+        ("y", "Y", false, false),
+        ("z", "Z", false, false),
+        ("x", "X", false, false),
+        ("y", "Y", true, false),
+        ("z", "Z", true, false),
+        ("y", "Y", true, true),
+    ] {
+        let mut h = move_triad_fixture();
+        assert_eq!(box_label(&mut h), Some("X"), "the box starts on X");
+        let at = h.at(&json!({"gizmo": handle})).unwrap();
+        h.frame_with(vec![pointer_at(at)]);
+        if off {
+            let away = h.at(&json!({"gizmo": "ball"})).map(|b| [b[0] - 3.0 * (at[0] - b[0]), b[1] - 3.0 * (at[1] - b[1])]).unwrap();
+            h.frame_with(vec![pointer_button(at, true), pointer_button(at, false), pointer_at(away)]);
+        } else if one_frame {
+            h.frame_with(vec![pointer_button(at, true), pointer_button(at, false)]);
+        } else {
+            h.frame_with(vec![pointer_button(at, true)]);
+            h.frame_with(vec![pointer_button(at, false)]);
+        }
+        h.frames(2);
+        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow (one frame: {one_frame}, off: {off})");
+        let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
+        assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
+    }
+}

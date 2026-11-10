@@ -11,13 +11,12 @@ use crate::vec::VecExt as _;
 use std::collections::HashMap;
 
 use solidcore::Vec3;
-use solidcore::eval::plan::EvalSurface;
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
 /// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `poles`: which
 /// nodes are poles, asked once per node ([`Poles`]).
-pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
+pub(crate) fn refine(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
     if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
         return;
     }
@@ -114,10 +113,10 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], u
 /// Which parameter directions the surface is collapsed along at each node of a face's
 /// triangulation (within `reach`): a property of the node's parameters, so it is asked once per
 /// node however many triangles, sides and rounds of refinement and flipping look at it. Ported
-/// from #13559, which did the same for solidcore-tess's own planner.
+/// from #13559, which did the same for solidcore-tess's own planner; the question itself is the
+/// kernel's classifier's, asked once per iso-line ([`super::poles::Face::pole`]).
 pub(crate) struct Poles<'a> {
-    s: &'a EvalSurface,
-    dom: super::uv::Domain,
+    s: &'a super::poles::Face,
     reach: f64,
     /// The answers so far, by the node's parameters bit for bit.
     flags: std::cell::RefCell<HashMap<[u64; 2], [bool; 2]>>,
@@ -128,8 +127,8 @@ pub(crate) struct Poles<'a> {
 
 impl<'a> Poles<'a> {
     /// The poles of `s`, a node within `reach` mm of one taken as one.
-    pub(crate) fn new(s: &'a EvalSurface, reach: f64) -> Self {
-        Poles { s, dom: super::uv::domain(s), reach, flags: std::cell::RefCell::new(HashMap::new()), #[cfg(test)] asked: std::cell::Cell::new(0) }
+    pub(crate) fn new(s: &'a super::poles::Face, reach: f64) -> Self {
+        Poles { s, reach, flags: std::cell::RefCell::new(HashMap::new()), #[cfg(test)] asked: std::cell::Cell::new(0) }
     }
 
     /// Whether each direction is collapsed at the node of parameters `q`.
@@ -140,7 +139,7 @@ impl<'a> Poles<'a> {
         }
         #[cfg(test)]
         self.asked.set(self.asked.get() + 2);
-        let f = [0, 1].map(|d| super::uv::degenerate_within(self.s, &self.dom, q, d, self.reach));
+        let f = [0, 1].map(|d| self.s.pole(q, d, self.reach));
         self.flags.borrow_mut().insert(key, f);
         f
     }
@@ -224,7 +223,7 @@ const MIN_FLIP_ANGLE: f64 = 1e-3;
 /// in (u, v) and against the surface normal (nothing folds), and the new side and the new
 /// triangles' middles stay within `tol` of the surface, or no farther than the old side's middle.
 /// Sides with one triangle (the face's boundary) are never flipped.
-pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
+pub(crate) fn flip(s: &super::poles::Face, tol: f64, poles: &Poles, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
     if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
         return;
     }
@@ -361,6 +360,7 @@ pub(crate) fn flip(s: &EvalSurface, tol: f64, poles: &Poles, fixed: &[Vec3], uv:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::eval::plan::EvalSurface;
 
     /// Refining and flipping a coarse patch of a cylinder (every sag over the tolerance, so the
     /// nodes are looked at by many triangles, sides and rounds) asks the pole question once per
@@ -391,6 +391,7 @@ mod tests {
                 tris.push([a, d, b]);
             }
         }
+        let s = super::super::poles::Face::new(s, 0.0);
         let poles = Poles::new(&s, 1e-9);
         let start = uv.len();
         refine(&s, 5e-2, &poles, &[], &mut uv, &mut tris, 300);

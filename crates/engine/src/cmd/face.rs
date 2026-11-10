@@ -247,6 +247,38 @@ fn xy(v: Vec2) -> Value {
     json!([v.x, v.y])
 }
 
+/// The picked points split into runs of coplanar, equally oriented faces of one body, in the
+/// order each run is first picked. Every pick is resolved against the body as it is now.
+pub(super) fn face_groups(s: &Session, points: &[Vec3], cmd: &str, face_body: Option<&str>) -> Result<Vec<Vec<Vec3>>> {
+    if points.len() > 1024 {
+        return Err(bad(cmd, "faces exceed the 1024-face limit"));
+    }
+    let state = s.model.state();
+    let mut groups: Vec<(String, solidcore_record::Plane, Vec<Vec3>)> = Vec::new();
+    for &point in points {
+        if !point.is_finite() {
+            return Err(bad(cmd, "faces must be finite points"));
+        }
+        let (mesh, index, distance, name) = face_at_in(s, point, face_body)
+            .map_err(|_| bad(cmd, "ambiguous face; specify face_body"))?
+            .ok_or_else(|| bad(cmd, "no body face at a selected point"))?;
+        let body = state.body(&name).ok_or_else(|| bad(cmd, "selected body disappeared"))?;
+        let plane = body.body.planar_face(index as usize).ok_or_else(|| bad(cmd, "faces must be planar"))?;
+        if distance > (mesh.bounds().diagonal() * 1e-3).max(1e-3) * 10.0 {
+            return Err(bad(cmd, "no body face at a selected point"));
+        }
+        let tolerance = (body.body.size() * 1e-9).max(1e-8);
+        match groups
+            .iter_mut()
+            .find(|(n, base, _)| *n == name && base.normal().dot(plane.normal()) >= 1.0 - 1e-9 && base.height(plane.origin).abs() <= tolerance)
+        {
+            Some((_, _, run)) => run.push(point),
+            None => groups.push((name, plane, vec![point])),
+        }
+    }
+    Ok(groups.into_iter().map(|(_, _, run)| run).collect())
+}
+
 /// Coplanar faces share one linked profile sketch and one Extrude feature. Resolve every
 /// pick before editing the document, so later picks never search an already modified body.
 pub(super) fn sketch_of_faces(s: &mut Session, points: &[Vec3], cmd: &str, face_body: Option<&str>) -> Result<(u64, Vec<Vec2>, String)> {
