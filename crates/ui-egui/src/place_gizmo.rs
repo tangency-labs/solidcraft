@@ -15,7 +15,7 @@
 //! [`spec`] picks the file by the dialog kind. The handles are published as `<name>:position` and
 //! `<name>:rotate` for `ui.handles`.
 //!
-//! The handles are behind the `placement_handles` preference (Preferences > Design > Placement), off by
+//! The handles are behind the `placement_handles` preference (Preferences > Tools > Placement handles), off by
 //! default: off, a feature is placed by its click only, as before, and its Position input takes faces
 //! only. A Single hole's markers (#6818) stay behind Create Hole › Move holes by clicking or dragging
 //! instead, as the hole's own handle was; each tool's [`Spec::serves`] says what turns it on.
@@ -28,6 +28,7 @@
 mod boss;
 mod hole;
 mod look;
+mod primitive;
 mod rest;
 mod snap_fit;
 
@@ -187,10 +188,16 @@ pub(crate) fn one(frame: Option<(Vec3, Vec3)>) -> Vec<Place> {
     frame.map(|(base, n)| Place { key: 0, base, n }).into_iter().collect()
 }
 
-/// Are the shared handles on (Preferences > Design > Placement handles)? The gate of every
+/// Are the shared handles on (Preferences > Tools > Placement handles)? The gate of every
 /// tool but the hole, whose markers keep the hole's own setting.
 pub(crate) fn on(app: &SolveApp) -> bool {
     app.preferences.placement_handles
+}
+
+/// A pick the shared handles take as a move: a Cylinder held by one reference edge moves along it
+/// (see `primitive::pick_held`). Only with the handles on; off, the pick is the dialog's, as before.
+pub(crate) fn pick_held(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
+    on(app) && primitive::pick_held(app, d, sel)
 }
 
 /// The face place a click with `hits` would add to the dialog's first input: snapped to a sketch
@@ -218,6 +225,7 @@ pub(crate) struct Turn {
 static TOOLS: &[&Spec] = &[
     &boss::SPEC,
     &hole::SPEC,
+    &primitive::SPEC,
     &rest::SPEC,
     &snap_fit::SPEC,
 ];
