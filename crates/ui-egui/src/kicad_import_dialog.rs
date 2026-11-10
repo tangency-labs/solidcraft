@@ -23,8 +23,9 @@ pub struct Dialog {
 }
 
 impl Dialog {
+    /// The window for `path`, every option at its default.
     pub fn new(path: &str) -> Dialog {
-        Dialog { path: path.to_string(), components: true, copper: KicadCopper::None, silkscreen: true, thickness: 1.6, color: [13, 84, 46] }
+        Dialog { path: path.to_string(), components: true, copper: KicadCopper::default(), silkscreen: true, thickness: 1.6, color: [13, 84, 46] }
     }
 
     /// The `doc.open` parameters, without the path.
@@ -67,7 +68,7 @@ fn board_thickness(path: &str) -> Option<f64> {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut dialog) = app.kicad_import.take() else { return };
 
-    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_kicad_import"), "import", solidcraft_ui_text::tr_label("Open KiCad PCB"))
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::unique("sc_kicad_import"), "import", solidcraft_ui_text::tr_label("Open KiCad PCB"))
         .cards(2.0)
         .fields()
         .actions(solidcraft_ui_text::tr("Open"), solidcraft_ui_text::tr("Cancel"), None)
@@ -257,7 +258,7 @@ mod tests {
         h.step(&json!({"widget": "Open"})).unwrap();
         h.settle();
         assert!(h.app.kicad_import.is_none() && !h.app.file_load.busy());
-        let names: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        let names: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
         assert!(names.iter().any(|n| n == "Copper F.Cu"), "{names:?}");
         let _ = std::fs::remove_file(path);
     }

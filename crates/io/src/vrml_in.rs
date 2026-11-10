@@ -230,7 +230,8 @@ struct Parser<'a> {
     tokens: Vec<Token<'a>>,
     next: usize,
     nodes: usize,
-    defs: HashMap<String, Node>,
+    /// Each `DEF`'s node and how many nodes its subtree holds, so a `USE` costs what it reuses.
+    defs: HashMap<String, (Node, usize)>,
 }
 
 impl<'a> Parser<'a> {
@@ -268,13 +269,21 @@ impl<'a> Parser<'a> {
         };
         if first.eq_ignore_ascii_case("DEF") {
             let Some(name) = self.word() else { return Ok(None) };
+            let before = self.nodes;
             let node = self.node(depth + 1)?.ok_or_else(|| IoError::Invalid("DEF without a node in VRML model".into()))?;
-            self.defs.insert(name, node.clone());
+            self.defs.insert(name, (node.clone(), self.nodes.saturating_sub(before)));
             return Ok(Some(node));
         }
         if first.eq_ignore_ascii_case("USE") {
             let Some(name) = self.word() else { return Ok(None) };
-            return Ok(self.defs.get(&name).cloned());
+            // A `USE` materializes the whole referenced subtree again, so it costs as many
+            // nodes as the definition held: a file cannot repeat one subtree to blow the limit.
+            let Some((node, size)) = self.defs.get(&name).cloned() else { return Ok(None) };
+            self.nodes = self.nodes.saturating_add(size);
+            if self.nodes > MAX_NODES {
+                return Err(IoError::Invalid(format!("VRML model has more than {MAX_NODES} nodes")));
+            }
+            return Ok(Some(node));
         }
         if first.eq_ignore_ascii_case("PROTO") || first.eq_ignore_ascii_case("EXTERNPROTO") {
             // Skip the body: brackets and braces are balanced, so consume to the end of the node.
@@ -566,12 +575,48 @@ impl Reader {
     fn indexed_triangle_set(&mut self, node: &Node, transform: &Mat) {
         let Some(points) = node.node("coord").and_then(|c| c.numbers("point")) else { return };
         let Some(indices) = node.numbers("index") else { return };
-        let base = self.mesh.positions.len() as u32;
+        let count = points.len() / 3;
+        let mut local = Vec::with_capacity(count);
         for chunk in points.as_chunks::<3>().0 {
-            self.mesh.positions.push(solidcraft_doc::apply_point(transform, Vec3::new(chunk[0], chunk[1], chunk[2])));
+            let p = Vec3::new(chunk[0], chunk[1], chunk[2]);
+            if !p.is_finite() {
+                self.warn("VRML model has a non-finite point");
+                return;
+            }
+            local.push(solidcraft_doc::apply_point(transform, p));
         }
+        if self.mesh.positions.len().saturating_add(local.len()) > MAX_VERTICES {
+            self.warn("VRML model exceeds the vertex limit");
+            return;
+        }
+        let Ok(base) = u32::try_from(self.mesh.positions.len()) else {
+            self.warn("VRML model exceeds the mesh limits");
+            return;
+        };
+        self.mesh.positions.extend(local);
         for tri in indices.as_chunks::<3>().0 {
-            self.mesh.triangles.push([tri[0] as u32 + base, tri[1] as u32 + base, tri[2] as u32 + base]);
+            if self.mesh.triangles.len() >= MAX_TRIANGLES {
+                self.warn("VRML model exceeds the triangle limit");
+                return;
+            }
+            let mut corners = [0u32; 3];
+            let mut bad = false;
+            for (slot, raw) in tri.iter().enumerate() {
+                if !raw.is_finite() || *raw < 0.0 || raw.fract() != 0.0 || *raw as usize >= count {
+                    bad = true;
+                    break;
+                }
+                let Some(corner) = (*raw as u32).checked_add(base) else {
+                    bad = true;
+                    break;
+                };
+                corners[slot] = corner;
+            }
+            if bad {
+                self.warn("VRML model has an out-of-range index");
+                continue;
+            }
+            self.mesh.triangles.push(corners);
         }
     }
 

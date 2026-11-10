@@ -56,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&OPEN_CONTRACT)
         .output(output_schema_for::<OpenResult>)
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"none\" (default: leave the traces out), \"overlay\" (a flat copper surface on the board) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf/.kicad_pro/.kicad_pcb file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ, glTF or KiCad PCB; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); units?: for an STL or OBJ file (see file.insert_mesh); origin?: bool for a mesh file (see file.insert_mesh); folder?: bool for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); history?: features|solids for a FreeCAD file (see file.insert_step); for a KiCad PCB: thickness?: board thickness in mm (default from the board); components?: bool (default true); copper?: \"overlay\" (default: a 0.001 mm copper film on the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); silkscreen?: bool (default true: the silk shapes and text); color?: \"#rrggbb\" or [r, g, b] (board substrate colour); representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); verify?: bool (default false: a design's signature is checked and reported, `signature`) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh); newer_file: {format, reads_up_to, unknown_changes, not_understood, notice} and warnings when a newer SolidCraft saved it: it opens all the same, and what this version can't read is named there and kept by saving"),
     CommandSpec::new("file.insert_step", "Insert STEP", crate::checked!("file.insert_step", insert_step))
         .at("SOLID", "INSERT")
         .icon("import")
@@ -829,7 +829,7 @@ fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
 fn parse_kicad_color(v: &Value) -> Option<[u8; 3]> {
     if let Some(s) = v.as_str() {
         let hex = s.trim().trim_start_matches('#');
-        let expand = |c: u8| (c >> 4) * 17;
+        let expand = |c: u8| c * 17;
         return match hex.len() {
             3 => Some([
                 expand(u8::from_str_radix(hex.get(0..1)?, 16).ok()?),
@@ -868,6 +868,8 @@ fn add_kicad(s: &mut Session, path: &str, name: Option<&str>, options: &solidcra
     let paths = KicadPaths::current();
     let mut load = |model: &str| {
         let resolved = paths.resolve(model, &model_dir).map_err(|e| e.to_string())?;
+        // A board names its models; they follow the same rule as any other path a document names.
+        solidcraft_io::vfs::check_design_path(&resolved, Some(board_path.as_ref())).map_err(|e| e.to_string())?;
         read_kicad_model(&resolved).map_err(|e| format!("{resolved}: {e}"))
     };
     let imported =
@@ -2599,6 +2601,16 @@ mod tests {
         };
         assert!(has_thumbnail(&mut s, "part.3mf"));
         assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
+
+    /// Three-digit hex colours expand one digit per channel, as CSS does: `#fff` is white.
+    #[test]
+    fn a_three_digit_colour_expands_each_digit() {
+        assert_eq!(parse_kicad_color(&json!("#fff")), Some([255, 255, 255]));
+        assert_eq!(parse_kicad_color(&json!("#1a9")), Some([17, 170, 153]));
+        assert_eq!(parse_kicad_color(&json!("#123456")), Some([0x12, 0x34, 0x56]));
+        assert_eq!(parse_kicad_color(&json!([1, 2, 3])), Some([1, 2, 3]));
+        assert_eq!(parse_kicad_color(&json!("#12")), None);
     }
 
     /// While the profiler records, a STEP import's reply carries its own profile: the import's

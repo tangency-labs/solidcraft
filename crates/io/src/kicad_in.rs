@@ -80,9 +80,9 @@ impl KicadRepresentation {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KicadCopper {
     /// Leave the copper out.
-    #[default]
     None,
     /// A flat copper surface on the board, without thickness: an overlay for the board's look.
+    #[default]
     Overlay,
     /// Copper with its real thickness, as mesh bodies.
     Mesh,
@@ -131,7 +131,7 @@ impl Default for KicadOptions {
         KicadOptions {
             thickness: None,
             components: true,
-            copper: KicadCopper::None,
+            copper: KicadCopper::Overlay,
             silkscreen: true,
             color: None,
             representation: KicadRepresentation::default(),

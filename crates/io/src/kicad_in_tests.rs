@@ -302,16 +302,17 @@ fn a_filled_zone_adds_copper_next_to_tracks() {
 }
 
 #[test]
-fn copper_and_silkscreen_are_off_by_default() {
+fn copper_defaults_to_an_overlay_and_silkscreen_to_on() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (gr_line (start 1 1) (end 10 1) (layer "F.SilkS") (width 0.2))
       (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1)))"#;
     let mut load = |_: &str| Err("not used".to_string());
-    let options = KicadOptions { silkscreen: false, ..Default::default() };
-    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
-    assert!(meshes.is_empty(), "only the board would be there");
+    let names: Vec<&str> = meshes.iter().map(|mesh| mesh.name.as_str()).collect();
+    assert!(names.contains(&"Copper F.Cu"), "the default copper overlay is missing: {names:?}");
+    assert!(names.iter().any(|name| name.contains("Silk")), "the default silkscreen is missing: {names:?}");
     assert!(imported.board_step.is_some(), "the board is not a solid");
 }
 

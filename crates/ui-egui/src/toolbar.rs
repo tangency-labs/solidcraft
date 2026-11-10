@@ -406,7 +406,7 @@ impl FileAction {
             Self::New => crate::documents::new_design(app),
             Self::Open => app.pick_open(|app, path| {
                 if let Some(path) = path {
-                    app.open_path_async(&path);
+                    app.open_chosen_file(&path);
                 }
             }),
             Self::Save => save(app),
@@ -2417,7 +2417,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::O => {
                     app.pick_open(|app, path| {
                         if let Some(path) = path {
-                            app.open_path_async(&path);
+                            app.open_chosen_file(&path);
                         }
                     });
                 }

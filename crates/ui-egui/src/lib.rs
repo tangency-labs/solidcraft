@@ -3072,7 +3072,6 @@ impl SolveApp {
 
     /// Open a chosen file: a KiCad board asks for its import options first, anything else opens.
     pub fn open_chosen_file(&mut self, path: &str) {
-        self.home.open = false;
         if solidcraft_engine::io::is_kicad_path(path) {
             kicad_import_dialog::open(self, path);
         } else {
