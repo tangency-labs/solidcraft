@@ -90,22 +90,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("slot_center")
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_POINT_CONTRACT)
-        .output(output_schema_for::<DrawResult>)
-        .params(concat!("center: slot centre, end: one arc centre, width", created_doc!())),
+        .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
+        .params(concat!("center: slot centre, end: one arc centre, width; returns centre_line and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", crate::checked!("sketch.slot.arc_three_point", arc_slot_three))
         .at("SKETCH", "CREATE")
         .icon("arc_slot")
         .enabled(in_sketch)
         .contract(&ARC_SLOT_THREE_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("start, through, end: points on the centre arc, width", created_doc!())),
+        .params(concat!("start, through, end: points on the centre arc, width; returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", crate::checked!("sketch.slot.arc_center", arc_slot_center))
         .at("SKETCH", "CREATE")
         .icon("arc_slot_center")
         .enabled(in_sketch)
         .contract(&ARC_SLOT_CENTER_CONTRACT)
         .output(output_schema_for::<ArcSlotResult>)
-        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
+        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc and middle", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", crate::checked!("sketch.ellipse", ellipse))
         .at("SKETCH", "CREATE")
         .icon("ellipse")
@@ -1160,11 +1160,15 @@ fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.slot.center_point";
     let (c, e) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "end")?);
     let w = width(p, cmd)?;
-    let (out, info) = slot_parts(s, p, cmd, c * 2.0 - e, e, w)?;
-    drawn(out, info)
+    reply(slot_parts(s, p, cmd, c * 2.0 - e, e, w)?)
 }
 
 /// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
+///
+/// Its middle (#7908) is the middle of the construction centre arc: a point on that arc with
+/// construction chords to both cap centres held equal, so it stays halfway along the arc however
+/// the slot is edited or dragged. On the arc's circle equal chords leave two places (the middle
+/// and the point opposite); the solver keeps the one it is drawn at. The middle adds no freedom.
 fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, w: f64) -> Result<Value> {
     let h = w / 2.0;
     if h >= r {
@@ -1176,10 +1180,16 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     let t1 = t0 + sweep;
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
     let mut centre_arc = None;
+    let mut middle = None;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
         let pe = sk.add_point(at(t1, r), None)?;
+        // The middle comes before the side ends: the rank analysis then takes its two
+        // constraints on its own coordinates before the cap tangencies (which hold only to the
+        // solve's accuracy) and counts the slot's freedom as without it. After the centre-line
+        // ends, so `locate` still places the slot by its centre, start and end.
+        let mid = sk.add_point(at(t0 + sweep / 2.0, r), None)?;
         let (os, is) = (sk.add_point(at(t0, r + h), None)?, sk.add_point(at(t0, r - h), None)?);
         let (oe, ie) = (sk.add_point(at(t1, r + h), None)?, sk.add_point(at(t1, r - h), None)?);
         let outer = sk.add_arc(o, at(t0, r + h), at(t1, r + h), [Some(oc), Some(os), Some(oe)], None)?;
@@ -1197,9 +1207,18 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
             cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
         }
+        cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: mid, c: centre })?);
+        let (to_s, to_e) = (sk.add_line_pts(mid, ps, None)?, sk.add_line_pts(mid, pe, None)?);
+        for l in [to_s, to_e] {
+            if let Some(c) = sk.curves.get_mut(l) {
+                c.construction = true;
+            }
+        }
+        cons.push(add_c(sk, ConstraintKind::Equal { a: to_s, b: to_e })?);
+        middle = sk.points.get(mid).map(|q| q.id.clone());
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
-    reply(ArcSlotResult { drawn: drawn_result(out, info), centre_arc })
+    reply(ArcSlotResult { drawn: drawn_result(out, info), centre_arc, middle })
 }
 
 fn arc_slot_three(s: &mut Session, p: &Value) -> Result<Value> {

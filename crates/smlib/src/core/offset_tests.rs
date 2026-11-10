@@ -327,7 +327,7 @@ fn solidcore_case(name: &'static str) -> Got {
             let size = if sheet { area(&body, 1e-8) } else { volume(&body, 1e-8) }.unwrap_or_else(|e| panic!("{name}: size: {e}"));
             let n = counts(&body).unwrap();
             let (rec, _) = native(&to_arrays(&body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-            solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+            solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
             let bx = bounds(&body).unwrap();
             Measured { size, bounds: bx, counts: n, kinds: kinds(&rec) }
         });

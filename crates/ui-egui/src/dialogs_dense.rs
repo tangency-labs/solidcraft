@@ -815,6 +815,20 @@ pub(crate) fn primitive_label(key: &str) -> &str {
     }
 }
 
+/// Cylinder and Sphere take their size as a diameter or a radius (#6609). Switching converts the
+/// size, so the part stays as it is, and OK sends the one shown.
+fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
+    let Some(field) = fields.iter_mut().find(|(k, _)| matches!(*k, "diameter" | "radius")) else { return };
+    let current = usize::from(field.0 == "radius");
+    let mut selected = current;
+    form_row(ui, "Size", |ui| ui_kit::segmented(ui, &mut selected, &["Diameter", "Radius"], Default::default()));
+    if selected != current {
+        let diameter = selected == 0;
+        field.1 = crate::length_input::scaled(&field.1, diameter);
+        field.0 = if diameter { "diameter" } else { "radius" };
+    }
+}
+
 /// The coil's section, where the section sits on the diameter, the way it turns and where it
 /// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
 fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
@@ -849,9 +863,51 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     enter
 }
 
+/// The distances along a Section Analysis's plane at which the cut goes through the model, or
+/// `None` while the dialog has no plane or there is no model to cut.
+fn section_span(app: &SolveApp, d: &Dialog) -> Option<(f64, f64)> {
+    if !matches!(d.kind, Kind::Section { .. }) {
+        return None;
+    }
+    let (_, params) = apply_commands(app, d).ok()?.into_iter().next()?;
+    params.get("plane")?;
+    let cut_at = |distance: &str| {
+        let mut p = params.clone();
+        p["offset"] = json!(distance);
+        let mut scratch = app.session.scratch();
+        scratch.execute("inspect.section", &p).ok()?;
+        scratch.section
+    };
+    let origin = cut_at("0 mm")?.0;
+    let along = cut_at("1 mm")?.0 - origin;
+    let b = crate::viewport::model_bounds(app);
+    let distances = [b.min.x, b.max.x]
+        .into_iter()
+        .flat_map(|x| [b.min.y, b.max.y].into_iter().map(move |y| (x, y)))
+        .flat_map(|(x, y)| [b.min.z, b.max.z].into_iter().map(move |z| Vec3::new(x, y, z)))
+        .map(|corner| (corner - origin).dot(along));
+    let (lo, hi) = distances.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), d| (lo.min(d), hi.max(d)));
+    (lo.is_finite() && hi.is_finite() && lo < hi).then_some((lo, hi))
+}
+
+/// A slider under Section Analysis's Distance. The field keeps what was typed until the slider
+/// is dragged, and a distance typed outside the model widens the slider to reach it.
+fn section_slider(app: &SolveApp, ui: &mut egui::Ui, offset: &mut String, (lo, hi): (f64, f64)) {
+    let doc = &app.session.doc;
+    let mut shown = crate::length_input::eval(doc, offset, solidcraft_engine::doc::expr::Kind::Length).ok().filter(|x| x.is_finite()).unwrap_or(0.0);
+    let range = lo.min(shown)..=hi.max(shown);
+    form_row(ui, "", |ui| {
+        let slider = ui_kit::Slider { show_value: false, ..Default::default() };
+        if ui_kit::slider(ui, &mut shown, range, slider).changed() {
+            *offset = crate::length_input::model(doc, shown);
+        }
+    });
+}
+
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    let section_span = section_span(app, d);
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -972,9 +1028,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else {
                 &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
             };
-            for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
+            // A planar To face as the plane it lies in: the moved face comes onto it along its
+            // normal only, without sliding across to the picked point.
+            let to_snaps: &[(&str, &str)] = if *components {
+                snaps
+            } else {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin"), ("Onto Plane", "plane")]
+            };
+            for (label, key, choices) in [("From Snap", "from_snap", snaps), ("To Snap", "to_snap", to_snaps)] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, snaps);
+                    extra_choice(ui, &mut d.extra, key, key, choices);
                 });
             }
             if *components {
@@ -1068,6 +1131,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
+                round_size_row(ui, fields);
+            }
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
@@ -1123,6 +1189,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch } => {
             enter |= expr_row(ui, "Distance", offset);
+            if let Some(span) = section_span {
+                section_slider(app, ui, offset, span);
+            }
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
             if section_turns_off(&app.session, &d.inputs) && !d.extra.contains_key("plane") {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));

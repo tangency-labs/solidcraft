@@ -353,3 +353,32 @@ fn a_held_input_is_reported_not_waited_for() {
         "{seen:?}"
     );
 }
+
+/// A status error is no answer, unless a solidcore-side failure or a cancellation is in its cause
+/// chain: then the call fails. (Each assertion on a chain fails when `answer` reads only the
+/// error on top.)
+#[test]
+fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() {
+    use solidcore::error::{Failure, Reason};
+
+    let wrap = |cause: SolidError| {
+        Failure::new("test::stage", Reason::Failed("a stage failed"))
+            .caused_by(cause)
+            .into_error()
+    };
+    let status = wrap(SolidError::sm_err("test::inner"));
+    assert!(status.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(status)), Ok(None)));
+
+    let unported = wrap(SolidError::unported("test::callee", "test.unit"));
+    assert!(unported.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(unported)), Err(e) if e.is_port_failure()));
+    let deep = wrap(wrap(SolidError::unported("test::callee", "test.unit")));
+    assert!(answer::<()>(Err(deep)).is_err());
+
+    let cancelled = wrap(SolidError::cancelled("test::cancelled"));
+    assert!(cancelled.sm_status().is_some() && !cancelled.is_port_failure());
+    assert!(answer::<()>(Err(cancelled)).is_err());
+
+    assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
+}

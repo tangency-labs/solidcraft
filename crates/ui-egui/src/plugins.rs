@@ -237,8 +237,13 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     use crate::ui_kit;
     let mut on = enabled(app, &plugin.id);
     let was_on = on;
-    let card =
-        ui.push_id(&plugin.id, |ui| ui_kit::settings_plugin_card(ui, &plugin.id, &plugin.name, &plugin.version, &plugin.description, &mut on)).inner;
+    let labels = ui_kit::PluginCardLabels {
+        show_in_folder: solidcraft_ui_text::tr_label("Show in folder"),
+        enabled: solidcraft_ui_text::tr("prefs.plugins_enabled"),
+    };
+    let card = ui
+        .push_id(&plugin.id, |ui| ui_kit::settings_plugin_card(ui, &plugin.id, &plugin.name, &plugin.version, &plugin.description, &mut on, &labels))
+        .inner;
     let response = card.response;
     let (folder, check) = card.inner;
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);

@@ -206,7 +206,7 @@ struct RowRig {
 impl RowRig {
     fn new(width: f32) -> RowRig {
         let rig = RowRig {
-            ctx: crate::fonts::test_context(),
+            ctx: crate::ui_kit::test_support::context(),
             width,
             time: std::cell::Cell::new(0.0),
             texts: Default::default(),
@@ -233,21 +233,21 @@ impl RowRig {
                 group("B", vec![button("b.on", true), button("b.off", false)]),
             ],
             labels: true,
-            accent: TabAccent::for_tab(&t, "MODEL"),
+            accent: crate::workspace::tab_accent(&t, "MODEL"),
             exit: false,
             reveal: None,
             more_tip: "More",
             handles: HANDLES,
         };
         let mut actions = Vec::new();
-        let output = crate::test_support::frame(&self.ctx, input, |ui| {
+        let output = crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(pos2(0.0, 30.0), vec2(self.width, GROUP_HEIGHT + 1.0));
             actions = show(ui, &row, rect, &mut |_, _| false).actions;
             let dropped = actions.iter().any(|a| matches!(a, Action::Drop { .. }));
             self.removed.borrow_mut().extend(drag_end(ui, rect, None, dropped, &|_| Some("box".to_string()), &HANDLES));
         });
         *self.texts.borrow_mut() =
-            crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
+            crate::ui_kit::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
         actions
     }
 
@@ -322,7 +322,7 @@ struct TabsRig {
 
 impl TabsRig {
     fn new() -> TabsRig {
-        let rig = TabsRig { ctx: crate::fonts::test_context(), time: std::cell::Cell::new(0.0) };
+        let rig = TabsRig { ctx: crate::ui_kit::test_support::context(), time: std::cell::Cell::new(0.0) };
         rig.frame(Vec::new());
         rig
     }
@@ -338,7 +338,7 @@ impl TabsRig {
             ..Default::default()
         };
         let t = Tokens::get();
-        let accent = TabAccent::for_tab(&t, "MODEL");
+        let accent = crate::workspace::tab_accent(&t, "MODEL");
         let row = Tabs {
             tabs: vec![
                 Tab { id: "ONE", label: "One", accent, contextual: false, aliases: &[] },
@@ -355,7 +355,7 @@ impl TabsRig {
             handles: TAB_HANDLES,
         };
         let mut actions = Vec::new();
-        crate::test_support::frame(&self.ctx, input, |ui| {
+        crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| {
             actions = tabs(ui, &row, Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, TAB_ROW_HEIGHT))).actions;
         });
         actions
@@ -400,7 +400,7 @@ use egui::{Event, RawInput};
 fn tip_pass(ctx: &egui::Context, menu: Rect, time: f64, at: egui::Pos2) -> Vec<(usize, Rect)> {
     let raw = RawInput { events: vec![Event::PointerMoved(at)], time: Some(time), ..Default::default() };
     let mut shown: Vec<(usize, Rect)> = Vec::new();
-    crate::test_support::frame(ctx, raw, |ui| {
+    crate::ui_kit::test_support::raw_frame(ctx, raw, |ui| {
         let ctx = ui.ctx();
         crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Popup).area(egui::Id::unique("test_dropdown")).fixed_pos(menu.min).show(
             ctx,
@@ -431,7 +431,7 @@ fn tip_pass(ctx: &egui::Context, menu: Rect, time: f64, at: egui::Pos2) -> Vec<(
 /// a row drops hover the same pass. Timings below keep a margin around that lag.
 #[test]
 fn each_newly_hovered_row_waits_the_full_tip_delay() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let menu = Rect::from_min_size(pos2(20.0, 20.0), vec2(220.0, 64.0));
     let a = menu.min + vec2(10.0, 16.0);
     let b = menu.min + vec2(10.0, 48.0);
@@ -466,7 +466,7 @@ fn menu_style() -> MenuStyle<'static> {
     MenuStyle {
         pin_tip: "Pin",
         unpin_tip: "Unpin",
-        accent: TabAccent::for_tab(&Tokens::get(), "MODEL"),
+        accent: crate::workspace::tab_accent(&Tokens::get(), "MODEL"),
         focus: egui::Id::unique("test_menu"),
         entry: &["t:entry:"],
         pin: "t:pin:",
@@ -488,7 +488,7 @@ struct MenuRig {
 
 impl MenuRig {
     fn new(grid: bool) -> MenuRig {
-        let rig = MenuRig { ctx: crate::fonts::test_context(), grid, time: std::cell::Cell::new(0.0) };
+        let rig = MenuRig { ctx: crate::ui_kit::test_support::context(), grid, time: std::cell::Cell::new(0.0) };
         rig.frame(Vec::new(), 0.0);
         rig
     }
@@ -506,7 +506,7 @@ impl MenuRig {
         let entries = [entry("m.on", true), entry("m.off", false)];
         let style = menu_style();
         let mut chosen = Vec::new();
-        crate::test_support::frame(&self.ctx, input, |ui| {
+        crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| {
             if self.grid {
                 let grouped: Vec<(Option<&str>, MenuEntry)> = entries.iter().map(|e| (None, *e)).collect();
                 let out = grid(ui, &grouped, &[], &style);
@@ -606,14 +606,14 @@ fn buttons_are_dropped_before_a_button_at_a_groups_end_or_removed_off_the_row() 
 /// is published and counted.
 #[test]
 fn a_deferred_button_is_painted_as_the_app_resolves_it() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let t = Tokens::get();
     let mut on = button("a.on", true);
     on.app_paints = true;
     let row = Row {
         groups: vec![group("A", vec![on, button("a.off", true)])],
         labels: true,
-        accent: TabAccent::for_tab(&t, "MODEL"),
+        accent: crate::workspace::tab_accent(&t, "MODEL"),
         exit: false,
         reveal: None,
         more_tip: "More",
@@ -622,7 +622,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     solidcraft_ui_registry::clear_handles();
     let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1000.0, 400.0))), ..Default::default() };
     let mut deferred = Vec::new();
-    crate::test_support::frame(&ctx, input, |ui| {
+    crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| {
         let out = show(ui, &row, Rect::from_min_size(pos2(0.0, 30.0), vec2(800.0, GROUP_HEIGHT + 1.0)), &mut |_, _| false);
         deferred = out.buttons.into_iter().filter_map(|d| d.deferred).collect();
         assert_eq!(deferred.len(), 1, "only the button the app paints is deferred");
@@ -635,7 +635,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
             enabled: true,
             name: "On".into(),
             checkable: true,
-            accent: TabAccent::for_tab(&t, "MODEL"),
+            accent: crate::workspace::tab_accent(&t, "MODEL"),
         };
         paint_deferred(ui, deferred.drain(..).map(|d| (d, look.clone())).collect(), "t:ns");
     });

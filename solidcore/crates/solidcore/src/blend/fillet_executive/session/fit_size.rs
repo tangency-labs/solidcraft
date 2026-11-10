@@ -7,8 +7,7 @@
 //! `LargestSizeOnItsFaces` and `BandsMeetAt` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) and
 //! the executive's `NoteFitOfPolygonsTakenWhole` and the circle-top fit of
 //! `CreateFilletBrep` (`SmFilletExecutive.cpp`) in commits a3d6d81 and 49f393d; 5e8c9c1
-//! brackets each bound strictly inside its search (twice the blend's own size). They run
-//! only with the opt-in `Kernel::fixes.fillet_gn_section_generator`.
+//! brackets each bound strictly inside its search (twice the blend's own size).
 //!
 //! | Rust                          | Upstream (fork)                                  |
 //! |-------------------------------|--------------------------------------------------|

@@ -100,12 +100,9 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
-    f.planar_path_uncapped_open_profiles = true;
     f.revolve_analytic_profile_faces = true;
     f.revolve_arc_centre_near_axis_is_sphere = true;
-    f.taper_pivot_nearest_corner = true;
     f.revolve_nested_shells_as_cavities = true;
-    f.curve_sweep_caps_at_sweep_ends = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;
     f.offset_resolve_crossing_loops = true;
@@ -146,11 +143,9 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.corner_blend_stays_inside_neighbours = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
-    f.offset_closed_curve_trim_arc = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;

@@ -1,6 +1,6 @@
 //! The SolidCraft fork's tangency-labs/smlib@64e5632 and 8f145ee (#2273, smlib#79 step 7):
 //! a variable round whose balls exist over the variable radius solver's stations is its
-//! definition (`fillet_round_as_definition`, WR-698, on `fillet_gn_section_generator`).
+//! definition (`fillet_round_as_definition`, WR-698).
 //!
 //! The capi's `variable_round_on_a_cone_is_its_definition` and
 //! `variable_round_quadratic_law_is_its_definition`: the top back edge (y = 30, z = 20) of a
@@ -457,7 +457,6 @@ fn solidcraft_kernel() -> Kernel {
 /// each end of the edge.
 fn fork_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k.fixes.fillet_exact_arc_sections = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
