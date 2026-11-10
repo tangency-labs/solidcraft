@@ -81,6 +81,9 @@ fn take_work(app: &mut SolveApp) -> DocWork {
         app.tool = None;
         return DocWork::default();
     }
+    // A calculation abandoned by Cancel belongs to the design being left: once the tab comes
+    // back its revision has moved on, so it could never be taken up again (#3962).
+    app.abandoned.clear();
     DocWork {
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
