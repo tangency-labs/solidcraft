@@ -93,15 +93,16 @@ pub(crate) use history_group::*;
 pub(crate) use layout::*;
 pub use look_chain::{LookStep, look_chain};
 pub use menu::{Item, LIST_W};
-pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
-pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
+pub(crate) use menu::{Menu, MenuItem, WorkspaceMenu, WorkspaceStyle, rename_menu, workspace_menu};
+pub(crate) use metrics::{ContentWidth, dimension, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
 pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
 pub(crate) use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover, within,
+    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
+    within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]
@@ -132,6 +133,7 @@ pub(crate) use status::*;
 pub(crate) use table::*;
 #[cfg(test)]
 pub(crate) use text::ellipsize_middle;
+pub(crate) use text::paint_text;
 pub(crate) use text_menu::menu_open as text_menu_open;
 pub(crate) use theme_picker::*;
 pub(crate) use tree::*;
@@ -139,6 +141,7 @@ pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;
 
 #[cfg(test)]
+#[path = "gallery_tests.rs"]
 pub(crate) mod gallery;
 #[cfg(test)]
 mod slider_tests;

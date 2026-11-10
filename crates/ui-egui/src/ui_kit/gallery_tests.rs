@@ -15,6 +15,12 @@ pub(crate) struct Sample {
     pub(crate) checked: bool,
 }
 
+/// The style names a host passes to [`text_emphasis`].
+const SAMPLE_EMPHASIS: EmphasisLabels<'static> = EmphasisLabels { bold: "Bold", italic: "Italic", no_bold: "This font has no bold face" };
+
+/// The paging arrows' names a host passes to [`theme_browser`].
+const SAMPLE_ARROWS: PageLabels<'static> = PageLabels { previous: "Previous themes", next: "Next themes" };
+
 /// One gallery specimen: its name, the published rect it fills, the handle inside it, and how
 /// to draw it.
 pub(crate) struct Element {
@@ -99,7 +105,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         );
     }),
     element!("theme_browser_grid", |ui, _| {
-        theme_browser(ui, "gallery_grid", 14, true, None, |ui, _, width| {
+        theme_browser(ui, "gallery_grid", 14, true, None, &SAMPLE_ARROWS, |ui, _, width| {
             theme_card(
                 ui,
                 &ThemeCard {
@@ -164,7 +170,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         theme_empty(ui, "No theme matches these filters.", "Clear filters", || {});
     }),
     element!("theme_browser", |ui, _| {
-        theme_browser(ui, "gallery_browser", 9, false, None, |ui, i, width| {
+        theme_browser(ui, "gallery_browser", 9, false, None, &SAMPLE_ARROWS, |ui, i, width| {
             theme_card(
                 ui,
                 &ThemeCard {
@@ -337,7 +343,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         pending_section(ui, "upcoming", "Textures", "Soon");
     }),
     element!("inspector_header", |ui, _| {
-        inspector_header(ui, "body", "Boss", "Body");
+        inspector_header(ui, "body", "Boss", "Body", InspectorNames { close: "sample:close", remove: "sample.remove", remove_label: "Remove" });
     }),
     element!("workspace_chip", |ui, _| {
         workspace_chip(ui, "Body");
@@ -351,7 +357,15 @@ pub(crate) const ELEMENTS: &[Element] = &[
         checkbox_at(ui, rect, "Enabled", &mut sample.checked);
     }),
     element!("settings_plugin_card", |ui, sample| {
-        settings_plugin_card(ui, "sample", "Gear generator", "1.2.0", "Adds a parametric gear feature.", &mut sample.checked);
+        settings_plugin_card(
+            ui,
+            "sample",
+            "Gear generator",
+            "1.2.0",
+            "Adds a parametric gear feature.",
+            &mut sample.checked,
+            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled" },
+        );
     }),
     element!("text_button", |ui, _| {
         text_button(ui, "Reset", true);
@@ -503,11 +517,14 @@ pub(crate) const ELEMENTS: &[Element] = &[
             title: "Review native studio",
             name: "Soft enveloping studio",
             subtitle: "Native studio · whole scene",
+            replaces_label: "Replaces",
             replaces: "Lighting, environment, exposure and stage",
+            kept_label: "Keeps",
             kept: "Camera, sampling, dimensions, optical bindings and geometry",
             acknowledgement: "Confirm replacing saved state",
+            acknowledge_handle: "review:acknowledge",
             apply: "Apply studio",
-            copy: false,
+            secondary: None,
             notice: None,
         }
         .content(ui, &mut state.checked, |_| {});
@@ -619,7 +636,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
             row(ui, "Autosave every", |ui| {
                 field(ui, &mut state.value);
             });
-            below_row_control(ui, "Autosave every", 260.0, |ui| settings_autosave_timeline(ui, 5.0));
+            below_row_control(ui, "Autosave every", 260.0, |ui| settings_inline_note(ui, "Every 5 minutes"));
         });
     }),
     element!("named_control", "dialog:widget:Profile name", Some("dialog:Profile name"), |ui, state| {
@@ -649,7 +666,13 @@ pub(crate) const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true }),
+                |ui, ()| {
+                    layout_preview(
+                        ui,
+                        LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true },
+                        "Where the panels go",
+                    )
+                },
             )
         });
     }),
@@ -709,7 +732,6 @@ pub(crate) const ELEMENTS: &[Element] = &[
             ],
             &mut state.selected,
         );
-        settings_pointer_preview(ui, true, "Normal", true);
     }),
     element!("picture_card", |ui, _| {
         use super::preferences_figure_data as figures;
@@ -907,11 +929,17 @@ pub(crate) const ELEMENTS: &[Element] = &[
         });
     }),
     element!("preference_specimens", |ui, _| {
-        scale_specimen(ui, 1.1);
-        status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());
-        settings_autosave_timeline(ui, 5.0);
-        settings_axis_row(ui, "Push X", 0.6, [0.1, 0.2], |_| {}, |_| {}, |_| {});
+        settings_axis_row(
+            ui,
+            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
+            "Push X",
+            0.6,
+            [0.1, 0.2],
+            |_| {},
+            |_| {},
+            |_| {},
+        );
         settings_mouse_mapping(ui, &[(vec!["Shift".into(), "Middle drag".into()], "Orbit".into())], |_| {});
     }),
     element!("assistant_entry", |ui, _| {
@@ -977,7 +1005,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("assistant_tool", |ui, _| {
         assistant_tool_frame(ui, false, |ui| {
-            ui.monospace("parameters.set");
+            ui.monospace("sample.action_a");
             assistant_tool_detail(ui, |ui| {
                 ui.monospace("thickness = 8 mm");
             });
@@ -986,7 +1014,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     element!("assistant_tool_failed", |ui, _| {
         assistant_tool_frame(ui, false, |ui| {
             assistant_tool_row(ui, true, |ui| {
-                ui.monospace("solid.fillet");
+                ui.monospace("sample.action_b");
             });
         });
     }),
@@ -1031,8 +1059,8 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("settings_tab_chip", |ui, _| {
         ui.horizontal_wrapped(|ui| {
-            settings_tab_chip(ui, "MODEL", "Model", "extrude", true);
-            settings_tab_chip(ui, "SURFACE", "Surface", "surface_extrude", false);
+            settings_tab_chip(ui, "Tab A", "Tab A", "placeholder", true);
+            settings_tab_chip(ui, "Tab B", "Tab B", "placeholder", false);
         });
     }),
     element!("history_transport", |ui, _| {
@@ -1040,13 +1068,13 @@ pub(crate) const ELEMENTS: &[Element] = &[
             let side = Tokens::get().space_24;
             for control in HistoryTransport::ALL {
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
-                control.show(ui, rect, false);
+                control.show(ui, rect, false, PlayLabels { play: "Play", stop: "Stop" });
             }
         });
     }),
     element!("history_marker", |ui, _| {
         let t = Tokens::get();
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
+        let accent = solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Surface);
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(t.space_24 * 7.0, t.space_12), egui::Sense::hover());
             ui.painter().rect_filled(rect, 0.0, t.panel);
@@ -1155,11 +1183,10 @@ pub(crate) const ELEMENTS: &[Element] = &[
         ui.add_space(Tokens::get().space_6);
         CommandSearch::sheet(ui, ui.available_width(), 1.0, false, |ui| {
             CommandSearch::heading(ui, "search.commands", 1);
-            let c = solidcraft_engine::find_command("solid.fillet").unwrap();
-            let mut row = MenuItem::new(c.id, c.label, c.icon);
+            let mut row = MenuItem::new("sample.action_a", "Fillet", "placeholder");
             row.highlighted = true;
             row.shortcut = "F";
-            row.search_row(ui, &query, "MODEL › MODIFY", None);
+            row.search_row(ui, &query, "Tab A › Group", None);
             CommandSearch::detail(ui, "radius  6 mm");
         });
     }),
@@ -1218,29 +1245,33 @@ pub(crate) const ELEMENTS: &[Element] = &[
         // The marking menu's eight slots, as a host fills them outside a sketch.
         let (r, _) = ui.allocate_exact_size(vec2(360.0, 360.0), egui::Sense::hover());
         let items = [
-            Item::action("ui.repeat", "Repeat", "redo").key("R").on_if(false),
-            Item::action("ui.delete", "Delete", "delete").key("Del"),
-            Item::action("solid.press_pull", "Press Pull", "press_pull"),
-            Item::action("solid.hole", "Hole", "hole"),
-            Item::action("sketch.create", "Create Sketch", "sketch"),
-            Item::action("solid.extrude", "Extrude", "extrude"),
-            Item::action("edit.undo", "Undo", "undo"),
-            Item::action("solid.move", "Move/Copy", "move"),
+            Item::action("sample.action_a", "Repeat", "placeholder").key("R").on_if(false),
+            Item::action("sample.action_b", "Delete", "placeholder").key("Del"),
+            Item::action("sample.action_c", "Action C", "placeholder"),
+            Item::action("sample.action_d", "Action D", "placeholder"),
+            Item::action("sample.action_e", "Action E", "placeholder"),
+            Item::action("sample.action_f", "Action F", "placeholder"),
+            Item::action("sample.action_g", "Undo", "placeholder"),
+            Item::action("sample.action_h", "Move/Copy", "placeholder"),
         ];
         radial_menu(ui, r.center(), &items, Some(3));
     }),
     element!("workspace_menu", |ui, _| {
-        // Headed sections, a separator and a checked entry, as a host's workspace menu has.
+        // A current, an available and a planned workspace, as a host lists them.
         let items = [
-            Item::action("#create", "Create", ""),
-            Item::action("sketch.create", "Create Sketch", "sketch"),
-            Item::action("solid.extrude", "Extrude", "extrude"),
-            Item::sep(),
-            Item::action("#view", "View", ""),
-            Item::action("ui.findBrowser", "Find in Browser", "search"),
-            Item::action("ui.toggleOrigin", "Show Origin", "origin").key("current"),
+            Item::action("sample.space_a", "Space A", "placeholder").key("current"),
+            Item::action("sample.space_b", "Space B", "placeholder"),
+            Item::action("sample.space_c", "Space C", "placeholder").on(false),
         ];
-        workspace_menu(ui, &items, None, 550.0);
+        let style = |item: &Item| {
+            let (slug, tabs, ramp) = match item.label.as_str() {
+                "Space A" => ("a", Some("Tab A · Tab B"), None),
+                "Space B" => ("b", Some("Tab C"), Some(solidcraft_theme::AccentRamp::Surface)),
+                _ => ("c", None, None),
+            };
+            Some(WorkspaceStyle { slug, description: "A sample workspace", tabs, ramp })
+        };
+        workspace_menu(ui, &WorkspaceMenu { items: &items, style: &style, footer: "Every workspace shows the same sample." }, None, 550.0);
     }),
     element!("window", "dialog:footer", Some("dialog:ok"), |ui, _| {
         Window::new(ui.scope_id().with("window"), "settings", "Preferences").content(
@@ -1576,6 +1607,9 @@ pub(crate) const ELEMENTS: &[Element] = &[
     element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
         name_cell_with_hint(ui, "Width", false, "Double-click to rename");
     }),
+    element!("copy_cell", |ui, _| {
+        copy_cell(ui, "12.500 g", "Mass: 12.500 g", false, "Click to copy");
+    }),
     element!("search_field", |ui, s| {
         search_field(ui, ui.scope_id().with("search"), &mut s.value, "Search");
     }),
@@ -1738,7 +1772,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
-            text_emphasis(ui, &mut s.checked, &mut false, true);
+            text_emphasis(ui, &mut s.checked, &mut false, true, &SAMPLE_EMPHASIS);
         });
     }),
     element!("value_pair_named", "dialog:row:Position", Some("dialog:Distance X"), |ui, s| {
@@ -1816,10 +1850,10 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("dropdown_icons", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
         row(ui, "Visual style", |ui| {
-            let options: Vec<_> = crate::navigation_bar::VISUAL_STYLES
+            let options: Vec<_> = crate::navigation_slots::VISUAL_STYLES
                 .iter()
                 .enumerate()
-                .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                .map(|(index, (_, label))| (*label, crate::navigation_slots::visual_style_icon(index as u8)))
                 .collect();
             dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
         });
@@ -2006,11 +2040,11 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("shortcut_binding", |ui, _| {
         ui.horizontal(|ui| {
-            shortcut_binding(ui, "Ctrl+Shift+PageDown", true);
-            shortcut_binding(ui, "Option+Enter", false);
-            shortcut_binding(ui, "Ctrl++", true);
+            shortcut_binding(ui, "Ctrl+Shift+PageDown", "Not assigned", true);
+            shortcut_binding(ui, "Option+Enter", "Not assigned", false);
+            shortcut_binding(ui, "Ctrl++", "Not assigned", true);
         });
-        shortcut_binding(ui, "", true);
+        shortcut_binding(ui, "", "Not assigned", true);
     }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
@@ -2201,14 +2235,14 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
         for _ in 0..3 {
             super::test_support::frame(&ctx, vec![], &mut draw);
         }
-        for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+        for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
             let trigger = solidcraft_ui_registry::handle_at("dialog:Visual style").unwrap();
             super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
             super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
             super::test_support::frame(&ctx, vec![], &mut draw);
-            for (option, (_, name)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            for (option, (_, name)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
                 let rect = solidcraft_ui_registry::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
-                let icon = crate::navigation_bar::visual_style_icon(option as u8);
+                let icon = crate::navigation_slots::visual_style_icon(option as u8);
                 let painted = solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
                 let owner =
                     if option == sample.borrow().selected { solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
@@ -2219,7 +2253,7 @@ fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() 
             super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
             super::test_support::frame(&ctx, vec![], &mut draw);
             assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
-            let icon = crate::navigation_bar::visual_style_icon(index as u8);
+            let icon = crate::navigation_slots::visual_style_icon(index as u8);
             let trigger = solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap();
             assert!(trigger.contains_rect(solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
             assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
@@ -2337,7 +2371,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
         let mut italic = false;
         let mut selected = 0;
         let mut draw = |ui: &mut Ui| {
-            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true));
+            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true, &SAMPLE_EMPHASIS));
             row(ui, "Alignment", |ui| {
                 segmented(
                     ui,
@@ -2517,7 +2551,7 @@ fn gallery_covers_every_inline_element() {
                 // Inherited labels, state keys and accessors, parsers and size measurements do not render elements.
                 if !matches!(
                     name.as_str(),
-                    "eye_drag_id" | "expressions" | "icon_label_width" | "label" | "parse_number" | "placement_field_content_size"
+                    "dimension" | "eye_drag_id" | "expressions" | "icon_label_width" | "label" | "parse_number" | "placement_field_content_size"
                 ) {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }

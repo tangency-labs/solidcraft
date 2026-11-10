@@ -2004,6 +2004,7 @@ fn compact_tool_sheet_corners_follow_its_right_edge_contact() {
 
 #[test]
 fn theme_shape_changes_preserve_panel_geometry_and_dock_contacts() {
+    crate::test_support::host_data();
     use crate::{frame::Side, ui_kit::LayoutMode};
     let ctx = crate::ui_kit::test_support::context();
     let mut results = Vec::new();

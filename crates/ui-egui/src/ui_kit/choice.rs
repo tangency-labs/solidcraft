@@ -348,22 +348,29 @@ pub(crate) fn checkbox_row(ui: &mut egui::Ui, key: &str, label: &str, on: bool) 
     response.backing_on_hover_text(label).clicked()
 }
 
+/// The host's text for [`text_emphasis`]: the two style names, and why Bold is off.
+pub(crate) struct EmphasisLabels<'a> {
+    pub bold: &'a str,
+    pub italic: &'a str,
+    pub no_bold: &'a str,
+}
+
 /// Compact bold/italic toggles for text. Tokens: scope font/control tokens.
-/// The glyphs keep the familiar B/I treatment; accessible names use translated style names.
-pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bold_enabled: bool) {
+/// The glyphs keep the familiar B/I treatment; accessible names are the host's style names.
+pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bold_enabled: bool, labels: &EmphasisLabels<'_>) {
     use crate::ui_kit::type_face::RichTextExt as _;
-    for (key, text, value, id, enabled) in [
-        ("Bold", egui::RichText::new("B").semibold(), bold, "sketch_text.bold", bold_enabled),
-        ("Italic", egui::RichText::new("I").italics(), italic, "sketch_text.italic", true),
+    for (key, text, value, label, enabled) in [
+        ("Bold", egui::RichText::new("B").semibold(), bold, labels.bold, bold_enabled),
+        ("Italic", egui::RichText::new("I").italics(), italic, labels.italic, true),
     ] {
         if !enabled {
             *value = false;
         }
-        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).backing_on_hover_text(solidcraft_ui_text::tr(id))).inner;
+        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).backing_on_hover_text(label)).inner;
         if !enabled {
-            response = response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.no_bold"));
+            response = response.backing_on_disabled_hover_text(labels.no_bold);
         }
-        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && enabled, *value, solidcraft_ui_text::tr(id)));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled() && enabled, *value, label));
         solidcraft_ui_registry::publish_target_as(&format!("dialog:{key}"), &format!("dialog:emphasis:{key}"), response.rect);
     }
 }

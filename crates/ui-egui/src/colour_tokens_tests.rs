@@ -216,7 +216,7 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 scan(&path, &format!("{relative}/"), found);
                 continue;
             }
-            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "gallery.rs" | "test_support.rs") {
+            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "test_support.rs") {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();

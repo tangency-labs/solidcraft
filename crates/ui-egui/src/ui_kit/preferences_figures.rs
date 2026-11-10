@@ -187,7 +187,7 @@ pub(crate) fn paint_contact_shading(p: &Painter, rect: Rect, on: bool) {
 /// It is explanatory vector content: no second viewport, live scene, or nested host.
 /// A restrained workspace schematic: panel placement remains primary, with a few
 /// tool marks, tree rows and one simple solid providing recognisable CAD context.
-pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview) {
+pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview, note: &str) {
     let t = Tokens::get();
     let width = super::metrics::dimension(ui.available_width());
     let size = vec2(width, width * 148.0 / 226.0);
@@ -281,8 +281,7 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview:dialog", dialog);
     solidcraft_ui_registry::publish_rect("prefs:layout_preview", outer);
-    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
-        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.layout_note"));
+    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).backing_on_hover_text(note);
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
@@ -316,7 +315,7 @@ mod tests {
                 let ctx = crate::ui_kit::test_support::context();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     ui.set_width(262.0);
-                    super::paint_layout(ui, state);
+                    super::paint_layout(ui, state, "Where the panels go");
                 });
                 output.textures_delta.clear();
                 format!("{:?}", output.shapes)

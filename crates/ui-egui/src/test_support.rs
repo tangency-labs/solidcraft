@@ -6,6 +6,16 @@ use solidcraft_engine::{Sel, Session};
 // The generic frame and event helpers are the kit's; SolidCraft's tests use them under these names.
 pub(crate) use crate::ui_kit::test_support::{each_shape, key, pointer, raw_frame as frame, text_shapes};
 
+/// What SolidCraft installs into the shared crates before its first frame: its catalogs, its
+/// icons, its tab table and its navigation slots. A test that reads theme files or draws icons without an app or a
+/// test context ([`crate::fonts::test_context`]) calls it first.
+pub(crate) fn host_data() {
+    crate::i18n::install();
+    crate::icon_svg::install();
+    crate::workspace::install_tabs();
+    crate::navigation_slots::install();
+}
+
 pub(crate) fn app_with_script(script: Value) -> SolveApp {
     let mut session = Session::default();
     session.run_script(&script).unwrap();

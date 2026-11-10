@@ -1344,6 +1344,7 @@ fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
             editor: false,
             enabled: true,
             header_actions: None,
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,

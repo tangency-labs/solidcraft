@@ -1,5 +1,6 @@
 use super::*;
 use crate::prelude::*;
+use solidcore_ops::{label, pcurve, record_check as check};
 use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -288,7 +289,7 @@ fn every_form_validates_and_round_trips_without_a_kernel() {
         ("lower forms", sheet_with_lower_forms()),
     ] {
         check::validate(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
-        geometry::check(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
+        solidcore_ops::record_check::agreement(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = serde_json::to_vec(&body).unwrap();
         let restored: Brep = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body, restored, "{name}");
@@ -366,13 +367,13 @@ fn a_pcurve_a_rounding_short_of_its_edge_is_read_at_its_end() {
         *k = short;
     }
     check::validate(&b).unwrap();
-    geometry::check(&b).unwrap();
+    solidcore_ops::record_check::agreement(&b).unwrap();
 }
 
 /// One geometric defect each, structurally valid: every one is refused, naming the record.
 #[test]
 fn geometric_defects_are_refused_by_record() {
-    use geometry::{Problem, Record};
+    use solidcore_ops::record_check::{Problem, Record};
     let off = |what| move |p: &Problem| matches!(p, Problem::Off { what: w, .. } if *w == what);
     let cases: Vec<(&str, Record, Box<dyn Fn(&Problem) -> bool>, Brep)> = vec![
         ("vertex off its curve's start", Record::Edge(0), Box::new(off("curve start misses its start vertex")), {
@@ -462,7 +463,7 @@ fn geometric_defects_are_refused_by_record() {
     ];
     for (name, record, problem, body) in cases {
         check::validate(&body).unwrap_or_else(|e| panic!("{name}: structurally valid: {e}"));
-        let error = geometry::check(&body).err().unwrap_or_else(|| panic!("{name} was accepted"));
+        let error = solidcore_ops::record_check::agreement(&body).err().unwrap_or_else(|| panic!("{name} was accepted"));
         assert_eq!(error.record, record, "{name}: {error}");
         assert!(problem(&error.problem), "{name}: {error}");
     }
@@ -509,7 +510,7 @@ fn hostile_records_never_panic_the_geometry_check() {
     b.faces[0].surface = Surface::PlacedRevolution { profile: circle, origin: [0.; 3], axis: [0., 0., 1.], matrix: identity, forward: true };
     cases.push(b);
     for (i, b) in cases.iter().enumerate() {
-        let checked = std::panic::catch_unwind(|| geometry::check(b));
+        let checked = std::panic::catch_unwind(|| solidcore_ops::record_check::agreement(b));
         assert!(matches!(checked, Ok(Err(_))), "case {i}: {checked:?}");
     }
 }

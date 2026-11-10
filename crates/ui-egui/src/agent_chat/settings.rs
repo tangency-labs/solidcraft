@@ -734,7 +734,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
-            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
+            |ui, (visible, speed, follow)| crate::prefs::figures::pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
         );
     });
 }

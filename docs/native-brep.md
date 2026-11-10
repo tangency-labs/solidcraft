@@ -202,7 +202,7 @@ are SMLib's, the edge's parameter SMLib's or an affine image of it). SMLib keeps
 an analytic face's trims on its internal rational B-spline, whose angle
 parameter is not the record's angle, and a circle's or ellipse's on its NURBS
 parameter, not its angle; neither is an exact B-spline in the record's
-parameters. The rest come from `brep::pcurve::pcurves`, which computes them from
+parameters. The rest come from `solidcore_ops::pcurve::pcurves` (the kernel's `solidcore::eval::pcurve`), which computes them from
 a face's surface record and each use's curve record and interval, for every
 backend (a use's `given` pcurve is taken as it is). It is exact in closed form
 for lines, polylines and whole splines on planes, circles about the axis of a
@@ -317,7 +317,7 @@ It writes every curve and surface as truck holds it: lines, B-spline and NURBS
 coefficients, the three points of a plane, a revolution's profile, axis, matrix
 and orientation, and an intersection's two surfaces, leader and tolerance. An
 edge's interval is its truck curve's parameter range. Pcurves come from
-`brep::pcurve` on the records just written; a face's domain is the
+`solidcore_ops::pcurve` on the records just written; a face's domain is the
 box around its pcurves' control points, clamped to the surface's natural domain
 and at most one turn in a periodic direction. Every tolerance is the body's face
 tolerance, 10⁻⁶ of its size and at least 10⁻⁵ mm, how far later operations take

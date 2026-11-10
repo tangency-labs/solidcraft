@@ -149,8 +149,7 @@
 //!   the earlier [`SolidError::Unported`] deferral, and an `IsConnectedTo` target in another
 //!   B-rep is connected to nothing. `SmFace::IsConnectedTo` (`topology.face_p4`) and the
 //!   B-rep of `GetBrep` (a [`BrepId`] the handle hooks cannot name) are still unported.
-//! - **Opt-in (WR-537).** With `Kernel::fixes.seam_point_solutions_are_one`,
-//!   `ComputePointParameters` keeps the nearest of a face or surface solve's solutions
+//! - **WR-537.** `ComputePointParameters` keeps the nearest of a face or surface solve's solutions
 //!   when they all evaluate to one point within the source zone tolerance (a point on a
 //!   closed face's seam; the fork's tangency-labs/smlib@577f7be).
 //! - **Not in this unit.** `GetLoop`, `GetSurfaceObject`, `GetVolumeObject`,
@@ -1368,16 +1367,14 @@ impl<O: ClassObject> PointClassification<O> {
             // find point/face->surface intersection point to face->Tolerance
             let mut solutions =
                 access.global_point_solve(k, target, &uv_domain, point, self.src_zone_tol_3d)?;
-            // not upstream (WR-537, opt-in): solutions that are one point are one
-            if k.fixes.seam_point_solutions_are_one {
-                one_point(
-                    k,
-                    access.geometry(),
-                    target,
-                    &mut solutions,
-                    self.src_zone_tol_3d,
-                )?;
-            }
+            // not upstream (WR-537): solutions that are one point are one
+            one_point(
+                k,
+                access.geometry(),
+                target,
+                &mut solutions,
+                self.src_zone_tol_3d,
+            )?;
 
             // when a distinct solution was not found
             if solutions.len() != 1 {
@@ -1389,15 +1386,13 @@ impl<O: ClassObject> PointClassification<O> {
                     point,
                     zone_tol3d(k, self.src_zone_tol_3d * 100.0),
                 )?;
-                if k.fixes.seam_point_solutions_are_one {
-                    one_point(
-                        k,
-                        access.geometry(),
-                        target,
-                        &mut solutions,
-                        self.src_zone_tol_3d,
-                    )?;
-                }
+                one_point(
+                    k,
+                    access.geometry(),
+                    target,
+                    &mut solutions,
+                    self.src_zone_tol_3d,
+                )?;
 
                 // still no solutions - return an error
                 if solutions.len() != 1 {
@@ -2268,8 +2263,7 @@ enum DropTarget<O> {
     Face(O),
 }
 
-/// Not upstream (WR-537, opt-in `Kernel::fixes.seam_point_solutions_are_one`; the fork's
-/// tangency-labs/smlib@577f7be): a point on the seam of a face that closes on itself (a
+/// Not upstream (WR-537; the fork's tangency-labs/smlib@577f7be): a point on the seam of a face that closes on itself (a
 /// whole cylinder's wall) has its parameters at both ends of the period, several
 /// solutions that are one point. When every solution evaluates within `tol` of the
 /// first's point, only the nearest (the first of the smallest solution values) is
