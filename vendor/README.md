@@ -83,6 +83,16 @@ SolidCraft changes:
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
   eframe so startup can retry another backend instead of invoking wgpu's panic handler.
+- `src/renderer.rs`, `src/winit.rs`: eframe uploads a window's texture changes only when that
+  window paints. A main window that is hidden or covered holds its changes back (its first
+  font atlas among them) while a separate window (an immediate viewport) paints at once, so a
+  change to part of a texture could reach the GPU before the texture itself, or beyond the size
+  it has there, and `update_texture` panicked ("Tried to update a texture that has not been
+  allocated yet", seen popping out the Parameters window, #5097). Such a change is now refused
+  with a warning (`partial_fits`, `take_refused_updates`), and the painter uploads the CPU font
+  atlas whole in the same paint (`repair_font_atlas`). It does so too right after a whole atlas
+  of the current size, which can be older than glyphs another window already gave the GPU.
+  `cargo test -p egui-wgpu --lib -- refused_update`.
 
 ## winit 0.30.13 (Apache-2.0, © The winit contributors, https://github.com/rust-windowing/winit)
 

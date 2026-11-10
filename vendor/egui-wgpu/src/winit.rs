@@ -899,9 +899,18 @@ impl Painter {
 
         let user_cmd_bufs = {
             let mut renderer = render_state.renderer.write();
+            // SolidCraft (#5097): the font atlas changes in this frame, see `repair_font_atlas`.
+            let mut font_options = None;
+            let mut font_whole = None;
             #[expect(clippy::iter_over_hash_type)] // Order doesn't matter here
             for (id, image_deltas) in textures_delta.set.drain() {
                 for image_delta in image_deltas {
+                    if id == epaint::TextureId::default() {
+                        font_options = Some(image_delta.options);
+                        if image_delta.pos.is_none() {
+                            font_whole = Some(image_delta.image.size());
+                        }
+                    }
                     renderer.update_texture(
                         &render_state.device,
                         &render_state.queue,
@@ -909,6 +918,22 @@ impl Painter {
                         &image_delta,
                     );
                 }
+            }
+            let font_refused = renderer.take_refused_updates().contains(&epaint::TextureId::default());
+            if let Some(options) = font_options
+                && crate::renderer::repair_font_atlas(
+                    font_refused,
+                    font_whole,
+                    self.context.fonts(|fonts| fonts.font_image_size()),
+                )
+            {
+                let image = self.context.fonts(|fonts| fonts.image());
+                renderer.update_texture(
+                    &render_state.device,
+                    &render_state.queue,
+                    epaint::TextureId::default(),
+                    &epaint::ImageDelta::full(image, options),
+                );
             }
 
             renderer.update_buffers(

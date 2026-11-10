@@ -292,6 +292,10 @@ pub struct Renderer {
     /// instead of panicking (SolidCraft #1469).
     skip_frame: bool,
 
+    /// SolidCraft (#5097): textures a partial change could not be applied to since the last
+    /// [`Self::take_refused_updates`].
+    refused_updates: Vec<epaint::TextureId>,
+
     /// Storage for resources shared with all invocations of [`CallbackTrait`]'s methods.
     ///
     /// See also [`CallbackTrait`].
@@ -515,6 +519,7 @@ impl Renderer {
                 capacity: INDEX_BUFFER_START_CAPACITY,
             },
             skip_frame: false,
+            refused_updates: Vec::new(),
             uniform_buffer,
             // Buffers on wgpu are zero initialized, so this is indeed its current state!
             previous_uniform_buffer_content: UniformBuffer::zeroed(),
@@ -737,6 +742,20 @@ impl Renderer {
             );
         };
 
+        // SolidCraft (#5097): eframe uploads a window's texture changes only when that window
+        // paints. A main window that is hidden or covered holds its changes back (the first font
+        // atlas among them) while a separate window paints at once, so a change to part of a
+        // texture can arrive before the GPU has that texture, or the size it has grown to. Refuse
+        // it instead of panicking; the painter then uploads the font atlas whole.
+        if let Some(pos) = image_delta.pos {
+            let on_gpu = self.textures.get(&id).and_then(|t| t.texture.as_ref()).map(|t| [t.width(), t.height()]);
+            if !partial_fits(on_gpu, pos, [width, height]) {
+                log::warn!("egui texture {id:?}: a part changed before the GPU had the texture it belongs to");
+                self.refused_updates.push(id);
+                return;
+            }
+        }
+
         // Use same label for all resources associated with this texture id (no point in retyping the type)
         let label_str = format!("egui_texid_{id:?}");
         let label = Some(label_str.as_str());
@@ -839,6 +858,12 @@ impl Renderer {
                 options: Some(image_delta.options),
             },
         );
+    }
+
+    /// SolidCraft (#5097): the textures [`Self::update_texture`] refused a partial change for
+    /// since the last call.
+    pub fn take_refused_updates(&mut self) -> Vec<epaint::TextureId> {
+        std::mem::take(&mut self.refused_updates)
     }
 
     pub fn free_texture(&mut self, id: &epaint::TextureId) {
@@ -1335,3 +1360,44 @@ const _: () = {
     const fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<Renderer>();
 };
+
+/// SolidCraft (#5097): whether a change of `size` texels at `pos` fits in the GPU texture of
+/// `on_gpu` texels (`None`: the GPU has no such texture).
+pub(crate) fn partial_fits(on_gpu: Option<[u32; 2]>, pos: [usize; 2], size: [u32; 2]) -> bool {
+    let end = |at: usize, len: u32| u64::try_from(at).ok().and_then(|at| at.checked_add(u64::from(len)));
+    on_gpu.is_some_and(|[width, height]| {
+        end(pos[0], size[0]).is_some_and(|x| x <= u64::from(width)) && end(pos[1], size[1]).is_some_and(|y| y <= u64::from(height))
+    })
+}
+
+/// SolidCraft (#5097): whether the painter should upload the CPU font atlas whole after a frame's
+/// font changes. The atlas only grows, so the CPU copy holds every glyph any window was given.
+/// Upload it when a font change was refused, or when a whole atlas of the current size was just
+/// applied: that copy can be older than changes another window's paint already gave the GPU. A
+/// whole atlas of another size is left alone: this frame's text was laid out for that size.
+pub(crate) fn repair_font_atlas(refused: bool, applied_whole: Option<[usize; 2]>, current: [usize; 2]) -> bool {
+    refused || applied_whole == Some(current)
+}
+
+#[cfg(test)]
+mod refused_update_tests {
+    use super::{partial_fits, repair_font_atlas};
+
+    #[test]
+    fn a_part_fits_only_inside_a_texture_the_gpu_has() {
+        assert!(partial_fits(Some([64, 32]), [0, 0], [64, 32]));
+        assert!(partial_fits(Some([64, 32]), [60, 30], [4, 2]));
+        assert!(!partial_fits(None, [0, 0], [1, 1]), "the GPU never got the texture");
+        assert!(!partial_fits(Some([64, 32]), [0, 31], [8, 2]), "the atlas grew in a change not painted yet");
+        assert!(!partial_fits(Some([64, 32]), [63, 0], [2, 1]));
+        assert!(!partial_fits(Some([64, 32]), [usize::MAX, 0], [1, 1]), "no overflow");
+    }
+
+    #[test]
+    fn the_font_atlas_is_sent_whole_after_a_refusal_or_an_older_whole_copy() {
+        assert!(repair_font_atlas(true, None, [256, 256]));
+        assert!(repair_font_atlas(false, Some([256, 256]), [256, 256]), "the copy can be older than the GPU's glyphs");
+        assert!(!repair_font_atlas(false, Some([256, 128]), [256, 256]), "text this frame was laid out for the older size");
+        assert!(!repair_font_atlas(false, None, [256, 256]), "only parts were applied, and all fitted");
+    }
+}
