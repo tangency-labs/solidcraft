@@ -728,7 +728,7 @@ fn held_back(d: &Drawing, record: &Annotation) -> bool {
 }
 
 /// The dimensions and notes of `views` of `d` that are held back ([`held_back`]), by view and id.
-fn held_by_exploded(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<u64> {
+pub(crate) fn held_by_exploded(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<u64> {
     annotations_on(d, views).iter().filter(|record| held_back(d, record)).map(Annotation::id).collect()
 }
 

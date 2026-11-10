@@ -631,3 +631,48 @@ fn a_note_off_the_paper_is_listed() {
     let reply = checked(&mut s, json!({}));
     assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &off)], "{reply}");
 }
+
+/// [`plate`] with a component, Bolt, a 10 mm cube above it, and an exploded view, Apart, that moves the
+/// Bolt up 50 mm; [`drawn`]'s sheet and front view, with what `annotate` adds on that view; then the
+/// view drawing Apart, as a file can hold it (the commands refuse dimensions and notes on the model
+/// there). The session, the view, and the plate's feature.
+fn exploded(annotate: impl FnOnce(&mut Session, u64)) -> (Session, u64, u64) {
+    let (mut s, _) = plate();
+    let bolt = run(&mut s, "component.create", json!({"name": "Bolt"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 20], "body_name": "Cube"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    // An exploded view pulls components apart, so the design needs two.
+    run(&mut s, "component.create", json!({"name": "Nut"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 20], "body_name": "Nut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    let plate = s.doc.features[0].id;
+    let (_, view) = drawn(&mut s);
+    annotate(&mut s, view);
+    let apart = s.doc.assembly.exploded[0].id;
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == view).unwrap();
+    Arc::make_mut(record).settings.exploded = Some(solidcraft_doc::drawing_view::Exploded::View(apart));
+    s.doc_mut().put_drawing(Arc::new(d));
+    (s, view, plate)
+}
+
+/// The why of each finding of `kind`, as (kind of record, id, why), sorted.
+fn whys(reply: &Value, kind: &str) -> Vec<(String, String, String)> {
+    let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
+    let of = reply["findings"].as_array().unwrap().iter().filter(|f| f["kind"] == kind);
+    let mut all: Vec<_> = of.map(|f| (text(&f["object"]["kind"]), text(&f["object"]["id"]), text(&f["why"]))).collect();
+    all.sort();
+    all
+}
+
+/// A dimension that a view drawing an exploded view holds back is listed out of date with why: no
+/// update draws it, as no update would.
+#[test]
+fn a_dimension_an_exploded_view_holds_back_says_why() {
+    let mut width = Value::Null;
+    let (mut s, ..) = exploded(|s, view| width = length(s, view, [50.0, 0.0, 0.0]));
+    let reply = checked(&mut s, json!({}));
+    let why = "its view draws an exploded view: not supported yet, so it isn't drawn".to_string();
+    assert_eq!(whys(&reply, "out_of_date"), [("dimension".to_string(), width.as_str().unwrap().to_string(), why)], "{reply}");
+}

@@ -96,10 +96,15 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
     let dimensions =
         shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
     out.extend(dimensions);
-    let held = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
+    // Out of date as a deferred drawing shows it as it last was, or held back by a view that draws an
+    // exploded view, which no update draws.
+    let held = crate::drawing_scene::held_by_exploded(d, d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id));
+    let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
+    let exploded = "its view draws an exploded view: not supported yet, so it isn't drawn";
     for id in shown.out_of_date {
         let kind = if d.view(id).is_some() { CheckedKind::View } else { CheckedKind::Dimension };
-        out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), held.into()));
+        let why = if held.contains(&id) { exploded } else { last };
+        out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), why.into()));
     }
     // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
     // else is held to the paper, whose box is display data, as the scene's boxes are: it decides
