@@ -4,7 +4,7 @@
 
 Each reader is LABEL=COMMAND, a command that takes a STEP file as its last argument and prints
 JSON with `bodies`: a list of objects with `volume_mm3`, `faces` and `closed` (as
-`solidcraft-cli eval FILE` does). A `.p21` file is passed as a `.step` copy.
+`solidcraft-cli eval FILE` does; older builds name `closed` `solid`, which is read in its place). A `.p21` file is passed as a `.step` copy.
 
     bench/step/run.py --corpus bench/step/corpus --out /tmp/bake \\
         --reader base=/path/to/old/solidcraft-cli --reader new=/path/to/new/solidcraft-cli
@@ -19,6 +19,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -52,9 +53,12 @@ def run_one(label, command, path, timeout):
         bodies = data.get("bodies") or []
         if not bodies:
             return {"status": "refused", "wall_s": wall, "error": "no bodies"}
-        vol = sum(b.get("volume_mm3") or 0.0 for b in bodies)
-        faces = sum(b.get("faces") or 0 for b in bodies)
-        closed = sum(1 for b in bodies if b.get("closed", b.get("solid")) is True)
+        try:
+            vol = sum(float(b.get("volume_mm3") or 0.0) for b in bodies)
+            faces = sum(int(b.get("faces") or 0) for b in bodies)
+            closed = sum(1 for b in bodies if b.get("closed", b.get("solid")) is True)
+        except (TypeError, ValueError, AttributeError):
+            return {"status": "refused", "wall_s": wall, "error": "bad json"}
         return {"status": "opened", "bodies": len(bodies), "closed": closed, "faces": faces, "volume": vol, "wall_s": wall}
 
 
@@ -79,8 +83,10 @@ def main():
     a = ap.parse_args()
     readers = []
     for r in a.reader:
-        label, _, cmd = r.partition("=")
-        readers.append((label, cmd.split()))
+        label, sep, cmd = r.partition("=")
+        if not sep or not label or not cmd.strip():
+            ap.error(f"--reader needs LABEL=COMMAND, got {r!r}")
+        readers.append((label, shlex.split(cmd)))
     with open(os.path.join(a.corpus, "manifest.tsv")) as f:
         files = [line.rstrip("\n").split("\t") for line in f.readlines()[1:]]
     refs = references()
