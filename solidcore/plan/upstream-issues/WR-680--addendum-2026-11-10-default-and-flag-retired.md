@@ -28,7 +28,9 @@ kernel rig's `fixes.json` had the flag on, so their results do not move.
   - tilt 20, seam 170, r 0.262514174: -0.636117736700 (the fork's) to -0.635683901346.
   Their face counts, the rails' ends and the refusal sizes do not move.
 - **Goldens.** `--all --goldens` moves 44 rows of two bodies, values only (no case added,
-  removed, broken or refused differently); blessing rewrites 108 more rows within `1e-9`.
+  removed, broken or refused differently); rows that moved only within `1e-9` keep their
+  text. Every moved row with its old and new values is in
+  `plan/findings/intersect.surface_drop_lib_p3--exact-cylinder-trims-move-goldens-2026-11-10.md`.
   - `blend.fillet_executive_p3` `piecewise-box-edges-*` (8 rows): the 10 x 20 x 30 box with
     edges rounded r0.5 and mitred where two meet. The mitre of two equal perpendicular
     cylinders is an ellipse in the bisecting plane, so the volume has a closed form:
