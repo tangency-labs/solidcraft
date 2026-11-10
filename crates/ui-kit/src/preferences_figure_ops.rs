@@ -315,8 +315,10 @@ pub(super) fn paint_rounded(p: &Painter, rect: Rect, figure: &Figure, sample: &T
     paint(p, rect, figure, Some(sample), Some(&outline));
 }
 
-/// Reuse the six canonical figures with the semantic palette being previewed, without global state.
-pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tokens) {
+/// Colour-vision figure `index` (0 to 5: fixed and projected sketch lines, the axes, bends,
+/// draft and a failed feature) in the semantic palette of `t`, the mode being previewed, without
+/// global state. Any other index paints nothing.
+pub fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tokens) {
     use super::preferences_figure_data as figures;
     let figure = match index {
         0 => &figures::COLOUR_VISION_FIXED,

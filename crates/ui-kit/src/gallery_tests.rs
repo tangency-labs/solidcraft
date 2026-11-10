@@ -931,7 +931,6 @@ pub const ELEMENTS: &[Element] = &[
         });
     }),
     element!("preference_specimens", |ui, _| {
-        colour_vision_sample(ui, &Tokens::get());
         settings_axis_row(
             ui,
             &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },

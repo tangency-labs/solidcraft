@@ -1,6 +1,7 @@
 //! Shared preference compositions and explanatory figures. Figures are cheap painter content,
 //! never additional application viewports; every colour and control metric comes from tokens.
 pub use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
+pub use super::preferences_figure_ops::paint_colour_vision;
 use super::{metrics::dimension, text::paint_text};
 use crate::BackingTooltipExt as _;
 use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
@@ -934,37 +935,4 @@ pub fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, options
         .inner
     })
     .inner
-}
-
-/// The names under the Colour vision sample (message ids).
-pub const COLOUR_VISION_SAMPLE: [&str; 6] =
-    ["ui.colour_vision_fixed", "ui.colour_vision_projected", "ui.axes", "Bends", "ui.draft", "ui.colour_vision_failed"];
-
-/// The Colour vision sample (#778): fixed and projected sketch lines, the X and Y axes, bends up
-/// and down, Draft Analysis and a failed feature, each drawn as it is where it appears, in the
-/// colours of `t` (the preference passes the mode being chosen, #7152). The six cells share one
-/// responsive, clipped area.
-pub fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
-    if super::settings_search::suppress_chrome(ui) {
-        return;
-    }
-    let count = COLOUR_VISION_SAMPLE.len() as f32;
-    let gap = t.space_8.min(dimension(ui.available_width()) / (count - 1.0));
-    let width = ((dimension(ui.available_width()) - gap * (count - 1.0)) / count).min(t.space_24 * 3.0 + t.space_12);
-    let figure_height = t.space_24 + t.space_16 + t.space_4;
-    let (area, _) = ui.allocate_exact_size(vec2(width * count + gap * (count - 1.0), figure_height + t.space_3 + t.space_16), Sense::hover());
-    solidcraft_ui_registry::publish_rect("prefs:colour_vision_samples", area);
-    let p = ui.painter_at(area);
-    for (i, name) in COLOUR_VISION_SAMPLE.iter().enumerate() {
-        let cell = egui::Rect::from_min_size(area.min + vec2((width + gap) * i as f32, 0.0), vec2(width, figure_height));
-        solidcraft_ui_registry::publish_rect(&format!("prefs:colour_vision_sample:{i}"), cell);
-        super::preferences_figure_ops::paint_colour_vision(&p, cell, i, t);
-        centred_text(
-            &p,
-            Rect::from_min_size(cell.left_bottom() + vec2(0.0, t.space_3), vec2(cell.width(), t.space_16)),
-            solidcraft_ui_text::tr(name),
-            FontId::proportional(t.font_small),
-            t.text_dim,
-        );
-    }
 }

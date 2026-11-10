@@ -1088,7 +1088,7 @@ fn the_sections_messages_are_in_every_catalog() {
     let ids: Vec<&str> = ColorVision::ALL
         .into_iter()
         .flat_map(|m| [m.label_id(), m.help_id()])
-        .chain(crate::ui_kit::COLOUR_VISION_SAMPLE)
+        .chain(crate::prefs::figures::COLOUR_VISION_SAMPLE)
         .chain(["ui.colour_vision", "ui.colour_vision_mode", "ui.colour_vision_sample", "ui.colour_vision_note"])
         .collect();
     for (lang, text) in [

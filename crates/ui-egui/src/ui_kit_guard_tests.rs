@@ -1450,18 +1450,7 @@ const KIT_MESSAGE_PREFIXES: &[&str] = &["color.", "navbar.custom.", "search.", "
 /// The message ids (`area.thing`) of SolidCraft's English catalog outside the kit's vocabulary:
 /// labels the kit must take from the host as data.
 fn host_message_ids() -> std::collections::BTreeSet<String> {
-    let english = crate::i18n::LOCALES.first().expect("the English catalog");
-    english
-        .messages()
-        .keys()
-        .filter(|key| {
-            let mut parts = key.split('.');
-            let dotted = key.contains('.')
-                && parts.all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
-            dotted && !KIT_MESSAGE_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
-        })
-        .map(|key| key.to_string())
-        .collect()
+    all_message_ids().into_iter().filter(|key| !KIT_MESSAGE_PREFIXES.iter().any(|prefix| key.starts_with(prefix))).collect()
 }
 
 #[test]
@@ -1507,4 +1496,111 @@ fn message_id_guard_finds_host_ids_but_skips_kit_vocabulary_and_tests() {
         mod tests { fn sample() -> &'static str { "sketch_text.bold" } }
     "#;
     assert_eq!(host_names_in(source, &names), ["prefs.blur_off", "ai.prefs.pointer_preview_hidden"]);
+}
+
+/// English-label keys of SolidCraft's English catalog (`Bends`, `Collapse`): older tables read
+/// them through the label adapter. Everything else in the catalog is a message id.
+fn english_label_keys() -> std::collections::BTreeSet<String> {
+    let english = crate::i18n::LOCALES.first().expect("the English catalog");
+    let ids = all_message_ids();
+    english.messages().keys().filter(|key| !ids.contains(*key)).map(|key| key.to_string()).collect()
+}
+
+/// Every dotted message id (`area.thing`) of SolidCraft's English catalog, the kit's included.
+fn all_message_ids() -> std::collections::BTreeSet<String> {
+    let english = crate::i18n::LOCALES.first().expect("the English catalog");
+    english
+        .messages()
+        .keys()
+        .filter(|key| {
+            key.contains('.')
+                && key.split('.').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'))
+        })
+        .map(|key| key.to_string())
+        .collect()
+}
+
+/// A list of string literals (`[..]`) in non-test code that holds message ids and also an
+/// English-label key: a bare label among ids, read with `tr` as if it were one.
+struct MixedIdLists<'n> {
+    ids: &'n std::collections::BTreeSet<String>,
+    labels: &'n std::collections::BTreeSet<String>,
+    found: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for MixedIdLists<'_> {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let attrs = match item {
+            syn::Item::Mod(i) => &i.attrs,
+            syn::Item::Fn(i) => &i.attrs,
+            syn::Item::Impl(i) => &i.attrs,
+            syn::Item::Const(i) => &i.attrs,
+            syn::Item::Static(i) => &i.attrs,
+            _ => return visit::visit_item(self, item),
+        };
+        if !test_only(attrs) {
+            visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_expr_array(&mut self, array: &'ast syn::ExprArray) {
+        let literals: Vec<String> = array
+            .elems
+            .iter()
+            .filter_map(|e| match e {
+                syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => Some(s.value()),
+                _ => None,
+            })
+            .collect();
+        if literals.iter().any(|l| self.ids.contains(l)) {
+            self.found.extend(literals.into_iter().filter(|l| self.labels.contains(l)));
+        }
+        visit::visit_expr_array(self, array);
+    }
+}
+
+fn mixed_id_lists_in(source: &str, ids: &std::collections::BTreeSet<String>, labels: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let mut guard = MixedIdLists { ids, labels, found: Vec::new() };
+    guard.visit_file(&syn::parse_file(source).unwrap());
+    guard.found
+}
+
+#[test]
+fn message_id_lists_hold_only_message_ids() {
+    let (ids, labels) = (all_message_ids(), english_label_keys());
+    let mut failures = Vec::new();
+    fn scan(dir: &Path, prefix: &str, out: &mut Vec<(std::path::PathBuf, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let name = format!("{prefix}{}", path.file_name().unwrap().to_str().unwrap());
+            if path.is_dir() { scan(&path, &format!("{name}/"), out) } else { out.push((path, name)) }
+        }
+    }
+    // The kit and its components, and the host's own screens.
+    let mut files = crate::test_support::kit_files();
+    scan(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), "", &mut files);
+    for (path, name) in files {
+        if name.ends_with("_tests.rs") || path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let found = mixed_id_lists_in(&std::fs::read_to_string(&path).unwrap(), &ids, &labels);
+        if !found.is_empty() {
+            failures.push(format!("{name}: {found:?}"));
+        }
+    }
+    failures.sort();
+    assert!(failures.is_empty(), "a list of message ids holds a bare English label; give it a message id:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn message_id_list_guard_finds_a_bare_label_among_ids_but_skips_tests() {
+    let (ids, labels) = (all_message_ids(), english_label_keys());
+    assert!(labels.contains("Bends") && ids.contains("ui.axes") && !labels.contains("ui.axes"));
+    let source = r#"
+        pub const SAMPLE: [&str; 3] = ["ui.axes", "Bends", "ui.draft"];
+        const LABELS: [&str; 2] = ["Bends", "Collapse"];
+        #[cfg(test)]
+        mod tests { const SAMPLE: [&str; 2] = ["ui.axes", "Bends"]; }
+    "#;
+    assert_eq!(mixed_id_lists_in(source, &ids, &labels), ["Bends"]);
 }

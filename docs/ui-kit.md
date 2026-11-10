@@ -1080,8 +1080,9 @@ of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `f
 `figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
 `control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
 and dark values, are in `crates/theme/src/palettes.rs`; theme files cannot override them yet and keep
-the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
-and `bend_down`, so they follow the colour vision mode.
+the built-in values. The colour vision figures (`paint_colour_vision`) read `axis_z`,
+`sketch_projected`, `axis_x`, `bend_up` and `bend_down`, so they follow the colour vision mode; the
+host composes them into its own sample with its own names.
 
 Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSample` (12 colours,
 `ThemeSample::from_tokens(&tokens)`), not the dialog's tokens, because a card shows its own theme.

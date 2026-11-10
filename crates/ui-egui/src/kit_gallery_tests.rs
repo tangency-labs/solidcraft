@@ -36,6 +36,7 @@ const APP_ELEMENTS: &[Element] = &[
     element!("preference_specimens", |ui, _| {
         crate::prefs::figures::scale_specimen(ui, 1.1);
         crate::prefs::figures::status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
+        crate::prefs::figures::colour_vision_sample(ui, &Tokens::get());
         crate::prefs::figures::autosave_timeline(ui, 5.0);
         crate::prefs::figures::pointer_preview(ui, true, "Normal", true);
     }),
