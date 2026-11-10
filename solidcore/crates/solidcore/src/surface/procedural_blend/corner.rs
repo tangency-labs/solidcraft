@@ -32,7 +32,7 @@
 //!   definition: the fill and its certificates are made anew and the net must be its patch,
 //!   number for number.
 //! - [`MixedDefinition`]: one of a Mixed corner's two faces, by its rule: the bicubically
-//!   blended Coons patch in R^4 (bilinear for chamfers) of its four sides and their ribbons
+//!   blended Coons patch in R^4 (the chamfer's for chamfers) of its four sides and their ribbons
 //!   ([`crate::blend::blend_corner::mixed::algebra::coons`]), the sides made from the two
 //!   trimmed blends (the trimline and the blend's cross partial along it) and the conic
 //!   inflection X-V in T. Its supports are the two blends and T. Re-certified by running
@@ -187,7 +187,7 @@ pub struct SetbackDefinition {
 }
 
 /// One of a Mixed corner's faces by its rule: the Coons patch of its four sides (`c0`, `c1`,
-/// `d0`, `d1`), bicubically blended (or bilinear, for chamfers), turned (`u`, `v` swapped)
+/// `d0`, `d1`), bicubically blended (or the chamfer's, G0), turned (`u`, `v` swapped)
 /// where its normal must leave the material; the two trimmed blends and T, its supports; the
 /// trimline's side, the blend it lies on and its uv on it; the conic X-V's side in T.
 #[derive(Debug, Clone)]
@@ -198,7 +198,7 @@ pub struct MixedDefinition {
     pub(crate) common: Box<Surface>,
     /// The four sides and their ribbons.
     pub(crate) sides: Box<[Side; 4]>,
-    /// Whether the rule is the bilinear Coons patch (chamfers, G0).
+    /// Whether the rule is the chamfer's Coons patch ([`algebra::coons_chamfer`], G0).
     pub(crate) bilinear: bool,
     /// Whether the patch is turned.
     pub(crate) transposed: bool,
@@ -632,7 +632,7 @@ impl MixedDefinition {
     pub fn patch(&self) -> Result<BSplineSurface> {
         let [c0, c1, d0, d1] = &*self.sides;
         let mut srf = if self.bilinear {
-            algebra::coons_bilinear(c0, c1, d0, d1)?
+            algebra::coons_chamfer(c0, c1, d0, d1, self.tol)?
         } else {
             algebra::coons(c0, c1, d0, d1)?
         };

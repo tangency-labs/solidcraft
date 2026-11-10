@@ -394,7 +394,7 @@ fn rounds_together_r5() {
     graded(5.0, false);
 }
 
-/// Chamfers d 2: the corner's faces are the bilinear Coons patches (G0).
+/// Chamfers d 2: the corner's faces are the chamfer's Coons patches of their sides (G0).
 #[test]
 fn chamfers_together_d2() {
     graded(2.0, true);
@@ -662,6 +662,34 @@ fn a_mixed_face_off_its_blend_or_t_is_refused() {
         assert!(why.contains("off T"), "{why}");
         // the net moved off its rule
         let mut off = rec;
+        for p in &mut off.net.points {
+            p[2] += 1e-3;
+        }
+        let why = corner_rebuild(&k, &CornerRecord::Mixed(off))
+            .unwrap_err()
+            .to_string();
+        assert!(why.contains("rule's patch"), "{why}");
+    }
+}
+
+/// Chamfers d 2: each Mixed face rebuilds from its record to the chamfer's rule (#13755),
+/// and a net moved off that rule is refused.
+#[test]
+fn a_mixed_chamfer_face_round_trips_through_its_record() {
+    let (k, b, res) = blended(2.0, 0);
+    res.unwrap();
+    let faces = corner_faces(&b, CornerKind::Mixed);
+    assert_eq!(faces.len(), 2);
+    for s in faces {
+        let rec = corner_to_record(&k, &s).unwrap();
+        let json = serde_json::to_string(&rec).unwrap();
+        let back = corner_rebuild(&k, &serde_json::from_str(&json).unwrap()).unwrap();
+        assert_eq!(corner_to_record(&k, &back).unwrap(), rec);
+        assert_eq!(back.procedural_blend().unwrap().recertify(&k).unwrap(), 0.0);
+        let CornerRecord::Mixed(mut off) = rec else {
+            panic!("not a mixed record");
+        };
+        assert!(off.bilinear, "the chamfer's rule");
         for p in &mut off.net.points {
             p[2] += 1e-3;
         }
