@@ -337,7 +337,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         pending_section(ui, "upcoming", "Textures", "Soon");
     }),
     element!("inspector_header", |ui, _| {
-        inspector_header(ui, "body", "Boss", "Body");
+        inspector_header(ui, "body", "Boss", "Body", InspectorNames { close: "sample:close", remove: "sample.remove", remove_label: "Remove" });
     }),
     element!("workspace_chip", |ui, _| {
         workspace_chip(ui, "Body");
@@ -503,11 +503,14 @@ pub(crate) const ELEMENTS: &[Element] = &[
             title: "Review native studio",
             name: "Soft enveloping studio",
             subtitle: "Native studio · whole scene",
+            replaces_label: "Replaces",
             replaces: "Lighting, environment, exposure and stage",
+            kept_label: "Keeps",
             kept: "Camera, sampling, dimensions, optical bindings and geometry",
             acknowledgement: "Confirm replacing saved state",
+            acknowledge_handle: "review:acknowledge",
             apply: "Apply studio",
-            copy: false,
+            secondary: None,
             notice: None,
         }
         .content(ui, &mut state.checked, |_| {});
@@ -1230,17 +1233,21 @@ pub(crate) const ELEMENTS: &[Element] = &[
         radial_menu(ui, r.center(), &items, Some(3));
     }),
     element!("workspace_menu", |ui, _| {
-        // Headed sections, a separator and a checked entry, as a host's workspace menu has.
+        // A current, an available and a planned workspace, as a host lists them.
         let items = [
-            Item::action("#create", "Create", ""),
-            Item::action("sketch.create", "Create Sketch", "sketch"),
-            Item::action("solid.extrude", "Extrude", "extrude"),
-            Item::sep(),
-            Item::action("#view", "View", ""),
-            Item::action("ui.findBrowser", "Find in Browser", "search"),
-            Item::action("ui.toggleOrigin", "Show Origin", "origin").key("current"),
+            Item::action("sample.space_a", "Space A", "placeholder").key("current"),
+            Item::action("sample.space_b", "Space B", "placeholder"),
+            Item::action("sample.space_c", "Space C", "placeholder").on(false),
         ];
-        workspace_menu(ui, &items, None, 550.0);
+        let style = |item: &Item| {
+            let (slug, tabs, ramp) = match item.label.as_str() {
+                "Space A" => ("a", Some("Tab A · Tab B"), None),
+                "Space B" => ("b", Some("Tab C"), Some(solidcraft_theme::AccentRamp::Surface)),
+                _ => ("c", None, None),
+            };
+            Some(WorkspaceStyle { slug, description: "A sample workspace", tabs, ramp })
+        };
+        workspace_menu(ui, &WorkspaceMenu { items: &items, style: &style, footer: "Every workspace shows the same sample." }, None, 550.0);
     }),
     element!("window", "dialog:footer", Some("dialog:ok"), |ui, _| {
         Window::new(ui.scope_id().with("window"), "settings", "Preferences").content(

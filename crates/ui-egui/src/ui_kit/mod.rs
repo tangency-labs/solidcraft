@@ -93,7 +93,7 @@ pub(crate) use history_group::*;
 pub(crate) use layout::*;
 pub use look_chain::{LookStep, look_chain};
 pub use menu::{Item, LIST_W};
-pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
+pub(crate) use menu::{Menu, MenuItem, WorkspaceMenu, WorkspaceStyle, rename_menu, workspace_menu};
 pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
@@ -101,7 +101,8 @@ pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
 pub(crate) use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover, within,
+    ComputeStatus, FeatureOptions, InspectorAction, InspectorNames, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
+    within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]

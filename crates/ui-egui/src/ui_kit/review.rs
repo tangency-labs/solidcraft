@@ -7,18 +7,24 @@ pub(crate) struct ReviewAndApply<'a> {
     pub title: &'a str,
     pub name: &'a str,
     pub subtitle: &'a str,
+    /// The impact rows' labels and values: what applying replaces and what it keeps.
+    pub replaces_label: &'a str,
     pub replaces: &'a str,
+    pub kept_label: &'a str,
     pub kept: &'a str,
     pub acknowledgement: &'a str,
+    /// The handle the acknowledgement checkbox publishes.
+    pub acknowledge_handle: &'a str,
     pub apply: &'a str,
-    pub copy: bool,
+    /// The label of a secondary action beside Apply, if the review offers one.
+    pub secondary: Option<&'a str>,
     pub notice: Option<&'a str>,
 }
 
 impl ReviewAndApply<'_> {
     pub(crate) fn show(&self, ctx: &egui::Context, valid: bool, acknowledged: &mut bool, content: impl FnOnce(&mut egui::Ui)) -> (bool, Action) {
         Confirm::new(egui::Id::unique("render_review_apply"), "inspect", self.title)
-            .actions(self.apply, tr("ui.cancel"), self.copy.then(|| tr("render.physical_copy_plan")))
+            .actions(self.apply, tr("ui.cancel"), self.secondary)
             .secondary_left()
             .show(ctx, valid && *acknowledged, |ui| self.content(ui, acknowledged, content))
     }
@@ -49,9 +55,7 @@ impl ReviewAndApply<'_> {
             );
         }
         content(ui);
-        for (label, value, key) in
-            [(tr("render.stage_panels.replaces"), self.replaces, "review:replaces"), (tr("render.stage_panels.kept"), self.kept, "review:kept")]
-        {
+        for (label, value, key) in [(self.replaces_label, self.replaces, "review:replaces"), (self.kept_label, self.kept, "review:kept")] {
             // Impact text wraps independently of ordinary one-line form rows.
             ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
@@ -65,6 +69,6 @@ impl ReviewAndApply<'_> {
             });
         }
         let ack = checkbox(ui, self.acknowledgement, acknowledged);
-        solidcraft_ui_registry::publish_target("render:review:acknowledge", ack.rect);
+        solidcraft_ui_registry::publish_target(self.acknowledge_handle, ack.rect);
     }
 }
