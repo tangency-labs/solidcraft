@@ -247,16 +247,14 @@ fn rounded_dome() -> Body {
     revolve(&profile, [0.0; 3], [0.0, -1.0, 0.0], TAU, true).unwrap()
 }
 
-/// One valid solid of `want` mm³ (the case's relative tolerance, 1e-3).
-fn one_valid_solid(r: &Body, want: f64) {
+/// One valid solid of `counts` faces, edges and vertices and `want` mm³ (the dome's 1e-8 off
+/// its circle moves the volume by about 1e-9 relative).
+fn one_valid_solid(r: &Body, counts: [usize; 3], want: f64) {
     let report = r.check(CheckLevel::All).unwrap();
     assert!(report.is_valid(), "{}", report.text);
     assert_eq!(r.solid_count().unwrap(), 1);
-    let v = volume(r);
-    assert!(
-        (v - want).abs() <= 1e-3 * want,
-        "volume {v}, closed form {want}"
-    );
+    assert_eq!(r.counts().unwrap(), counts);
+    assert!(near(volume(r), want), "{}, closed form {want}", volume(r));
 }
 
 /// The rounded dome joined flat to a cylinder of radius 10 below it, its seam on the dome's. The
@@ -286,7 +284,7 @@ fn a_dome_1e_8_off_its_circle_joins_flat_to_a_cylinder() {
     let r = boolean(cylinder, rounded_dome(), BooleanOp::Union)
         .unwrap()
         .unwrap();
-    one_valid_solid(&r, 2.0 / 3.0 * PI * 1e3 + PI * 1e2 * 15.0);
+    one_valid_solid(&r, [3, 4, 3], 2.0 / 3.0 * PI * 1e3 + PI * 1e2 * 15.0);
 }
 
 /// The rounded dome joined to its mirror image about y = 0: the two seams end 2.03e-8 apart, along
@@ -306,5 +304,5 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
     let r = boolean(rounded_dome(), mirror, BooleanOp::Union)
         .unwrap()
         .unwrap();
-    one_valid_solid(&r, 4.0 / 3.0 * PI * 1e3);
+    one_valid_solid(&r, [2, 3, 3], 4.0 / 3.0 * PI * 1e3);
 }
