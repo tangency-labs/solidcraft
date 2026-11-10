@@ -11,9 +11,10 @@ use crate::{ConstraintKind, Curve, CurveKind, Sketch, SketchError};
 pub const DEFAULT_PATTERN_COPIES: usize = 500;
 
 /// The most instances, the original included, any sketch pattern may hold, whatever the user's
-/// limit. Each copy adds at least one point, so this equals [`crate::MAX_POINTS`]: a larger
-/// ceiling could never be reached. Stored designs and parameter-driven rebuilds are checked
-/// against this, never against a preference, so a design opens the same for everyone.
+/// limit: the default sketch size, [`crate::MAX_POINTS`], since each copy adds at least one point.
+/// It stays the same when Preferences › Sketch › Largest sketch raises the sketch size (#10874).
+/// Stored designs and parameter-driven rebuilds are checked against this, never against a
+/// preference, so a design opens the same for everyone.
 pub const MAX_PATTERN_COPIES: usize = crate::MAX_POINTS;
 
 /// Placement relative to the original, along a pattern direction's oriented line.
