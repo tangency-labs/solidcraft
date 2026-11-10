@@ -31,9 +31,8 @@
 //! 12918e9): [`PrimitiveCreation::create_linear_sweep`] makes a circular arc short of a
 //! whole turn that is swept square to its plane a cylinder (`arc_sweep_cylinder`), where
 //! upstream makes it an `SmSurfOfExtrusion`.
-//! Not upstream (WR-576, tangency-labs/solidcore#1507, opt-in
-//! `Kernel::fixes.linear_sweep_arc_to_cylinder_zero`; SolidCraft change, tangency-labs/smlib
-//! fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
+//! Not upstream (WR-576, tangency-labs/solidcore#1507; SolidCraft change,
+//! tangency-labs/smlib fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
 //! to the zero an `SmCylinder`'s own check holds its generating curve to (`arc_zero`),
 //! not to the B-rep's tolerance.
 //! Not upstream (WR-596, opt-in `Kernel::fixes.box_face_failures_propagate`; the fork's
@@ -1062,7 +1061,7 @@ fn arc_sweep_cylinder(
     Ok(Some(cylinder))
 }
 
-/// Not upstream (WR-576, #1507, `fixes.linear_sweep_arc_to_cylinder_zero`): the zero a
+/// Not upstream (WR-576, #1507): the zero a
 /// linear sweep tests a profile curve's arc to, the one an `SmCylinder`'s own check holds
 /// its generating curve to: `SM_EFF_ZERO * 1000 * (1 + the largest coordinate of the
 /// curve's ends)` (the fork's `ArcZero`). The ends' status is ignored, as `GetEnds`'
@@ -1081,8 +1080,8 @@ impl PrimitiveCreation {
     /// swept along its axis, and an extrusion otherwise. Topology edits defer.
     /// With `k.fixes.linear_sweep_arc_is_cylinder` (not upstream, WR-565) an arc
     /// short of a full circle swept along its axis is a cylinder too.
-    /// With `k.fixes.linear_sweep_arc_to_cylinder_zero` (not upstream, WR-576) the arc
-    /// test is to the cylinder check's zero (`arc_zero`), not the B-rep's tolerance.
+    /// The arc test is to the cylinder check's zero (`arc_zero`, not upstream, WR-576),
+    /// not the B-rep's tolerance.
     pub fn create_linear_sweep(
         &mut self,
         k: &mut Kernel,
@@ -1134,13 +1133,9 @@ impl PrimitiveCreation {
                 } else if let Some((mut frame, radius, start, end)) = curve.is_arc(
                     k,
                     8,
-                    // Not upstream (WR-576, #1507): with the fix, an arc only to the
-                    // zero the cylinder's own check holds it to.
-                    if k.fixes.linear_sweep_arc_to_cylinder_zero {
-                        arc_zero(k, curve)?
-                    } else {
-                        brep.tolerance()
-                    },
+                    // Not upstream (WR-576, #1507): an arc only to the zero the
+                    // cylinder's own check holds it to.
+                    arc_zero(k, curve)?,
                 )? {
                     let angle = end - start;
                     // A right cylinder only fits if the cap, translated along the
