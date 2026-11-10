@@ -82,6 +82,7 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_topology_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -147,6 +148,12 @@ fn is_sweep_failure(e: &SolidError) -> bool {
 /// (`Upstream` before solidcore described it), and passes on as that status.
 fn is_query_failure(e: &SolidError) -> bool {
     e.query_failure().is_some()
+}
+
+/// A topology routine's failure (solidcore's `TopologyFailure`): it stands for the status the
+/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_topology_failure(e: &SolidError) -> bool {
+    e.topology_failure().is_some()
 }
 
 /// `size_ok`.
@@ -1516,5 +1523,22 @@ mod tests {
         assert!(matches!(status(query(QueryFailure::Failed("the region has no shells"))), Error::Status(1001)));
         assert!(matches!(status(query(QueryFailure::Missing("the face's surface"))), Error::Status(1006)));
         assert!(matches!(status(query(QueryFailure::InvalidValue("a vector of zero length has no direction"))), Error::Status(1007)));
+    }
+
+    /// A topology routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did, whether or not it names an entity.
+    #[test]
+    fn topology_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::topology::TopologyFailure;
+        let topology = |t| Failure::new("topology::edge", t).into_error();
+        assert!(matches!(status(topology(TopologyFailure::Failed("the loop does not close"))), Error::Status(1001)));
+        assert!(matches!(status(topology(TopologyFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(topology(TopologyFailure::InvalidValue("a zero normal"))), Error::Status(1007)));
+        assert!(matches!(status(topology(TopologyFailure::Inconsistent("two outer loops"))), Error::Status(1005)));
+        assert!(matches!(status(topology(TopologyFailure::DropFailed { status: 1010 })), Error::Status(1010)));
+        let at =
+            Failure::new("topology::vertexuse", TopologyFailure::Failed("x")).at(solidcore::EntityRef::Vertex(VertexId::from_index(2))).into_error();
+        assert!(matches!(status(at), Error::Status(1001)));
     }
 }

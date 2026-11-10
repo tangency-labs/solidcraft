@@ -1310,7 +1310,7 @@ mod tests {
         // the step-off reaches `EvaluateBinormal`, which returns `SM_ERR_INVALID_INPUT`
         // for an edge use outside a loop (without dereferencing it)
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: 1007, .. })),
+            r.as_ref().is_err_and(|e| e.upstream_status() == Some(1007)),
             "{r:?}"
         );
         assert_eq!(RadialSectorClass::ZeroSectorMate.code(), 7);
