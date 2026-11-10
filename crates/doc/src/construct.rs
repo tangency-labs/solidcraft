@@ -1064,6 +1064,8 @@ fn frame_origin(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
     match point(ctx, g) {
         Ok(p) => Ok(p),
         Err(e) => match g {
+            // An imported mesh has no B-rep vertices: its triangles' corner nearest the pick.
+            GeoRef::Vertex { at, .. } => mesh_vertex(ctx.st, *at).ok_or(e),
             GeoRef::Face { at, .. } => match plane(ctx, g) {
                 Ok(pl) => {
                     let n = pl.normal().normalized().ok_or(e)?;
@@ -1089,8 +1091,64 @@ fn frame_direction(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
             ConstructGeom::Axis { dir, .. } => Ok(dir),
             _ => Err(bad("the datum is no direction (pick an axis or a plane)")),
         },
-        _ => line(ctx, g).map(|(_, d)| d),
+        // An imported mesh has no B-rep edges: the straight run of its outline nearest the pick.
+        GeoRef::Edge { at, .. } => line(ctx, g).map(|(_, d)| d).or_else(|e| mesh_edge_direction(ctx.st, *at).ok_or(e)).map(edge_sense),
+        _ => line(ctx, g).map(|(_, d)| edge_sense(d)),
     }
+}
+
+/// An edge or line has no way of its own: it is taken with its largest component positive, as a
+/// model axis is (`model_axis`), so an upright edge gives Z up and a rebuilt edge the same way.
+fn edge_sense(d: Vec3) -> Vec3 {
+    let largest = [d.x, d.y, d.z].into_iter().fold(0.0_f64, |m, c| if c.abs() > m.abs() + 1e-12 { c } else { m });
+    if largest < 0.0 { d * -1.0 } else { d }
+}
+
+/// How near a pick has to be to a mesh's corner or outline to be taken for it: a thousandth of
+/// the mesh's size, as B-rep picks are found.
+fn mesh_tolerance(b: &ModelBody) -> f64 {
+    (b.body.size() * 1e-3).max(1e-3) * 10.0
+}
+
+/// The corner of an imported mesh's triangles nearest `at`, when one is near it.
+fn mesh_vertex(st: &ModelState, at: Vec3) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+    for b in st.bodies.iter().filter(|b| b.body.is_mesh()) {
+        let tol = mesh_tolerance(b);
+        for p in &b.mesh().positions {
+            let d = p.dist(at);
+            if d <= tol && best.is_none_or(|(bd, _)| d < bd) {
+                best = Some((d, *p));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+}
+
+/// The direction of the piece of an imported mesh's outline (the edges it draws) nearest `at`,
+/// when one is near it.
+fn mesh_edge_direction(st: &ModelState, at: Vec3) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+    for b in st.bodies.iter().filter(|b| b.body.is_mesh()) {
+        let tol = mesh_tolerance(b);
+        let m = b.mesh();
+        for e in &m.edges {
+            for w in e.windows(2) {
+                let (p0, p1) = (w[0], w[1]);
+                let d = p1 - p0;
+                let len2 = d.dot(d);
+                if len2 <= 1e-24 {
+                    continue;
+                }
+                let t = ((at - p0).dot(d) / len2).clamp(0.0, 1.0);
+                let dist = (p0 + d * t).dist(at);
+                if dist <= tol && best.is_none_or(|(bd, _)| dist < bd) {
+                    best = Some((dist, d));
+                }
+            }
+        }
+    }
+    best.and_then(|(_, d)| d.normalized())
 }
 
 pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {

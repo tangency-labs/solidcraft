@@ -32,6 +32,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.axis.through_cylinder",
     "construct.axis.two_planes",
     "construct.axis.two_points",
+    "construct.coordinate_system",
     "construct.plane",
     "construct.plane.along_path",
     "construct.plane.at_angle",

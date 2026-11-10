@@ -329,6 +329,37 @@ Revolve and Extrude's To Object, a surface patch's pass-through points, and Move
 points), a circular edge stands for its centre. A hovered circle shows a small star at its centre.
 A construction point keeps the edge, so it follows the circle's centre as the model changes.
 
+### Coordinate systems
+
+A **Coordinate System** (MODEL ▸ CONSTRUCT, `construct.coordinate_system`) is an origin and
+axes of your own inside a component, added as a step in the history: nothing before it changes.
+Pick its origin (a corner, a round edge's or face's centre, a point on a face, a construction
+point, or type coordinates; `"center"` or `"bottom"` takes the middle of the active part's box,
+or of its bottom), and optionally its Z and X: an edge or axis gives its direction, a face or
+plane its normal. X is laid square to Z. Left out, they are the component's own. An edge has no
+way of its own, so it is taken with its largest component positive (an upright edge is Z up);
+`z_flip` and `x_flip` reverse one. While its origin is being picked, an imported mesh's corners
+and outline edges can be picked too.
+
+It follows what it is built on: on a corner of a part, it moves with the corner when the part
+changes size. It is hidden until shown in the Browser, where it sits with the component's
+construction geometry, and it is drawn as a small triad.
+
+Its point, axes and planes are datums, like a component's origin's:
+
+- a sketch plane or plane input: `CS1` is its XY plane, `CS1/XZ` and `CS1/YZ` the others;
+- an axis input: `CS1/X`, `CS1/Y`, `CS1/Z`, and its point `CS1/O`;
+- a joint side: `CS1` is its whole frame, so a rigid joint between two coordinate systems puts
+  one exactly on the other (see Assemblies);
+- the frame an export is written in: `file.export {path, frame: "CS1"}` (also `file.save_mesh`
+  and the `file.export_*` commands) writes the bodies in its coordinates, a STEP of a design with
+  components as an assembly.
+
+Names are looked up when a command runs and saved as the coordinate system's id with the exact
+placement it is seen through (`o:2/3/cs:17/XY`, `cs:17/XY` for one of the design's own), so
+renaming it keeps everything that uses it, and a part placed twice has a coordinate system in
+each placement.
+
 `timeline.inspect {feature}` returns a feature's `definition`: the fields `timeline.edit` changes,
 with their current values. `timeline.edit {feature, set}` merges `set` into that definition
 (objects are merged field by field, anything else replaces the value), rebuilds the feature and

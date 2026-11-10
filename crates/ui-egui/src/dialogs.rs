@@ -5879,6 +5879,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = serde_json::Map::new();
             for (i, key) in keys.iter().enumerate() {
                 let input = d.inputs.get(i).map_or("", |inp| inp.label);
+                if sels(d, i).is_empty() && d.extra.get(*key).is_none() && construct_optional(command, key) {
+                    continue;
+                }
                 let sel = sels(d, i).first().ok_or_else(|| format!("pick the {}", input.to_lowercase()))?;
                 p.insert(
                     (*key).to_string(),
@@ -6908,6 +6911,16 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
         }
         "construct.axis.edge" => ("construct.axis.edge", "AXIS THROUGH EDGE", &[("Edge", LINE, "edge")]),
         "construct.point.vertex" => ("construct.point.vertex", "POINT AT VERTEX", &[("Point", POINT, "point")]),
+        // Z and X are optional (`construct_optional`): the component's own axes otherwise.
+        "construct.coordinate_system" => (
+            "construct.coordinate_system",
+            "cmd.construct.coordinate_system",
+            &[
+                ("Origin", POINT | FACES | EDGES | selection::ORIGIN, "origin"),
+                ("Z direction", LINE | PLANE | FACES, "z"),
+                ("X direction", LINE | PLANE | FACES, "x"),
+            ],
+        ),
         "construct.point.two_edges" => {
             ("construct.point.two_edges", "POINT THROUGH TWO EDGES", &[("First edge", CURVE, "a"), ("Second edge", CURVE, "b")])
         }
@@ -6937,6 +6950,12 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
         }
         _ => return None,
     })
+}
+
+/// Whether a construction dialog's input may be left empty: a coordinate system's Z and X
+/// (#14644), which then follow its component's axes.
+fn construct_optional(command: &str, key: &str) -> bool {
+    command == "construct.coordinate_system" && matches!(key, "z" | "x")
 }
 
 /// A dialog pick as a construction reference (`construct.*`'s `{face|edge|vertex: [x,y,z]}`,

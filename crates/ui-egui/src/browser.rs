@@ -1184,6 +1184,7 @@ impl Lit {
                                     FeatureKind::ConstructionPlane { .. }
                                         | FeatureKind::ConstructionAxis { .. }
                                         | FeatureKind::ConstructionPoint { .. }
+                                        | FeatureKind::CoordinateSystem { .. }
                                 )
                         })
                         .map(|f| f.component),
@@ -1704,7 +1705,10 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
                 } else {
                     matches!(
                         f.kind,
-                        FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. }
+                        FeatureKind::ConstructionPlane { .. }
+                            | FeatureKind::ConstructionAxis { .. }
+                            | FeatureKind::ConstructionPoint { .. }
+                            | FeatureKind::CoordinateSystem { .. }
                     )
                 };
                 (f.component == component && kind).then_some(i)

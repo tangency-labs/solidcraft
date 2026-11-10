@@ -145,6 +145,12 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
+A coordinate system (MODEL ▸ CONSTRUCT, `construct.coordinate_system`) is a whole frame as a
+joint side: `{"type": "rigid", "a": "Seat", "b": "Plug"}` puts the coordinate system `Plug` of
+one part exactly on `Seat` of another, origin, X and Z alike (`flip: true` turns it over). Put one
+on an imported part's corner, or at the bottom centre of its box, to place and turn the part by a
+point that means something rather than by the origin its file had.
+
 A joint's offset, angle and values can be typed as expressions over the design's parameters
 (`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
 whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a

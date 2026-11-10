@@ -1419,3 +1419,36 @@ fn an_export_in_a_coordinate_system_is_in_its_frame() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An imported mesh (the case that most needs a frame of its own): a coordinate system on its
+/// corner and edges, and a joint by it standing the part on the ground.
+#[test]
+fn a_coordinate_system_on_an_imported_meshs_corner() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-cs-mesh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cabinet.stl").to_string_lossy().to_string();
+    let mut maker = Session::default();
+    run(&mut maker, "solid.box", json!({"length": 30, "width": 20, "height": 45, "corner": [40, 60, 100]}));
+    run(&mut maker, "file.export", json!({"path": stl}));
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let occ = r["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": false}));
+    run(&mut s, "component.activate", json!({"component": r["component"]}));
+    // The bottom corner (40, 60, 100), Z up its vertical edge, X along its long bottom edge.
+    run(
+        &mut s,
+        "construct.coordinate_system",
+        json!({"origin": {"vertex": [40, 60, 100]}, "z": {"edge": [40, 60, 120]}, "x": {"edge": [55, 60, 100]}, "name": "Foot"}),
+    );
+    let (o, x, _, z) = frame(&s, "Foot");
+    assert!(near(o, Vec3::new(40.0, 60.0, 100.0)), "{o:?}");
+    // An edge is taken the way its largest component is positive: up, and along +X.
+    assert!(near(z, Vec3::Z) && near(x, Vec3::X), "{x:?} {z:?}");
+    // Joined by it to the design's XY (the frames made one), it stands on the ground from its
+    // corner at the origin.
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": {"plane": "XY"}, "b": "Foot"}));
+    assert_eq!(boxes(&s)[0].1, [0, 0, 0, 30000, 20000, 45000]);
+}
