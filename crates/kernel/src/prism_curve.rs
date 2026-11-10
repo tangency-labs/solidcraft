@@ -122,6 +122,10 @@ fn spans_of(run: &Run, work: &mut usize) -> Option<Vec<Vec<HPoint>>> {
             let ctrl: Vec<HPoint> = homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: p[3] }).collect();
             spline_spans(knots, &ctrl, t0, t1, work)?
         }
+        Curve::Circle { frame, radius } => {
+            let (a, b) = run.ends_along();
+            return ellipse_spans(v3(frame.origin), v3(frame.x_axis), v3(frame.y_axis), [*radius; 2], a, b, work);
+        }
         Curve::Ellipse { frame, radii } => {
             let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
             let (a, b) = run.ends_along();
@@ -329,20 +333,30 @@ pub enum PlanarPiece {
 
 /// `run` in `plane` exactly, for a sketch to project it: as [`segment`], and a curve of several
 /// Bézier spans (a spline edge, an elliptical arc past a quarter turn, a chain of a font's
-/// curves) as the one B-spline it is, its knots and weights its own. `None` when the edge
-/// doesn't lie in a plane parallel to `plane` or isn't read exactly.
+/// curves) as one B-spline with its own knots and weights. Splines and ellipses project
+/// between nonparallel planes too. `None` when the edge cannot be read exactly.
 pub(crate) fn projected_curves(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<PlanarPiece>> {
-    if let Some(segs) = read(run, plane, tol, work, false) {
-        return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+    // An unsuccessful analytic certificate must leave work for the exact spline path.
+    let allowance = *work / 2;
+    let mut analytic_work = allowance;
+    let analytic = read(run, plane, tol, &mut analytic_work, false);
+    *work -= allowance - analytic_work;
+    if let Some(segs) = analytic {
+        // A single Bezier or conic may describe the same locus with different knots or
+        // rational parameter speed. Native splines keep their representation unless a
+        // whole-span line/arc certificate establishes an analytic replacement.
+        let spline = matches!(run.curve, Curve::Spline { .. } | Curve::RationalSpline { .. });
+        if !spline || segs.iter().all(|s| matches!(s, Seg2::Line { .. } | Seg2::Arc { .. })) {
+            return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+        }
     }
     one_spline(run, plane, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
 }
 
 /// `run`'s spline (or ellipse) over its interval, in the direction it runs, as one clamped
 /// B-spline in `plane`: the piece of the curve between the interval's ends (Boehm insertion,
-/// exact up to rounding), its control points read in the plane. `None` when a control point lies
-/// off the level of the curve's start (the curve is not in a plane parallel to `plane`), the
-/// ends miss the run's ends, or the work budget runs out.
+/// exact up to rounding), its control points projected into the plane. `None` when the ends
+/// miss the run's ends, the coordinates cannot be represented accurately, or work runs out.
 fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<PlanarSpline> {
     if !tol.is_finite() || tol <= 0. || run.interval[1] <= run.interval[0] {
         return None;
@@ -367,8 +381,20 @@ fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Pl
         Curve::RationalSpline { knots, homogeneous } => {
             along(run, clamped(knots, homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: p[3] }).collect(), work)?)?
         }
+        Curve::Line { .. } => {
+            let eval = CurveEval::new(run.curve).ok()?;
+            along(run, (1, vec![t0, t0, t1, t1], vec![HPoint::weighted(eval.point(t0)?, 1.), HPoint::weighted(eval.point(t1)?, 1.)]))?
+        }
+        Curve::Polyline { points } => {
+            if points.len() < 2 || points.len() > MAX_CONTROLS {
+                return None;
+            }
+            let last = (points.len() - 1) as f64;
+            let knots: Vec<_> = std::iter::once(0.).chain((0..points.len()).map(|i| i as f64)).chain(std::iter::once(last)).collect();
+            along(run, clamped(&knots, points.iter().map(|p| HPoint::weighted(v3(*p), 1.)).collect(), work)?)?
+        }
         // Rational quadratic spans, already the way the run goes, joined: each joint knot twice.
-        Curve::Ellipse { .. } => {
+        Curve::Ellipse { .. } | Curve::Circle { .. } => {
             let spans = spans_of(run, work)?;
             let mut knots = vec![0.0; 3];
             let mut ctrl: Vec<HPoint> = Vec::new();
@@ -393,8 +419,9 @@ fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Pl
     if !(max_w.is_finite() && max_w > 0.) {
         return None;
     }
+    let ctrl: Vec<_> = ctrl.into_iter().map(|p| HPoint { x: p.x / max_w, y: p.y / max_w, z: p.z / max_w, w: p.w / max_w }).collect();
+    let max_w = 1.0;
     let (Some(first), Some(last)) = (ctrl.first().and_then(|p| p.project()), ctrl.last().and_then(|p| p.project())) else { return None };
-    let level = plane.height(first);
     let (a, b) = (plane.to_local(first), plane.to_local(last));
     if first.dist(run.ends[0]) > tol || last.dist(run.ends[1]) > tol {
         return None;
@@ -407,7 +434,7 @@ fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Pl
         }
         let v = p.project()?;
         let error = (v.x.abs() + v.y.abs() + v.z.abs() + plane.origin.len()) * f64::EPSILON * 256.;
-        if (plane.height(v) - level).abs() + error > tol || error > tol * 0.1 {
+        if error > tol * 0.1 {
             return None;
         }
         let local = plane.to_local(v);
@@ -424,7 +451,7 @@ fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Pl
     if let Some(p) = points.last_mut() {
         *p = b;
     }
-    if weights.iter().all(|w| (w - 1.).abs() <= 1e-12) {
+    if weights.iter().all(|w| *w == 1.) {
         weights.clear();
     }
     Some(PlanarSpline { degree, knots, points, weights })
@@ -436,8 +463,7 @@ fn along(run: &Run, (degree, knots, ctrl): (usize, Vec<f64>, Vec<HPoint>)) -> Op
     if run.forward {
         return Some((degree, knots, ctrl));
     }
-    let sum = knots.first()? + knots.last()?;
-    Some((degree, knots.iter().rev().map(|k| sum - k).collect(), ctrl.into_iter().rev().collect()))
+    Some((degree, knots.iter().rev().map(|k| -k).collect(), ctrl.into_iter().rev().collect()))
 }
 
 fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -> Option<Vec<Seg2>> {
@@ -767,6 +793,81 @@ mod tests {
     fn quarter() -> Curve {
         let w = std::f64::consts::FRAC_1_SQRT_2;
         Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[10., 0., 0., 1.], [10. * w, 10. * w, 0., w], [0., 10., 0., 1.]] }
+    }
+
+    #[test]
+    fn planar_rational_spline_keeps_unequal_endpoint_weights_and_speed() {
+        let curve =
+            Curve::RationalSpline { knots: vec![0., 0., 0., 1., 1., 1.], homogeneous: vec![[0., 0., 0., 1.], [0., 20., 0., 2.], [40., 40., 0., 4.]] };
+        let pieces = projected_curves(&run(&curve, true), &Plane::XY, 1e-6, &mut 262144).unwrap();
+        let [PlanarPiece::Spline(s)] = pieces.as_slice() else { panic!("source NURBS must remain a spline: {pieces:?}") };
+        let projected = Curve::RationalSpline {
+            knots: s.knots.clone(),
+            homogeneous: s.points.iter().zip(&s.weights).map(|(p, w)| [p.x * w, p.y * w, 0., *w]).collect(),
+        };
+        for i in 0..=32 {
+            let t = i as f64 / 32.;
+            assert!(at(&curve, t).dist(at(&projected, t)) < 1e-12);
+        }
+        assert!(at(&projected, 0.5).dist(Vec3::new(40. / 9., 80. / 9., 0.)) < 1e-12);
+    }
+
+    #[test]
+    fn tilted_spline_projection_preserves_the_selected_interval() {
+        let plane = Plane::new(Vec3::new(2., 3., 4.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
+        for multispan in [false, true] {
+            let mut points = vec![[0., 0., 0.], [6., 18., 5.], [18., -12., -3.], [40., 9., 12.]];
+            let knots = if multispan {
+                points.extend([[48., -4., 3.], [55., 2., 8.]]);
+                vec![0., 0., 0., 0., 0.3, 0.7, 1., 1., 1., 1.]
+            } else {
+                bezier_knots(3)
+            };
+            for rational in [false, true] {
+                let curve = if rational {
+                    Curve::RationalSpline {
+                        knots: knots.clone(),
+                        homogeneous: points.iter().zip([1., 0.8, 1.4, 1., 0.9, 1.2]).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, w]).collect(),
+                    }
+                } else {
+                    Curve::Spline { knots: knots.clone(), points: points.clone() }
+                };
+                for interval in [[0., 1.], [0.2, 0.8], [0.3, 0.7], [0.35, 0.65]] {
+                    for forward in [false, true] {
+                        let ends = if forward {
+                            [at(&curve, interval[0]), at(&curve, interval[1])]
+                        } else {
+                            [at(&curve, interval[1]), at(&curve, interval[0])]
+                        };
+                        let run = Run { curve: &curve, interval, forward, ends };
+                        let pieces = projected_curves(&run, &plane, 1e-6, &mut 262_144);
+                        assert!(pieces.is_some(), "a spline must project exactly over {interval:?}, forward={forward}");
+                        let pieces = pieces.unwrap();
+                        let [PlanarPiece::Spline(s)] = pieces.as_slice() else { panic!("expected one spline: {pieces:?}") };
+                        let projected = Curve::RationalSpline {
+                            knots: s.knots.clone(),
+                            homogeneous: s
+                                .points
+                                .iter()
+                                .enumerate()
+                                .map(|(i, p)| {
+                                    let w = s.weights.get(i).copied().unwrap_or(1.);
+                                    [p.x * w, p.y * w, 0., w]
+                                })
+                                .collect(),
+                        };
+                        let (lo, hi) = (s.knots[s.degree], s.knots[s.points.len()]);
+                        for i in 0..=32 {
+                            let u = f64::from(i) / 32.;
+                            let t = if forward { u } else { 1. - u };
+                            let expected = plane.to_local(at(&curve, interval[0] + (interval[1] - interval[0]) * t));
+                            let actual = at(&projected, lo + (hi - lo) * u);
+                            assert!(Vec2::new(actual.x, actual.y).dist(expected) < 1e-8, "interval={interval:?}, forward={forward}, u={u}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Sampling must not certify a spline cap that merely passes through the sample points.

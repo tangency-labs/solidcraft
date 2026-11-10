@@ -68,7 +68,6 @@ crates/doc/src/naming.rs:roomiest takes a sample point per face from mesh triang
 crates/doc/src/naming.rs:samples_up_to takes sample points per face from mesh triangles
 crates/doc/src/project.rs:body_mesh finds a projection's body nearest a point by the display mesh
 crates/doc/src/project.rs:cache_key keys projections by the display mesh
-crates/doc/src/project.rs:exact_edges finds the picked edges by the display mesh
 crates/doc/src/project.rs:first_hits picks the projected curves met first by the display mesh
 crates/doc/src/project.rs:nearest_face picks the nearest face by mesh triangles
 crates/doc/src/project.rs:resolve_face_indices projects faces through the display mesh

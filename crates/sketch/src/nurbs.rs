@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_geom::bspline::{self, HPoint};
+use solidcraft_geom::prelude::*;
 
 use crate::model::{Result, SketchError};
 
@@ -30,6 +31,91 @@ fn bad<T>(why: &str) -> Result<T> {
 }
 
 impl Nurbs {
+    /// The existing fit curve as exact control splines. Chord knots compact its C2 spans;
+    /// very ill-conditioned joins retain their original Bezier controls instead.
+    pub fn from_fit_points(points: &[Vec2], periodic: bool) -> Result<Vec<(Vec<Vec2>, Nurbs)>> {
+        if !(2..=crate::MAX_SPLINE_POINTS).contains(&points.len()) || points.iter().any(|p| !p.is_finite()) {
+            return bad("fit points must be finite and within the spline point limit");
+        }
+        let h: Vec<f64> = points.windows(2).map(|p| p[0].dist(p[1]).max(1e-9)).collect();
+        if h.iter().any(|h| !h.is_finite()) {
+            return bad("fit chord lengths are not finite");
+        }
+        let spans = crate::fit_beziers_mode(points, periodic)?;
+        if spans.len() != h.len() || spans.iter().flatten().any(|p| !p.is_finite()) {
+            return bad("fit spans cannot be represented accurately");
+        }
+        let mut out = Vec::new();
+        for (spans, h) in spans.chunks(crate::MAX_SPLINE_POINTS - 3).zip(h.chunks(crate::MAX_SPLINE_POINTS - 3)) {
+            if let Some(compact) = Self::compact_fit(spans, h) {
+                out.push(compact);
+                continue;
+            }
+            for spans in spans.chunks((crate::MAX_SPLINE_POINTS - 1) / 3) {
+                let mut controls = Vec::with_capacity(spans.len() * 3 + 1);
+                let mut knots = vec![0.0; 4];
+                for (i, [a, b, c, d]) in spans.iter().enumerate() {
+                    if i == 0 {
+                        controls.push(*a);
+                    }
+                    controls.extend([*b, *c, *d]);
+                    knots.extend(std::iter::repeat_n((i + 1) as f64, if i + 1 == spans.len() { 4 } else { 3 }));
+                }
+                let nurbs = Nurbs { knots, weights: Vec::new() };
+                nurbs.check(controls.len(), 3)?;
+                out.push((controls, nurbs));
+            }
+        }
+        Ok(out)
+    }
+
+    fn compact_fit(spans: &[[Vec2; 4]], h: &[f64]) -> Option<(Vec<Vec2>, Nurbs)> {
+        let (first, last) = (spans.first()?, spans.last()?);
+        let mut knots = vec![0.0; 4];
+        let mut widths = Vec::with_capacity(h.len());
+        let mut t = 0.0;
+        for (i, length) in h.iter().enumerate() {
+            let next = t + length;
+            if !(next > t && next.is_finite()) {
+                return None;
+            }
+            widths.push(next - t);
+            t = next;
+            knots.extend(std::iter::repeat_n(t, if i + 1 == h.len() { 4 } else { 1 }));
+        }
+        let mut controls = vec![first[0], first[1]];
+        for (pair, h) in spans.windows(2).zip(widths.windows(2)) {
+            // Cubic blossom at the three neighbouring knots. Extrapolating from the
+            // longer span keeps the coefficient ratio <= 1 even for uneven chords.
+            let (b, c, ratio) = if h[1] >= h[0] { (pair[1][1], pair[1][2], h[0] / h[1]) } else { (pair[0][2], pair[0][1], h[1] / h[0]) };
+            controls.push(b + (b - c) * ratio);
+        }
+        controls.extend([last[2], last[3]]);
+        let nurbs = Nurbs { knots, weights: Vec::new() };
+        nurbs.check(controls.len(), 3).ok()?;
+        // Reconstruct the Bezier coefficients in linear time. Their largest difference
+        // bounds the difference of the entire curves by the convex hull property.
+        let inner: Vec<[Vec2; 2]> = widths
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                let a = i.checked_sub(1).and_then(|j| widths.get(j)).copied().unwrap_or(0.0);
+                let c = widths.get(i + 1).copied().unwrap_or(0.0);
+                let sum = a + b + c;
+                [controls[i + 1].lerp(controls[i + 2], a / sum), controls[i + 2].lerp(controls[i + 1], c / sum)]
+            })
+            .collect();
+        let scale = spans.iter().flatten().fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
+        let tolerance = scale * f64::EPSILON * 128.0;
+        let certified = spans.iter().enumerate().all(|(i, expected)| {
+            let [b, c] = inner[i];
+            let a = if i == 0 { first[0] } else { inner[i - 1][1].lerp(b, widths[i - 1] / (widths[i - 1] + widths[i])) };
+            let d = if i + 1 == spans.len() { last[3] } else { c.lerp(inner[i + 1][0], widths[i] / (widths[i] + widths[i + 1])) };
+            [a, b, c, d].iter().zip(expected).all(|(a, b)| a.dist(*b) <= tolerance)
+        });
+        certified.then_some((controls, nurbs))
+    }
+
     /// Whether these knots and weights fit a control spline of `degree` over `n` points.
     pub fn check(&self, n: usize, degree: u8) -> Result<()> {
         let d = usize::from(degree);
@@ -73,7 +159,10 @@ impl Nurbs {
 
     /// The control points `p` with their weights, homogeneous.
     fn homogeneous(&self, p: &[Vec2]) -> Vec<HPoint> {
-        p.iter().enumerate().map(|(i, q)| HPoint::weighted(Vec3::new(q.x, q.y, 0.0), self.weight(i))).collect()
+        // A common weight scale has no geometric meaning. Normalize before multiplying
+        // coordinates so finite accepted weights cannot overflow or underflow the controls.
+        let max = self.weights.iter().copied().reduce(f64::max).unwrap_or(1.0);
+        p.iter().enumerate().map(|(i, q)| HPoint::weighted(Vec3::new(q.x, q.y, 0.0), self.weight(i) / max)).collect()
     }
 
     /// The knot domain `[lo, hi]` for `n` points of `degree`.
@@ -81,11 +170,11 @@ impl Nurbs {
         Some((*self.knots.get(degree)?, *self.knots.get(n)?))
     }
 
-    /// The same curve run the other way: the knots mirrored, the weights reversed (the points
-    /// reverse with them).
+    /// The same curve run the other way: negate and reverse the knots and reverse weights
+    /// (the points reverse with them). Reflection about zero preserves every knot exactly,
+    /// including intervals too narrow to survive subtraction from a large domain endpoint.
     pub fn reversed(&self) -> Nurbs {
-        let sum = self.knots.first().copied().unwrap_or(0.0) + self.knots.last().copied().unwrap_or(0.0);
-        Nurbs { knots: self.knots.iter().rev().map(|k| sum - k).collect(), weights: self.weights.iter().rev().copied().collect() }
+        Nurbs { knots: self.knots.iter().rev().map(|k| -k).collect(), weights: self.weights.iter().rev().copied().collect() }
     }
 
     /// The point of the spline over `p` (of `degree`) at `t` in [0, 1] across its knot domain.
@@ -141,6 +230,43 @@ impl Nurbs {
             }
         }
         Some(spans)
+    }
+
+    /// A point or the complete line interval when every control lies on one line
+    /// within affine-map roundoff. `None` retains a genuinely two-dimensional curve.
+    pub fn linear_image(&self, p: &[Vec2], degree: u8, roundoff: f64) -> Result<Option<[Vec2; 2]>> {
+        self.check(p.len(), degree)?;
+        if !(roundoff.is_finite() && roundoff >= 0.0) || p.iter().any(|p| !p.is_finite()) {
+            return bad("invalid projected controls or roundoff budget");
+        }
+        let origin = *p.first().ok_or_else(|| SketchError::Invalid("empty spline".into()))?;
+        let far = p.iter().copied().max_by(|a, b| a.dist(origin).total_cmp(&b.dist(origin))).unwrap_or(origin);
+        if far.dist(origin) <= roundoff {
+            return Ok(Some([origin; 2]));
+        }
+        let length = far.dist(origin);
+        if !(length.is_finite() && length > 0.0) {
+            return bad("invalid projected direction");
+        }
+        let axis = (far - origin) / length;
+        if p.iter().any(|p| axis.cross(*p - origin).abs() > roundoff) {
+            return Ok(None);
+        }
+        // Translate before extraction: range arithmetic depends on extent rather than the
+        // curve's world position. Boehm insertion is a convex combination for positive weights.
+        let scalar: Vec<_> = p.iter().map(|p| Vec2::new((*p - origin).dot(axis), 0.0)).collect();
+        let scale = scalar.iter().fold(1.0_f64, |s, p| s.max(p.x.abs()));
+        let accuracy = (scale * f64::EPSILON * 8192.0).max(1e-10);
+        let spans = self.spans(&scalar, degree).ok_or_else(|| SketchError::Invalid("cannot extract projected spline spans".into()))?;
+        let mut work = (64 * spans.len() + 4096) * (usize::from(degree) + 1).pow(2);
+        let mut range = [f64::INFINITY, f64::NEG_INFINITY];
+        for span in spans {
+            let r = bspline::bezier_scalar_range(&span, accuracy, &mut work).map_err(|e| SketchError::Invalid(e.to_string()))?;
+            range = [range[0].min(r[0]), range[1].max(r[1])];
+        }
+        // Reserve a second accuracy allowance for scalar mapping and positive-weight
+        // Boehm extraction (degree <= 9), outside the directed subdivision arithmetic.
+        Ok(Some([origin + axis * (range[0] - accuracy), origin + axis * (range[1] + accuracy)]))
     }
 
     /// The spline over `p` as its exact [`Seg2`] pieces, one a knot span: Béziers, or conics
