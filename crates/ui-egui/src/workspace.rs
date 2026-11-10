@@ -850,6 +850,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Every Construct command appears once, under its entity heading, including filtered menus.
     #[test]
     fn construct_groups_keep_every_command_in_planes_axes_points_order() {
         let specs = solidcraft_engine::command_specs();

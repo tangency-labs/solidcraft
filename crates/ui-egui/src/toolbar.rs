@@ -1540,7 +1540,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                                 return;
                             }
-                            let grouped = crate::workspace::grouped_commands(&tab, panel, &cmds);
+                            let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
+                                cmds.iter().map(|c| (None, *c)).collect()
+                            } else {
+                                crate::workspace::grouped_commands(&tab, panel, &cmds)
+                            };
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
                                 let mut paints = Vec::new();
                                 let action = dropdown_grid(app, ui, &tab, &grouped, &crate::workspace::ungrouped(&tab, panel, &cmds), &mut paints);
@@ -3486,12 +3490,14 @@ mod dropdown_tests {
         }
     }
 
+    /// Both layouts keep the original order by default and expose every tool with grouping on.
     #[test]
     fn construct_dropdown_groups_are_visible_in_list_and_grid() {
-        for grid in [false, true] {
+        for (grid, grouped) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.app.preferences.ribbon_icon_grid = grid;
+            h.app.preferences.construct_menu_groups = grouped;
             h.call("ui.resize", json!({"width":1600,"height":1200}));
             h.app.ui.tab = "MODEL".into();
             h.frames(4);
@@ -3521,16 +3527,32 @@ mod dropdown_tests {
                 let bounds = crate::scenario::rect_of("toolbar_dropdown").unwrap().expand(8.);
                 let image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), output.pixels_per_point, bounds, &textures);
                 std::fs::create_dir_all(&dir).unwrap();
-                image.save(std::path::Path::new(&dir).join(if grid { "construct-grid.png" } else { "construct-list.png" })).unwrap();
+                image
+                    .save(std::path::Path::new(&dir).join(format!(
+                        "construct-{}-{}.png",
+                        if grid { "grid" } else { "list" },
+                        if grouped { "grouped" } else { "default" }
+                    )))
+                    .unwrap();
             }
             for heading in ["Planes", "Axes", "Points"] {
-                assert!(
+                assert_eq!(
                     output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == heading)),
-                    "{heading} visible in grid={grid}"
+                    grouped,
+                    "{heading} in grid={grid}, grouped={grouped}"
                 );
             }
             let (cmds, _) = crate::workspace::layout("MODEL", "CONSTRUCT", &solidcraft_engine::command_specs()).unwrap();
             let prefix = "dropdown:";
+            if !grouped {
+                let mut positions: Vec<_> = cmds.iter().map(|c| (c.id, crate::scenario::handle_at(&format!("{prefix}{}", c.id)).unwrap())).collect();
+                positions.sort_by(|a, b| a.1.y.total_cmp(&b.1.y).then(a.1.x.total_cmp(&b.1.x)));
+                assert_eq!(
+                    positions.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+                    cmds.iter().map(|c| c.id).collect::<Vec<_>>(),
+                    "original order in grid={grid}"
+                );
+            }
             for c in &cmds {
                 assert!(crate::scenario::handle_at(&format!("{prefix}{}", c.id)).is_some(), "{} remains reachable in grid={grid}", c.id);
             }
