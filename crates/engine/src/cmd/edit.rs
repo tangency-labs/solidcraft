@@ -1887,6 +1887,88 @@ fn reorder_features(
     Ok((next, ordered, broken, Some(after)))
 }
 
+/// The edge and stretch (`from`, `to`) a `sheet.flange` segment input's key names:
+/// `sheet.flange.edge<x bits>,<y bits>,<z bits>.stretch<from bits>.<to bits>.<field>`. The edge is
+/// the point the flange was made on, the physical edge itself, so reordering the `edges` list moves
+/// no name onto another edge's stretch.
+fn segment_span(key: &str) -> Option<([u64; 3], f64, f64)> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let mut parts = rest.split('.');
+    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
+    let point: [u64; 3] = point.try_into().ok()?;
+    let from = f64::from_bits(parts.next()?.strip_prefix("stretch")?.parse::<u64>().ok()?);
+    let to = f64::from_bits(parts.next()?.parse::<u64>().ok()?);
+    Some((point, from, to))
+}
+
+/// The edge a `sheet.flange` edge-level input belongs to: the pick point its key carries, for the
+/// edge's own `angle` and `height`. A segment input carries its stretch as well, so `segment_span`
+/// reads those; this reads only the keys that name the edge itself.
+fn edge_point(key: &str) -> Option<[u64; 3]> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let mut parts = rest.split('.');
+    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
+    let point: [u64; 3] = point.try_into().ok()?;
+    if !matches!(parts.next()?, "angle" | "height") || parts.next().is_some() {
+        return None;
+    }
+    Some(point)
+}
+
+/// The pick point a `sheet.flange` key carries, decoded from the bits it stores, and what the key
+/// names after that point: its field, and for a segment its stretch.
+fn key_point(key: &str) -> Option<([f64; 3], &str)> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let (point, named) = rest.split_once('.')?;
+    let point: Vec<f64> = point.split(',').map(|bits| bits.parse::<u64>().ok().map(f64::from_bits)).collect::<Option<_>>()?;
+    let point: [f64; 3] = point.try_into().ok()?;
+    Some((point, named))
+}
+
+/// How far apart two pick points are.
+fn point_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+}
+
+/// Whether two pick points, as the bits a key stores, are within `tol` of each other.
+fn points_within(a: [u64; 3], b: [u64; 3], tol: f64) -> bool {
+    point_distance(a.map(f64::from_bits), b.map(f64::from_bits)) <= tol
+}
+
+/// The tolerance within which two pick points name the same edge: the distance the document lets a
+/// pick miss an edge by and still select it (`appearance::pick_tolerance` of the sheet body the
+/// feature is on), or 1e-6 mm when the model does not hold that body yet. A pick point that moves
+/// by a hair is the same edge, so the names on it stay (#5927, #5928).
+fn edge_pick_tolerance(s: &Session, kind: &FeatureKind) -> f64 {
+    const NONE: f64 = 1e-6;
+    let FeatureKind::SheetFlange { body, edges, .. } = kind else { return NONE };
+    let state = s.model.state();
+    // The body named, else the sheet the first pick point lands on: the one evaluation takes the
+    // feature's body from (`sheet_for`).
+    let sheet = match body {
+        Some(name) => state.sheets.iter().find(|sh| sh.body == name.0),
+        None => edges.first().and_then(|e| {
+            state.sheets.iter().filter_map(|sh| sh.edge_at(e.point.0).map(|at| (sh, at.4))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(sh, _)| sh)
+        }),
+    };
+    sheet.and_then(|sh| state.body(&sh.body)).map_or(NONE, solidcraft_doc::appearance::pick_tolerance)
+}
+
+/// Whether an old key and a new key name the same input: the same key, or the same field (and, for
+/// a segment, the same stretch) on pick points within `tol` of each other. The keys keep the bits
+/// of their point, so a point that moved by a hair no longer matches as a string; it is the same
+/// edge all the same (#5927, #5928).
+fn keys_match(old_key: &str, key: &str, tol: f64) -> bool {
+    if old_key == key {
+        return true;
+    }
+    match (key_point(old_key), key_point(key)) {
+        (Some((a, named)), Some((b, named_too))) => named == named_too && point_distance(a, b) <= tol,
+        _ => false,
+    }
+}
+
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     let mut keys: Vec<_> = kind.inputs().into_iter().map(|(label, _, unit)| (label.to_string(), unit)).collect();
     if let FeatureKind::Fillet { style, .. } = kind {
@@ -1905,6 +1987,53 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
                 }
             }
             solidcraft_doc::FilletStyle::Constant | solidcraft_doc::FilletStyle::Chord | solidcraft_doc::FilletStyle::Curvature => {}
+        }
+    }
+    // Every segment's angle and height has the same label ("Segment angle", "Segment height"), so
+    // a name could only be matched by position: inserting, deleting or reordering stretches or
+    // edges moved a named height onto another stretch (#5927, #5928). Each segment input is keyed
+    // by the edge it is on (the point the flange was made on, the physical edge) and by the stretch
+    // it describes (its `from` and `to`, exactly), so a name stays on its own stretch however the
+    // list is reordered. An edge's own angle and height are keyed by the edge's point for the same
+    // reason: reordering the edges moves no name onto another edge. The order is the walk's: an
+    // edge's angle before its height before its segments, edges in order, and only the expressions
+    // that carry a value.
+    if let FeatureKind::SheetFlange { edges, .. } = kind {
+        let mut edge_keys = Vec::new();
+        let mut segment_keys = Vec::new();
+        for e in edges {
+            let point = format!("{},{},{}", e.point.0.x.to_bits(), e.point.0.y.to_bits(), e.point.0.z.to_bits());
+            if e.angle.is_some() {
+                edge_keys.push(format!("sheet.flange.edge{point}.angle"));
+            }
+            if e.height.is_some() {
+                edge_keys.push(format!("sheet.flange.edge{point}.height"));
+            }
+            for s in &e.segments {
+                let stretch = format!("sheet.flange.edge{point}.stretch{}.{}", s.from.to_bits(), s.to.to_bits());
+                if s.angle.is_some() {
+                    segment_keys.push(format!("{stretch}.angle"));
+                }
+                if s.height.is_some() {
+                    segment_keys.push(format!("{stretch}.height"));
+                }
+            }
+        }
+        let mut next = edge_keys.into_iter();
+        for (key, _) in keys.iter_mut() {
+            if (key == "Edge angle" || key == "Edge height")
+                && let Some(unique) = next.next()
+            {
+                *key = unique;
+            }
+        }
+        let mut next = segment_keys.into_iter();
+        for (key, _) in keys.iter_mut() {
+            if (key == "Segment angle" || key == "Segment height")
+                && let Some(unique) = next.next()
+            {
+                *key = unique;
+            }
         }
     }
     keys
@@ -2052,18 +2181,128 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its
     // old index. Constructor-assigned names for new inputs cannot reuse the old dimensions.
-    let mut old_inputs: Vec<_> = input_keys(&old.kind).into_iter().zip(&old.param_names).collect();
-    let param_names: Vec<String> = input_keys(&new.kind)
-        .iter()
-        .enumerate()
-        .map(|(i, (label, kind))| {
-            if let Some(k) = old_inputs.iter().position(|((old_label, old_kind), _)| old_label == label && old_kind == kind) {
-                old_inputs.remove(k).1.clone()
-            } else {
-                new.param_names.get(i).cloned().unwrap_or_default()
-            }
-        })
+    // A key names the input itself where its label doesn't (a segment's stretch, a fillet's
+    // control); it is matched first, so inserting or reordering stretches moves no name onto
+    // another stretch. An input whose key changed (a stretch's fractions edited) is matched to the
+    // material it still is, below: the value it still has first, then the span it still covers.
+    let new_inputs = new.kind.inputs();
+    let new_labels: Vec<String> = new_inputs.iter().map(|(label, _, _)| label.to_string()).collect();
+    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String, String)> = input_keys(&old.kind)
+        .into_iter()
+        .zip(old.kind.inputs())
+        .zip(&old.param_names)
+        .map(|(((key, kind), (label, expression, _)), name)| (key, label.to_string(), kind, name.clone(), expression))
         .collect();
+    let keys = input_keys(&new.kind);
+    // Two pick points within the document's own pick tolerance name the same edge: a pick that
+    // moved by a hair keeps the names on its edge and on its stretches, and the expressions that
+    // read them (#5927, #5928). A feature whose body the model does not hold yet falls back to
+    // 1e-6 mm.
+    let tol = edge_pick_tolerance(s, &old.kind);
+    let mut param_names: Vec<String> = vec![String::new(); keys.len()];
+    for (i, (key, kind)) in keys.iter().enumerate() {
+        // The old input naming the same input with the nearest point: the exact key, or the same
+        // field (and stretch) on a point within the tolerance.
+        let mut best: Option<(usize, f64)> = None;
+        for (k, (old_key, _, old_kind, _, _)) in old_inputs.iter().enumerate() {
+            if old_kind != kind || !keys_match(old_key, key, tol) {
+                continue;
+            }
+            let distance = match (key_point(old_key), key_point(key)) {
+                (Some((a, _)), Some((b, _))) => point_distance(a, b),
+                _ => 0.0,
+            };
+            if best.is_none_or(|(_, nearest)| distance < nearest) {
+                best = Some((k, distance));
+            }
+        }
+        if let Some((k, _)) = best {
+            param_names[i] = old_inputs.remove(k).3.clone();
+        }
+    }
+    // A name follows the material it was given to, not the order of the list. When a segment input's
+    // key misses (a stretch deleted or merged, so the survivor's fractions are new), it is matched to
+    // the old input of the same label and kind that carries the same expression first: the survivor
+    // still has the value it had. Only then does the greatest span overlap on the same edge carry a
+    // name. A deleted stretch's name never lands on a stretch whose value came from elsewhere
+    // (#5927, #5928). An edge's own angle or height is keyed by its pick point and matched by that
+    // point within the tolerance, so an edge deleted and another inserted in one redefine move no
+    // name across.
+    for (i, (key, kind)) in keys.iter().enumerate() {
+        if !param_names[i].is_empty() {
+            continue;
+        }
+        if let Some((point, from, to)) = segment_span(key) {
+            let mut best: Option<(usize, bool, f64)> = None;
+            for (k, (old_key, old_label, old_kind, _, old_expression)) in old_inputs.iter().enumerate() {
+                if *old_label != new_labels[i] || old_kind != kind {
+                    continue;
+                }
+                let Some((old_point, old_from, old_to)) = segment_span(old_key) else { continue };
+                // The stretch's edge is its pick point, within the same tolerance: a pick that moved
+                // by a hair keeps the stretch's name (#5927, #5928).
+                if !points_within(old_point, point, tol) {
+                    continue;
+                }
+                let same_value = *old_expression == new_inputs[i].1;
+                let overlap = (old_to.min(to) - old_from.max(from)).max(0.0);
+                if !same_value && overlap <= 1e-9 {
+                    continue;
+                }
+                let better = match best {
+                    None => true,
+                    Some((_, best_value, best_overlap)) => (same_value && !best_value) || (same_value == best_value && overlap > best_overlap),
+                };
+                if better {
+                    best = Some((k, same_value, overlap));
+                }
+            }
+            if let Some((k, _, _)) = best {
+                param_names[i] = old_inputs.remove(k).3.clone();
+            }
+            // No old input of this edge carries the stretch's value or overlaps it: the
+            // constructor's own name stays, rather than another stretch's.
+            continue;
+        }
+        if let Some(point) = edge_point(key) {
+            // An edge's own angle or height is keyed by the edge's pick point, and the key match
+            // above took a point within the pick tolerance. When no old point was that close, the
+            // nearest edge point on this feature still names the edge the pick moved to, within a
+            // sane bound: twice the tolerance, and a hundredth of a millimetre at least, for a
+            // feature whose body the model does not hold yet. Beyond that bound the nearest point is
+            // not the edge that was picked, and a newly inserted edge keeps the constructor's name:
+            // a deleted edge's name never lands on it (#5927, #5928).
+            let bound = (tol * 2.0).max(1e-2);
+            let mut best: Option<(usize, f64)> = None;
+            for (k, (old_key, old_label, old_kind, _, _)) in old_inputs.iter().enumerate() {
+                if *old_label != new_labels[i] || old_kind != kind || segment_span(old_key).is_some() {
+                    continue;
+                }
+                let Some(old_point) = edge_point(old_key) else { continue };
+                let distance = point_distance(old_point.map(f64::from_bits), point.map(f64::from_bits));
+                if distance > bound || best.is_some_and(|(_, nearest)| distance >= nearest) {
+                    continue;
+                }
+                best = Some((k, distance));
+            }
+            if let Some((k, _)) = best {
+                param_names[i] = old_inputs.remove(k).3.clone();
+            }
+            continue;
+        }
+        // Only inputs whose key names no point are left: a label and a kind are all they carry, so
+        // one of them is matched by those alone.
+        if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
+            *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_point(old_key).is_none()
+        }) {
+            param_names[i] = old_inputs.remove(k).3.clone();
+        }
+    }
+    for (i, name) in param_names.iter_mut().enumerate() {
+        if name.is_empty() {
+            *name = new.param_names.get(i).cloned().unwrap_or_default();
+        }
+    }
     trial.doc_mut().features.retain(|f| f.id != made);
     // Made right after the edited feature, the trial joined the timeline folder holding both:
     // it leaves it too, or its id stays there, and is given out again below (#9373).
