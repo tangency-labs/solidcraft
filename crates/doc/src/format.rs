@@ -823,10 +823,20 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         return Err(DocError::Invalid("damaged design: duplicate feature, component or occurrence id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
+    // A 3D constraint that no longer checks out (it names a fit point its curve no longer has)
+    // is dropped rather than refusing the design (#10608); damaged ids still refuse it.
+    for feature in &mut d.features {
+        if let crate::FeatureKind::Sketch { sketch, .. } = &mut feature.kind
+            && sketch.validate_wires().is_ok()
+        {
+            sketch.prune_wire_constraints();
+        }
+    }
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
             sketch.validate_freeform_offsets().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -881,6 +891,9 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             || len("curves") > solidcraft_sketch::MAX_CURVES
             || len("constraints") > solidcraft_sketch::MAX_CONSTRAINTS
             || len("patterns") > solidcraft_sketch::MAX_CONSTRAINTS
+            // The 3D constraints too (#10608): refused here, before a typed list is built or
+            // stale entries are pruned from it.
+            || len("wire_constraints") > solidcraft_sketch::MAX_CONSTRAINTS
         {
             return Err(invalid());
         }
@@ -2480,6 +2493,34 @@ mod tests {
             *slot = Value::Array(vec![first; cap + 1]);
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("sketch too large"), "{key}: {error}");
+        }
+
+        // 3D constraints (#10608): a stale one (it names a fit point its curve does not have) is
+        // pruned as the design opens, up to the cap; one past the cap is refused first, so a huge
+        // list is neither built nor pruned away.
+        let mut sketch = Sketch::new();
+        let v = solidcore_record::Vec3::new;
+        let w = sketch.add_drawn_wire_in(&[v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0)], solidcraft_sketch::WireSpace::Component).unwrap();
+        let p = solidcraft_sketch::WirePoint { wire: w, index: 0 };
+        sketch.add_wire_constraint(solidcraft_sketch::WireConstraintKind::Fix { p, at: v(0.0, 0.0, 0.0) }).unwrap();
+        let mut doc = Document::new("3D constraints");
+        doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        let mut stale: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        let entry = &mut stale["features"][0]["sketch"]["wire_constraints"][0];
+        assert!(entry.to_string().contains("\"index\":0"), "the Fix names fit point 0: {entry}");
+        *entry = serde_json::from_str(&entry.to_string().replace("\"index\":0", "\"index\":9")).unwrap();
+        let one = stale["features"][0]["sketch"]["wire_constraints"][0].clone();
+        for (count, loads) in [(MAX_CONSTRAINTS, true), (MAX_CONSTRAINTS + 1, false)] {
+            let mut value = stale.clone();
+            value["features"][0]["sketch"]["wire_constraints"] = Value::Array(vec![one.clone(); count]);
+            match read(&value.to_string()) {
+                Ok(d) => {
+                    assert!(loads, "{count} 3D constraints must be refused");
+                    let crate::FeatureKind::Sketch { sketch, .. } = &d.features[0].kind else { panic!("sketch") };
+                    assert!(sketch.wire_constraints.is_empty(), "the stale ones are pruned");
+                }
+                Err(e) => assert!(!loads && e.to_string().contains("sketch too large"), "{count}: {e}"),
+            }
         }
     }
 

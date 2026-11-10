@@ -526,9 +526,11 @@ pub struct DocumentSketch {
     /// Its feature id.
     pub id: u64,
     pub name: String,
-    /// Its remaining degrees of freedom (0: fully constrained).
+    /// Its remaining degrees of freedom (0: fully constrained), its drawn 3D curves' included.
     pub dof: usize,
     pub status: SketchStatus,
+    /// Whether its 3D constraints hold (true when it has none, #10608).
+    pub wires_ok: bool,
     /// How many curves it has.
     pub curves: usize,
     /// How many profiles it closes.
@@ -956,8 +958,17 @@ pub struct SketchInspected {
     /// Its remaining degrees of freedom (0: fully constrained).
     pub dof: usize,
     pub fully_constrained: bool,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// The constraints still violated after a failed solve.
     pub failing: Vec<String>,
+    /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with
+    /// no drawn 3D curves. Its freedoms are counted in `dof`.
+    #[schemars(with = "Option<Map<String, Value>>")]
+    pub wires_solve: Value,
+    /// The 3D constraints and dimensions, as saved.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub wire_constraints: Value,
     pub curves: Vec<SketchCurve>,
     pub points: Vec<SketchPoint>,
     pub constraints: Vec<SketchConstraint>,
