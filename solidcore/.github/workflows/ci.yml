@@ -203,6 +203,9 @@ jobs:
       - name: Kernel rig
         env:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/reports/kernel-rig/table.md
+          # each case in a process of its own, one per vCPU of this job's 4-vCPU runner, with a
+          # CPU-time hang limit
+          KERNEL_CASES_JOBS: "4"
         # run as cargo test runs it: from the crate's directory
         run: |
           mkdir -p reports/kernel-rig
