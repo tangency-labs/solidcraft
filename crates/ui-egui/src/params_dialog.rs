@@ -53,6 +53,9 @@ pub struct ParamsDialog {
     /// The own window has been given its saved place; the system owns its place from then on.
     #[cfg(not(target_arch = "wasm32"))]
     own_placed: bool,
+    /// The last frame the own window was shown in: a window missed for a frame is closed by egui.
+    #[cfg(not(target_arch = "wasm32"))]
+    own_shown_frame: Option<u64>,
     /// Where the title was grabbed, from the card's corner, while the card is in the app.
     #[cfg(not(target_arch = "wasm32"))]
     grab: Option<egui::Vec2>,
@@ -506,6 +509,12 @@ fn own_window_place(place: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
     usable.then_some(([x, y], [w, h]))
 }
 
+/// Whether the own window was shown this frame or the one before, so egui still has it open.
+#[cfg(not(target_arch = "wasm32"))]
+fn shown_recently(last: Option<u64>, now: u64) -> bool {
+    last.is_some_and(|frame| frame.saturating_add(1) >= now)
+}
+
 /// The own window's settings, named after the design like the Assistant's window. The saved
 /// place goes only to a window that is opening: the system owns its place from then on.
 #[cfg(not(target_arch = "wasm32"))]
@@ -529,6 +538,13 @@ fn own_window_builder(document: &str, placed: bool, place: Option<[f32; 4]>) -> 
 #[cfg(not(target_arch = "wasm32"))]
 fn own_window(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[Row], held_status: Option<String>) -> (bool, ui_kit::Action) {
     let parent = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport().inner_rect);
+    // A window not shown last frame (the Home page was open, say) was closed by egui and opens
+    // again: it takes its saved place again, not one the system picks.
+    let now = ctx.cumulative_frame_nr();
+    if !shown_recently(d.own_shown_frame, now) {
+        d.own_placed = false;
+    }
+    d.own_shown_frame = Some(now);
     let builder = own_window_builder(&app.session.doc.name, d.own_placed, d.own.place);
     let builder = match &d.tear_off {
         Some(tear_off) => tear_off.prepare(builder),
@@ -1701,6 +1717,25 @@ mod tests {
         for broken in [[f32::NAN, 0.0, 900.0, 700.0], [0.0, 0.0, 5.0, 700.0], [1e9, 0.0, 900.0, 700.0]] {
             assert!(own_window_builder("Plate", false, Some(broken)).position.is_none(), "{broken:?} is not a usable place");
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_own_window_missed_for_a_frame_takes_its_saved_place_again() {
+        assert!(!shown_recently(None, 10), "never shown: it opens");
+        assert!(shown_recently(Some(10), 10) && shown_recently(Some(9), 10), "shown last frame: egui still has it");
+        assert!(!shown_recently(Some(8), 10), "a missed frame closed it, so it opens again at its saved place");
+        let mut h = escape_dialog();
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(3);
+        let d = h.app.params.as_mut().unwrap();
+        assert!(d.own_placed && d.own_shown_frame.is_some());
+        // As if the Home page had hidden the design for a while.
+        d.own_shown_frame = Some(0);
+        h.frames(2);
+        let d = h.app.params.as_ref().unwrap();
+        assert!(d.own.open && d.own_placed, "shown again, and placed again");
+        assert!(d.own_shown_frame.is_some_and(|frame| frame > 0));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
