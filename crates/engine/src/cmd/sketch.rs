@@ -1600,13 +1600,9 @@ fn rect_names(sk: &Sketch, l: &[usize], pts: &[usize]) -> (RectSides, RectCorner
 }
 
 /// The reply of a rectangle with named sides and corners, built from [`RectResult`].
-fn rect_result(
-    sk_out: (Vec<String>, Vec<String>),
-    (sides, corners): (RectSides, RectCorners),
-    info: Value,
-    figure: Option<String>,
-) -> Result<Value> {
-    let reply = RectResult { curves: sk_out.0, constraints: sk_out.1, sketch: info, sides, corners, created: None, figure, param_warnings: Vec::new() };
+fn rect_result(sk_out: (Vec<String>, Vec<String>), (sides, corners): (RectSides, RectCorners), info: Value, figure: Option<String>) -> Result<Value> {
+    let reply =
+        RectResult { curves: sk_out.0, constraints: sk_out.1, sketch: info, sides, corners, created: None, figure, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
