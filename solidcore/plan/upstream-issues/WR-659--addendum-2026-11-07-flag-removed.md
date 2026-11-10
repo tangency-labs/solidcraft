@@ -4,7 +4,7 @@ Updates: WR-659
 
 The flag acted only at a corner whose rounds ease. With `fillet_gn_section_generator` removed
 (WR-685's addendum of 2026-11-06), the ease's target is always the order-2 G^n section, and its
-at-thirds blend curve is gone. Without the halves, every corner of the 40 box rounded r 8, set
+at-thirds blend curve is gone. Without the halves, every corner of the 40 mm box rounded r 8, set
 back 12 and eased 3 (`issue_1376_setback_ease::every_corner_eased_eases_each_round_at_both_ends`)
 is not a manifold solid: the patch's iso-curve boundaries, fitted to the halves only to
 tolerance, no longer close against the eased sections. On SolidCraft's set it builds. Narrowing

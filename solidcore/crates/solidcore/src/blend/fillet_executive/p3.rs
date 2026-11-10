@@ -2234,7 +2234,10 @@ where
         _k: &mut Kernel,
         _solver: O,
     ) -> Result<(BallStation, bool)> {
-        // the adapter over ExecutiveAccess holds no solver geometry: no ball to judge
+        // The adapter over ExecutiveAccess drives upstream's CreateFilletBrep (the goldens'
+        // executive runners) and holds no solver geometry. The ball, fit and band checks
+        // are not upstream's, so it passes them as upstream does, here and below; an error
+        // would refuse every round it builds. A live session judges them.
         Ok((
             BallStation {
                 check: BallCheck::Regular,

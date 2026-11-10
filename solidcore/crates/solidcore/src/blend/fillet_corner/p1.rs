@@ -2444,7 +2444,8 @@ impl FilletCorner {
         // arrive here when building an N-sided patch
 
         // Not upstream (WR-659; the fork's tangency-labs/smlib 4702889): at a corner whose
-        // rounds ease
+        // rounds ease (m_dEaseDist > 0), the patch's sides on the corner's face curves are
+        // those curves' own halves (below)
         let face_curve_halves = self.ease_dist > 0.0;
 
         // for every m_Surfaces->Surface - build 1 face with natural edge boundaries
@@ -2467,7 +2468,7 @@ impl FilletCorner {
                 curve_orients.push(orient);
             }
 
-            // Not upstream (WR-659, opt-in; the fork's 4702889): at a corner whose rounds
+            // Not upstream (WR-659; the fork's 4702889): at a corner whose rounds
             // ease into their curvature-continuous sections (m_dEaseDist), a side of this
             // face on one of the corner's face curves is that curve's own half
             // (sm_FaceCurveHalfAlong), not the patch's iso-curve, which N_FillNSidedHole fits
