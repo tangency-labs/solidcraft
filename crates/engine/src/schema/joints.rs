@@ -335,7 +335,8 @@ impl JsonSchema for JointLimits {
 
 /// A joint origin as `joint.create` reads a side: a joint origin's name, or an object that says
 /// where (`face`, `circle`, `edge` or `point`: a point in world coordinates, or for the first two
-/// a face's name; or a `frame`). Kept as given, for the handler.
+/// a face's name; a `plane` or an `axis`: a name or key, or a definition object; or a `frame`).
+/// Kept as given, for the handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct JointOriginArg(pub Value);
 
@@ -346,13 +347,16 @@ impl JointOriginArg {
         }
         let named = ["face", "circle"].iter().any(|k| v.get(*k).and_then(Value::as_str).is_some());
         let picked = ["face", "circle", "edge", "point"].iter().any(|k| v.get(*k).and_then(params::vec3).is_some());
-        if named || picked {
+        // A plane or axis side, as the handler's plane_origin and axis_origin read them: a name
+        // or key, or a plane/axis definition object. Read further by the handler.
+        let datum = ["plane", "axis"].iter().any(|k| matches!(v.get(*k), Some(Value::String(_)) | Some(Value::Object(_))));
+        if named || picked || datum {
             return Ok(JointOriginArg(v.clone()));
         }
         match v.get("frame") {
             Some(f) if f.get("origin").and_then(params::vec3).is_some() => Ok(JointOriginArg(v.clone())),
             Some(_) => Err("`frame` needs origin and z".into()),
-            None => Err("a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name".into()),
+            None => Err("a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name".into()),
         }
     }
 }
@@ -371,7 +375,7 @@ impl JsonSchema for JointOriginArg {
         let point = json!({"anyOf": forms});
         let at = |description: &str| json!({"description": description, "anyOf": forms});
         json_schema!({
-            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge or point (a point [x, y, z]; for face and circle also a face's name, as model.faces lists it), or a frame {origin, z, x?}.",
+            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), or a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "description": "The name of a joint origin."},
                 {
@@ -383,6 +387,8 @@ impl JsonSchema for JointOriginArg {
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
                         "point": at("A point [x, y, z]."),
+                        "plane": {"description": "The plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
+                        "axis": {"description": "The axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
                         "z": at("The frame's z axis, a direction [x, y, z], where it is not the face's normal."),
                         "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}.", "anyOf": [point, {"type": "string"}, {"type": "object"}]},
@@ -1783,6 +1789,36 @@ impl JsonSchema for OriginFrame {
     }
 }
 
+/// A joint origin's plane: a name or key, or a plane definition object. Only its schema.
+pub struct OriginPlane;
+
+impl JsonSchema for OriginPlane {
+    fn schema_name() -> Cow<'static, str> {
+        "OriginPlane".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.",
+            "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]
+        })
+    }
+}
+
+/// A joint origin's axis: a name or key, or an axis definition object. Only its schema.
+pub struct OriginAxis;
+
+impl JsonSchema for OriginAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "OriginAxis".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.",
+            "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]
+        })
+    }
+}
+
 /// Make a named joint origin: a frame on a face, a round edge, an edge, a point, or given
 /// outright, that joints can then take for a side by its name. Give one of `face`, `circle`,
 /// `edge`, `point` or `frame`; a face or circle given by its name is found again by name, so the
@@ -1824,6 +1860,18 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WorldPoint")]
     pub point: Option<Value>,
+    /// The plane to sit on: `XY`, `XZ` or `YZ` (the design's own), `o:<ids>/origin/<item>` (a
+    /// placement's origin plane), a construction plane's name, or a plane definition object. Read
+    /// before the other keys: an origin with `plane` sits on the plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OriginPlane")]
+    pub plane: Option<Value>,
+    /// The axis to sit on: `X`, `Y` or `Z`, `o:<ids>/origin/<item>` (a placement's origin axis),
+    /// a construction axis's name, or an axis definition object. Read when no `edge` or `point`
+    /// is given, after `plane`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OriginAxis")]
+    pub axis: Option<Value>,
     /// An explicit frame, read only when no point is given in `face`, `circle`, `edge` or `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OriginFrame")]
@@ -1864,7 +1912,7 @@ fn origin_required(schema: &mut Schema) {
     // The handler refuses a call with none of them.
     schema.insert(
         "anyOf".into(),
-        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["frame"]}]),
+        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
     );
 }
 
@@ -1872,6 +1920,11 @@ fn origin_required(schema: &mut Schema) {
 const ORIGIN_X: &str = "`x` is a direction [x, y, z], a face's name, or {face: [x, y, z]}";
 const END_NAME: &str = "`end` is the name of a face a round end lies on";
 const END_ROUND: &str = "`end` is for a round origin (`circle`)";
+
+/// The wording of the handler's refusals of a plane or axis origin's value: a name or key, or a
+/// definition object.
+const PLANE_FORM: &str = "`plane` must be a plane name (e.g. \"XY\", \"o:2/origin/XY\", \"Plane1\") or a plane definition object";
+const AXIS_FORM: &str = "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object";
 
 /// A face or end name the handlers take: 1…16384 characters.
 fn face_name(v: &Value) -> bool {
@@ -1932,6 +1985,26 @@ impl MakeJointOriginParams {
         if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
             OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
         }
+        // A plane or axis origin, as plane_origin and axis_origin read them: a name or key, or
+        // a definition object. `plane` wins; `axis` is read when no `edge` or `point` is given.
+        let datum = if m.get("plane").is_some() {
+            Some("plane")
+        } else if m.get("axis").is_some() && m.get("edge").is_none() && m.get("point").is_none() {
+            Some("axis")
+        } else {
+            None
+        };
+        if let Some(what) = datum {
+            m.get("occurrence").map(OccurrenceKey::read).transpose()?;
+            match m.get(what) {
+                Some(Value::String(_)) | Some(Value::Object(_)) => {}
+                // The handler's own wording, so strict and off fail the same bad origin alike.
+                _ => return Err(if what == "plane" { PLANE_FORM.to_string() } else { AXIS_FORM.to_string() }),
+            }
+            origin_x(m)?;
+            origin_end(m, false)?;
+            return Ok(());
+        }
         // A face or circle given by its name: the first of the two that is text.
         let named = ["face", "circle"].into_iter().find_map(|k| m.get(k).and_then(Value::as_str).map(|n| (k, n)));
         if let Some((what, name)) = named {
@@ -1953,7 +2026,7 @@ impl MakeJointOriginParams {
                 f.get("origin").and_then(params::vec3).ok_or("`frame` needs origin and z")?;
                 "frame"
             }
-            _ => return Err("a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name".into()),
+            _ => return Err("a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name".into()),
         };
         m.get("occurrence").map(OccurrenceKey::read).transpose()?;
         match what {
@@ -2007,6 +2080,8 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
             circle: raw("circle"),
             edge: raw("edge"),
             point: raw("point"),
+            plane: raw("plane"),
+            axis: raw("axis"),
             frame: raw("frame"),
             on: raw("on"),
             corner: raw("corner"),

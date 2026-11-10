@@ -317,8 +317,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
-    f.fillet_exact_arc_sections = true;
-    f.fillet_exact_arc_spans = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;

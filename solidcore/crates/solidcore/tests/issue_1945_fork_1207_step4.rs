@@ -5,7 +5,9 @@
 //! kept the unscaled point's Jacobian for a clamped-and-scaled step (fixed in the fork's
 //! tangency-labs/smlib@d2757e1, ported under WR-253's `fixes.oscillating_skips_failed_guesses`), so
 //! a near-tangent SSI's end landed 1.6e-8 off and the rail's UV trim kept a 3.1e-8 span. The fork's
-//! C++ (68fb9162) builds 11 faces / 25 edges / 16 vertices, V 49712.42808748303, check clean.
+//! C++ (68fb9162) builds 11 faces / 25 edges / 16 vertices, V 49712.42808748303, check clean. Its
+//! rounds' sections are upstream's approximated arcs; here they are the ball's exact circles (WR-708,
+//! as the fork's own from 523bc25 on), which keep 8.1e-5 more material: V 49712.42816838713.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -25,6 +27,9 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::{Kernel, Point3};
+
+/// The body's volume with its rounds' sections the ball's exact circles (see the header).
+const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
 
 fn sc_fixes(k: &mut Kernel) {
     k.fixes.temporary_radius_setup_errors = true;
@@ -293,13 +298,14 @@ fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<
     )
 }
 
-/// With the fix: the fork's body (topology, volume to 1e-9 relative) and a clean check.
+/// With the fix: the fork's topology, the volume of its body with exact circles (to 1e-9
+/// relative; see the header) and a clean check.
 #[test]
 fn step4_round_matches_the_fork_and_checks_clean() {
     let (f, e, v, vol, lines) = run(true);
     assert_eq!((f, e, v), (11, 25, 16));
-    let fork = 49712.42808748303;
-    assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
+    let want = EXACT_CIRCLES_VOLUME;
+    assert!((vol - want).abs() <= 1e-9 * want, "V {vol} vs {want}");
     assert!(lines.is_empty(), "{lines:#?}");
 }
 
@@ -315,8 +321,8 @@ fn step4_round_matches_the_fork_and_checks_clean() {
 fn step4_round_without_the_nd_opt_in_builds_the_same_body() {
     let (f, e, v, vol, lines) = run(false);
     assert_eq!((f, e, v), (11, 25, 16));
-    let fork = 49712.42808748303;
-    assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
+    let want = EXACT_CIRCLES_VOLUME;
+    assert!((vol - want).abs() <= 1e-9 * want, "V {vol} vs {want}");
     assert!(lines.is_empty(), "{lines:#?}");
     let (_, _, _, with_opt_in, _) = run(true);
     assert_eq!(

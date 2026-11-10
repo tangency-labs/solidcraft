@@ -71,29 +71,33 @@ pub fn ruled_surface_from_offset(
         offset_curve.degree_reduction(options.tolerance, true),
         p,
     )?)?;
-    let map = map.ok_or_else(|| SolidError::sm_err(OP))?;
-    let index = usize::try_from(map.curve).map_err(|_| SolidError::sm_err(OP))?;
+    let map =
+        map.ok_or_else(|| SolidError::primitive_failed(OP, "the offset curve has no offset map"))?;
+    let index = usize::try_from(map.curve).map_err(|_| {
+        SolidError::primitive_failed(OP, "the offset map's curve index is negative")
+    })?;
     if !options.surface_intersection
         && !map.corner_offset
-        && !unmarried
-            .get(index)
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))?
+        && !unmarried.get(index).copied().ok_or_else(|| {
+            SolidError::primitive_failed(OP, "the offset map's curve is out of range")
+        })?
     {
         *missing_faces = true;
     }
-    let source = generators
-        .get(index)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let source = generators.get(index).ok_or_else(|| {
+        SolidError::primitive_failed(OP, "the offset map's generator is out of range")
+    })?;
     let mut second = source.clone();
     let mut first = offset_curve.clone();
     let mut first_is_offset = true;
     let mut second_is_generator = true;
     if map.corner_offset {
-        let other = usize::try_from(map.other_curve).map_err(|_| SolidError::sm_err(OP))?;
-        let other = generators
-            .get(other)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let other = usize::try_from(map.other_curve).map_err(|_| {
+            SolidError::primitive_failed(OP, "the offset map's other curve index is negative")
+        })?;
+        let other = generators.get(other).ok_or_else(|| {
+            SolidError::primitive_failed(OP, "the offset map's other generator is out of range")
+        })?;
         let pivot = pivot_nearest_corner(source, other, options.same_point_tolerance, &first)?;
         second = BSplineCurve::create_point_curve(pivot)?;
         second_is_generator = false;
@@ -134,16 +138,19 @@ pub fn ruled_surface_from_offset(
         } else {
             ignore_status(passed_on(first.transform(&options.movement, None), p)?)?;
         }
-        *unmarried
-            .get_mut(index)
-            .ok_or_else(|| SolidError::sm_err(OP))? = false;
+        *unmarried.get_mut(index).ok_or_else(|| {
+            SolidError::primitive_failed(OP, "the offset map's curve is out of range")
+        })? = false;
     }
     // Transform precedes the missing-face early return upstream.
     if first_is_offset {
         *offset_curve = first.clone();
     }
     if *missing_faces && !options.surface_intersection {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::primitive_failed(
+            OP,
+            "the offset curve's faces are missing",
+        ));
     }
     let [domain0, domain1] = intervals;
     let length0 = Curve::from(first.clone())
@@ -155,7 +162,10 @@ pub fn ruled_surface_from_offset(
             .0
             < 2.0 * options.tolerance
     {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::primitive_failed(
+            OP,
+            "a ruled side is shorter than twice the tolerance",
+        ));
     }
     let mut rules = [first, second];
     let compatible = BSplineCurve::make_curves_compatible(&mut rules, options.same_point_tolerance);

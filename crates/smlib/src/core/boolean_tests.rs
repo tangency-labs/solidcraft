@@ -554,4 +554,12 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     let intersect = |f| Failure::new("intersect::point_class", f).into_error();
     assert!(matches!(status(intersect(IntersectFailure::Failed("no point"))), Error::Status(1001)));
     assert!(matches!(status(intersect(IntersectFailure::Missing("the face's surface"))), Error::Status(1006)));
+    // a primitive, extrusion, revolution, skin or taper failure passes on as the status it replaced
+    use solidcore::error::primitive::PrimitiveFailure;
+    let primitive = |f| Failure::new("primitive::primitive_creation::p3", f).into_error();
+    assert!(matches!(status(primitive(PrimitiveFailure::Failed("no profiles to sweep"))), Error::Status(1001)));
+    assert!(matches!(status(primitive(PrimitiveFailure::Missing("the target region"))), Error::Status(1006)));
+    assert!(matches!(status(primitive(PrimitiveFailure::AxisInsideFace)), Error::Status(1025)));
+    let helix = PrimitiveFailure::HelixDeviates { deviation: 0.5, tolerance: 0.25 };
+    assert!(matches!(status(primitive(helix)), Error::Status(1021)));
 }

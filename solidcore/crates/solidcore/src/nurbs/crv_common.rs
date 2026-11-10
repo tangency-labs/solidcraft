@@ -149,7 +149,7 @@ pub fn quadratic_arc_tol(arc: &Arc, at: f64) -> Result<Curve> {
 /// [`quadratic_arc_tol`] split into at least `min_arcs` equal arcs (at most four):
 /// the arc count [`quadratic_arc_tol`] picks from the sweep when that is more. Not
 /// upstream: the sections of an exact circular fillet take the same count along the
-/// rails (`fixes.fillet_exact_arc_spans`, WR-711).
+/// rails (WR-711).
 ///
 /// # Errors
 ///
