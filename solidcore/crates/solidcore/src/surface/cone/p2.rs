@@ -161,9 +161,14 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
 /// is the extrusion's direction to rounding, where two independently fitted circles tilt
 /// it (#13536).
 ///
-/// The curve is that circle when every segment is, on one circle: the legs equal, the weight
-/// the half sweep's cosine (within `EFF_ZERO_SQRT`), the planes parallel (within
-/// `EFF_ZERO_SQRT`) and the centres and radii the same, the lengths within `scaled_zero`.
+/// The circle is made from the first segment at least half as wide as the widest, a well
+/// conditioned one, and
+/// the curve is that circle when every segment is an arc of it, end to end: its legs equal and
+/// its weight the half sweep's cosine (within `EFF_ZERO_SQRT`), its plane parallel (within
+/// `EFF_ZERO_SQRT`), its end points on the circle and its middle point `r / cos α` from the
+/// centre, the lengths within `scaled_zero`. (A segment a hair long, an arc's extension, fixes
+/// a centre of its own only to the rounding of its points over its sweep, so it is checked on
+/// the circle, not compared by its own centre.)
 /// The frame's X axis points to the start point and its Z axis about which the curve turns
 /// counter-clockwise; the start angle is `0` and the end angle the sweep in degrees, as
 /// `IsArc` gives them. `None` for a degenerate curve, a degree other than 2, or a curve that
@@ -173,15 +178,21 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
 ///
 /// Those of the degeneracy test and the Bézier decomposition.
 fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
+    struct Segment {
+        q0: Point3,
+        q1: Point3,
+        q2: Point3,
+        half: f64,
+        normal: Option<Vec3>,
+    }
     if curve.is_degenerate(k, scaled_zero, None)? {
         return Ok(None);
     }
     let Some(nurb) = curve.nurb.as_ref() else {
         return Ok(None);
     };
-    // the circle of the first segment: (centre, unit normal, radius, X axis)
-    let mut circle: Option<(Point3, Vec3, f64, Vec3)> = None;
-    let mut sweep = 0.0_f64;
+    let mut segments = Vec::new();
     for segment in nurb.decompose_bez()? {
         if segment.degree() != 2 {
             return Ok(None);
@@ -203,42 +214,71 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
         let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
             return Ok(None);
         };
-        let Ok(normal) = tangent.cross(next).unitize() else {
-            return Ok(None);
-        };
         // the half sweep, from the leg and the chord
         let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
         let weight = b.w / (a.w * c.w).sqrt();
         if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
             return Ok(None);
         }
-        let inward = normal.cross(tangent);
-        // r = |leg| / tan α = |leg| cos α / sin α, from the leg's direction and the chord's
-        let Ok(across) = chord.unitize() else {
-            return Ok(None);
-        };
-        let radius = leg0.length() * tangent.dot(across) / tangent.cross(across).length();
-        // as `IsArc`: a radius too large for the arc's length makes no accurate circle
-        if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
-            return Ok(None);
-        }
-        let centre = q0 + inward * radius;
-        match circle {
-            None => circle = Some((centre, normal, radius, -inward)),
-            Some((first, first_normal, first_radius, _)) => {
-                if first.distance(centre) > scaled_zero
-                    || (first_radius - radius).abs() > scaled_zero
-                    || first_normal.dot(normal) < 1.0 - EFF_ZERO_SQRT
-                {
-                    return Ok(None);
-                }
-            }
-        }
-        sweep += 2.0 * half;
+        segments.push(Segment {
+            q0,
+            q1,
+            q2,
+            half,
+            normal: tangent.cross(next).unitize().ok(),
+        });
     }
-    let Some((centre, normal, radius, x_axis)) = circle else {
+    // The circle is made from a segment of large sweep, well conditioned: a segment a hair
+    // long (an arc's extension past its face) fixes its centre only to the rounding of its
+    // points over its sweep. The first segment at least half as wide as the widest is taken,
+    // so equal sweeps (a whole circle's quarters) take the first. Every segment must then
+    // lie on that circle.
+    let widest = segments.iter().fold(0.0_f64, |m, s| m.max(s.half));
+    let Some(base) = segments.iter().find(|s| s.half >= 0.5 * widest) else {
         return Ok(None);
     };
+    let Some(normal) = base.normal else {
+        return Ok(None);
+    };
+    let (leg0, leg1, chord) = (base.q1 - base.q0, base.q2 - base.q1, base.q2 - base.q0);
+    let (Ok(tangent), Ok(across)) = (leg0.unitize(), chord.unitize()) else {
+        return Ok(None);
+    };
+    // r = |leg| / tan α = |leg| cos α / sin α, from the leg's direction and the chord's
+    let radius = leg0.length() * tangent.dot(across) / tangent.cross(across).length();
+    // as `IsArc`: a radius too large for the arc's length makes no accurate circle
+    if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
+        return Ok(None);
+    }
+    let centre = base.q0 + normal.cross(tangent) * radius;
+    let mut sweep = 0.0_f64;
+    for s in &segments {
+        let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
+        // the middle point is where the end tangents meet, r / cos α from the centre
+        let corner = ((s.q1 - centre).length() * s.half.cos() - radius).abs() <= scaled_zero;
+        let flat = s
+            .normal
+            .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
+        if !(on(s.q0) && on(s.q2) && corner && flat) {
+            return Ok(None);
+        }
+        sweep += 2.0 * s.half;
+    }
+    let Some(first) = segments.first() else {
+        return Ok(None);
+    };
+    // X toward the start point: away from the centre, square to the first segment's tangent
+    let Ok(start_tangent) = (first.q1 - first.q0).unitize() else {
+        return Ok(None);
+    };
+    let x_axis = start_tangent.cross(normal);
+    // the segments run one way round: each starts where the one before it ends
+    if segments.windows(2).any(|w| match w {
+        [a, b] => a.q2.distance(b.q0) > scaled_zero,
+        _ => false,
+    }) {
+        return Ok(None);
+    }
     let end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
