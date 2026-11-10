@@ -679,7 +679,6 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "model" => &["traced"],
         "view center" | "view centre" => &["classic"],
         "axes" | "axes (signed)" => &["axes", "signed axes", "axes (signed)"],
-        "cube" | "cube (compact)" => &["cube", "cube (compact)"],
         "under cursor" => &["under the cursor"],
         _ => &[],
     }
