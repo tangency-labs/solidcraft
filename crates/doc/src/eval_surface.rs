@@ -109,7 +109,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         keeps,
                     )?
                 }
-                (None, None) => kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?), keeps)?,
+                (None, None) => {
+                    kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
+                }
             };
             let made = Traced::step(trimmed, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
@@ -132,7 +134,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
                 Some(crate::ExtendTo::Bounds) => kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::Bounds))?,
                 Some(crate::ExtendTo::Plane(plane)) => {
-                    let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?);
+                    let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
                 Some(crate::ExtendTo::Face(t)) => {
@@ -312,6 +314,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 f.component,
             )?;
             let (o, d) = revolve_axis(
+                Some(doc),
+                f.component,
                 vals,
                 &ss,
                 axis,

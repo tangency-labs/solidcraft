@@ -1241,6 +1241,7 @@ impl Dialog {
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
+                    && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
                 if matches!(d.kind, Kind::Fillet { .. }) {
@@ -1641,6 +1642,9 @@ impl Dialog {
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
+        if inp.rejects(&sel) {
+            return None;
+        }
         (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
     }
 
@@ -1782,6 +1786,9 @@ impl Dialog {
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
         self.pick_refused = None;
+        if self.active_input().is_some_and(|i| i.rejects(&sel)) {
+            return;
+        }
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -1882,6 +1889,9 @@ impl Dialog {
         }
         let mut accepted = false;
         for x in sels {
+            if inp.rejects(&x) {
+                continue;
+            }
             if takes_components {
                 let occ = match x {
                     Sel::Occurrence { path } if !path.is_empty() => Some(Sel::Occurrence { path }),

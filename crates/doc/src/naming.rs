@@ -949,6 +949,8 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
             // The origin was written as its values when the feature was evaluated (`naming_feature`).
             let Ok((o2, d2)) = crate::eval::revolve_axis(
+                None,
+                0,
                 &Default::default(),
                 ss,
                 axis,
