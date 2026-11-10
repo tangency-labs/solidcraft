@@ -207,8 +207,8 @@ pub struct DimensionStatusResult {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
-    /// Its sheet shows it as it last was: its view is out of date, or it was read from another model
-    /// or record than it has now.
+    /// Its sheet shows it as it last was, or not at all: its view is out of date, it was read from
+    /// another model or record than it has now, or its view draws an exploded view and holds it back.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub out_of_date: bool,
 }
@@ -240,7 +240,8 @@ pub struct SheetSceneResult {
     pub objects: Vec<SheetObjectResult>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<SheetSceneDimension>,
-    /// The views and dimensions a deferred drawing shows as they last were.
+    /// The views and dimensions a deferred drawing shows as they last were, and the dimensions a view
+    /// drawing an exploded view holds back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

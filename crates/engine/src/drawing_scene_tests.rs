@@ -822,6 +822,39 @@ fn a_sheet_makes_one_copy_for_each_exploded_view_it_draws() {
     built(&s, sheet);
 }
 
+/// A file can hold a dimension on a view that draws an exploded view, though no command makes one
+/// (#13048). Its view holds it back, unread and undrawn, so every command that reads the sheet
+/// lists it out of date: the scene, the export and `drawing.status`. No update would read it, so the
+/// drawing isn't held. Deferred and updated, it is still listed.
+#[test]
+fn a_dimension_an_exploded_view_holds_back_is_out_of_date_everywhere() {
+    let (mut s, sheet, [assembled, ..], apart) = two_assembled_one_apart();
+    let first = s.doc.occurrences[0].id;
+    let edge = json!({"point": [5, 0, 0], "path": [first]});
+    let id = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(assembled), "kind": {"length": {"edge": edge}}}))["dimension"].clone();
+    // As a file holds it: drawing.view.edit refuses to explode a view with a dimension on it.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let view = d.views.iter_mut().find(|v| v.id == assembled).unwrap();
+    Arc::make_mut(view).settings.exploded = Some(Exploded::View(apart));
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    settled(&mut s, sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["out_of_date"], json!([id]), "{scene}");
+    assert_eq!(listed(&mut s, sheet), std::slice::from_ref(&id), "as the export lists it");
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current"), "{reply}");
+    assert_eq!(out_of_date_dimensions(&reply), std::slice::from_ref(&id), "{reply}");
+    assert!(reply.get("held").is_none(), "{reply}");
+
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["out_of_date"], json!([id]), "deferred: {scene}");
+    assert_eq!(out_of_date_dimensions(&status_of(&mut s).0), [id], "deferred");
+}
+
 /// A deferred drawing draws nothing until `drawing.update`: then from the model as it is now, until
 /// that changes. Reopened, it waits again. While it waits, every command that reads its sheet reads
 /// what the page shows and lists what is out of date, and `drawing.status` says it is held.
