@@ -39,6 +39,8 @@ def run_probe(command, local, tmp, timeout):
         p = subprocess.run(command + [local], capture_output=True, timeout=timeout, cwd=tmp)
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "wall_s": timeout}
+    except OSError as e:
+        return {"status": "crashed", "wall_s": time.monotonic() - start, "error": str(e)[:200]}
     wall = time.monotonic() - start
     try:
         data = json.loads(p.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
@@ -60,7 +62,10 @@ def run_one(label, command, path, timeout):
         if name.lower().endswith(".p21"):
             name = name[:-4] + ".step"
         local = os.path.join(tmp, name)
-        shutil.copyfile(path, local)
+        try:
+            shutil.copyfile(path, local)
+        except OSError as e:
+            return {"status": "crashed", "wall_s": 0.0, "error": f"copy: {e}"[:200]}
         if command and command[0].startswith("probe:"):
             return run_probe([command[0][len("probe:"):]] + command[1:], local, tmp, timeout)
         out = os.path.join(tmp, "out.json")
@@ -69,6 +74,8 @@ def run_one(label, command, path, timeout):
             p = subprocess.run(command + ["eval", local, "--json-out", out], capture_output=True, timeout=timeout, cwd=tmp)
         except subprocess.TimeoutExpired:
             return {"status": "timeout", "wall_s": timeout}
+        except OSError as e:
+            return {"status": "crashed", "wall_s": time.monotonic() - start, "error": str(e)[:200]}
         wall = time.monotonic() - start
         try:
             with open(out) as f:
