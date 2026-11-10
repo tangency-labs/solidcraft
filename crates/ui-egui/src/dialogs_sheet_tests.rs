@@ -143,9 +143,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", "csv", "mm"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", "dxf", "mm"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -363,6 +363,61 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
     }
 }
 
+/// The flat panel's DXF units: the default is metric, and choosing inches reaches the exported
+/// drawing, which is then written in inches (header and coordinates).
+#[test]
+fn flat_pattern_dxf_units_reach_the_exported_drawing() {
+    fn header_value(dxf: &str, var: &str) -> String {
+        let lines: Vec<&str> = dxf.lines().collect();
+        let i = lines.iter().position(|l| l.trim() == var).unwrap();
+        lines.get(i + 2).map_or_else(String::new, |l| l.trim().to_string())
+    }
+    fn ext(dxf: &str, var: &str) -> [f64; 2] {
+        let lines: Vec<&str> = dxf.lines().collect();
+        let i = lines.iter().position(|l| l.trim() == var).unwrap();
+        [lines[i + 2].trim().parse().unwrap(), lines[i + 4].trim().parse().unwrap()]
+    }
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"layout": mode}));
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        let path = h.dir.join("units.dxf");
+        let chosen = path.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert!(name.ends_with(".dxf"), "{name}");
+            assert_eq!(extensions, &["dxf"]);
+            Box::pin(std::future::ready(Some(chosen.clone())))
+        }));
+        h.app.start("sheet.flat_pattern");
+        h.settle();
+        // The default is metric.
+        h.step(&json!({"widget": "Export DXF…"})).unwrap();
+        let mm = std::fs::read_to_string(&path).expect("the default export writes the file");
+        assert_eq!(header_value(&mm, "$INSUNITS"), "4");
+        std::fs::remove_file(&path).unwrap();
+        // The choice asks for inches, and the next export has them.
+        h.step(&json!({"click": {"handle": "dialog:DXF Units"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:DXF Units:Inch"}})).unwrap();
+        h.step(&json!({"widget": "Export DXF…"})).unwrap();
+        let inches = std::fs::read_to_string(&path).expect("the inch export writes the file");
+        assert_eq!(header_value(&inches, "$INSUNITS"), "1");
+        assert_eq!(header_value(&inches, "$MEASUREMENT"), "0");
+        // The extents are the millimetre ones over 25.4.
+        for var in ["$EXTMIN", "$EXTMAX"] {
+            for (a, b) in ext(&mm, var).iter().zip(ext(&inches, var)) {
+                assert!((a / 25.4 - b).abs() < 1e-9, "{var}: {a} vs {b}");
+            }
+        }
+    }
+}
+
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
 fn bend_table_picker_writes_the_current_body() {
@@ -379,7 +434,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, "csv", "mm"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();

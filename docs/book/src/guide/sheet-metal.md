@@ -388,6 +388,16 @@ The DXF is an AutoCAD 2000 (`AC1015`) drawing in millimetres, made for a laser-c
 nesting or CAM software: each kind of line is on a layer of its own, with a colour (AutoCAD's
 index) and, for the bends, a linetype that the file defines.
 
+`"units"` is `mm` (the default) or `inches`: in `inches` every coordinate, radius and text height
+is written in inches, the header is `$INSUNITS 1` and `$MEASUREMENT 0` (instead of `$INSUNITS 4`
+and `$MEASUREMENT 1`), the `DASHED` pattern is in half and quarter inches, the bend notes' radii
+are in inches and the pocket layers name their depths in inches (`POCKET_…_Z…_TO_…_IN`). The
+drawing is the same part, only its units are different; the bend table's CSV stays in millimetres.
+
+```json
+{"command":"sheet.export_dxf","params":{"path":"bracket-flat-in.dxf","units":"inches"}}
+```
+
 | Layer | Colour | Line | Holds |
 |---|---|---|---|
 | `OUTLINE` | 7 white or black | continuous | the outer contour of each piece of the sheet |
@@ -486,7 +496,8 @@ The pocket floor and side walls remain solid geometry; overlapping cuts from opp
 become a through hole wherever they remove the whole thickness. Flat-pattern JSON lists
 `pockets` with their side, depth and bottom/top thickness coordinates in millimetres.
 DXF pocket boundaries use `POCKET_BOTTOM_Z…_TO_…_MM`, `POCKET_TOP_Z…_TO_…_MM`, or
-`POCKET_INTERNAL_Z…_TO_…_MM` layers. These are machining operations, so do not treat every
+`POCKET_INTERNAL_Z…_TO_…_MM` layers (named in `_IN` with their depths in inches in an inches
+drawing, `"units": "inches"`). These are machining operations, so do not treat every
 pocket layer as a through-cut contour when importing the drawing into a CAM tool. (Text
 machined to a depth is a marking, on `ETCH`.)
 

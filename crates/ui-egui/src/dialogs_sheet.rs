@@ -55,6 +55,9 @@ const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 /// Which way a further bend turns, against the bend before it.
 const BEND_WAY_LABELS: [&str; 2] = ["Same way", "Other way"];
 const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular", "Tear"];
+/// The units the flat-pattern DXF is written in (the command's `units`) and their labels.
+const DXF_UNITS: [&str; 2] = ["mm", "inches"];
+const DXF_UNIT_LABELS: [&str; 2] = ["Metric", "Inch"];
 
 /// One stretch of a picked edge in the Flange dialog: `from`…`to` as fractions of the stretch the
 /// sheet still has of the edge, and the stretch's own angle, height and side (text, as typed).
@@ -153,6 +156,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 data: Option<Result<Value, String>>,
                 key: Option<(u64, Option<String>)>,
                 status: Option<String>,
+                /// The units the flat-pattern DXF is exported in (an index into `DXF_UNITS`).
+                dxf_units: usize,
             },
         }
     }
@@ -225,7 +230,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             let pick = active.and_then(|a| rules.iter().position(|r| r.name == a)).unwrap_or(0);
             (Sm::Rules { pick, name: String::new(), values: Vec::new(), relief: 0, angles: 0, active: true, loaded: None }, vec![])
         }
-        "sheet.flat_pattern" => (Sm::FlatPattern { data: None, key: None, status: None }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
+        "sheet.flat_pattern" => {
+            (Sm::FlatPattern { data: None, key: None, status: None, dxf_units: 0 }, vec![SelInput::new("Body (last if none)", BODIES, false)])
+        }
         _ => Sm::simple_start(id)?,
     };
     Some((crate::length_input::defaults(&app.session.doc, Kind::Sheet(sm)), inputs))
@@ -498,7 +505,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::FlatPattern { data, key, status } => {
+        Sm::FlatPattern { data, key, status, dxf_units } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
@@ -541,14 +548,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             );
                         });
                     }
+                    choice_row(ui, "DXF Units", "sm_flat_dxf_units", dxf_units, &DXF_UNIT_LABELS);
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf"));
+                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "dxf", DXF_UNITS[usize::min(*dxf_units, 1)]));
                         }
                     });
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Bend Table…"), crate::ui_kit::Button::Normal).clicked() {
-                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "csv"));
+                            *status = Some(export_flat(app, v["body"].as_str().unwrap_or(""), "csv", DXF_UNITS[0]));
                         }
                     });
                     if let Some(s) = status {
@@ -578,7 +586,7 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
         _ => return false,
     };
     if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
-        export_flat(app, &body, extension);
+        export_flat(app, &body, extension, DXF_UNITS[0]);
     } else {
         // Let the command report its ordinary "no sheet body" error without opening a picker;
         // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
@@ -589,13 +597,18 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     true
 }
 
-fn export_flat(app: &mut SolveApp, body: &str, extension: &str) -> String {
+fn export_flat(app: &mut SolveApp, body: &str, extension: &str, units: &str) -> String {
     let name = format!("{}-{body}.{extension}", app.session.doc.name);
     let body = body.to_string();
+    let units = units.to_string();
     let command = if extension == "csv" { "sheet.export_bend_table" } else { "sheet.export_dxf" };
     app.pick_save(&name, &[extension], move |app, path| {
         let message = if let Some(path) = path {
-            match app.run(command, json!({"body": body, "path": path})) {
+            let mut params = json!({"body": body, "path": path});
+            if command == "sheet.export_dxf" {
+                params["units"] = json!(units);
+            }
+            match app.run(command, params) {
                 Ok(_) => {
                     app.set_status(format!("Exported {path}"), false);
                     format!("Saved {path}")
