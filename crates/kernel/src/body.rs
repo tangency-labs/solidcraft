@@ -29,7 +29,7 @@ pub struct Body {
     pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
     /// The record as solidcore-ops' body, for the kernel's answers about its faces
     /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
-    /// when the conversion failed, kept like `smlib`'s refusal so it is not tried again.
+    /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
     pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
@@ -721,14 +721,23 @@ impl Body {
     }
 
     /// The record as solidcore-ops' body and the order of its entities, made on first use and
-    /// kept for every later face. A conversion that fails is kept too, as `smlib`'s refusal is:
-    /// it runs unstoppable, so a stopped job cannot make it fail, and the same record fails the
-    /// same way again. None for a mesh body.
+    /// kept for every later face. A refusal of the record is kept too, as `smlib`'s is: the same
+    /// record is refused the same way again. A refusal of the moment is not kept, so a later
+    /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
+    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
     pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
         if self.is_mesh() {
             return None;
         }
-        self.ops.get_or_init(|| solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)).ok()).as_ref()
+        if let Some(kept) = self.ops.get() {
+            return kept.as_ref();
+        }
+        // Converted outside the cell: a failure callback that asked about this body again
+        // would otherwise reenter the cell while it is being filled.
+        match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            made => self.ops.get_or_init(|| made.ok()).as_ref(),
+        }
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
