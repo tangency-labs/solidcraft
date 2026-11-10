@@ -460,6 +460,15 @@ fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u
     Ok(bytes)
 }
 
+/// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
+/// with the cloud's index.
+fn take_cloud_complexes(metadata: &mut Value) -> Vec<(usize, Value)> {
+    let Some(clouds) = metadata.get_mut("point_clouds").and_then(Value::as_array_mut) else {
+        return Vec::new();
+    };
+    clouds.iter_mut().enumerate().filter_map(|(index, cloud)| Some((index, cloud.as_object_mut()?.remove("complex")?))).collect()
+}
+
 fn decode_cloud(bytes: &[u8], cloud: &mut solidcraft_doc::point_cloud::PointCloud) -> Result<()> {
     use solidcraft_doc::point_cloud::{Colors, MAX_POINTS, Points};
     if bytes.get(..8) != Some(POINTS_MAGIC.as_slice()) {
@@ -943,8 +952,12 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
         hydrate_texture_resources(&mut metadata, reader)? || hdr
     };
+    // A cloud's points are in its blob, so its segments, triangles and properties are read and
+    // checked with them below (`decode_cloud`), not against the empty points the metadata holds
+    // (#14572). The metadata keeps them for what a newer build's file holds.
+    let complexes = take_cloud_complexes(&mut metadata);
     let hydrated_text;
-    let text = if hydrated {
+    let text = if hydrated || !complexes.is_empty() {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -953,6 +966,14 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    for (index, complex) in complexes {
+        if let Some(cloud) = doc.point_clouds.get_mut(index) {
+            cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
+        }
+        if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
+            cloud.insert("complex".into(), complex);
+        }
+    }
     if newer_container && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
         let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
