@@ -149,7 +149,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::surface::offset_surface::{closed_turn, offset_continues_as_itself, SS_UNKNOWN};
+use crate::surface::offset_surface::{closed_turn, SS_UNKNOWN};
 use crate::surface::surface::p3::{out_of_bounds_enabled, set_out_of_bounds_enabled};
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as edgeuse;
