@@ -1046,6 +1046,8 @@ preference_settings! {
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
     /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
     window_system: String = "auto".into(), PAGE_GRAPHICS;
+    /// Graphics API for the next start; Automatic preserves the platform startup order.
+    graphics_backend: String = "auto".into(), PAGE_GRAPHICS;
     /// Exact graphics adapter name; empty selects automatically on the next start.
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
@@ -1233,6 +1235,9 @@ preference_settings! {
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
     /// centre, as before #7893.
     toast_place: crate::viewport::ToastPlace = Default::default(), PAGE_LAYOUT;
+    /// The operations under way, with their progress and Cancel, in a panel in the view's
+    /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
+    operations_panel: bool = true, PAGE_LAYOUT;
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
     hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
@@ -1866,7 +1871,10 @@ impl Snapshot {
         }
     }
     /// Restore ordinary preferences after the panel transaction has succeeded.
-    fn restore_other_preferences(self, app: &mut SolveApp) {
+    fn restore_other_preferences(self, app: &mut SolveApp) -> Result<(), String> {
+        if self.prefs.graphics_backend != app.preferences.graphics_backend && app.services.graphics_path.is_some() {
+            save_graphics_backend(app, &self.prefs.graphics_backend)?;
+        }
         let graphics = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
@@ -1899,6 +1907,7 @@ impl Snapshot {
         if (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone()) != graphics {
             save_graphics(app);
         }
+        Ok(())
     }
 
     /// Whether everything is as in the snapshot: nothing Cancel would put back. Destructured, so
@@ -2145,6 +2154,14 @@ fn ui_font_row(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Restore Defaults for one page.
 fn defaults(app: &mut SolveApp, page: usize) {
+    if page == PAGE_GRAPHICS
+        && app.preferences.graphics_backend != "auto"
+        && app.services.graphics_path.is_some()
+        && let Err(error) = set_graphics_backend(app, "auto")
+    {
+        app.set_status(error, true);
+        return;
+    }
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
@@ -2479,6 +2496,27 @@ pub fn show_mm_bare(app: &SolveApp, v: f64) -> String {
     length_number(v, &app.session.doc.units, app.preferences.length_decimals)
 }
 
+/// Graphics API choices offered by the native build; unavailable platform APIs are omitted.
+pub const GRAPHICS_BACKENDS: &[&str] = if cfg!(target_os = "windows") {
+    &["auto", "dx12", "vulkan", "gl"]
+} else if cfg!(target_os = "macos") {
+    &["auto", "metal"]
+} else {
+    &["auto", "vulkan", "gl"]
+};
+
+/// Human-readable API names, retaining legacy manually configured choices for display.
+pub fn graphics_backend_label(backend: &str) -> String {
+    match backend {
+        "auto" | "" => solidcraft_ui_text::tr("prefs.graphics_api_auto").to_string(),
+        "dx12" => "Direct3D 12".into(),
+        "vulkan" => "Vulkan".into(),
+        "gl" => "OpenGL".into(),
+        "metal" => "Metal".into(),
+        other => other.to_string(),
+    }
+}
+
 /// The window system choices (`Prefs::window_system`, #3083).
 pub const WINDOW_SYSTEMS: &[&str] = &["auto", "wayland", "x11"];
 /// winit's issue for dropping files onto a window on native Wayland, which the note links to.
@@ -2532,20 +2570,96 @@ fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     }
 }
 
-/// Write the anti-aliasing and window system settings where the host reads them at start (neither
-/// can change while the window is open).
+/// Read startup settings without replacing unreadable data with defaults during a UI edit.
+fn read_graphics_settings(path: &std::path::Path) -> Result<serde_json::Value, String> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
+        Err(error) => return Err(error.to_string()),
+    };
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok(json!({}));
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    if !value.is_object() {
+        return Err("graphics settings must be a JSON object".into());
+    }
+    Ok(value)
+}
+
+/// Save a backend choice and its last working choice together before changing the UI state.
+/// Consecutive edits retain the original recovery choice until a window confirms startup.
+fn save_graphics_backend(app: &SolveApp, backend: &str) -> Result<(), String> {
+    let path = app.services.graphics_path.as_deref().ok_or_else(|| app.tr("prefs.graphics_api_unavailable").to_string())?;
+    let result = (|| {
+        let path = std::path::Path::new(path);
+        let mut graphics = read_graphics_settings(path)?;
+        let saved = graphics.get("backend").and_then(serde_json::Value::as_str).unwrap_or("auto").to_string();
+        if saved == backend {
+            return Ok(());
+        }
+        let previous = graphics
+            .get("backend_trial")
+            .filter(|trial| trial.get("requested").and_then(serde_json::Value::as_str) == Some(saved.as_str()))
+            .and_then(|trial| trial.get("previous").and_then(serde_json::Value::as_str))
+            .unwrap_or(&saved);
+        let previous = if previous.len() <= 256 && !previous.chars().any(char::is_control) { previous.to_string() } else { "auto".into() };
+        graphics["backend"] = json!(backend);
+        if backend == previous {
+            if let Some(object) = graphics.as_object_mut() {
+                object.remove("backend_trial");
+            }
+        } else {
+            graphics["backend_trial"] = json!({"previous":previous,"requested":backend,"started":false});
+        }
+        solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
+    })();
+    result.map_err(|error: String| solidcraft_ui_text::format("prefs.graphics_api_save_failed", &[("error", &error)]))
+}
+
+/// Select the graphics API for the next launch without a terminal or environment override.
+/// A failed write leaves the current preference and any pending restart unchanged.
+pub fn set_graphics_backend(app: &mut SolveApp, backend: &str) -> Result<(), String> {
+    if !GRAPHICS_BACKENDS.contains(&backend) {
+        return Err(format!("`graphics_backend` must be one of {}", GRAPHICS_BACKENDS.join(", ")));
+    }
+    save_graphics_backend(app, backend)?;
+    app.preferences.graphics_backend = backend.into();
+    Ok(())
+}
+
+/// Check restart availability before saving a choice or applying a combined control request.
+pub fn check_graphics_restart(app: &SolveApp) -> Result<(), String> {
+    if app.services.graphics_backend_override {
+        return Err(app.tr("prefs.graphics_api_override").to_string());
+    }
+    if app.services.graphics_restart.is_none() {
+        return Err(app.tr("prefs.graphics_api_restart_unavailable").to_string());
+    }
+    Ok(())
+}
+
+/// Restart through the normal unsaved-design prompts using the host's restart command.
+pub fn request_graphics_restart(app: &mut SolveApp) -> Result<(), String> {
+    check_graphics_restart(app)?;
+    crate::update::restart_graphics(app);
+    Ok(())
+}
+
+/// Write ordinary startup settings without changing a backend choice or its recovery record.
 fn save_graphics(app: &SolveApp) {
     if let Some(path) = &app.services.graphics_path {
-        // Other settings in the file (the graphics `backend`) stay as they are.
-        let mut graphics = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-            .filter(serde_json::Value::is_object)
-            .unwrap_or_else(|| json!({}));
-        graphics["msaa"] = json!(app.preferences.msaa);
-        graphics["window_system"] = json!(app.preferences.window_system);
-        graphics["adapter"] = json!(app.preferences.graphics_adapter);
-        let _ = std::fs::write(path, graphics.to_string());
+        let path = std::path::Path::new(path);
+        let result = (|| {
+            let mut graphics = read_graphics_settings(path)?;
+            graphics["msaa"] = json!(app.preferences.msaa);
+            graphics["window_system"] = json!(app.preferences.window_system);
+            graphics["adapter"] = json!(app.preferences.graphics_adapter);
+            solidcraft_engine::io::safe_write::write_atomic(path, graphics.to_string().as_bytes(), false).map_err(|error| error.to_string())
+        })();
+        if let Err(error) = result {
+            log::warn!("graphics preferences were not saved: {error}");
+        }
     }
 }
 
@@ -2711,7 +2825,7 @@ impl prefs_window::Host for SolveApp {
             self.panel_layout_preferences.clone_from(deferred);
         }
         let up = self.preferences.up_axis.clone();
-        snapshot.clone().restore_other_preferences(self);
+        snapshot.clone().restore_other_preferences(self)?;
         if self.preferences.up_axis != up {
             up_axis_changed(self);
         }
@@ -3106,9 +3220,12 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         .transpose()?;
     let button = rest.remove("button");
     if let Some(b) = button.as_ref().and_then(|v| v.as_str())
-        && !["ok", "cancel", "apply", "defaults"].contains(&b)
+        && !["ok", "cancel", "apply", "defaults", "restart_graphics"].contains(&b)
     {
-        return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)"));
+        return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults, restart_graphics)"));
+    }
+    if button.as_ref().and_then(serde_json::Value::as_str) == Some("restart_graphics") {
+        check_graphics_restart(app)?;
     }
     let stand_up = rest.remove("stand_up").and_then(|v| v.as_bool());
     let mut staged = app.preferences.clone();
@@ -3178,7 +3295,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some("cancel") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Cancel)?,
         Some("apply") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Apply)?,
         Some("defaults") => prefs_window::press(app, WINDOW_PAGES, prefs_window::Button::Defaults)?,
-        Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
+        Some("restart_graphics") => request_graphics_restart(app)?,
+        Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults, restart_graphics)")),
         None => {}
     }
     if button.is_some() {
@@ -4021,6 +4139,11 @@ fn prepare_preferences(
     {
         return Err("`dimension_input` must be view or window".into());
     }
+    if let Some(value) = p.get("graphics_backend")
+        && !value.as_str().is_some_and(|id| GRAPHICS_BACKENDS.contains(&id) || id == app.preferences.graphics_backend)
+    {
+        return Err(format!("`graphics_backend` must be one of {}", GRAPHICS_BACKENDS.join(", ")));
+    }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
@@ -4141,6 +4264,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
 
 /// All fallible preference checks finish before any application or file write.
 fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> Result<serde_json::Value, String> {
+    if new.graphics_backend != app.preferences.graphics_backend {
+        save_graphics_backend(app, &new.graphics_backend)?;
+    }
     let file = crate::theme_files::find(&new.theme, &new.custom_themes);
     if (new.theme != app.preferences.theme || new.custom_themes != app.preferences.custom_themes) && new.theme != "system" {
         app.ui.dark = file.map_or(new.theme == "dark", |f| f.base.is_dark());
@@ -6353,6 +6479,7 @@ mod tests {
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
+            ("operations_panel", json!(false), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_follow_hover", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
@@ -7993,7 +8120,7 @@ mod tests {
             assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
 
             // The session fields also roll back when the page was opened with the opposite values.
-            original.clone().restore_other_preferences(&mut h.app);
+            original.clone().restore_other_preferences(&mut h.app).unwrap();
             h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
             assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
             h.call("ui.prefs", json!({"button":"cancel"}));
@@ -9170,6 +9297,152 @@ mod tests {
         assert_eq!(h.app.autosave.as_ref().unwrap().interval, Duration::from_secs(150));
     }
 
+    /// Backend edits are saved before restart, with one original recovery choice across edits.
+    #[test]
+    fn graphics_backend_selection_preserves_recovery_and_other_settings() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-backend-choice-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"auto","msaa":4,"adapter":"Named GPU","future":{"keep":true}}"#).unwrap();
+        let services = crate::Services { graphics_path: Some(path.to_string_lossy().into()), ..Default::default() };
+        let mut app = SolveApp::new(Default::default(), services);
+        let read = || serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let snapshot = Snapshot::take(&app);
+        let wanted = if cfg!(target_os = "macos") { "metal" } else { "vulkan" };
+        set_graphics_backend(&mut app, wanted).unwrap();
+        assert_eq!(app.preferences.graphics_backend, wanted);
+        assert_eq!(read()["backend_trial"], json!({"previous":"auto","requested":wanted,"started":false}));
+        assert_eq!(read()["future"], json!({"keep":true}));
+        assert_eq!(read()["adapter"], "Named GPU");
+        assert_eq!(read()["msaa"], 4);
+        // A second untried choice must recover to Automatic, not to the first untried API.
+        save_graphics_backend(&app, "gl").unwrap();
+        app.preferences.graphics_backend = "gl".into();
+        set(&mut app, &json!({"msaa":2})).unwrap();
+        assert_eq!(read()["backend_trial"], json!({"previous":"auto","requested":"gl","started":false}));
+        assert_eq!(read()["backend"], "gl");
+        assert_eq!(read()["msaa"], 2);
+        snapshot.restore_other_preferences(&mut app).unwrap();
+        assert_eq!(app.preferences.graphics_backend, "auto");
+        assert_eq!(read()["backend"], "auto");
+        assert!(read().get("backend_trial").is_none());
+        set_graphics_backend(&mut app, wanted).unwrap();
+        defaults(&mut app, PAGE_GRAPHICS);
+        assert_eq!(app.preferences.graphics_backend, "auto");
+        assert_eq!(read()["backend"], "auto");
+        assert!(read().get("backend_trial").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A manual legacy backend list survives unrelated edits and remains the recovery choice.
+    #[test]
+    fn graphics_backend_legacy_choice_is_preserved_until_explicitly_changed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-backend-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"backend":"dx12,vulkan","msaa":4}"#).unwrap();
+        let services = crate::Services { graphics_path: Some(path.to_string_lossy().into()), ..Default::default() };
+        let mut app = SolveApp::new(Default::default(), services);
+        app.preferences.graphics_backend = "dx12,vulkan".into();
+        let read = || serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        set(&mut app, &json!({"graphics_adapter":"Named GPU"})).unwrap();
+        assert_eq!(read()["backend"], "dx12,vulkan");
+        assert!(read().get("backend_trial").is_none());
+        let snapshot = Snapshot::take(&app);
+        set_graphics_backend(&mut app, "auto").unwrap();
+        assert_eq!(read()["backend_trial"]["previous"], "dx12,vulkan");
+        snapshot.restore_other_preferences(&mut app).unwrap();
+        assert_eq!(read()["backend"], "dx12,vulkan");
+        assert!(read().get("backend_trial").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Failed writes or invalid API choices cannot update the UI or discard existing settings.
+    #[test]
+    fn graphics_backend_save_failure_and_invalid_choice_leave_preferences_unchanged() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-backend-write-failure-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        std::fs::create_dir_all(&path).unwrap();
+        let services = crate::Services { graphics_path: Some(path.to_string_lossy().into()), ..Default::default() };
+        let mut app = SolveApp::new(Default::default(), services);
+        let before = app.preferences.clone();
+        let wanted = if cfg!(target_os = "macos") { "metal" } else { "vulkan" };
+        assert!(set_graphics_backend(&mut app, wanted).is_err());
+        assert!(set(&mut app, &json!({"graphics_backend":wanted,"theme":"light"})).is_err());
+        assert_eq!(app.preferences, before);
+        assert!(!app.quit_requested);
+        std::fs::remove_dir(&path).unwrap();
+        let damaged = b"{broken graphics settings";
+        std::fs::write(&path, damaged).unwrap();
+        assert!(set_graphics_backend(&mut app, wanted).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), damaged);
+        assert_eq!(app.preferences, before);
+        std::fs::write(&path, b"{}").unwrap();
+        for bad in [json!("glide"), json!("dx12,vulkan"), json!(""), json!(null), json!(7)] {
+            assert!(set(&mut app, &json!({"graphics_backend":bad})).is_err());
+            assert_eq!(app.preferences, before);
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"{}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The visible picker uses the same saved preference as ui.prefs and Cancel restores it.
+    #[test]
+    fn graphics_backend_picker_selects_and_cancels_without_requiring_commands() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-backend-picker-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.graphics_path = Some(path.to_string_lossy().into());
+        h.app.services.graphics_backend = Some(if cfg!(target_os = "macos") { "metal" } else { "vulkan" });
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:graphics_backend");
+        assert_eq!(h.app.preferences.graphics_backend, "auto");
+        h.step(&json!({"click":{"handle":"prefs:graphics_backend"}})).unwrap();
+        let wanted = if cfg!(target_os = "macos") { "metal" } else { "vulkan" };
+        h.step(&json!({"click":{"handle":format!("dialog:list:graphics_api:{wanted}")}})).unwrap();
+        assert_eq!(h.app.preferences.graphics_backend, wanted);
+        let saved = serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["backend"], wanted);
+        assert_eq!(saved["backend_trial"]["previous"], "auto");
+        assert_eq!(lenient(&serde_json::to_value(&h.app.preferences).unwrap()).graphics_backend, wanted);
+        assert_eq!(h.call("ui.prefs", json!({"button":"cancel"}))["ok"], true);
+        assert_eq!(h.app.preferences.graphics_backend, "auto");
+        let saved = serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["backend"], "auto");
+        assert!(saved.get("backend_trial").is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn graphics_backend_restart_control_refuses_an_override_or_missing_host_command() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-backend-restart-refusal-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graphics.json");
+        let original = br#"{"backend":"auto","future":{"keep":true}}"#;
+        std::fs::write(&path, original).unwrap();
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+        let wanted = if cfg!(target_os = "macos") { "metal" } else { "vulkan" };
+        let before = app.preferences.clone();
+        let combined = json!({"graphics_backend":wanted,"theme":"light","button":"restart_graphics"});
+        assert!(control(&mut app, &combined).is_err());
+        assert_eq!(app.preferences, before, "a rejected combined request changes no preferences");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert!(!app.quit_requested);
+        app.services.graphics_restart = Some(("solidcraft".into(), Vec::new()));
+        app.services.graphics_backend_override = true;
+        assert!(control(&mut app, &combined).is_err());
+        assert_eq!(app.preferences, before, "an override refuses before saving the new API");
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert!(!app.quit_requested);
+        assert!(crate::update::take_launch(&mut app).is_none());
+        assert_eq!(Prefs::default().graphics_backend, "auto");
+        assert_eq!(lenient(&json!({"msaa":4})).graphics_backend, "auto");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn graphics_card_picker_selects_named_cards_and_restores_automatic() {
         let dir = std::env::temp_dir().join(format!("solidcraft-graphics-picker-{}", std::process::id()));
@@ -9204,7 +9477,7 @@ mod tests {
         assert_eq!(read()["backend"], "vulkan");
         let saved = serde_json::to_value(&app.preferences).unwrap();
         assert_eq!(lenient(&saved).graphics_adapter, "Discrete large");
-        snapshot.restore_other_preferences(&mut app);
+        snapshot.restore_other_preferences(&mut app).unwrap();
         assert_eq!(read()["adapter"], "");
         set(&mut app, &json!({"graphics_adapter":"Discrete small"})).unwrap();
         defaults(&mut app, PAGE_GRAPHICS);

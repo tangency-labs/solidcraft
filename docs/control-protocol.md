@@ -739,9 +739,11 @@ drawing and answering while it runs:
   design as it is and lands after that edit, never in the middle of it. If the design was replaced
   (another tab made active, a new file opened, its tab closed), the request fails at once with
   `… the design was replaced … nothing was applied`, and the requests behind it go on.
-- A chip in the view names the command, with **Stop**. Stop answers
-  `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and the requests
-  waiting behind it go on. The computation finishes unseen in the background.
+- A row of the operations panel in the view's bottom-right corner names the command, with how
+  many of a batch's steps are done and a red X (with **Preferences > Layout > Show operations
+  in the view** off, a chip with **Stop** instead; `ui.operations` lists and cancels the rows).
+  The X answers `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and
+  the requests waiting behind it go on. The computation finishes unseen in the background.
 - `file.export` and `file.save_mesh` change nothing in the design. They run on a copy of the
   design as it was when they were asked for, and nothing waits behind them.
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
@@ -833,6 +835,7 @@ no box selection.
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.messages` | `clear?`: `true` (empty the list), `open?`: bool (show or hide the Messages window) | every status message of this run, oldest first (the last 200; a message repeated in a row is one entry with a `count`): `messages` `[{text, error, at, count}]` (`at` in ms since the Unix epoch), and whether the window is `open` (#2763) |
 | `ui.documents` | `action?`: `new`, `switch`, `close`, `close_all`, `close_others`, `move`, `quit`; `index?`; `from?`, `to?` (move); `save_indices?`: array of tab indices to tick in the grouped save prompt; `save_row?`, `discard_row?`: tab index to save or discard and close in that prompt; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?"); `open_elsewhere?`: `read_only`, `anyway`, `cancel` (answers "open elsewhere" for the first Open waiting); `changed_on_disk?`: `save_copy`, `overwrite`, `cancel` (answers "changed on disk" before a Save) | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, `save_prompt` (null or rows with `index`, `name`, `path` (null if never saved), `selected`), whether a quit is asking, whether the active design is `read_only`, the Opens waiting for "open elsewhere" (`open_elsewhere`) and a waiting "changed on disk" (`changed_on_disk`) |
+| `ui.operations` | `cancel?`: an operation's `key` | the operations under way, newest first, as the view's operations panel shows them: `key`, `label`, `steps` (`{done, total}` when the work counts them), `queued`, `cancelling`, `cancellable`, and whether the panel is `shown`. With `cancel`: cancels that operation as its X does (its work stops at its next check and nothing of it is applied; operations queued behind it go on); an error when no such operation is under way or it can't be cancelled (a save being written) |
 | `ui.file` | `path`; `insert?`: bool | starts an interactive background Open or Insert; poll `ui.inspect.file_busy` for completion; the window stays responsive |
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `slot?`, `replace?` | a command's keys (`key`: the first, shown in menus; `keys`: all), or rebinds it: `key` becomes its only key, or with `slot` replaces its key there (one past the last adds a key, `""` there removes that key); `""` without `slot` clears them; key names are case-insensitive and modifiers are normalized (`shift+ctrl+t` becomes `Ctrl+Shift+T`); unknown and reserved keys are refused; a key another command uses is refused unless `replace` |
@@ -911,6 +914,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `fillet_legacy_radius` (default false: a new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's units ("0.07874 in" in an inch design); true: it opens at the number 2 read in the design's units ("2 in"), as before, #12418)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
+- `graphics_backend` (native Graphics API: `auto` by default; Windows: `dx12`, `vulkan`, `gl`; macOS: `metal`; Linux: `vulkan`, `gl`. Saved before graphics initialization and applied on restart. Existing manual comma lists are preserved until an explicit API change. `{"button":"restart_graphics"}` asks about unsaved designs, then restarts with the saved API; unavailable in the browser or under an explicit launch override.)
 - `ground_shadow_follows_model` (Graphics, default false): raised models cast their ground shadow on the origin ground plane; true restores the shadow below the lowest visible body. Both modes keep the shadow below bodies extending beneath the origin, and follow the selected up axis.
 - `hidden_toolbar_tabs` (default `[]`: all existing tabs, including Sheet Metal and Weldments, stay visible; lists tabs to hide, each once, e.g. `["SURFACE", "SHEET METAL"]`; hidden tabs stay hidden regardless of the design's features; [ribbon layout](ribbon-layout.md))
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)

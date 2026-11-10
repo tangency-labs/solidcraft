@@ -281,6 +281,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        // The operations under way, with their Cancel, in the view's corner.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.operations_panel"),
+                            app.tr("prefs.operations_panel_note"),
+                            &mut app.preferences.operations_panel,
+                            "operations_panel",
+                        );
                     });
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,

@@ -1386,7 +1386,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
 fn named_id(cmd: &str, id: Option<&str>) -> Result<Option<String>> {
     match id {
         Some(i) if !solidcraft_doc::persistent_name::text_fits_name(i) => {
-            Err(bad(cmd, format!("the id `{i}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#` or `]`")))
+            Err(bad(cmd, format!("the id `{i}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#`, `]`, `(` or `)`")))
         }
         Some(i) => Ok(Some(i.to_string())),
         None => Ok(None),
