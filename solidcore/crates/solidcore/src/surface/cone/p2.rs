@@ -336,13 +336,13 @@ fn end_circles(
 
 /// The angle tolerance (degrees) of the circle checks, `ang_tol`, at least the angle the
 /// rounding of the circles' stored points can turn a circle's plane or frame by (not upstream):
-/// points of size `size` (`1 + |min corner| + |max corner|`, as `scaled_zero` sizes them) are
-/// known to `8 ε size`, which over the larger circle's `radius` turns its normal by up to
+/// points of coordinates up to `size` (the larger of the surface's corners) are known to
+/// `8 ε size`, which over the larger circle's `radius` turns its normal by up to
 /// `8 ε size / radius`. A tolerance scaled below that (a cylinder at ±1.2e6 checked at a
 /// thousandth of the default) would decide on the rounding of the input, not its shape.
 fn circle_angle_tol(ang_tol: f64, size: f64, top: &IsoArc, bot: &IsoArc) -> f64 {
     let radius = top.radius.max(bot.radius);
-    if !(radius > 0.0) {
+    if radius.is_nan() || radius <= 0.0 {
         return ang_tol;
     }
     ang_tol.max((8.0 * f64::EPSILON * size / radius).to_degrees())
@@ -832,7 +832,7 @@ impl Cone {
         };
         let ang_tol = circle_angle_tol(
             ang_tol,
-            1.0 + min_pnt.max_dimension() + max_pnt.max_dimension(),
+            min_pnt.max_dimension().max(max_pnt.max_dimension()),
             &top,
             &bot,
         );
@@ -1196,7 +1196,9 @@ impl Cone {
         };
         let ang_tol = circle_angle_tol(
             ang_tol,
-            1.0 + nurb_min_point.max_dimension() + nurb_max_point.max_dimension(),
+            nurb_min_point
+                .max_dimension()
+                .max(nurb_max_point.max_dimension()),
             &top,
             &bot,
         );
@@ -1714,6 +1716,25 @@ mod tests {
             let axis = placement.z_axis();
             assert!(axis.x.abs() < 1e-15 && axis.y.abs() < 1e-15, "{axis:?}");
         }
+    }
+
+    /// A canonical cylinder of radius 2.94 (the goldens' gen0196), its net reaching ±1.2e6
+    /// along its axis, recognised at a thousandth of the default tolerance. Its control points
+    /// are known to the rounding of coordinates that large (about 2.3e-10), which turns its
+    /// middle circle's plane by about 2.5e-11 rad, more than that scaled tolerance (1.75e-11
+    /// rad): the circle checks take at least the angle that rounding allows, so the cylinder is
+    /// still found (#13536).
+    #[test]
+    fn a_long_cylinder_is_recognised_at_a_tight_tolerance() {
+        let k = kernel();
+        let placement = Axis2Placement::new(
+            Point3::new(-0.6585817449754678, 1.1482602439441063, 3.8088879534351),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let cylinder = Cone::create_canonical_cylinder(&k, &placement, 2.941736097781478).unwrap();
+        let found = Cone::is_nurb_surface_cone(&k, cylinder.rev().base(), 0.001).unwrap();
+        assert!(found.is_some());
     }
 
     fn canonical(k: &Kernel, bot: f64, top: f64, h: f64, swap: bool, inside: bool) -> Cone {
