@@ -205,7 +205,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.delete_vertex_joins_seam_iso_curve = true;
     f.box_face_failures_propagate = true;
     f.ellipse_adjust_step_interval_keeps_turns = true;
-    f.fillet_cleanup_removes_input_slits = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
     f.fillet_removal_takes_ring_fillets = true;
@@ -226,7 +225,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
-    f.boolean_temporary_transform_statuses = true;
     f.planar_path_sweep_statuses = true;
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
