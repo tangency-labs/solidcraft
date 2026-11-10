@@ -78,6 +78,8 @@ engine.describe                   the command registry itself
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
 expr.evaluate                     expression evaluation
+file.gerber_files                 a listing of a board's files: crates/engine/src/cmd/board_import_tests.rs
+file.insert_gerber                board import, tested in crates/engine/src/cmd/board_import_tests.rs
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
 file.save_as                      saving the design
