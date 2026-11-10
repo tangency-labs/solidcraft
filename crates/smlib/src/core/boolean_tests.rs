@@ -549,4 +549,9 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     assert!(matches!(status(boolean(Some(SolidError::unported("test::callee", "test.unit")))), Error::Unsupported));
     let offset = Failure::new("offset::offset_executive::p2", Reason::Failed("the offset could not be built")).into_error();
     assert!(matches!(status(offset), Error::Solidcore(_)));
+    // an intersection or classification failure passes on as the status it replaced
+    use solidcore::error::intersect::IntersectFailure;
+    let intersect = |f| Failure::new("intersect::point_class", f).into_error();
+    assert!(matches!(status(intersect(IntersectFailure::Failed("no point"))), Error::Status(1001)));
+    assert!(matches!(status(intersect(IntersectFailure::Missing("the face's surface"))), Error::Status(1006)));
 }

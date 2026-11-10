@@ -571,7 +571,9 @@ fn rust(i: &Input) -> ScResult<Output> {
         }
     }
     let status = result.as_ref().err().map_or(0., |e| match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => 1007.,
     });
     let mut out = vec![

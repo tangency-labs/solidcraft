@@ -238,7 +238,9 @@ fn rust(input: Input) -> Result<Output, HarnessError> {
     }
     let status = match result {
         Ok(()) => 0,
-        Err(SolidError::Upstream { code, .. }) => code,
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            solidcore::error::upstream_status(&e).unwrap_or(-1)
+        }
         _ => 1001,
     };
     let mut o = vec![f64::from(status), cc.size() as f64];
