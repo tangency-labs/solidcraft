@@ -16,6 +16,7 @@ use serde_json::{Map, Value, json};
 
 use super::check::{located, whole};
 use super::materials::MaterialReply;
+use super::types::{LengthExpr, StringList};
 use crate::params;
 
 /// Which command to describe.
@@ -1120,6 +1121,77 @@ pub struct WireArcInfo {
     pub end: [f64; 3],
     /// Its sweep (degrees).
     pub sweep_deg: f64,
+}
+
+/// Find Holes (`inspect.find_holes`): the round bores of a design, with the edges that close
+/// them. At least one of `max_diameter`, `min_diameter`, `type` and `feature` is required,
+/// which the handler refuses when they are all left out.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FindHolesParams {
+    /// Only holes no wider than this.
+    #[serde(default)]
+    pub max_diameter: Option<LengthExpr>,
+    /// Only holes wider than this.
+    #[serde(default)]
+    pub min_diameter: Option<LengthExpr>,
+    /// The bodies to search, by name: one or a list. Default: every body.
+    #[serde(default)]
+    pub bodies: Option<StringList>,
+    /// Default true: cylinders that lean into the material — holes, not bosses.
+    #[serde(default)]
+    pub holes_only: Option<bool>,
+    /// Keep only holes made by a feature of this type (`Hole`, `Extrude`, a feature's base
+    /// name, or `solid.hole`).
+    #[serde(default)]
+    pub r#type: Option<String>,
+    /// Keep only holes made by this feature, by name or id.
+    #[serde(default)]
+    pub feature: Option<String>,
+}
+
+/// What `inspect.find_holes` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FindHolesResult {
+    /// The `max_diameter` filter in millimetres, or null when it wasn't given.
+    pub max_diameter: Option<f64>,
+    /// The `min_diameter` filter in millimetres, or null when it wasn't given.
+    pub min_diameter: Option<f64>,
+    /// The holes, by body then center.
+    pub holes: Vec<HoleHit>,
+    /// `holes.len()`.
+    pub count: usize,
+    /// Every hole's closing edges, flat: what `solid.chamfer` takes as `edges`.
+    pub edges: Vec<[f64; 3]>,
+}
+
+/// One hole, as `inspect.find_holes` reports it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HoleHit {
+    /// The body the hole is in.
+    pub body: String,
+    /// The bore's diameter in millimetres.
+    pub diameter: f64,
+    /// The bore's axis (a unit vector).
+    pub axis: [f64; 3],
+    /// A point on the bore's axis, between its closing edges.
+    pub center: [f64; 3],
+    /// Whether the cylinder leans into the material; null when the mesh could not say.
+    pub concave: Option<bool>,
+    /// The round edges that close the hole, both ends, as `solid.chamfer` takes them.
+    pub edges: Vec<[f64; 3]>,
+    /// The feature that made the hole, when one was found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature: Option<HoleFeature>,
+}
+
+/// The feature an `inspect.find_holes` hit was attributed to.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct HoleFeature {
+    pub id: u64,
+    pub name: String,
+    /// The feature's type (`Hole`, `Extrude`, …).
+    pub r#type: String,
 }
 
 #[cfg(test)]

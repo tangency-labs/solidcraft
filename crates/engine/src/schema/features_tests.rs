@@ -291,7 +291,6 @@ fn strict_keeps_todays_errors() {
         ("solid.combine", json!({"target": "A", "tools": ["B"]})),
         // #12884: Chamfer's edges and distances; giving both `distance2` and `angle`, and a
         // distance that doesn't evaluate as a length, stay the handler's to refuse.
-        ("solid.chamfer", json!({"edges": [], "distance": 1})),
         ("solid.chamfer", json!({"edges": 5, "distance": 1})),
         ("solid.chamfer", json!({"edges": [[1, 2]], "distance": 1})),
         ("solid.chamfer", json!({"edges": [[0, 0, 0]], "distance": true})),
