@@ -819,8 +819,9 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
         || !all_unique(d.occurrences.iter().map(|o| o.id))
+        || !all_unique(d.configs.rows.iter().map(|r| r.id))
     {
-        return Err(DocError::Invalid("damaged design: duplicate feature, component or occurrence id".into()));
+        return Err(DocError::Invalid("damaged design: duplicate feature, component, occurrence or configuration row id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
     for feature in &d.features {
@@ -2212,9 +2213,10 @@ mod tests {
             )
             .unwrap();
         d.configs.columns = vec![Column::Param("width".into()), Column::Suppress(feature)];
+        let ids = [d.allocate_id().unwrap(), d.allocate_id().unwrap()];
         d.configs.rows = vec![
-            ConfigRow { name: "Default".into(), cells: vec!["10 mm".into(), "false".into()] },
-            ConfigRow { name: "Alternate".into(), cells: vec!["width / 2 + 5 mm".into(), "yes".into()] },
+            ConfigRow { id: ids[0], name: "Default".into(), cells: vec!["10 mm".into(), "false".into()] },
+            ConfigRow { id: ids[1], name: "Alternate".into(), cells: vec!["width / 2 + 5 mm".into(), "yes".into()] },
         ];
         d.configs.active = Some("Default".into());
         let mut legacy: Value = serde_json::from_str(&d.to_json()).unwrap();
@@ -2238,6 +2240,7 @@ mod tests {
         let mut d = Document::new("configured styles");
         d.configs.columns = vec![Column::Material("Body".into()), Column::Appearance("Body".into())];
         d.configs.rows = vec![ConfigRow {
+            id: d.allocate_id().unwrap(),
             name: "Blue steel".into(),
             cells: vec!["Steel".into(), r#"{"name":"Custom blue","color":[40,90,186],"opacity":0.4}"#.into()],
         }];
@@ -2549,12 +2552,15 @@ mod tests {
             ("contact_sets", json!({"id": 100, "name": "Contact", "occurrences": []})),
             ("studies", json!({"id": 100, "name": "Study", "steps": 10, "keys": []})),
             ("exploded", json!({"id": 100, "name": "View", "moves": []})),
+            ("configs", json!({"columns": [], "rows": [{"id": 100, "name": "Row", "cells": []}]})),
         ];
         for (field, item) in cases {
             let json = edited(&Document::new("Legacy IDs"), |v| {
                 v.as_object_mut().unwrap().remove("next_id");
                 if matches!(field, "browser_groups" | "timeline_groups" | "canvases") {
                     v[field] = json!([item]);
+                } else if field == "configs" {
+                    v[field] = item;
                 } else {
                     v["assembly"] = json!({field: [item]});
                 }
@@ -2565,6 +2571,7 @@ mod tests {
             back.timeline_groups.clear();
             back.canvases.clear();
             back.assembly = Default::default();
+            back.configs = Default::default();
             let mut reopened = read(&back.to_json()).unwrap();
             assert_eq!(reopened.allocate_id().unwrap(), 101, "{field}: deleted legacy id was forgotten");
             assert_eq!(reopened.allocate_id().unwrap(), 102, "{field}");

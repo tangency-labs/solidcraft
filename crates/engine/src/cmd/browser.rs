@@ -1118,7 +1118,7 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.doc_mut().preserve_configuration_units(&old, &kept);
     if let Some(row) = matched_configuration {
-        s.doc_mut().apply_configuration(&row)?;
+        s.doc_mut().apply_configuration(row.as_str())?;
     }
     s.settle_value_edit(&solved)?;
     reply(kept)
