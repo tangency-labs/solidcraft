@@ -615,23 +615,26 @@ fn assert_test_face38_counted(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<(bo
                     *t = Some(LoopTrims::new(b, l)?);
                 }
             }
-            let tol = match uv_tol {
-                Some(tol) => tol,
-                None => {
-                    // UVTrimCurves are measured in UVSpace, so the 3d ZoneTol has to
-                    // be mapped there
-                    let zone_tol_3d = crate::surface::surface::p1::zone_tol_3d(k, &surface)?;
-                    let mid = surface.natural_uv_domain_with_nurb(k)?.mid();
-                    let tol =
-                        crate::surface::surface::p1::map_to_2d(k, zone_tol_3d, mid, &surface)?;
-                    *uv_tol.insert(tol)
-                }
+            let tol = if let Some(tol) = uv_tol {
+                tol
+            } else {
+                // UVTrimCurves are measured in UVSpace, so the 3d ZoneTol has to be
+                // mapped there
+                let zone_tol_3d = crate::surface::surface::p1::zone_tol_3d(k, &surface)?;
+                let mid = surface.natural_uv_domain_with_nurb(k)?.mid();
+                let tol = crate::surface::surface::p1::map_to_2d(k, zone_tol_3d, mid, &surface)?;
+                *uv_tol.insert(tol)
             };
-            let (head, tail) = trims.split_at_mut(jj);
-            let (Some(Some(l1)), Some(Some(l2))) = (head.get_mut(ii), tail.first_mut()) else {
+            // the second loop is taken out while the first is borrowed, then put back
+            let mut second = trims.get_mut(jj).and_then(Option::take);
+            let (Some(Some(l1)), Some(l2)) = (trims.get_mut(ii), second.as_mut()) else {
                 return Err(null("sm_AssertTestFace38: loop out of range"));
             };
-            if do_loops_intersect_in_uv(k, b, l1, l2, tol, &mut counts)? {
+            let met = do_loops_intersect_in_uv(k, b, l1, l2, tol, &mut counts)?;
+            if let Some(slot) = trims.get_mut(jj) {
+                *slot = second;
+            }
+            if met {
                 return Ok((false, counts));
             }
         }
