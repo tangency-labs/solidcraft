@@ -4838,8 +4838,7 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     if crate::drag_snap::suppressed() {
         return Some((lp, None));
     }
-    let (minor, _) = grid_step(app.cam.half_height());
-    let step = minor / 10.0;
+    let (minor, fine) = solidcraft_engine::view::sketch_grid_step(app.cam.half_height());
     if let Some(p) = crate::sketch_tools::refine_snap(app, proj, &ss.sketch, &ss.plane, lp) {
         return Some(p);
     }
@@ -4847,7 +4846,15 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     if ss.sketch.view.no_snap {
         return Some((lp, None));
     }
-    Some((Vec2::new((lp.x / step).round() * step, (lp.y / step).round() * step), None))
+    // On a crossing of the grid the user can see when the pointer is near one, on the finer
+    // lattice between the crossings otherwise (#7114).
+    // The crossing of the drawn grid's lines takes the pointer when the pointer means one; with
+    // the preference off the point lands on the finer lattice only, as before (#7114).
+    if app.preferences.sketch_snap_to_visible_grid {
+        Some((solidcraft_engine::view::sketch_grid_point(lp, minor, fine), None))
+    } else {
+        Some((solidcraft_engine::view::sketch_grid_lattice(lp, fine), None))
+    }
 }
 
 pub fn delete_selection(app: &mut SolveApp) {

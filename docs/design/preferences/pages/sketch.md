@@ -13,6 +13,7 @@ A 120x64 figure at the left (`sketch-guides`), the checkboxes at the right.
 | Guides from sketch points too | Checkbox | `Prefs.sketch_tracking_points` | `true` | none | none | Disabled while the first is off (`sketch_tracking_guides`). |
 | Snap to where two guides cross | Checkbox | `Prefs.sketch_recent_snap` | `false` | none | none | Catalog label today: "Auto snap to recent centers and midpoints". |
 | Line up with other sketch points | Checkbox | `Prefs.sketch_align_points` | `false` | "Drawing lines align with points on both axes at once." | none | |
+| Snap to the grid's visible crossings | Checkbox | `Prefs.sketch_snap_to_visible_grid` | `true` | "A point snaps to the crossings of the lines the grid draws when the pointer means one, and to the finer lattice between them otherwise. Off: the point snaps to the finer lattice only, as before." | none | |
 | Hold to stop snapping | Dropdown (200 wide, "Alt / Option") | `Prefs.suppress_sketch_snap` (`ModifierCombo`) | Ctrl + Alt (`ModifierCombo::CTRL_ALT`) | none | none | The board sample shows "Alt / Option" and the key caps "Ctrl / Cmd"; the default in the code is Ctrl+Alt. |
 
 ## Drawing
