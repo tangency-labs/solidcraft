@@ -216,6 +216,12 @@ target_point!(
     "must be a point [x, y, z] to turn to"
 );
 
+target_point!(
+    /// Emboss's `face`: a [`Point3`], with the handler's message.
+    EmbossFacePoint,
+    "must be a finite point [x,y,z]"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -504,6 +510,30 @@ keyword_param!(
     &["in_plane", "plane", "normal"],
     "in_plane or normal",
     "Which way the wall grows from the curves: in_plane (the default; plane is an alias), across the sketch plane, or normal, along the sketch plane's normal. Matching ignores case."
+);
+keyword_param!(
+    /// `solid.coil`'s `section`.
+    CoilSectionParam,
+    "section",
+    &["circular", "circle", "square"],
+    "circular or square",
+    "The shape swept along the helix: circular (the default; circle is an alias) or square. Any case."
+);
+keyword_param!(
+    /// `solid.coil`'s `section_position`.
+    CoilSectionPositionParam,
+    "section position",
+    &["inside", "center", "on", "on_center", "outside"],
+    "inside, center or outside",
+    "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
+);
+keyword_param!(
+    /// `solid.emboss`'s `mode`.
+    EmbossModeParam,
+    "mode",
+    &["emboss", "deboss"],
+    "emboss or deboss",
+    "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
     /// `solid.fillet`'s `type`.
@@ -1104,12 +1134,15 @@ impl JsonSchema for RailFitParam {
     }
 }
 
-/// What `features::guide_rails` says about a sweep's or a loft's (`what`) `rails`, as given (not
-/// `null`), before it looks a sketch up: its message, or `None`. `default_sketch`: a rail may
+/// What `features::guide_rails` says about a sweep's or a loft's `rails`, as given (not `null`),
+/// before it looks a sketch up: its message, or `None`. `count_for`: the command whose one or two
+/// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
-fn guide_rails_problem(v: &Value, what: &str, default_sketch: bool) -> Option<String> {
+pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
     let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
-    if !(1..=2).contains(&given.len()) {
+    if let Some(what) = count_for
+        && !(1..=2).contains(&given.len())
+    {
         return Some(whole(format!("a {what} takes one or two guide rails")));
     }
     for (i, rail) in given.iter().enumerate() {
@@ -1144,7 +1177,7 @@ pub struct SweepRails(pub Value);
 impl<'de> Deserialize<'de> for SweepRails {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
-        match guide_rails_problem(&v, "sweep", true) {
+        match guide_rails_problem(&v, Some("sweep"), true) {
             Some(why) => Err(D::Error::custom(why)),
             None => Ok(SweepRails(v)),
         }
@@ -1256,8 +1289,8 @@ fn geo_problem(v: &Value) -> Option<String> {
 }
 
 /// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
-const SAVED_REFS: [&str; 11] =
-    ["point", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+const SAVED_REFS: [&str; 12] =
+    ["point", "datum", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
 
 /// `{key: point}`, unless it has `type` (then it is a saved reference).
 fn picked_at(key: &str, point: &Schema) -> Value {
@@ -1425,6 +1458,42 @@ impl JsonSchema for AxisLine {
                 {"type": "object", "properties": {"type": {"enum": ["edge", "face"]}}, "required": ["type"]}
             ]
         })
+    }
+}
+
+/// Circular Pattern's `axis`, as `features::pattern_axis` reads it: an [`AxisLine`], except that
+/// the coordinates of `{origin, dir}`'s origin may be expressions. Kept as given, for the handler.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PatternAxis(pub Value);
+
+impl<'de> Deserialize<'de> for PatternAxis {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let Some(origin) = v.get("origin").filter(|_| v.is_object() && !crate::cmd::is_model_axis(&v)) else {
+            return AxisLine::deserialize(v).map(|axis| PatternAxis(axis.0)).map_err(D::Error::custom);
+        };
+        if serde_json::from_value::<PointExpr3>(origin.clone()).is_err() {
+            return Err(D::Error::custom(whole("`axis.origin` must be a point [x, y, z] of numbers or length expressions")));
+        }
+        if v.get("dir").and_then(params::vec3).and_then(solidcraft_geom::Vec3Geom::normalized).is_none() {
+            return Err(D::Error::custom(whole("axis needs a non-zero `dir`")));
+        }
+        Ok(PatternAxis(v))
+    }
+}
+
+impl JsonSchema for PatternAxis {
+    fn schema_name() -> Cow<'static, str> {
+        "PatternAxis".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let origin = generator.subschema_for::<PointExpr3>();
+        let mut schema = AxisLine::json_schema(generator);
+        let slot = schema.as_object_mut().and_then(|o| o.get_mut("anyOf")).and_then(|forms| forms.pointer_mut("/1/properties/origin"));
+        if let Some(slot) = slot {
+            *slot = json!(origin);
+        }
+        schema
     }
 }
 

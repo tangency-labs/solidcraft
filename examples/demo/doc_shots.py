@@ -11,7 +11,9 @@ an Xvfb screen, drives it over the control channel the way a person would (enclo
 Demo: the pointer glides to a button and clicks it, values are typed), and writes
 docs/book/src/media/<page>/<name>.png (a still, with numbered callouts where the shot asks for
 them) or .mp4 (a clip, with the drawn pointer and click ripples of overlay.py, idle stretches cut by
-trim_idle.py). Shots are the functions below; the page that shows a shot explains it.
+trim_idle.py). Shots are the functions below; the page that shows a shot explains it. --light makes
+the stills again in the light theme, as <name>.light.png; the book shows the one that matches its
+own theme (docs/book/theme/media.css).
 
 Needs Xvfb, ffmpeg (x11grab) and Pillow, and a release build of the app (`--app`, default
 $CARGO_TARGET_DIR/release/solidcraft, else target/release/solidcraft). Every new file needs an
@@ -183,16 +185,19 @@ class Shot(Demo):
 # -- capture ------------------------------------------------------------------------------------
 
 
-def run_shot(name, exe, display, keep):
+def run_shot(name, exe, display, keep, light=False):
     kind, start, f, setup = SHOTS[name]
     work = Path(tempfile.mkdtemp(prefix="doc-shot-"))
-    out = MEDIA / f"{name}.{'png' if kind == 'still' else 'mp4'}"
+    out = MEDIA / f"{name}{'.light' if light else ''}.{'png' if kind == 'still' else 'mp4'}"
     out.parent.mkdir(parents=True, exist_ok=True)
     app = App(exe, display, start, work)
     try:
         log = open(work / "steps.log", "w")
         d = Shot(app.port, log)
         d.prepare()
+        if light:
+            d.ui("ui.set", {"dark": False})
+            d.settle_camera()
         if setup:
             setup(d)
             d.settle_camera()
@@ -1071,12 +1076,15 @@ def main():
     ap.add_argument("--display", default=":97", help="the Xvfb display to start (or use, with --no-xvfb)")
     ap.add_argument("--no-xvfb", action="store_true", help="use a display that is already running")
     ap.add_argument("--keep", action="store_true", help="keep each shot's work folder")
+    ap.add_argument("--light", action="store_true", help="the stills again in the light theme, as NAME.light.png")
     a = ap.parse_args()
     if a.list:
         for name, (kind, start, f, _) in SHOTS.items():
             print(f"{name:32} {kind:5} {start:6} {(f.__doc__ or '').split(chr(10))[0]}")
         return
     names = [n for n in SHOTS if not a.shots or n in a.shots or n.split("/")[0] in a.shots]
+    if a.light:
+        names = [n for n in names if SHOTS[n][0] == "still"]
     if a.shots and not names:
         sys.exit(f"no such shot: {' '.join(a.shots)} (--list)")
     xvfb = None
@@ -1086,7 +1094,7 @@ def main():
     try:
         for n in names:
             print(f"{n} ...", file=sys.stderr)
-            run_shot(n, a.app, a.display, a.keep)
+            run_shot(n, a.app, a.display, a.keep, a.light)
     finally:
         if xvfb:
             xvfb.terminate()

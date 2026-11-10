@@ -1030,7 +1030,7 @@ fn pattern_id(p: &Value) -> Option<String> {
     str_(p, "pattern").map(str::to_string)
 }
 
-fn alignment_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn alignment_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "enum": ["left", "center", "right"]})
 }
 

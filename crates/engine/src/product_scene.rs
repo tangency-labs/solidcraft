@@ -112,7 +112,7 @@ mod tests {
             ("sketch.dimension", json!({"entities":["l2"],"value":15})),
             ("sketch.finish", json!({})),
             ("solid.extrude", json!({"distance":5})),
-            ("sketch.edit", json!({"sketch":"Sketch1"})),
+            ("sketch.edit", json!({"sketch":"Sketch1","restore_marker":false})),
             ("sketch.drag", json!({"entity":"l1.start","from":[5,5],"to":[4,5],"live":true})),
         ] {
             s.execute(id, &p).unwrap();

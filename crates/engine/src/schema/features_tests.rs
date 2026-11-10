@@ -7,6 +7,7 @@ use super::{
     FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams,
     SphereParams, TorusParams,
 };
+use super::{PatternCircularParams, PatternCircularResult};
 use super::{SurfaceSweepParams, SweepParams};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -1032,6 +1033,91 @@ fn revolve_wrong_typed_keys_are_reported() {
         let mut strict = revolve_rig(ParamCheck::Strict);
         assert!(strict.execute("solid.revolve", &p).is_err(), "{p}");
     }
+}
+
+/// A box named `Post` away from the Z axis, and a component `Part` to place more of.
+fn ring_rig(level: ParamCheck) -> Session {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "name": "Post"})).unwrap_or_else(|e| panic!("{e}"));
+    s.execute("component.create", &json!({"name": "Part", "activate": false})).unwrap_or_else(|e| panic!("{e}"));
+    s.param_check = level;
+    s
+}
+
+fn ring() -> Value {
+    json!({"features": ["Post"], "axis": "Z", "count": 4})
+}
+
+fn ring_with(key: &str, value: Value) -> Value {
+    let mut p = ring();
+    p[key] = value;
+    p
+}
+
+#[test]
+fn circular_pattern_schema_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<PatternCircularParams>(),
+        &["alignment", "angle", "axis", "bodies", "body_name", "body_names", "components", "count", "features", "name", "participants", "reversed"],
+    );
+}
+
+/// Calls Circular Pattern refuses today get the same message in strict; an `angle` that isn't a
+/// number or text, which the handler ignores, is refused by the contract, and so is a misspelt key.
+#[test]
+fn circular_pattern_contract_keeps_the_handlers_errors() {
+    let cases = [
+        json!({"axis": "Z", "count": 4}),
+        ring_with("features", json!(5)),
+        ring_with("features", json!(["Nope"])),
+        ring_with("bodies", json!(["Nope"])),
+        ring_with("axis", json!("Nope")),
+        ring_with("axis", json!(5)),
+        ring_with("axis", json!({"origin": [0, 0], "dir": [0, 0, 1]})),
+        ring_with("axis", json!({"origin": [0, 0, 0]})),
+        ring_with("axis", json!({"origin": [0, 0, 0], "dir": [0, 0, 0]})),
+        ring_with("axis", json!({"dir": [0, 0, 0]})),
+        ring_with("count", json!(true)),
+        ring_with("count", json!("nope")),
+        ring_with("angle", json!("5 mm")),
+        ring_with("alignment", json!("up")),
+        ring_with("alignment", json!(null)),
+        ring_with("reversed", json!("yes")),
+        ring_with("reversed", json!(null)),
+    ];
+    for p in &cases {
+        let error = |level| ring_rig(level).execute("solid.pattern.circular", p).err().map(|e| e.to_string());
+        let off = error(ParamCheck::Off);
+        assert!(off.is_some(), "{p} should fail today");
+        assert_eq!(error(ParamCheck::Strict), off, "{p}");
+    }
+    assert!(!crate::schema::issues("solid.pattern.circular", &ring_with("angle", json!(true))).is_empty());
+    assert!(ring_rig(ParamCheck::Strict).execute("solid.pattern.circular", &ring_with("cuont", json!(4))).is_err());
+}
+
+/// Each form the handler takes passes strict, and every reply matches the output schema.
+#[test]
+fn circular_pattern_replies_match_the_output_schema() {
+    let schema = output_schema_for::<PatternCircularResult>();
+    let schema = schema.as_value();
+    let calls = [
+        ring(),
+        ring_with("axis", json!("z")),
+        ring_with("axis", json!({"dir": [0, 0, 1]})),
+        ring_with("axis", json!({"origin": ["0 mm", 0, 0], "dir": [0, 0, 1]})),
+        ring_with("count", json!("2 + 2")),
+        ring_with("angle", json!("180 deg")),
+        ring_with("alignment", json!("center")),
+        ring_with("reversed", json!(true)),
+        json!({"components": ["Part"], "axis": "Z", "count": 3}),
+    ];
+    for p in &calls {
+        let r = ring_rig(ParamCheck::Strict).execute("solid.pattern.circular", p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+    let warned = json!({"components": ["Part"], "axis": "Z", "count": 3, "colour": "red"});
+    let r = ring_rig(ParamCheck::Warn).execute("solid.pattern.circular", &warned).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{r}");
 }
 
 /// A 40 x 30 x 20 block from the origin, `Block`, with its top front edge rounded (radius 2) when

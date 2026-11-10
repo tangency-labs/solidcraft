@@ -184,6 +184,8 @@ fn folder_visibility_shortcut_does_not_take_dialog_body_picks_or_chevrons() {
     h.step(&json!({"click":{"chevron":"Bodies"}})).unwrap();
     h.step(&json!({"key":"V"})).unwrap();
     assert!(!h.app.session.folder_hidden("c0/bodies"), "the fold arrow does not pick a visibility target");
+    // The click below picks the body, so Bodies must start empty (#13098 fills in an only body).
+    h.app.preferences.export_selects_only_body = false;
     h.app.start("file.save_mesh");
     h.settle();
     h.step(&json!({"click":{"handle":"row:Bodies"}})).unwrap();
@@ -335,7 +337,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
                 app.publish_tab_accent(&ctx);
-                let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), tab);
+                let accent = crate::workspace::tab_accent(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };

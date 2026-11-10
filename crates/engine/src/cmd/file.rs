@@ -770,9 +770,25 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     let model = s.model.state();
     let keep_world = s.world_cache.lock().ok().is_some_and(|cache| cache.as_ref().is_some_and(|cache| cache.matches(s, &model)));
     s.doc_mut().name = to.to_string();
+    // An open sketch's entry finds its place in the history by these states' addresses
+    // (Finish folds the edit, Cancel checks the history): it follows the renamed copies.
+    let mut renamed: Vec<(*const solidcraft_doc::Document, std::sync::Arc<solidcraft_doc::Document>)> = Vec::new();
     for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
         if snap.doc.name == from {
+            let old = std::sync::Arc::as_ptr(&snap.doc);
             std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
+            renamed.push((old, snap.doc.clone()));
+        }
+    }
+    if let Some(entry) = s.sketch_entry.as_mut() {
+        let follow = |doc: &mut std::sync::Arc<solidcraft_doc::Document>| match renamed.iter().find(|(old, _)| *old == std::sync::Arc::as_ptr(doc)) {
+            Some((_, new)) => *doc = new.clone(),
+            None if doc.name == from => std::sync::Arc::make_mut(doc).name = to.to_string(),
+            None => {}
+        };
+        follow(&mut entry.doc);
+        if let Some(top) = entry.undo_top.as_mut() {
+            follow(top);
         }
     }
     if keep_world
@@ -947,6 +963,14 @@ impl Session {
         }
         if !self.visibility.is_empty() {
             design.to_mut().visibility = self.visibility.clone();
+        }
+        // A sketch edited with the timeline rolled to it: the file holds the position the edit
+        // returns to, not the temporary rollback (#14010).
+        if let Some(marker) = self.sketch_restore_marker() {
+            let marker = marker.filter(|m| *m < design.features.len());
+            if design.marker != marker {
+                design.to_mut().marker = marker;
+            }
         }
         design
     }
@@ -1163,12 +1187,26 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
+        solidcraft_io::export_with_parts(
+            &s.doc.painted(&*s.world_state()?),
+            bodies,
+            parts,
+            format,
+            &name,
+            &s.doc.metadata,
+            quality,
+            export_thumbnail(s, format, bodies).as_deref(),
+        )?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply =
         ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), files: Vec::new(), param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// A picture of the part, drawn only for a format that has a place for it.
+fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
+    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
 }
 
 /// [`export_to`] for a mesh file a slicer is sent (STL or 3MF): each body laid on its print face.
@@ -1184,7 +1222,8 @@ fn export_laid_to(
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
-    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
+    let thumbnail = export_thumbnail(s, format, bodies);
+    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply = SaveMeshResult {
         path: path.to_string(),
@@ -1483,6 +1522,25 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #9449: a 3MF export carries a picture of the part as its package thumbnail.
+    #[test]
+    fn a_3mf_export_carries_the_design_thumbnail() {
+        crate::capture::install_test_renderer();
+        let mut s = Session::default();
+        // Headless, as from the CLI: nothing has drawn the bodies, so their display meshes are cold.
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let dir = std::env::temp_dir();
+        let has_thumbnail = |s: &mut Session, name: &str| {
+            let path = dir.join(format!("solidcraft-3mf-thumbnail-{}-{name}", std::process::id()));
+            s.execute("file.export", &json!({"path": path})).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            bytes.windows(b"Metadata/thumbnail.png".len()).any(|entry| entry == b"Metadata/thumbnail.png")
+        };
+        assert!(has_thumbnail(&mut s, "part.3mf"));
+        assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
 
     /// While the profiler records, a STEP import's reply carries its own profile: the import's
     /// stages and the kernel's calls, as diagnostics.profile reports them.

@@ -134,7 +134,10 @@ pub fn intersect_curves(
 
     // If no intersections return error
     if solutions.is_empty() {
-        return Err(SolidError::sm_err(OP_CURVES));
+        return Err(SolidError::intersect_failed(
+            OP_CURVES,
+            "the curves do not intersect",
+        ));
     }
 
     // Extract info from solution array
@@ -194,7 +197,10 @@ pub fn intersect_surfaces(
     // check result
     let status = status.and_then(|()| {
         if result.curves_3d.is_empty() {
-            Err(SolidError::sm_err(OP_SURFACES))
+            Err(SolidError::intersect_failed(
+                OP_SURFACES,
+                "the surfaces do not intersect",
+            ))
         } else {
             Ok(())
         }
@@ -309,7 +315,10 @@ pub fn intersect_breps(
     // check result
     let status = status.and_then(|()| {
         if curves.is_empty() && points.as_ref().is_none_or(Vec::is_empty) {
-            Err(SolidError::sm_err(OP_BREPS))
+            Err(SolidError::intersect_failed(
+                OP_BREPS,
+                "the B-reps do not intersect",
+            ))
         } else {
             Ok(())
         }
@@ -530,7 +539,10 @@ fn append_curve_surface_hits(
 /// `SM_ERR` when a call found neither an overlap nor a point.
 fn found(hits: CurveHits, op: &'static str) -> Result<CurveHits> {
     if hits.points.is_empty() && hits.curves.is_empty() {
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::intersect_failed(
+            op,
+            "neither an overlap nor an intersection point was found",
+        ));
     }
     Ok(hits)
 }
@@ -569,7 +581,7 @@ pub fn intersect_curve_face(
 ) -> Result<CurveHits> {
     // (an evaluation copy of the face's surface: same owner and cache slot)
     let surface = crate::topology::face::p2::surface(b, f)?
-        .ok_or_else(|| SolidError::sm_err(OP_CURVE_FACE))?
+        .ok_or_else(|| SolidError::intersect_failed(OP_CURVE_FACE, "the face has no surface"))?
         .clone_for_evaluation()?;
     let uv_domain = crate::topology::face::p2::uv_domain(b, f)?;
     let services = BrepFaceServices::new(b);
@@ -683,7 +695,10 @@ mod tests {
             [30., 53., 0.],
         ]);
         let e = intersect_curves(&k, &a, &far, false).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }), "{e:?}");
+        assert_eq!(
+            e,
+            SolidError::intersect_failed(OP_CURVES, "the curves do not intersect")
+        );
     }
 
     #[test]
@@ -743,7 +758,8 @@ mod tests {
             .unwrap(),
         );
         let e = intersect_curve_brep(&k, &far, &mut b).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }), "{e:?}");
+        assert!(e.intersect_failure().is_some(), "{e:?}");
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR), "{e:?}");
     }
 
     #[test]
@@ -766,7 +782,7 @@ mod tests {
         assert!(!curves.is_empty());
         let (curves, status) = intersect_surfaces(&k, &sphere, &plane(5.0));
         assert!(
-            matches!(status, Err(SolidError::Upstream { .. })),
+            matches!(&status, Err(e) if *e == SolidError::intersect_failed(OP_SURFACES, "the surfaces do not intersect")),
             "{status:?}"
         );
         assert!(curves.is_empty());

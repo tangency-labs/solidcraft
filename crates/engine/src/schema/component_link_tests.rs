@@ -15,7 +15,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<InsertDesignParams>(), &["name", "parent", "path", "reuse", "translate"]);
     assert_keys(input_schema_for::<UpdateLinksParams>(), &["component", "components"]);
-    assert_keys(input_schema_for::<RelinkParams>(), &["component", "path"]);
+    assert_keys(input_schema_for::<RelinkParams>(), &["component", "occurrence", "path"]);
     assert_keys(input_schema_for::<BreakLinkParams>(), &["component"]);
     assert_keys(input_schema_for::<LinksParams>(), &[]);
     assert_keys(input_schema_for::<ExtractParams>(), &["component", "path"]);
@@ -107,6 +107,8 @@ fn the_schemas_take_what_the_handlers_read() {
         input_schema_for::<RelinkParams>(),
         &[
             (json!({"component": "Plate", "path": "b.solidcraft"}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": 4}), true),
+            (json!({"component": "Plate", "path": "b.solidcraft", "occurrence": "Plate:2"}), false),
             (json!({"component": "Plate"}), false),
             (json!({"path": "b.solidcraft"}), false),
         ],
@@ -141,6 +143,10 @@ fn the_check_names_what_is_wrong_with_a_key() {
     assert_eq!(issues("component.replace_with_link", json!({"component": 1})), Vec::<String>::new());
     assert_eq!(issues("component.replace_with_link", json!({"component": 1, "path": 3})), ["`with` or `path` is required"]);
     assert_eq!(issues("component.relink", json!({"component": 1, "path": "b.solidcraft", "paths": 1})).len(), 1);
+    assert_eq!(
+        issues("component.relink", json!({"component": 1, "path": "b.solidcraft", "occurrence": -1})),
+        ["`occurrence` must be a placement id"]
+    );
 }
 
 fn folder(name: &str) -> PathBuf {
@@ -164,7 +170,7 @@ fn matches(schema: schemars::Schema, id: &str, reply: &Value) {
 }
 
 /// Insert (new, reused, in a parent, placed), list, update (with a design that can't be read
-/// named in `failed`), relink and break, in Warn: each real reply matches its output schema and
+/// named in `failed`), relink (one placement, then all) and break, in Warn: each real reply matches its output schema and
 /// carries no warning. A list the network or a device refuses has the other shapes of an entry.
 #[test]
 fn link_replies_match_the_output_schema() {
@@ -207,6 +213,13 @@ fn link_replies_match_the_output_schema() {
     assert_eq!(nothing["unchanged"], json!(["A"]), "{nothing}");
     matches(output_schema_for::<UpdateLinksResult>(), "component.update_links", &nothing);
 
+    // One of A's two placements comes to show B's design, as a placement of B.
+    let one = run("component.relink", json!({"component": "A", "occurrence": reused["occurrence"], "path": b}));
+    assert!(
+        one["component"] == second["component"] && one["previous_component"] == first["component"] && one["occurrence"] == reused["occurrence"],
+        "{one}"
+    );
+    matches(output_schema_for::<RelinkResult>(), "component.relink", &one);
     let moved = run("component.relink", json!({"component": "A", "path": b}));
     assert!(moved["geometry_changed"] == true && moved["joint_errors"] == json!([]), "{moved}");
     matches(output_schema_for::<RelinkResult>(), "component.relink", &moved);
