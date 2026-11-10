@@ -2648,8 +2648,9 @@ fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], ha
     let look = |id: u32| {
         context.groups.iter().any(|(n, _)| *n == id).then(|| {
             let gone = context.items.iter().enumerate().any(|(at, item)| item.group == id && gone.get(at).copied().unwrap_or(false));
-            // The bubble is the accent colour itself: a pill in it is darker, not the same.
-            pills::Look { background: egui::Color32::from_black_alpha(70), text: if gone { t.text_dim } else { t.text }, gone }
+            // The bubble is the accent colour itself: a pill in it takes the filled chip's colour
+            // so it stands apart from the bubble.
+            pills::Look { background: t.chip, text: if gone { t.text_dim } else { t.text }, gone }
         })
     };
     let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
