@@ -89,6 +89,11 @@ impl Product {
             Self::RenderBrowser => render && !crate::render_ui::focused(app),
         }
     }
+    /// The Browser holds the History in the compact layout when History is shown in it, so it takes its
+    /// column's whole height instead of shrinking to the few rows it lists (#14566).
+    fn fills(self, app: &crate::SolveApp) -> bool {
+        self == Self::Browser && crate::browser::fills_column(app)
+    }
     fn header_actions(self) -> Vec<HeaderActionSpec> {
         let entries: Vec<(&str, &str, &str)> = match self {
             Self::History => vec![
@@ -174,6 +179,7 @@ impl Product {
 struct PanelSnapshot {
     product: Product,
     available: bool,
+    fills: bool,
     presentation: PanelPresentation,
     extent: Option<ContentExtent>,
 }
@@ -218,6 +224,7 @@ impl ProductionState {
             panels: Product::ALL.map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
+                fills: product.fills(app),
                 presentation: product.presentation(app, app.preferences.history_play_button),
                 extent: None,
             }),
@@ -319,6 +326,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     let play_button = snapshot.play_button;
     for panel in &mut snapshot.panels {
         panel.available = panel.product.available(app);
+        panel.fills = panel.product.fills(app);
         panel.presentation = panel.product.presentation(app, play_button);
     }
     Ok(())
@@ -587,10 +595,11 @@ impl PanelController for ProductionController {
     }
     fn measure(&self, _owner: &ContentOwner, _models: &dyn PanelModels, spec: &PanelSpec) -> PanelResult<Arc<dyn HostContentMetrics>> {
         let snapshot = self.state.0.try_borrow().map_err(|_| error(Rule::Lifecycle, "content measurement is borrowed"))?;
+        let panel = snapshot.panels.iter().find(|panel| panel.product == self.product);
         Ok(Arc::new(ProductionMetrics {
-            extent: snapshot.panels.iter().find(|panel| panel.product == self.product).and_then(|panel| panel.extent),
+            extent: panel.and_then(|panel| panel.extent),
             inset: solidcraft_theme::Tokens::get().space_2 * 2.0,
-            policy: spec.side_height_policy,
+            policy: if panel.is_some_and(|panel| panel.fills) { SideHeightPolicy::Fill } else { spec.side_height_policy },
         }))
     }
     fn prepare_lifecycle(&self, event: &LifecycleEvent) -> PanelResult<()> {

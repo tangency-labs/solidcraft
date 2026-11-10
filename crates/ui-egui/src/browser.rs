@@ -1296,7 +1296,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
                     container.show_frame(ui, frame, limits, |ui| {
                         ui.set_width(inner_width);
                         ui.set_max_height(inner_height);
-                        if stacked {
+                        if stacked || fills_column(app) {
                             ui.set_min_height(inner_height);
                             ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, vec2(inner_width, inner_height))));
                         }
@@ -1475,7 +1475,17 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top() + 1.0, t.toolbar.lerp_to_gamma(t.border, 0.5));
         ui.add_space(t.space_3);
     }
-    rows_contents(app, ui, collapsible && !stacked);
+    rows_contents(app, ui, collapsible && !stacked && !fills_column(app));
+}
+
+/// In the compact layout with the History shown in the Browser, the Browser is the only side panel
+/// and holds the whole History, so it fills the window's height instead of hugging its rows. A folded
+/// Browser still folds (#14566).
+pub(crate) fn fills_column(app: &SolveApp) -> bool {
+    app.ui.layout == crate::ui_kit::LayoutMode::Docked
+        && app.preferences.history_in_browser
+        && !app.preferences.browser_collapsed
+        && !crate::render_workspace::active(app)
 }
 
 /// Existing Browser content without placement, title or collapse chrome.
