@@ -2983,10 +2983,31 @@ fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
     out
 }
 
+/// Distinguish a component's reference geometry without exposing its internal placement key.
+/// The pattern is a message (`dialog.component_origin`), so the label reads in the interface's
+/// language; the item goes by the name the preferences give the origin planes.
+pub(crate) fn component_origin_label(s: &Session, names: crate::prefs::OriginPlaneNames, name: &str) -> Option<String> {
+    // A construction feature answers to its own name first, as the resolvers do: a feature
+    // named like a datum key resolves to the feature, so its chip says the feature's name
+    // (`selection_label` falls back to it), not a placement's (#7313 review).
+    if s.doc.find_feature(name).is_some() {
+        return None;
+    }
+    let (path, item) = solidcraft_engine::origins::item(name)?;
+    let placement =
+        path.iter().filter_map(|id| s.doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect::<Vec<_>>().join(" / ");
+    Some(solidcraft_ui_text::format("dialog.component_origin", &[("placement", &placement), ("item", names.label(item))]))
+}
+
 /// A picked item as its chip shows it. A round edge or face says what it stands for in `inp`:
 /// its axis in an axis input, a circle's centre in a point input. An origin plane goes by
 /// the name the preferences give it.
 pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames, d: &Dialog, inp: &SelInput, item: &Sel) -> String {
+    if let Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } = item
+        && let Some(label) = component_origin_label(s, names, name)
+    {
+        return label;
+    }
     let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
     let sketch_name = |id| {
         s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::format("browser.sketch_name", &[("number", &id.to_string())]))
@@ -4885,6 +4906,16 @@ fn flip_toward_viewer(app: &SolveApp, name: &str) -> Option<&'static str> {
 /// the sketch, the view turning to it and the extrude all went the wrong way. `None` while the
 /// active component sits at the origin (the name says the same) or for a construction plane.
 fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
+    // A construction feature named exactly like a datum item keeps its precedence, the order every
+    // other resolver pins: the datum branch only runs when no feature carries the name.
+    if app.session.doc.find_feature(name).is_none()
+        && let Some((path, item)) = solidcraft_engine::origins::item(name)
+    {
+        let active = app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(app.session.active_component));
+        if path == active {
+            return Some(json!(item));
+        }
+    }
     let p = solidcore_record::Plane::named(name)?;
     if app.session.doc.find_feature(name).is_some() || solidcraft_engine::doc::is_identity(&app.session.active_component_frame()) {
         return None;
@@ -4908,6 +4939,12 @@ pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcore_record:
         // With occurrences the world state leaves construction geometry out; the viewport's
         // planes are evaluated in place.
         .or_else(|| solidcraft_engine::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl))
+        // A component origin item key (`o:2/origin/XY`) last: a feature of the same name wins —
+        // the lookup case-insensitive, as `find_feature` answers, so a case-only spelling of a
+        // feature's name is still the feature's (#7313 review) — and a datum follows the
+        // browser's eyes: a disabled Origin folder's plane is not offered here (the
+        // command-side resolvers keep taking it, for saved references).
+        .or_else(|| if s.doc.find_feature(name).is_none() && s.construction_visible(name) { s.origin_plane(name) } else { None })
 }
 
 /// Animate the camera to look straight at the active sketch plane.
@@ -6001,10 +6038,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     json!({"origin": pt(*point), "normal": pt(n)})
                 }
                 Some(Sel::Plane { name }) => {
+                    // A construction plane keeps the reach it always had here: a feature answers
+                    // to its own name before the world planes do (an older design can hold a
+                    // plane named `Top`), then a datum key, then the origin aliases (#7313 review).
                     let pl = solidcraft_engine::view::construction_planes(s)
                         .into_iter()
                         .find(|(_, n, _)| n == name)
                         .map(|(_, _, pl)| pl)
+                        .or_else(|| plane_by_name(s, name))
                         .ok_or("unknown plane")?;
                     json!({"origin": pt(pl.origin), "normal": pt(pl.normal())})
                 }
@@ -6389,8 +6430,18 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             "X" => Some((Vec3::ZERO, Vec3::X)),
             "Y" => Some((Vec3::ZERO, Vec3::Y)),
             "Z" => Some((Vec3::ZERO, Vec3::Z)),
-            // A construction axis.
-            n => solidcraft_engine::view::construction_axes(&app.session).into_iter().find(|(_, an, _, _)| an == n).map(|(_, _, o, d)| (o, d)),
+            // A construction axis by name first, so a name that looks like an origin item key
+            // still reaches it; then a component origin axis by its key, when no feature
+            // carries the name (the case-insensitive `find_feature` lookup, as everywhere the
+            // order is pinned) and its Origin folder is shown (a disabled folder's axis feeds
+            // no preview).
+            n => solidcraft_engine::view::construction_axes(&app.session)
+                .into_iter()
+                .find(|(_, an, _, _)| an == n)
+                .map(|(_, _, o, d)| (o, d))
+                .or_else(|| {
+                    if app.session.doc.find_feature(n).is_none() && app.session.construction_visible(n) { app.session.origin_axis(n) } else { None }
+                }),
         },
         Sel::SketchCurve { id, .. } => {
             let st = crate::open_meshing::session_world(&app.session);
@@ -8970,5 +9021,63 @@ mod preselected_sketch_line_tests {
             let made = h.app.session.doc.features.iter().filter(|f| format!("{:?}", f.kind).starts_with(kind.trim_end_matches("Feature"))).count();
             assert_eq!(made, 1, "{command} runs on the edge");
         }
+    }
+}
+
+#[cfg(test)]
+mod section_plane_tests {
+    //! Section Analysis keeps the construction plane it picked, by its name (#7313 review).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// An older design can hold a construction plane named like a world plane (`Top`): the
+    /// commands refuse the name today, so the fixture renames the feature by hand and has the
+    /// model follow the rename, as the engine follows `timeline.rename` (a name labels a
+    /// feature, it builds nothing). The cut stands where the feature stands, not at the world
+    /// plane of the same name; a picked datum key or origin alias still reaches its plane
+    /// through [`plane_by_name`].
+    #[test]
+    fn section_keeps_a_construction_plane_of_a_world_plane_name() {
+        let mut h = Harness::new();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":"2 mm","name":"Old plane"})).unwrap();
+        let id = h.app.session.doc.features.iter().find(|f| f.name == "Old plane").unwrap().id;
+        h.app.session.doc_mut().feature_mut(id).unwrap().name = "Top".into();
+        assert!(h.app.session.model.rename_feature(&h.app.session.doc, id), "the model follows the rename");
+        h.step(&json!({"start":"inspect.section"})).unwrap();
+        h.frames(2);
+        h.app.dialog.as_mut().expect("the section dialog opens").inputs[0].items.push(Sel::Plane { name: "Top".into() });
+        let d = h.app.dialog.as_ref().expect("the section dialog opens");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(cmd, "inspect.section");
+        assert_eq!(p["plane"]["origin"], json!([0.0, 0.0, 2.0]), "the construction plane, not the world plane of the same name: {p}");
+    }
+
+    /// A picked component origin item key reaches its plane once its Origin folder is shown,
+    /// and a picked design origin plane goes to the command by name, as before: the
+    /// feature-first lookup only takes a construction plane that really carries the name.
+    #[test]
+    fn section_still_reaches_datums_and_origin_aliases() {
+        use solidcraft_engine::origins;
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+        let occurrence = h.app.session.doc.occurrences.iter().find(|o| o.component != 0).unwrap().id;
+        h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,5]})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("browser.visibility", json!({"tree_folders":[origins::folder(&[occurrence])],"visible":true})).unwrap();
+        h.step(&json!({"start":"inspect.section"})).unwrap();
+        h.frames(2);
+        h.app.dialog.as_mut().expect("the section dialog opens").inputs[0].items.push(Sel::Plane { name: origins::key(&[occurrence], "XY") });
+        let d = h.app.dialog.as_ref().expect("the section dialog opens");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (_, p) = commands.first().unwrap();
+        assert_eq!(p["plane"]["origin"], json!([0.0, 0.0, 5.0]), "the datum follows its placement: {p}");
+        h.app.dialog.as_mut().expect("the section dialog stays open").inputs[0].items.clear();
+        h.app.dialog.as_mut().expect("the section dialog stays open").inputs[0].items.push(Sel::Plane { name: "XY".into() });
+        let d = h.app.dialog.as_ref().expect("the section dialog stays open");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (_, p) = commands.first().unwrap();
+        assert_eq!(p["plane"], json!("XY"), "the design's own plane goes to the command by name: {p}");
     }
 }

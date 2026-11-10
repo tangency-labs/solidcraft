@@ -1118,3 +1118,35 @@ fn edge_picks_with_no_placement_to_look_through_are_checked() {
     run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
     assert!((body_volume(&s, "Box") - (BLOCK - CUT)).abs() < 1e-3 * CUT, "{}", body_volume(&s, "Box"));
 }
+
+/// A sketch (and a construction plane) picked on another component's origin follows that
+/// component: the reference is saved as the placement's datum, not as a world plane frozen
+/// where the component was when it was picked (#7313).
+#[test]
+fn cross_component_sketch_refs_follow_the_component() {
+    use solidcraft_doc::construct::DatumItem;
+    let mut s = Session::default();
+    let made = run(&mut s, "component.create", json!({"name": "Assembly", "grounded": false}));
+    let (parent, first) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    run(&mut s, "occurrence.move", json!({"occurrence": first, "translate": [100, 0, 0]}));
+    let child = run(&mut s, "component.create", json!({"name": "Child", "grounded": false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": parent, "translate": [50, 0, 0]}));
+    // A sketch on the child's XY in its first placement, and a plane offset from the same plane.
+    let plane = crate::origins::key(&[first, child], "XY");
+    let sid = run(&mut s, "sketch.create", json!({"plane": plane, "name": "On child"}))["sketch"].as_u64().unwrap();
+    let f = s.doc.feature(sid).unwrap();
+    let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Datum { datum }, .. } = &f.kind else { panic!("{:?}", f.kind) };
+    assert_eq!(datum.item, DatumItem::XY);
+    assert_eq!(datum.path, vec![first, child]);
+    run(&mut s, "construct.plane.offset", json!({"base": plane, "offset": "5 mm", "name": "Off child"}));
+    // The sketch is where the child's XY is, and it follows the child when it moves.
+    let sketch_plane = |s: &Session| s.world_state().unwrap().sketch(sid).unwrap().plane;
+    assert!(near(sketch_plane(&s).origin, Vec3::new(120.0, 0.0, 0.0)), "{:?}", sketch_plane(&s));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [10, 0, 0]}));
+    assert!(near(sketch_plane(&s).origin, Vec3::new(130.0, 0.0, 0.0)), "{:?}", sketch_plane(&s));
+    // The offset plane, built on the datum, follows the move too - offset and all.
+    let (_, _, off) = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Off child").unwrap();
+    assert!(near(off.origin, Vec3::new(130.0, 0.0, 5.0)), "{off:?}");
+}

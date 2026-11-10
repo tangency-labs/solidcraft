@@ -22,6 +22,7 @@ pub mod fuzz;
 pub mod licences;
 mod mesh_lines;
 pub mod occurrences;
+pub mod origins;
 pub mod panels;
 pub mod params;
 pub mod product_scene;

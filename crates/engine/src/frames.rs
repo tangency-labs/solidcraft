@@ -324,6 +324,10 @@ impl Mapper<'_> {
         if v.is_array() {
             return self.pick(v, None);
         }
+        // A name, and among them a component origin key (`o:…/origin/XY`) in particular, passes
+        // through untouched: the command's resolver applies the one order - a feature of the same
+        // name first, then the datum - and saves the reference that follows what it names (#7313),
+        // instead of the plane being frozen where it was picked.
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
@@ -721,6 +725,11 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                     vec3(v).and_then(|p| m.local_point(&frame, p))
                 }
                 Axis => {
+                    // A name, and among them a component origin key (`o:…/origin/X`), passes
+                    // through untouched: the command's resolver applies the one order - a feature
+                    // of the same name first, then the datum - and saves the reference that
+                    // follows what it names (#7313), instead of the axis being frozen where it
+                    // was picked.
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         // An `{origin, dir}` axis without its origin passes through the world's,
