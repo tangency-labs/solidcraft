@@ -536,6 +536,22 @@ keyword_param!(
     "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
+    /// `surface.ruled`'s `mode`.
+    RuledModeParam,
+    "mode",
+    &["normal", "tangent", "angle", "direction"],
+    "normal, tangent, angle or direction",
+    "Which way the rulings run from each edge: normal (the default: along the normal of the face beside the edge), tangent (continuing that face), angle (`angle` from `direction`, else from the face's normal, turned away from the face) or direction (along `direction`). Matching ignores case."
+);
+keyword_param!(
+    /// `surface.ruled`'s `corners`.
+    RuledCornersParam,
+    "corners",
+    &["mitre", "miter", "round"],
+    "mitre or round",
+    "How the strip turns the chain's sharp corners: mitre (the default; miter is an alias) or round. Inside corners are always cut back. Matching ignores case."
+);
+keyword_param!(
     /// `solid.fillet`'s `type`.
     FilletTypeParam,
     "fillet type",
