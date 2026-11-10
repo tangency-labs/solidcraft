@@ -2165,6 +2165,10 @@ fn origin_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut
 /// The Origin rows of one component placement, under its row: [`origin_rows`] keyed by the
 /// complete occurrence path, so repeated and nested placements each get their own folder
 fn origin_rows_at(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: &mut Actions, path: &[u64]) {
+    // A search never looks at the Origin rows, the design's or a placement's, so it lists none of them.
+    if app.tree.search.on() {
+        return;
+    }
     let component = !path.is_empty();
     let folder = solidcraft_engine::origins::folder(path);
     let key = if component { folder.as_str() } else { "origin" };
