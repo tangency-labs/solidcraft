@@ -7515,11 +7515,13 @@ fn gpu_punctual_offset_preserves_small_shift_after_large_local_barycentric_displ
 
 #[test]
 fn shared_bvh_node_walk_preserves_original_ordinary_and_compensated_hit_bits() {
-    // Frozen f53 policy, not re-derived from the new implementation. Only its
-    // test-local function name changes; it still calls the byte-identical old
-    // ordered walker for zero low parts, and carries the old triangle_ahead_precise
-    // the shader no longer needs. This reference entry inlines three real walks,
-    // rather than compiling the historical seven-walk main.
+    // Frozen f53 policy, not re-derived from the new implementation: the old
+    // precise and ordered walkers under test-local names, and the old
+    // triangle_ahead_precise the shader no longer needs. legacy_precise_policy
+    // sends zero low parts to legacy_ordered_within, as the old policy did; both
+    // keep three direct difference_products calls per candidate, which the shader
+    // now makes at one edge_weights call site. This reference entry inlines three
+    // real walks, rather than compiling the historical seven-walk main.
     let legacy = r#"fn triangle_ahead_precise(t: Triangle, o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>) -> bool {
     if all(o_low==vec3<f32>(0.0)) { return triangle_ahead(t,o,d); }
     let lo=precise_point_delta(min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
@@ -7528,10 +7530,84 @@ fn shared_bvh_node_walk_preserves_original_ordinary_and_compensated_hit_bits() {
     if any((d==vec3<f32>(0.0))&((lo>vec3<f32>(0.0))|(hi<vec3<f32>(0.0)))) { return false; }
     return true;
 }
+fn legacy_ordered_within(o: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
+    var hit = Hit(limit, 0xffffffffu, vec3<f32>(0.0));
+    let origin_error=max(max(abs(o.x),max(abs(o.y),abs(o.z))),1.0)*(1.0/1048576.0);
+    var source: Triangle;
+    if excluded!=0xffffffffu { source=triangle(excluded); }
+    // Project every candidate into the same ray-aligned 2D coordinate system.
+    // Shared edges then use identical products with opposite signs, avoiding the
+    // independently rounded barycentric comparisons of Moller-Trumbore.
+    var kz = 0u;
+    if abs(d.y)>abs(d.x) { kz=1u; }
+    if abs(d.z)>abs(d[kz]) { kz=2u; }
+    let kx=(kz+1u)%3u; let ky=(kx+1u)%3u;
+    let shear=vec3<f32>(d[kx]/d[kz],d[ky]/d[kz],1.0/d[kz]);
+    let order=select(-1.0,1.0,d[kz]>0.0);
+    var best=FAR;
+    // Children are tested at their parent and visited near-first. The build
+    // bounds tree depth to 30, so at most 31 nodes are pending.
+    var stack: array<u32, 32>;
+    var entry: array<f32, 32>;
+    if nodes[0].first == 0xffffffffu { return hit; }
+    entry[0] = box_entry_padded(nodes[0], o, d, hit.distance, u.lighting.x);
+    if entry[0] < 0.0 { return hit; }
+    stack[0] = 0u;
+    var size = 1u;
+    loop {
+        if size == 0u { break; }
+        size -= 1u;
+        if entry[size] > hit.distance { continue; }
+        let node = nodes[stack[size]];
+        if node.count == 0u {
+            if size + 2u > 32u { break; }
+            let left = box_entry_padded(nodes[node.first], o, d, hit.distance, u.lighting.x);
+            let right = box_entry_padded(nodes[node.first+1u], o, d, hit.distance, u.lighting.x);
+            var near_child = node.first; var near_entry = left;
+            var far_child = node.first+1u; var far_entry = right;
+            if right >= 0.0 && (left < 0.0 || right < left) {
+                near_child = node.first+1u; near_entry = right;
+                far_child = node.first; far_entry = left;
+            }
+            if far_entry >= 0.0 { stack[size] = far_child; entry[size] = far_entry; size += 1u; }
+            if near_entry >= 0.0 { stack[size] = near_child; entry[size] = near_entry; size += 1u; }
+            continue;
+        }
+        for (var i = node.first; i < node.first + node.count; i += 1u) {
+            if i == excluded { continue; }
+            // A straight continuation cannot revisit its producing exact plane.
+            // IDs join only connected, exactly coplanar uploaded f32 triangles
+            // of one body; curved facets and other bodies remain candidates.
+            if excluded!=0xffffffffu && geometry[geometry[3]+i]==geometry[geometry[3]+excluded] { continue; }
+            let t = triangle(i);
+            if !triangle_ahead(t,o,d) { continue; }
+            let pa=t.p0.xyz-o; let pb=t.p1.xyz-o; let pc=t.p2.xyz-o;
+            let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
+            let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
+            let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
+            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
+            let det=weights.x+weights.y+weights.z;
+            if det==0.0 { continue; }
+            // Retain all three directly evaluated weights: 1-u-v can erase a
+            // small corner clearance when the other two weights sum to one.
+            let bary=weights/det;
+            let depth=surface_ray_depth(t,bary,o,kz);
+            let distance=depth*shear.z;
+            let key=depth*order;
+            if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
+            if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
+                hit = Hit(distance,i,bary); best=key;
+                if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
+            }
+        }
+    }
+    return hit;
+}
 fn legacy_precise_policy(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
     // Dispatch once before traversal. Ordinary rays keep the original lean BVH
     // loop, without precision-helper branches inside every candidate/node test.
-    if all(o_low==vec3<f32>(0.0)) { return trace_ordered_within(o,d,any_hit,excluded,minimum,inside,limit,blocker); }
+    if all(o_low==vec3<f32>(0.0)) { return legacy_ordered_within(o,d,any_hit,excluded,minimum,inside,limit,blocker); }
     var hit = Hit(limit, 0xffffffffu, vec3<f32>(0.0));
     // Project every candidate into the same ray-aligned 2D coordinate system.
     // Shared edges then use identical products with opposite signs, avoiding the
