@@ -4796,7 +4796,7 @@ mod command_start_tab_tests {
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way
-    /// however they are started. F6, the navigation bar and the view cube never move the ribbon,
+    /// however they are started. F6, the navigation bar and the navigator never move the ribbon,
     /// so command search and the VIEW tab's menus must not either.
     #[test]
     fn view_display_commands_keep_the_ribbon_on_the_tab_they_were_started_from() {

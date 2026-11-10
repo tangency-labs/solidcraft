@@ -41,10 +41,10 @@ fill `selected_bg`, text `selected_ink` at weight 600, and (cards, tiles, chips)
 | Ink on an accent fill (primary button "OK", checked checkbox tick) | `#FFFFFF` | `#0F1620` | light `on_accent`; dark: **no token: add `pref_on_accent`** = light `#FFFFFF` / dark `#0F1620` (dark `on_accent` is white) |
 | Tint behind a figure in a card or tile and behind the theme options panel (not the segmented control, which has no well) | `#EEF1F5` | `#2F343E` | dark `dialog_footer`; light: **no token: add `pref_well`** = light `#EEF1F5` / dark `#2F343E` |
 | Figure ground (the rectangle under every card figure) | `#F7F8FA` | `#1C1F26` | dark `control_fill`; light: **no token: add `figure_ground`** = light `#F7F8FA` / dark `#1C1F26` |
-| Figure outlines (cube edges, geometry strokes) | `#6F7C8F` | `#A3AEC2` | **no token: add `figure_line`** = `#6F7C8F` / `#A3AEC2` |
-| Figure cube, left face | `#E4E9F0` | `#515B72` | **no token: add `figure_face_left`** = `#E4E9F0` / `#515B72` |
-| Figure cube, right face | `#C9D2DE` | `#394256` | **no token: add `figure_face_right`** = `#C9D2DE` / `#394256` |
-| Figure cube, top face and figure paper | `#FFFFFF` | `#6B7790` | **no token: add `figure_face_top`** = `#FFFFFF` / `#6B7790` |
+| Figure outlines (box edges, geometry strokes) | `#6F7C8F` | `#A3AEC2` | **no token: add `figure_line`** = `#6F7C8F` / `#A3AEC2` |
+| Figure box, left face | `#E4E9F0` | `#515B72` | **no token: add `figure_face_left`** = `#E4E9F0` / `#515B72` |
+| Figure box, right face | `#C9D2DE` | `#394256` | **no token: add `figure_face_right`** = `#C9D2DE` / `#394256` |
+| Figure box, top face and figure paper | `#FFFFFF` | `#6B7790` | **no token: add `figure_face_top`** = `#FFFFFF` / `#6B7790` |
 | Warning badge text and stroke ("Restart needed", "not on this GPU") | `#B84A00` | `#F0A27A` | **no token: add `pref_note`** = `#B84A00` / `#F0A27A` (nearest: `surface_ink` #A45000) |
 | Warning badge fill | `#FBEBDD` | `#4A3326` | **no token: add `pref_note_fill`** = `#FBEBDD` / `#4A3326` |
 | Success badge fill ("Connected", "Up to date", "Signed in") | `#E5F2E6` | `#1F3A31` | light `form_success_fill`; dark: **no token: add `pref_ok_fill`** dark `#1F3A31` (dark `form_success_fill` is #2C4A33) |
@@ -96,9 +96,9 @@ own pairing.
 | `#FFFFFF` | `#DEE2E8` | 1 board | `control_fill`, `dialog_body` / `dialog_label`, `form_ink` |
 | `#FFFFFF` | `#272B34` | 1 board | `control_fill`, `dialog_body` / `dialog_bg`, `dialog_body` |
 | `#FFFFFF` | `#1B2430` | 1 board | `control_fill`, `dialog_body` / `nav_tip_ink`, `file_background` (#1F232B) |
-| `#F4F6F9` | `#F4F6F9` | 1 board | `dialog_footer`, `toolbar` (#F6F7F9) / `nav_tip` (#EEF1F5), `cube_face` (#ECEFF4) |
-| `#EEF1F5` | `#EEF1F5` | 1 board | `nav_viewport`, `cube_face` (#ECEFF4) / `nav_tip`, `cube_face` (#ECEFF4) |
-| `#EEF1F5` | `#3A4150` | 1 board | `nav_viewport`, `cube_face` (#ECEFF4) / `nav_hover`, `grid` (#3B414C) |
+| `#F4F6F9` | `#F4F6F9` | 1 board | `dialog_footer`, `toolbar` (#F6F7F9) / `nav_tip` (#EEF1F5), `navigator_face` (#ECEFF4) |
+| `#EEF1F5` | `#EEF1F5` | 1 board | `nav_viewport`, `navigator_face` (#ECEFF4) / `nav_tip`, `navigator_face` (#ECEFF4) |
+| `#EEF1F5` | `#3A4150` | 1 board | `nav_viewport`, `navigator_face` (#ECEFF4) / `nav_hover`, `grid` (#3B414C) |
 | `#276B2C` | `#8FDB9A` | 1 board | `form_success`, `bend_up` (#1E8C32) / `timeline_marker` (#AAB2C0), `body` (#989CA2) |
 | `#D9DFE7` | `#D9DFE7` | 1 board | `nav_press` (#DCE2EA), `dialog_border` (#D5DBE3) / `dialog_label` (#DEE2E8), `form_ink` (#DEE2E8) |
 | `#9AA7B6` | `#9AA7B6` | 1 board | `grid_major` (#AAB2BE), `nav_dim` (#8895A7) / `text_dim` (#949BA8), `timeline_marker` (#AAB2C0) |
@@ -106,21 +106,21 @@ own pairing.
 | `#A8B3C1` | `#A8B3C1` | 1 board | `grid_major` (#AAB2BE), `body` (#B0BAC6) / `timeline_marker` (#AAB2C0), `file_dim` (#B4BBC8) |
 | `#C9D1DB` | `#C9D1DB` | 1 board | `viewport_bottom` (#CBD2DD), `border` (#D0D4DC) / `icon` (#D0D6E2), `origin_point` (#D6D7DA) |
 | `#3A4150` | `#3A4150` | 1 board | `dialog_label` (#3A4656), `file_dim` (#3A4656) / `nav_hover`, `grid` (#3B414C) |
-| `#252A34` | `#252A34` | 1 board | `cube_text` (#262A32), `text` (#262A32) / `nav_viewport` (#262B35), `cube_text` (#262A32) |
-| `#2A2F3A` | `#2A2F3A` | 1 board | `body_edge` (#282C34), `cube_text` (#262A32) / `glyph_bg` (#2C323C), `nav_viewport` (#262B35) |
+| `#252A34` | `#252A34` | 1 board | `navigator_text` (#262A32), `text` (#262A32) / `nav_viewport` (#262B35), `navigator_text` (#262A32) |
+| `#2A2F3A` | `#2A2F3A` | 1 board | `body_edge` (#282C34), `navigator_text` (#262A32) / `glyph_bg` (#2C323C), `nav_viewport` (#262B35) |
 | `#323845` | `#323845` | 1 board | `app_bar_tab_active` (#353B47), `app_bar` (#343840) / `timeline_item` (#343A46), `app_bar_tab_active` (#353B47) |
-| `#6C7689` | `#6C7689` | 1 board | `text_dim` (#6E7480), `cube_border` (#555E6E) / `nav_dim` (#7C879A), `form_accent` (#7B63A6) |
+| `#6C7689` | `#6C7689` | 1 board | `text_dim` (#6E7480), `navigator_border` (#555E6E) / `nav_dim` (#7C879A), `form_accent` (#7B63A6) |
 | `#8CBEF5` | `#8CBEF5` | 1 board | `sel_edge_rim` (#7FBFFF), `agent_busy` (#6CB4F0) / `sel_edge_rim` (#7FBFFF), `file_primary_ink` (#9CC7F5) |
 | `#99A5BA` | `#99A5BA` | 1 board | `grid_major` (#AAB2BE), `nav_dim` (#8895A7) / `text_dim` (#949BA8), `timeline_marker` (#AAB2C0) |
 | `#7E8AA0` | `#7E8AA0` | 1 board | `app_bar_separator` (#8891A0), `nav_dim` (#8895A7) / `nav_dim` (#7C879A), `app_bar_separator` (#8891A0) |
-| `#566176` | `#566176` | 1 board | `cube_border` (#555E6E), `form_dim` (#4A5868) / `cube_border` (#555E6E), `control_border` (#4A5262) |
+| `#566176` | `#566176` | 1 board | `navigator_border` (#555E6E), `form_dim` (#4A5868) / `navigator_border` (#555E6E), `control_border` (#4A5262) |
 | `#3F485A` | `#3F485A` | 1 board | `dialog_label` (#3A4656), `file_dim` (#3A4656) / `border` (#3F4552), `dialog_border` (#3F4552) |
 | `#454D5E` | `#454D5E` | 1 board | `icon` (#464E5C), `timeline_marker` (#464C58) / `nav_press` (#464E60), `grid_major` (#494F5A) |
-| `#32302F` | `#32302F` | 1 board | `body_edge` (#282C34), `cube_text` (#262A32) / `dialog_bg` (#272B34), `dialog_body` (#272B34) |
+| `#32302F` | `#32302F` | 1 board | `body_edge` (#282C34), `navigator_text` (#262A32) / `dialog_bg` (#272B34), `dialog_body` (#272B34) |
 | `#1D2021` | `#1D2021` | 1 board | `form_ink` (#1B2430), `nav_tip` (#1B2430) / `app_bar` (#1C1F26), `control_fill` (#1C1F26) |
-| `#282828` | `#282828` | 1 board | `cube_text` (#262A32), `text` (#262A32) / `timeline` (#21252D), `cube_text` (#262A32) |
+| `#282828` | `#282828` | 1 board | `navigator_text` (#262A32), `text` (#262A32) / `timeline` (#21252D), `navigator_text` (#262A32) |
 | `#3C3836` | `#3C3836` | 1 board | `app_bar` (#343840), `app_bar_tab_active` (#353B47) / `dialog_footer` (#2F343E), `nav_field` (#2F343E) |
-| `#7C6F64` | `#7C6F64` | 1 board | `text_dim` (#6E7480), `cube_border` (#555E6E) / `cube_border` (#555E6E), `control_border` (#4A5262) |
+| `#7C6F64` | `#7C6F64` | 1 board | `text_dim` (#6E7480), `navigator_border` (#555E6E) / `navigator_border` (#555E6E), `control_border` (#4A5262) |
 | `#83A598` | `#83A598` | 1 board | `app_bar_separator` (#8891A0), `nav_dim` (#8895A7) / `app_bar_separator` (#8891A0), `body` (#989CA2) |
 | `#EBDBB2` | `#EBDBB2` | 1 board | `file_recovery_well` (#F7E2B8), `file_recovery_border` (#F0D29A) / `timeline_item_error` (#E8C4AA), `hover_edge_halo` (#CBCBCB) |
 | `#D5C4A1` | `#D5C4A1` | 1 board | `file_recovery_border` (#F0D29A), `hover_edge_halo` (#CBCBCB) / `timeline_item_error` (#E8C4AA), `file_recovery_ink` (#F5CC89) |
@@ -131,13 +131,13 @@ own pairing.
 | `#2B2F52` | `#2B2F52` | 1 board | `app_bar_tab_active` (#353B47), `app_bar` (#343840) / `form_soft` (#372F4F), `timeline_item` (#343A46) |
 | `#3B4170` | `#3B4170` | 1 board | `icon` (#464E5C), `dialog_label` (#3A4656) / `accent_soft` (#2A466E), `selected_bg` (#2A466E) |
 | `#9CA3DE` | `#9CA3DE` | 1 board | `grid_major` (#AAB2BE), `body` (#B0BAC6) / `form_tab_ink` (#B39BEE), `timeline_marker` (#AAB2C0) |
-| `#B6A6FF` | `#B6A6FF` | 1 board | `cube_hover` (#BEDCFC), `control_border` (#C3CBD6) / `form_tab_ink` (#B39BEE), `file_primary_ink` (#9CC7F5) |
-| `#E7E1FF` | `#E7E1FF` | 1 board | `form_soft` (#EEE8FA), `hover` (#E2EAF6) / `app_bar_text` (#E6EAF2), `cube_face` (#ECEFF4) |
+| `#B6A6FF` | `#B6A6FF` | 1 board | `navigator_hover` (#BEDCFC), `control_border` (#C3CBD6) / `form_tab_ink` (#B39BEE), `file_primary_ink` (#9CC7F5) |
+| `#E7E1FF` | `#E7E1FF` | 1 board | `form_soft` (#EEE8FA), `hover` (#E2EAF6) / `app_bar_text` (#E6EAF2), `navigator_face` (#ECEFF4) |
 | `#9C8FE8` | `#9C8FE8` | 1 board | `preview_add` (#70A0E2), `body_selected` (#6EAAEB) / `form_tab_ink` (#B39BEE), `form_fill` (#8A6FCC) |
 | `#6E8FE0` | `#6E8FE0` | 1 board | `preview_add` (#70A0E2), `body_selected` (#6EAAEB) / `preview_add` (#70A0E2), `body_selected` (#6EAAEB) |
 | `#6E76B8` | `#6E76B8` | 1 board | `sel_face` (#4C7FCB), `sel_vertex` (#466EAA) / `form_accent` (#7B63A6), `form_fill` (#8A6FCC) |
 | `#8A94A3` | `#8A94A3` | 1 board | `nav_dim` (#8895A7), `app_bar_separator` (#8891A0) / `app_bar_separator` (#8891A0), `text_dim` (#949BA8) |
-| `#7C8899` | `#5A6475` | 1 board | `app_bar_separator` (#8891A0), `nav_dim` (#8895A7) / `cube_border` (#555E6E), `control_border` (#4A5262) |
+| `#7C8899` | `#5A6475` | 1 board | `app_bar_separator` (#8891A0), `nav_dim` (#8895A7) / `navigator_border` (#555E6E), `control_border` (#4A5262) |
 | `#E69F00` | `#E69F00` | 1 board | `joint_manipulator` (#EB9D00), `mesh_fill` (#E0B200) / `joint_manipulator` (#EB9D00), `mesh_fill` (#C6A800) |
 | `#E69F00` | `#F0C060` | 1 board | `joint_manipulator` (#EB9D00), `mesh_fill` (#E0B200) / `preview_new` (#F0E169), `warning` (#ECAA46) |
 | `#D55E00` | `#F0A27A` | 1 board | `bend_down` (#C85A14), `surface_accent` (#A45000) / `file_recovery_ink` (#F5CC89), `glyph_edge` (#C88278) |

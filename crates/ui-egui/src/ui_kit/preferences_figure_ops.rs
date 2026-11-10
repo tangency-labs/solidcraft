@@ -122,7 +122,7 @@ pub(super) struct Figure {
 }
 
 /// The twelve colours a theme thumbnail is drawn with: ground, bar and side panel, muted marks,
-/// accent, the window face's top and bottom, grid, cube top, cube outline, cube left, cube right
+/// accent, the window face's top and bottom, grid, box top, box outline, box left, box right
 /// and the thumbnail's border. A colour may carry alpha (a glass theme's panels).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThemeSample {
@@ -190,12 +190,12 @@ impl Ctx<'_> {
         };
         let semantic = if matches!(self.palette, Palette::Navigator) {
             match ink {
-                Ink::Ground | Ink::Top => Some(t.cube_face),
-                Ink::Left => Some(t.cube_face.lerp_to_gamma(t.cube_border, 0.12)),
-                Ink::Right => Some(t.cube_face.lerp_to_gamma(t.cube_border, 0.24)),
+                Ink::Ground | Ink::Top => Some(t.navigator_face),
+                Ink::Left => Some(t.navigator_face.lerp_to_gamma(t.navigator_border, 0.12)),
+                Ink::Right => Some(t.navigator_face.lerp_to_gamma(t.navigator_border, 0.24)),
                 Ink::Line => Some(t.figure_line),
-                Ink::Text => Some(t.cube_text),
-                Ink::Accent => Some(t.cube_hover),
+                Ink::Text => Some(t.navigator_text),
+                Ink::Accent => Some(t.navigator_hover),
                 Ink::AxisX => Some(t.axis_x),
                 Ink::AxisY => Some(t.axis_y),
                 Ink::AxisZ => Some(t.axis_z),
@@ -264,14 +264,14 @@ impl Ctx<'_> {
                 _ => None,
             };
             if let Some(axis) = axis {
-                let ground = if matches!(ink, Ink::White) { axis } else { t.cube_face };
+                let ground = if matches!(ink, Ink::White) { axis } else { t.navigator_face };
                 let intended = if matches!(ink, Ink::White) { t.on_accent } else { axis };
                 if solidcraft_theme::contrast_ratio(intended, ground) >= 4.5 {
                     return intended;
                 }
                 // Lettering has its own foreground role. Preserve the actual axis colour on
                 // discs and strokes, choosing a legible token only for the tiny glyph.
-                return [intended, t.cube_text, t.on_accent, t.tab_on_fill_dark]
+                return [intended, t.navigator_text, t.on_accent, t.tab_on_fill_dark]
                     .into_iter()
                     .max_by(|a, b| solidcraft_theme::contrast_ratio(*a, ground).total_cmp(&solidcraft_theme::contrast_ratio(*b, ground)))
                     .unwrap_or(intended);
@@ -359,10 +359,6 @@ pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect, axes: &[NavigatorAx
         }
         crate::ui_kit::icons::glyphs::axis_tip_scaled(&p, c, axis.name, axis.direction, *at, axis.depth, false, t, scale);
     }
-}
-
-pub(crate) fn paint_navigation_cube(p: &Painter, rect: Rect) {
-    paint_with_tokens(p, rect, &super::preferences_figure_data::NAVIGATOR_CUBE, None, None, &Tokens::get(), Palette::Navigator);
 }
 
 /// A generic body (a hexagonal prism) in the navigator palette: the user's own body stands in its place.
@@ -520,7 +516,7 @@ fn draw(p: &Painter, ctx: &Ctx, op: &Op, clip: Option<&[Pos2]>) {
             // The board's captions are 6.5 to 7.5 units: too small to read at card size, so they
             // are drawn a third larger (never under 8 points). The SVG's `y` is the baseline, which
             // sits about 0.36 em below the middle of a line of digits and capitals.
-            // Longer captions sit in tight pills and on cube faces, so they are drawn slightly smaller than the board (egui's monospace face is wider than the board's).
+            // Longer captions sit in tight pills and on box faces, so they are drawn slightly smaller than the board (egui's monospace face is wider than the board's).
             let grow = match s.chars().count() {
                 0..=4 => 1.2,
                 5..=6 => 0.9,
@@ -799,13 +795,13 @@ mod tests {
     fn navigator_palette_preserves_axis_hues_and_uses_legible_lettering() {
         for t in [Tokens::light(), Tokens::dark()] {
             let ctx = Ctx { t: &t, sample: None, palette: Palette::Navigator, origin: Pos2::ZERO, scale: 1.0 };
-            assert_eq!(ctx.ink(Ink::Ground, 1.0), t.cube_face);
+            assert_eq!(ctx.ink(Ink::Ground, 1.0), t.navigator_face);
             assert_eq!(ctx.ink(Ink::Line, 1.0), t.figure_line);
-            assert_eq!(ctx.ink(Ink::Text, 1.0), t.cube_text);
+            assert_eq!(ctx.ink(Ink::Text, 1.0), t.navigator_text);
             for (ink, axis, label) in [(Ink::AxisX, t.axis_x, "X"), (Ink::AxisY, t.axis_y, "Y"), (Ink::AxisZ, t.axis_z, "Z")] {
                 assert_eq!(ctx.ink(ink, 1.0), axis, "the navigator's real axis palette");
                 assert!(solidcraft_theme::contrast_ratio(ctx.text_ink(Ink::White, 1.0, label), axis) >= 4.5);
-                assert!(solidcraft_theme::contrast_ratio(ctx.text_ink(ink, 1.0, label), t.cube_face) >= 4.5);
+                assert!(solidcraft_theme::contrast_ratio(ctx.text_ink(ink, 1.0, label), t.navigator_face) >= 4.5);
             }
             let ordinary = Ctx { palette: Palette::Figure, ..ctx };
             assert_eq!(ordinary.ink(Ink::AxisX, 1.0), t.figure_axis_x, "other illustrations keep their palette");

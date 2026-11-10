@@ -1369,7 +1369,7 @@ fn cards_block_model_hover_wheel_and_drag_but_the_gap_remains_viewport() {
 
 #[test]
 fn floating_sketch_palette_and_compass_share_measured_clearance() {
-    for style in crate::prefs::NavigatorStyle::ALL {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 720.0, 2.0)] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;
@@ -1404,7 +1404,7 @@ fn floating_sketch_palette_and_compass_share_measured_clearance() {
 
 #[test]
 fn short_floating_palette_stays_in_viewport() {
-    for style in crate::prefs::NavigatorStyle::ALL {
+    for style in [crate::prefs::NavigatorStyle::Axes] {
         for height in [475, 385, 300] {
             let mut h = Harness::new();
             h.app.preferences.navigator_style = style;

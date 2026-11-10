@@ -1372,7 +1372,7 @@ fn view_analysis_buttons_are_one_toggle_group() {
 #[test]
 fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
     use solidcraft_viewport::ViewAngles;
-    for style in ["axes", "cube"] {
+    for style in ["axes", "custom"] {
         let mut h = Harness::new();
         h.call("ui.prefs", json!({"navigator_style": style}));
         h.app.preferences.look_at_anim = false;

@@ -1074,7 +1074,7 @@ pub struct Tokens {
     pub origin_plane_hover: Color32,
     pub origin_point: Color32,
     /// The X, Y and Z colours, one set for every axis drawn (#976): the origin axes, the view
-    /// triad, the navigation cube's triad, the Move gizmo, a 3D sketch point's triad, joint
+    /// triad, the navigator's triad, the Move gizmo, a 3D sketch point's triad, joint
     /// origins, measured distances along the axes and the headless picture's origin axes.
     pub axis_x: Color32,
     pub axis_y: Color32,
@@ -1100,12 +1100,12 @@ pub struct Tokens {
     pub preview_sketch: Color32,
     /// Removed material in a feature preview (translucent).
     pub preview_cut: Color32,
-    /// Navigation cube faces, outline and labels.
-    pub cube_face: Color32,
-    pub cube_border: Color32,
-    pub cube_text: Color32,
-    /// Light blue hover fill, readable on the pale cube in either theme.
-    pub cube_hover: Color32,
+    /// Navigator faces, outline and labels.
+    pub navigator_face: Color32,
+    pub navigator_border: Color32,
+    pub navigator_text: Color32,
+    /// Light blue hover fill, readable on the pale navigator in either theme.
+    pub navigator_hover: Color32,
     // ---- viewport ----
     /// Viewport background (top and bottom of the gradient; equal for a flat fill).
     pub viewport_top: Color32,
@@ -1178,11 +1178,11 @@ pub struct Tokens {
     pub figure_highlight: Color32,
     /// Neutral shadow cast by a model in a Preferences figure, independent of theme polarity.
     pub figure_shadow: Color32,
-    /// Top face of the Preferences figure cube.
+    /// Top face of the Preferences figure box.
     pub figure_face_top: Color32,
-    /// Left face of the Preferences figure cube.
+    /// Left face of the Preferences figure box.
     pub figure_face_left: Color32,
-    /// Right face of the Preferences figure cube.
+    /// Right face of the Preferences figure box.
     pub figure_face_right: Color32,
     /// Paper, panels and pads drawn inside Preferences figures.
     pub figure_card: Color32,
@@ -1378,7 +1378,7 @@ impl Tokens {
             &mut self.nav_field,
             &mut self.nav_viewport,
             &mut self.glyph_bg,
-            &mut self.cube_face,
+            &mut self.navigator_face,
             &mut self.viewport_top,
             &mut self.viewport_bottom,
             &mut self.grid,
@@ -1389,7 +1389,7 @@ impl Tokens {
             &mut self.control_border,
             &mut self.app_bar_separator,
             &mut self.nav_tip_key_border,
-            &mut self.cube_border,
+            &mut self.navigator_border,
             &mut self.file_background,
             &mut self.file_surface,
             &mut self.file_border,
@@ -1425,7 +1425,7 @@ impl Tokens {
 
     /// These tokens with the colours drawn in the 3D view taken from `view`: the background and
     /// grid, bodies, selection and hover, the origin and construction geometry, previews, sketches
-    /// and their dimensions and glyphs, the navigation cube and triads, box selection and the
+    /// and their dimensions and glyphs, the navigator and triads, box selection and the
     /// analysis colours. The window keeps its own: panels, dialogs, menus, and the chips and cards
     /// over the view (`overlay` with its text, icons and borders).
     pub fn with_viewport(self, view: Tokens) -> Tokens {
@@ -1459,10 +1459,10 @@ impl Tokens {
             preview_new: view.preview_new,
             preview_sketch: view.preview_sketch,
             preview_cut: view.preview_cut,
-            cube_face: view.cube_face,
-            cube_border: view.cube_border,
-            cube_text: view.cube_text,
-            cube_hover: view.cube_hover,
+            navigator_face: view.navigator_face,
+            navigator_border: view.navigator_border,
+            navigator_text: view.navigator_text,
+            navigator_hover: view.navigator_hover,
             viewport_top: view.viewport_top,
             viewport_bottom: view.viewport_bottom,
             grid: view.grid,
@@ -1536,15 +1536,15 @@ impl Tokens {
         t
     }
 
-    /// Fade idle cube colours into the viewport while retaining opaque facets.
-    pub fn navigation_cube(self, active: bool) -> Tokens {
+    /// Fade idle navigator colours into the viewport while retaining opaque facets.
+    pub fn navigator(self, active: bool) -> Tokens {
         if active {
             return self;
         }
         let mut t = self;
-        t.cube_face = t.cube_face.lerp_to_gamma(t.viewport_top, 0.55);
-        t.cube_border = t.cube_border.lerp_to_gamma(t.viewport_top, 0.55);
-        t.cube_text = t.cube_text.lerp_to_gamma(t.viewport_top, 0.55);
+        t.navigator_face = t.navigator_face.lerp_to_gamma(t.viewport_top, 0.55);
+        t.navigator_border = t.navigator_border.lerp_to_gamma(t.viewport_top, 0.55);
+        t.navigator_text = t.navigator_text.lerp_to_gamma(t.viewport_top, 0.55);
         t.axis_x = t.axis_x.lerp_to_gamma(t.viewport_top, 0.55);
         t.axis_y = t.axis_y.lerp_to_gamma(t.viewport_top, 0.55);
         t.axis_z = t.axis_z.lerp_to_gamma(t.viewport_top, 0.55);
@@ -1931,7 +1931,7 @@ mod tests {
                 // The two sides differ, so the checks below tell them apart.
                 assert_ne!((w.viewport_top, w.panel), (v.viewport_top, v.panel));
                 // The view's: background and grid, bodies, selection and hover, sketches with their
-                // dimensions and glyphs, the origin, the cube and triads, box selection, analysis.
+                // dimensions and glyphs, the origin, the navigator and triads, box selection, analysis.
                 assert_eq!((t.viewport_top, t.viewport_bottom, t.grid, t.grid_major), (v.viewport_top, v.viewport_bottom, v.grid, v.grid_major));
                 assert_eq!(
                     (t.body, t.body_edge, t.body_selected, t.sel_face, t.sel_edge, t.hover_edge),
@@ -1942,8 +1942,8 @@ mod tests {
                     (v.sketch, v.sketch_fixed, v.dimension, v.glyph_bg, v.glyph_text, v.profile_fill)
                 );
                 assert_eq!(
-                    (t.origin_plane, t.axis_x, t.cube_face, t.cube_text, t.axis_y, t.axis_z),
-                    (v.origin_plane, v.axis_x, v.cube_face, v.cube_text, v.axis_y, v.axis_z)
+                    (t.origin_plane, t.axis_x, t.navigator_face, t.navigator_text, t.axis_y, t.axis_z),
+                    (v.origin_plane, v.axis_x, v.navigator_face, v.navigator_text, v.axis_y, v.axis_z)
                 );
                 assert_eq!(
                     (t.box_window, t.section_cap, t.preview_add, t.sketch_construction, t.continuity),

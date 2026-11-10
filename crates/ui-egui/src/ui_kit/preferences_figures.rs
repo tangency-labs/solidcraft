@@ -135,7 +135,7 @@ fn orientation_axes(y_up: bool) -> [(f32, f32, usize, &'static str); 3] {
 }
 
 /// Orientation uses the same 30-degree ground plane as the model cards, with unmistakable
-/// axis arrows and readable labels rather than an unrelated generic cube.
+/// axis arrows and readable labels rather than an unrelated generic box.
 pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
     let t = Tokens::get();
     let c = Canvas { rect };

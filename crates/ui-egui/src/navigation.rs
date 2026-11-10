@@ -455,7 +455,7 @@ fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::I
 }
 
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
-/// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
+/// navigator's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
 /// selected face, plane or sketch. Held longer than a tap, an arrow keeps turning the view at a
 /// steady rate (`step_key_hold`); the operating system's key repeat does nothing. Not while a
 /// menu, the command box or a focused widget has the arrows. Returns whether the key was used.
@@ -557,7 +557,7 @@ pub(crate) struct CameraInput {
     pub primary_pressed: bool,
     /// The pointer is over this view and available for canvas input.
     pub inside: bool,
-    /// The axis view or navigation cube's rectangle.
+    /// The axis view or navigator's rectangle.
     pub axes: Rect,
     pub pinch: f32,
     pub pan: egui::Vec2,
@@ -3062,7 +3062,7 @@ mod view_key_tests {
         assert!((turn(before, h.app.cam.yaw).abs() - 30f64.to_radians()).abs() < 1e-6);
     }
 
-    /// Ctrl+1…7 run Front … Isometric View by default, turning the view as the view cube's faces
+    /// Ctrl+1…7 run Front … Isometric View by default, turning the view as the navigator's faces
     /// do; the keys are ordinary shortcuts, so one can be moved to another command and back.
     #[test]
     fn ctrl_digits_turn_to_the_standard_views_and_can_be_rebound() {

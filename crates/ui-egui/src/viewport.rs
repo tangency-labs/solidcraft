@@ -51,8 +51,8 @@ mod refine_wait_tests;
 #[path = "body_gizmo.rs"]
 mod body_gizmo;
 
-#[path = "navigation_cube.rs"]
-mod navigation_cube;
+#[path = "navigator_controls.rs"]
+mod navigator_controls;
 
 #[path = "viewport_drag_layer.rs"]
 mod drag_layer;
@@ -3465,10 +3465,10 @@ fn section_clip(app: &SolveApp) -> [f32; 4] {
 pub(crate) fn axis_view_size(style: crate::prefs::NavigatorStyle) -> f32 {
     match style {
         crate::prefs::NavigatorStyle::Axes => 116.0,
-        crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => navigation_cube::SIZE,
+        crate::prefs::NavigatorStyle::Custom => navigator_controls::SIZE,
     }
 }
-// Keep command panels anchored independently of the compact cube's display size.
+// Keep command panels anchored independently of the navigator's display size.
 pub const AXIS_VIEW_CLEARANCE: f32 = 168.0;
 
 /// Axis length as a multiple of the origin plane size (solid part 1, dashed beyond).
@@ -5951,7 +5951,7 @@ impl ToastPlace {
 pub(crate) const TOAST_WIDTH: f32 = 360.0;
 
 /// Where the corner stack may go: the largest free rect in a `TOAST_WIDTH` column at the right of
-/// `view`, clear of `obstacles` (the axis view and cube at the top, the view toolbar when a narrow
+/// `view`, clear of `obstacles` (the axis view at the top, the view toolbar when a narrow
 /// window brings it under the column, docked panels), less the usual margin. A pane at the right
 /// edge (an edge-docked dialog, the Assistant) moves the column, at full width, to its left edge
 /// rather than leaving a strip beside it (#8804, as the frame-rate readout does, #6755). The first
@@ -7145,14 +7145,14 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
             let orbit = crate::navigation_bar_view::canvas_caps(app).orbit;
             app.viewport.layout = Some(if let Some(confirm) = app.viewport.host_confirm {
-                crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, app.preferences.navigator_style, confirm, navigation, orbit)
+                crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, crate::view_gizmo::style(app), confirm, navigation, orbit)
             } else if orbit {
-                crate::viewport_layout::Layout::host(rect, &usable, app.preferences.navigator_style, crate::view_confirm::size(app), navigation)
+                crate::viewport_layout::Layout::host(rect, &usable, crate::view_gizmo::style(app), crate::view_confirm::size(app), navigation)
             } else {
                 crate::viewport_layout::Layout::host_with_axis(
                     rect,
                     &usable,
-                    app.preferences.navigator_style,
+                    crate::view_gizmo::style(app),
                     crate::view_confirm::size(app),
                     navigation,
                     false,
@@ -7186,7 +7186,7 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
         }
         // OK and Cancel in the view's corner (#6709) take the top right; the axis view goes below.
         let corner = crate::view_confirm::size(app);
-        let style = app.preferences.navigator_style;
+        let style = crate::view_gizmo::style(app);
         let layout = if crate::render_workspace::active(app) {
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, content).rect } else { Rect::NOTHING };
             if app.preferences.render_inspector_side == "left" {
@@ -7228,7 +7228,7 @@ fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
     let c = axis_rect(app, rect).center();
     // The compass sits a little higher in its reserved box (less margin above, the same on the
     // right); the box itself is unchanged.
-    if app.preferences.navigator_style == crate::prefs::NavigatorStyle::Axes { c - vec2(0.0, AXIS_CENTER_LIFT) } else { c }
+    if crate::view_gizmo::style(app) == crate::prefs::NavigatorStyle::Axes { c - vec2(0.0, AXIS_CENTER_LIFT) } else { c }
 }
 
 /// How far the signed-axis compass is lifted inside its reserved box.
@@ -7236,7 +7236,7 @@ pub(crate) const AXIS_CENTER_LIFT: f32 = 4.0;
 
 pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
     app.viewport.layout.as_ref().filter(|l| l.viewport == crate::render_workspace::camera_rect(app, rect)).map(|l| l.axis_view).unwrap_or_else(|| {
-        let size = axis_view_size(app.preferences.navigator_style);
+        let size = axis_view_size(crate::view_gizmo::style(app));
         Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))
     })
 }
@@ -7277,11 +7277,8 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let orbit = crate::view_compass::orbit(ui, &mut drag, may_start, |p| {
         let shown = crate::view_gizmo::shown(app);
         match shown.style {
-            crate::prefs::NavigatorStyle::Axes => axis_rect(app, rect).contains(p),
             crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::drag_origin(app, rect, p),
-            crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => {
-                navigation_cube::drag_origin(app, axis_center(app, rect), p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
-            }
+            crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => axis_rect(app, rect).contains(p),
         }
     });
     (app.viewport.axis_drag, app.viewport.axis_warp) = (drag.at, drag.warp);
@@ -7327,9 +7324,8 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     gizmo_menu(app, ui, rect);
     let shown = crate::view_gizmo::shown(app);
     match shown.style {
-        crate::prefs::NavigatorStyle::Axes => signed_axis_view(app, ui, rect),
         crate::prefs::NavigatorStyle::Custom if shown.shape.is_some() => body_gizmo::show(app, ui, rect, shown),
-        crate::prefs::NavigatorStyle::Cube | crate::prefs::NavigatorStyle::Custom => navigation_cube::show(app, ui, rect),
+        crate::prefs::NavigatorStyle::Axes | crate::prefs::NavigatorStyle::Custom => signed_axis_view(app, ui, rect),
     }
 }
 
@@ -12804,27 +12800,6 @@ mod tests {
                 moved(half, end, if keeps { first.shift } else { then.shift });
             }
         }
-    }
-
-    #[test]
-    fn navigation_cube_repeated_face_click_keeps_view_and_drag_snaps() {
-        let mut h = crate::scenario::Harness::new();
-        h.call("ui.prefs", json!({"navigator_style":"cube"}));
-        h.run(&json!([
-            {"call":"ui.view","params":{"view":"home"}},
-            {"click":{"handle":"axis_view:z"}},
-            {"expect":{"camera":{"pitch_deg":90,"yaw_deg":0}}},
-            {"click":{"handle":"axis_view:z"}},
-            {"expect":{"camera":{"pitch_deg":90,"yaw_deg":0}}},
-            {"call":"ui.view","params":{"view":"front"}}
-        ]))
-        .unwrap();
-        let c = axis_center(&h.app, h.app.viewport.rect.unwrap());
-        h.call("ui.drag", json!({"x0":c.x,"y0":c.y,"x1":c.x+220.0,"y1":c.y,"shift":true,"steps":40}));
-        assert!((h.app.cam.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-6);
-        assert!(h.app.viewport.axis_drag.is_none());
-        assert!(h.app.viewport.orbit_free.is_none());
-        assert!(h.app.viewport.boxsel.is_none());
     }
 
     #[test]

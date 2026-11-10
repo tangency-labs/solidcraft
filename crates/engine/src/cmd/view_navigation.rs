@@ -1,4 +1,4 @@
-//! Stateless camera commands shared by the navigation cube and programmatic callers.
+//! Stateless camera commands shared by the view navigators and programmatic callers.
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
 use solidcraft_viewport::{Camera, StandardView};
@@ -83,7 +83,7 @@ CommandSpec::new("view.navigation_bar", "Navigation Bar", navigation_bar)
 CommandSpec::new("view.navigator", "Custom View Navigator", crate::checked!("view.navigator", navigator))
     .icon("nav_settings").noundo().doc_only()
     .contract(&NAVIGATOR_CONTRACT).output(output_schema_for::<NavigatorParams>)
-    .params("style?: axes|cube|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
+    .params("style?: axes|custom; body?: body name|null; texture?: themed|modeled; arrows?, home?: bool → the navigator as set; the app's view navigator, never saved in the design; never opens a dialog (a toolbar start opens the Custom View Navigator panel)"),
 CommandSpec::new("view.ribbon_tabs_only", "Ribbon Tabs Only", crate::checked!("view.ribbon_tabs_only", ribbon_tabs_only))
     .icon("chevron").noundo().doc_only().contract(&RIBBON_TABS_ONLY_CONTRACT).output(output_schema_for::<RibbonTabsOnly>)
     .params("on?: bool (omitted: switch) → on?; fold the ribbon to its tab row, a tab click shows its panels over the view (window setting)"),
@@ -162,7 +162,7 @@ CommandSpec::new("view.previous_tab", "Previous Tab", crate::checked!("view.prev
     .icon("chevron_right").noundo().doc_only().key("Ctrl+Shift+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
     .params("no parameters → step: -1; the window shows the design tab to the left of the shown one (before the first, the last); never edits the design or opens a dialog")];
 
-const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the view cube does, keeping target, distance and projection";
+const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the axes navigator does, keeping target, distance and projection";
 
 /// The standard view a `view.front` … `view.isometric` command turns to.
 pub fn standard_view(id: &str) -> Option<StandardView> {
@@ -550,7 +550,7 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
-        // Left, right, up and down turn the view a quarter turn (the navigation cube's arrows),
+        // Left, right, up and down turn the view a quarter turn (the navigator's arrows),
         // or `degrees` (the arrow keys' 15° steps, #1541).
         let (sin, cos) = match p.get("degrees") {
             None => (1.0, 0.0),
@@ -1026,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn every_cube_direction_preserves_framing_without_editing_the_design() {
+    fn every_direction_preserves_framing_without_editing_the_design() {
         for up in [UpAxis::Z, UpAxis::Y] {
             let mut s = Session::default();
             let before = s.doc.to_json();

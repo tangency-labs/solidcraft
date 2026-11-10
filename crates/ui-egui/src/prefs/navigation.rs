@@ -286,7 +286,6 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_section(ui, "navigation_view", app.tr("ui.tab_view"), |ui| {
         let options = [
             ui_kit::PictureChoice { key: "Signed axes", label: app.tr("prefs.navigation.axes_signed"), figure: paint_signed_axes },
-            ui_kit::PictureChoice { key: "Cube", label: app.tr("prefs.navigation.cube_compact"), figure: ui_kit::paint_navigation_cube },
             ui_kit::PictureChoice { key: "Custom", label: solidcraft_ui_text::tr_label("Custom"), figure: ui_kit::paint_navigation_custom },
         ];
         if let Some(index) = ui_kit::settings_picture_choices_sized(
@@ -300,7 +299,7 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ) {
             app.preferences.navigator_style = NavigatorStyle::ALL.get(index).copied().unwrap_or_default();
         }
-        if let Some(all) = ["Signed axes", "Cube", "Custom"]
+        if let Some(all) = ["Signed axes", "Custom"]
             .into_iter()
             .map(|key| crate::scenario::rect_of(&format!("prefs:navigator:{key}")))
             .collect::<Option<Vec<_>>>()

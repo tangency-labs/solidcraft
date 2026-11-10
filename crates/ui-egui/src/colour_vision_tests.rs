@@ -334,7 +334,7 @@ fn groups(t: &Tokens) -> Vec<Group> {
         group("validation status", &[("form_success", t.form_success), ("error", t.error)], &[("panel", t.panel)]),
         group("validation surfaces", &[("form_success_fill", t.form_success_fill), ("form_error_fill", t.form_error_fill)], &[]),
         group("UI text", &[("error", t.error), ("warning", t.warning), ("text", t.text)], &[("panel", t.panel)]),
-        // Every axis drawn: origin, view triad, navigation cube, Move gizmo… (one set, #976).
+        // Every axis drawn: origin, view triad, navigator, Move gizmo… (one set, #976).
         group("axes", &[("axis_x", t.axis_x), ("axis_y", t.axis_y), ("axis_z", t.axis_z)], &[("viewport_top", t.viewport_top)]),
         group(
             "assembly Move",
@@ -639,11 +639,11 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("profile_fill", "a closed profile's tint"),
     ("glyph_bg", "a constraint glyph's ground"),
     ("glyph_edge", "a constraint glyph's edge"),
-    // The navigation cube: labelled faces.
-    ("cube_face", "labelled"),
-    ("cube_border", "labelled"),
-    ("cube_text", "labelled"),
-    ("cube_hover", "hover highlight"),
+    // The navigator: labelled faces.
+    ("navigator_face", "labelled"),
+    ("navigator_border", "labelled"),
+    ("navigator_text", "labelled"),
+    ("navigator_hover", "hover highlight"),
     // Not a colour.
     ("analysis.hatch", "a flag: stripes on the failing faces"),
     // Icon colours that are a shade of a measured one, or one mark alone.

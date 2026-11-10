@@ -1115,7 +1115,7 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
     assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
 
-    // Elsewhere: a design without that body, the cube, and no custom body yet.
+    // Elsewhere: a design without that body, the signed axes, and no custom body yet.
     let mut other = Harness::new();
     run(&mut other, "settings.profile.save", json!({"name": "Plain"}));
     assert_eq!(run(&mut other, "settings.profile.import", json!({"profile": exported})), json!({"name": "Gizmo"}));

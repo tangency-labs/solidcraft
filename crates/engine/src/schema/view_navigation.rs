@@ -98,7 +98,7 @@ pub struct AngleReadoutResult {
 }
 
 /// Turn the view to the command's standard orientation (front, back, left, right, top, bottom
-/// or isometric), as the view cube does, keeping the camera's target, distance, projection and
+/// or isometric), as the axes navigator does, keeping the camera's target, distance, projection and
 /// up axis. Display only: the design isn't changed and nothing is added to undo.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -275,25 +275,25 @@ pub struct RenderFrame {
 #[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct NavigatorParams {
-    /// The navigator: signed axes, the cube, or a custom body (the cube until a body is
+    /// The navigator: signed axes, or a custom body (the signed axes until a body is
     /// chosen). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub style: Option<NavigatorStyle>,
     /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
-    /// it, so it stays when the design closes. `null`: no body (the cube again). A body over
+    /// it, so it stays when the design closes. `null`: no body (the signed axes again). A body over
     /// 10,000 triangles, or whose thinnest width is under a fifth of its widest, is refused.
     /// Default: unchanged.
     #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<String>")]
     pub body: Option<Option<String>>,
-    /// The custom navigator's colours: the cube's (`themed`) or the body's own appearance and
+    /// The custom navigator's colours: the theme's (`themed`) or the body's own appearance and
     /// edge colour (`modeled`). Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture: Option<NavigatorTexture>,
-    /// The cube's orbit and roll arrows around the custom navigator. Default: unchanged.
+    /// The orbit and roll arrows around the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arrows: Option<bool>,
-    /// The cube's Home button beside the custom navigator. Default: unchanged.
+    /// The Home button beside the custom navigator. Default: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<bool>,
 }
@@ -303,7 +303,6 @@ pub struct NavigatorParams {
 #[serde(rename_all = "snake_case")]
 pub enum NavigatorStyle {
     Axes,
-    Cube,
     Custom,
 }
 

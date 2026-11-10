@@ -2322,138 +2322,6 @@ pub(super) const NAVIGATOR_AXES: Figure = Figure {
     ],
 };
 
-pub(super) const NAVIGATOR_CUBE: Figure = Figure {
-    size: [120.0, 64.0],
-    ops: &[
-        Op::Poly {
-            pts: &[[60.0, 10.0], [79.053, 21.0], [60.0, 32.0], [40.947, 21.0]],
-            closed: true,
-            fill: Some(P { ink: Ink::Top, a: 1.0 }),
-            grad: None,
-            line: None,
-        },
-        Op::Poly {
-            pts: &[[40.947, 21.0], [60.0, 32.0], [60.0, 54.0], [40.947, 43.0]],
-            closed: true,
-            fill: Some(P { ink: Ink::Left, a: 1.0 }),
-            grad: None,
-            line: None,
-        },
-        Op::Poly {
-            pts: &[[60.0, 32.0], [79.053, 21.0], [79.053, 43.0], [60.0, 54.0]],
-            closed: true,
-            fill: Some(P { ink: Ink::Right, a: 1.0 }),
-            grad: None,
-            line: None,
-        },
-        Op::Poly {
-            pts: &[[60.0, 10.0], [79.053, 21.0], [79.053, 43.0], [60.0, 54.0], [40.947, 43.0], [40.947, 21.0]],
-            closed: true,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 1.35, dash: [0.0, 0.0], round: true }),
-        },
-        Op::Poly {
-            pts: &[[40.947, 21.0], [60.0, 32.0], [79.053, 21.0]],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 1.35, dash: [0.0, 0.0], round: true }),
-        },
-        Op::Poly {
-            pts: &[[60.0, 32.0], [60.0, 54.0]],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 1.35, dash: [0.0, 0.0], round: true }),
-        },
-        Op::Poly { pts: &[[60.0, 5.4], [57.5, 1.2], [62.5, 1.2]], closed: true, fill: Some(P { ink: Ink::Line, a: 1.0 }), grad: None, line: None },
-        Op::Poly { pts: &[[60.0, 58.6], [62.5, 62.8], [57.5, 62.8]], closed: true, fill: Some(P { ink: Ink::Line, a: 1.0 }), grad: None, line: None },
-        Op::Poly { pts: &[[35.4, 32.0], [31.2, 34.5], [31.2, 29.5]], closed: true, fill: Some(P { ink: Ink::Line, a: 1.0 }), grad: None, line: None },
-        Op::Poly { pts: &[[84.6, 32.0], [88.8, 29.5], [88.8, 34.5]], closed: true, fill: Some(P { ink: Ink::Line, a: 1.0 }), grad: None, line: None },
-        Op::Poly {
-            pts: &[
-                [80.927, 8.977],
-                [80.563, 8.68],
-                [80.191, 8.393],
-                [79.811, 8.117],
-                [79.424, 7.851],
-                [79.03, 7.596],
-                [78.628, 7.352],
-                [78.22, 7.119],
-                [77.806, 6.898],
-                [77.386, 6.688],
-                [76.96, 6.49],
-                [76.528, 6.304],
-                [76.092, 6.129],
-                [75.651, 5.967],
-                [75.206, 5.817],
-                [74.757, 5.679],
-                [74.304, 5.554],
-                [73.848, 5.441],
-                [73.389, 5.341],
-                [72.928, 5.254],
-                [72.464, 5.179],
-                [71.998, 5.118],
-                [71.531, 5.069],
-                [71.063, 5.033],
-                [70.593, 5.01],
-            ],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 1.65, dash: [0.0, 0.0], round: true }),
-        },
-        Op::Poly {
-            pts: &[[69.094, 4.958], [72.662, 3.081], [72.522, 7.079]],
-            closed: true,
-            fill: Some(P { ink: Ink::Line, a: 1.0 }),
-            grad: None,
-            line: None,
-        },
-        Op::Poly {
-            pts: &[
-                [83.753, 12.008],
-                [84.024, 12.391],
-                [84.284, 12.783],
-                [84.534, 13.181],
-                [84.772, 13.586],
-                [84.998, 13.997],
-                [85.214, 14.415],
-                [85.418, 14.838],
-                [85.61, 15.267],
-                [85.79, 15.701],
-                [85.958, 16.139],
-                [86.114, 16.582],
-                [86.257, 17.03],
-                [86.388, 17.481],
-                [86.507, 17.935],
-                [86.613, 18.393],
-                [86.706, 18.853],
-                [86.787, 19.316],
-                [86.855, 19.781],
-                [86.909, 20.248],
-                [86.951, 20.715],
-                [86.98, 21.184],
-                [86.996, 21.654],
-                [87.0, 22.124],
-                [86.99, 22.593],
-            ],
-            closed: false,
-            fill: None,
-            grad: None,
-            line: Some(L { ink: Ink::Line, a: 1.0, w: 1.65, dash: [0.0, 0.0], round: true }),
-        },
-        Op::Poly {
-            pts: &[[86.937, 24.092], [85.061, 20.525], [89.058, 20.664]],
-            closed: true,
-            fill: Some(P { ink: Ink::Line, a: 1.0 }),
-            grad: None,
-            line: None,
-        },
-    ],
-};
-
 pub(super) const ORBIT_CENTRE: Figure = Figure {
     size: [120.0, 64.0],
     ops: &[
@@ -4424,11 +4292,6 @@ pub(crate) fn paint_navigator_axes(p: &Painter, rect: Rect) {
     paint(p, rect, &NAVIGATOR_AXES, None, None);
 }
 
-/// The `navigator-cube` figure of `docs/design/preferences/figures`.
-pub(crate) fn paint_navigator_cube(p: &Painter, rect: Rect) {
-    paint(p, rect, &NAVIGATOR_CUBE, None, None);
-}
-
 /// The `orbit-centre` figure of `docs/design/preferences/figures`.
 pub(crate) fn paint_orbit_centre(p: &Painter, rect: Rect) {
     paint(p, rect, &ORBIT_CENTRE, None, None);
@@ -4586,7 +4449,6 @@ pub(crate) const FIGURES: &[(&str, [f32; 2], fn(&Painter, Rect))] = &[
     ("measure-axis-distances", MEASURE_AXIS_DISTANCES.size, paint_measure_axis_distances),
     ("mouse-mapping", MOUSE_MAPPING.size, paint_mouse_mapping),
     ("navigator-axes", NAVIGATOR_AXES.size, paint_navigator_axes),
-    ("navigator-cube", NAVIGATOR_CUBE.size, paint_navigator_cube),
     ("orbit-centre", ORBIT_CENTRE.size, paint_orbit_centre),
     ("orbit-cursor", ORBIT_CURSOR.size, paint_orbit_cursor),
     ("orbit-origin", ORBIT_ORIGIN.size, paint_orbit_origin),
