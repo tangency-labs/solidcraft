@@ -5959,7 +5959,11 @@ fn feature_tools_with_constructor(
                     }
                     to - start
                 }
-                None if extent.through_all => through_all_distance(st, &ss.plane, &crate::plain(targets))?,
+                None if extent.through_all => {
+                    // The reach is a length; a negative saved distance keeps its side (#10415).
+                    let reach = through_all_distance(st, &ss.plane, &crate::plain(targets))?;
+                    if val(vals, &extent.distance, Kind::Length).is_ok_and(|saved| saved < 0.0) { -reach } else { reach }
+                }
                 None => val(vals, &extent.distance, Kind::Length)?,
             };
             // A taper of 0 is a straight extrusion (the dialog stores one, and designs carry it);
