@@ -507,7 +507,7 @@ slot/tile/add/appearance targets retain their identities.
 | Bar 3 | Hover / press and open / latched; focus outline 2 with offset 1 | `navigation_visual`, `navigation_fill`, `NAV_FOCUS_WIDTH/OFFSET`; `nav_hover`, `nav_press`, `selected_bg`, `form_primary` |
 | Bar 5 | Width 244, padding 5, radius 10; shared menu shadow (0,14), blur 36; row 30, radius 6, inset 8, icon 17, gap 9; heading 22, text 11, tracking .07em | `NAV_POPUP_*`, `NAV_MENU_*`, `NAV_ROW_GAP`, `NAV_HEADING_*`, `navigation_popup_frame`, `Container::menu_frame` |
 | Bar 6 | Left / Centre / Right, 12 edge inset | `Position`, `NAV_EDGE`; legacy bottom / bottom_left / bottom_right deserialize as centre / left / right |
-| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `navigation_bar_view::measure` |
+| Bar 7 | More button follows the selected size; popup width 200; value text drops before labels and overflow | `NavigationMetrics`, `NAV_MORE_WIDTH`, `nav_bar_layout::measure` |
 | Bar 8 | Idle fade 45%, hidden 0%, restored 100%; hide-mode fade in 120ms | `navigation_opacity`, `NAV_IDLE_OPACITY/FADE_SECONDS` |
 | Bar 9 | Tooltip delay 800ms, gap 6, padding (8,5), radius 6; 12 medium text, 11 mono key, 15 key line height | `NAV_TOOLTIP_DELAY/POPUP_GAP`, `navigation_tooltip`; `nav_tip/tip_ink/tip_key_border` |
 | Bar 10 | Render hides Look at and Visual style; flat canvases hide Orbit, Spin, Look at, Projection and Visual style, retaining Home and Display | `Slot::available`, `canvas_caps` |

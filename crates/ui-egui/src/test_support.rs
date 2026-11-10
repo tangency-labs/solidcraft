@@ -28,6 +28,7 @@ pub(crate) const KIT_COMPONENTS: &[&str] = &[
     "history_bar.rs",
     "history_bar_tests.rs",
     "nav_bar.rs",
+    "nav_bar_layout.rs",
     "nav_bar_tests.rs",
     "navigation_bar.rs",
     "prefs_window.rs",

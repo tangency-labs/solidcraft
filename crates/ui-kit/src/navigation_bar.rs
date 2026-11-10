@@ -1,5 +1,6 @@
-//! Stored navigation slots, checked against the host's slot catalogue. Painting lives in
-//! `navigation_bar_view`; SolidCraft's catalogue is `navigation_slots`.
+//! Stored navigation slots, checked against the host's slot catalogue. Their layout is
+//! [`crate::nav_bar_layout`] and the bar component [`crate::nav_bar`]; SolidCraft's catalogue is
+//! `navigation_slots`.
 use crate::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

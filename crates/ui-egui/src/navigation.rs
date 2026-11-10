@@ -36,6 +36,11 @@ impl NavCaps {
     pub const MODEL: NavCaps = NavCaps { orbit: true, pick: true };
     /// The Render workspace's product preview: shared navigation and product picking.
     pub const RENDER: NavCaps = NavCaps { orbit: true, pick: true };
+
+    /// Whether the navigation bar shows `slot` on a page with these caps.
+    pub fn shows(self, slot: &crate::navigation_bar::Slot) -> bool {
+        slot.available(self.orbit, self.pick)
+    }
 }
 
 /// Give a panel the wheel delta left by its children, one movable axis at a time.

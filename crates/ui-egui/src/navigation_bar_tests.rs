@@ -2,8 +2,8 @@
 //! and bars measured in its viewport.
 use crate::navigation::NavCaps;
 use crate::navigation_bar::*;
-use crate::navigation_bar_view::measure;
 use crate::navigation_slots::{CATALOGUE, SELECTION_MODE_ICONS};
+use crate::ui_kit::nav_bar_layout::measure;
 use crate::ui_kit::{NavigationEdge, NavigationKind, NavigationSize};
 use egui::{Rect, pos2, vec2};
 use serde_json::json;
@@ -59,7 +59,7 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
     for width in [5.0, 39.0, 46.0, 90.0, 160.0, 250.0, 310.0, 700.0, 1400.0] {
         for height in [30.0, 80.0, 130.0, 240.0, 720.0] {
             let canvas = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
-            let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 50.0);
+            let bar = measure(canvas, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0);
             let layout = crate::viewport_layout::Layout::with_content(
                 canvas,
                 canvas,
@@ -91,9 +91,9 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
         }
     }
     let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 720.0));
-    assert!(measure(wide, &prefs, NavCaps::MODEL, |_| 50.0).labels);
+    assert!(measure(wide, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0).labels);
     let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(380.0, 720.0));
-    let bar = measure(middle, &prefs, NavCaps::MODEL, |_| 50.0);
+    let bar = measure(middle, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0);
     assert!(!bar.labels && bar.overflow.is_empty(), "text disappears before slots fold");
 }
 
@@ -104,7 +104,7 @@ fn measured_bar_honours_size_position_and_ignores_unknown_slots() {
     for size in [NavigationSize::Compact, NavigationSize::Regular] {
         for position in [Position::Centre, Position::Left, Position::Right] {
             let prefs: NavigationBar = serde_json::from_value(json!({"slots":["future", "pan", "fit"], "size":size, "position":position})).unwrap();
-            let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 0.0);
+            let bar = measure(canvas, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 0.0);
             assert_eq!(bar.slots.iter().map(|(slot, _)| slot.id).collect::<Vec<_>>(), ["pan", "fit"]);
             assert!(bar.slots.iter().all(|(_, rect)| rect.height() == size.points()));
             match position {
@@ -132,7 +132,7 @@ fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_
         for edge in [NavigationEdge::Bottom, NavigationEdge::Top] {
             let prefs: NavigationBar = serde_json::from_value(json!({"position": position, "edge": edge})).unwrap();
             assert_eq!(serde_json::to_value(&prefs).unwrap()["edge"], if edge == NavigationEdge::Top { "top" } else { "bottom" });
-            let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 50.0);
+            let bar = measure(canvas, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0);
             match edge {
                 NavigationEdge::Bottom => assert_eq!(bar.rect.bottom(), canvas.bottom() - NAV_BOTTOM),
                 NavigationEdge::Top => assert_eq!(bar.rect.top(), canvas.top() + NAV_BOTTOM),
@@ -333,13 +333,13 @@ fn navigation_menu_value_width_is_independent_of_global_button_labels() {
     crate::navigation_slots::install();
     let mut bar = NavigationBar { slots: vec!["visual_style".into(), "display".into()], ..Default::default() };
     let content = Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 200.0));
-    let before = measure(content, &bar, NavCaps::MODEL, |_| 100.0);
+    let before = measure(content, &bar, |slot| NavCaps::MODEL.shows(slot), |_| 100.0);
     bar.slot_options.insert("visual_style".into(), SlotOptions { shows: MenuDisplay::IconAndValue });
-    let value = measure(content, &bar, NavCaps::MODEL, |_| 100.0);
+    let value = measure(content, &bar, |slot| NavCaps::MODEL.shows(slot), |_| 100.0);
     assert_eq!(value.slots[0].1.width(), before.slots[0].1.width() + 100.0 + crate::ui_kit::NAV_MENU_GAP);
     assert_eq!(value.slots[1].1.width(), before.slots[1].1.width());
     bar.labels = Labels::Labels;
-    let labels = measure(content, &bar, NavCaps::MODEL, |_| 100.0);
+    let labels = measure(content, &bar, |slot| NavCaps::MODEL.shows(slot), |_| 100.0);
     assert_eq!(labels.slots.iter().map(|(_, rect)| *rect).collect::<Vec<_>>(), value.slots.iter().map(|(_, rect)| *rect).collect::<Vec<_>>());
 }
 
@@ -463,7 +463,7 @@ fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
 #[test]
 fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_position() {
     crate::navigation_slots::install();
-    use crate::navigation_bar_view::editor_layout;
+    use crate::ui_kit::nav_bar_layout::editor_layout;
     use crate::ui_kit::*;
     let stage = Rect::from_min_size(pos2(100.0, 200.0), vec2(640.0, NAV_STAGE_HEIGHT));
     for (legacy, current, position) in
@@ -475,7 +475,7 @@ fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_positi
         for size in [NavigationSize::Compact, NavigationSize::Regular] {
             let bar = NavigationBar { size, ..bar.clone() };
             let preview = editor_layout(stage, &bar, |_| 0.0);
-            let live = measure(stage, &bar, NavCaps::MODEL, |_| 0.0);
+            let live = measure(stage, &bar, |slot| NavCaps::MODEL.shows(slot), |_| 0.0);
             assert_eq!(preview.rect.bottom(), stage.bottom() - NAV_BORDER - NAV_STAGE_INSET);
             let top = editor_layout(stage, &NavigationBar { edge: NavigationEdge::Top, ..bar.clone() }, |_| 0.0);
             assert_eq!(top.rect.top(), stage.top() + NAV_BORDER + NAV_STAGE_INSET);
@@ -499,11 +499,11 @@ fn navigation_board_drops_menu_value_text_before_folding_slots() {
     crate::navigation_slots::install();
     let mut bar = NavigationBar { slots: vec!["pan".into(), "visual_style".into(), "display".into()], ..Default::default() };
     bar.slot_options.insert("visual_style".into(), SlotOptions { shows: MenuDisplay::IconAndValue });
-    let wide = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(700.0, 200.0)), &bar, NavCaps::MODEL, |_| 120.0);
+    let wide = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(700.0, 200.0)), &bar, |slot| NavCaps::MODEL.shows(slot), |_| 120.0);
     assert!(wide.values && wide.overflow.is_empty());
-    let narrow = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(220.0, 200.0)), &bar, NavCaps::MODEL, |_| 120.0);
+    let narrow = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(220.0, 200.0)), &bar, |slot| NavCaps::MODEL.shows(slot), |_| 120.0);
     assert!(!narrow.values && narrow.overflow.is_empty());
-    let folded = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 200.0)), &bar, NavCaps::MODEL, |_| 120.0);
+    let folded = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 200.0)), &bar, |slot| NavCaps::MODEL.shows(slot), |_| 120.0);
     assert!(!folded.values && !folded.overflow.is_empty());
     assert_eq!(folded.more.size(), vec2(32.0, 32.0));
 }

@@ -12,6 +12,7 @@ pub mod blur;
 pub mod frame;
 pub mod history_bar;
 pub mod nav_bar;
+pub mod nav_bar_layout;
 pub mod navigation_bar;
 pub mod prefs_window;
 pub mod ribbon;
