@@ -153,6 +153,7 @@ pub fn curve(c: &BCurve) -> R<Curve> {
             bspline_curve(knots, points, Some(weights))?
         }
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("a traced intersection curve")),
+        BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => return Err(unsupported("a curve on a procedural sweep")),
     })
 }
 
@@ -241,6 +242,7 @@ fn placed_curve(c: &BCurve, a: &Affine, similarity: Option<f64>) -> R<BCurve> {
                 .collect::<R<_>>()?,
         },
         BCurve::SurfaceIntersection { .. } => return Err(unsupported("a revolution of a traced intersection curve")),
+        BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => return Err(unsupported("a revolution of a curve on a procedural sweep")),
     })
 }
 
@@ -307,6 +309,7 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => revolution(profile, *origin, *axis, matrix, *forward)?,
         BSurface::BallPatch { .. } => return Err("a ball patch's label (its face is written as its NURBS form)".into()),
         BSurface::Blend { .. } => return Err("a blend's label (its face is written as its NURBS form)".into()),
+        BSurface::ProceduralSweep(_) => return Err(unsupported("a procedural sweep surface")),
     })
 }
 

@@ -115,7 +115,7 @@ pub fn face_surface(
                     scale: [1.0, 1.0],
                 })
             }
-            Record::Spline { .. } => {
+            Record::Spline { .. } | Record::ProceduralSweep(_) => {
                 let (surface, uv_domain) = from_parameters(k, label, domain)?;
                 Ok(FaceSurface {
                     surface,
@@ -151,7 +151,7 @@ pub fn face_surface(
             match loop_on.then(|| BallPatch::create_certified(&net, centre, *radius)) {
                 Some(Ok(b)) => Surface::from(b),
                 Some(Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. }))) => {
-                    return Err(e)
+                    return Err(e);
                 }
                 // owner 22254: a label its form or its loop does not prove is dropped; the
                 // face is its exact NURBS
@@ -163,7 +163,11 @@ pub fn face_surface(
         | Record::Cone { .. }
         | Record::Sphere { .. }
         | Record::Torus { .. } => labelled(k, label, net)?,
-        _ => return Err(bad("a NURBS form is given for a cylinder, cone, sphere, torus, ball patch or revolution only")),
+        _ => {
+            return Err(bad(
+                "a NURBS form is given for a cylinder, cone, sphere, torus, ball patch or revolution only",
+            ));
+        }
     };
     Ok(FaceSurface {
         surface,
@@ -372,6 +376,18 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
         [uv_domain.u_min(), uv_domain.u_max()],
         [uv_domain.v_min(), uv_domain.v_max()],
     ];
+    if let Some(sweep) = s
+        .procedural_sweep()
+        .filter(|sweep| sweep.definition().screw().is_some())
+    {
+        return Ok(RecordFace {
+            surface: Record::ProceduralSweep(Box::new(sweep.definition().to_record(sweep.net())?)),
+            nurbs: None,
+            domain: box_,
+            scale: [1.0, 1.0],
+            agrees: true,
+        });
+    }
     if let SurfaceKind::Plane(p) = s.kind_with_nurb(k)? {
         A::check(k, s)?;
         let (o, x, y) = p.position().canonical();
@@ -417,7 +433,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
             let proved = match own.build(k, form.into_owned()) {
                 Ok(_) => Some(own),
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
+                    return Err(e);
                 }
                 Err(_) => None,
             };
@@ -463,7 +479,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
                     radius: bp.radius(),
                 }),
                 Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
-                    return Err(e)
+                    return Err(e);
                 }
                 Err(_) => None,
             }
@@ -476,7 +492,7 @@ pub fn record_face(k: &Kernel, s: &Surface, uv_domain: &Extent2d) -> Result<Reco
             return Err(SolidError::Unsupported {
                 operation: OP_BACK,
                 reason: "a face surface with no NURBS form has no exact record",
-            })
+            });
         }
     };
     let form = as_b_spline(k, s)?.ok_or_else(|| bad("the surface has no NURBS form"))?;

@@ -276,7 +276,16 @@ mod tests {
     use super::*;
 
     fn empty_record() -> Brep {
-        Brep { version: 4, tolerance: 1e-6, regions: Vec::new(), shells: Vec::new(), faces: Vec::new(), edges: Vec::new(), vertices: Vec::new() }
+        Brep {
+            version: 4,
+            tolerance: 1e-6,
+            regions: Vec::new(),
+            shells: Vec::new(),
+            faces: Vec::new(),
+            edges: Vec::new(),
+            vertices: Vec::new(),
+            screw_owners: Vec::new(),
+        }
     }
 
     fn call(op: &'static str, inputs: &[u64], outputs: Result<Vec<u64>, String>) -> Event {

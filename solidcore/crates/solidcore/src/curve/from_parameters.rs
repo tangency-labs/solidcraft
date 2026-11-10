@@ -133,11 +133,96 @@ pub fn from_parameters(k: &Kernel, record: &Record, interval: [f64; 2]) -> Resul
             curve: Curve::from(spline(knots, homogeneous, 3, OP)?),
             interval: Extent1d::from_raw(lo, hi),
         }),
+        Record::OnSurface {
+            surface,
+            uv_curve,
+            domain,
+        } => {
+            if !matches!(**surface, crate::eval::Surface::ProceduralSweep(_)) {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: "curve surface is not a retained screw",
+                });
+            }
+            let (s, _) = crate::surface::from_parameters::from_parameters(k, surface, *domain)?;
+            on_screw_surface(k, &s, uv_curve, *domain, interval)
+        }
+        Record::OnSurfaceRef { .. } => Err(SolidError::Unsupported {
+            operation: OP,
+            reason: "an unbound screw owner requires body context",
+        }),
         Record::SurfaceIntersection { .. } => Err(SolidError::Unsupported {
             operation: OP,
             reason: "a traced intersection curve has no constructor from its numbers yet",
         }),
     }
+}
+
+/// Rebuild an exact UV curve from a previously certified screw owner.
+///
+/// # Errors
+/// Refuses invalid domains, UV splines and owners that are not retained screws.
+pub fn on_screw_surface(
+    k: &Kernel,
+    owner: &crate::surface::surface::Surface,
+    uv_curve: &Record2,
+    domain: [[f64; 2]; 2],
+    interval: [f64; 2],
+) -> Result<EdgeCurve> {
+    let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
+    if owner
+        .procedural_sweep()
+        .is_none_or(|s| s.definition().screw().is_none())
+    {
+        return Err(bad("curve surface is not a retained screw"));
+    }
+    let support = owner.natural_uv_domain_with_nurb(k)?;
+    let [[ua, ub], [va, vb]] = domain;
+    if !([ua, ub, va, vb].iter().all(|v| v.is_finite())
+        && ua < ub
+        && va < vb
+        && ua >= support.u_min()
+        && ub <= support.u_max()
+        && va >= support.v_min()
+        && vb <= support.v_max())
+    {
+        return Err(bad("curve surface domain outside owner"));
+    }
+    let (knots, count) = match uv_curve {
+        Record2::Spline { knots, points } => (knots, points.len()),
+        Record2::RationalSpline { knots, homogeneous } => (knots, homogeneous.len()),
+    };
+    let degree = knots
+        .len()
+        .checked_sub(
+            count
+                .checked_add(1)
+                .ok_or_else(|| bad("UV count overflow"))?,
+        )
+        .ok_or_else(|| bad("invalid UV spline counts"))?;
+    if count > crate::sweep::screw::MAX_NET_POINTS || !(1..=16).contains(&degree) {
+        return Err(bad("UV spline exceeds its resource budget"));
+    }
+    let [u0, u1] = uv_curve
+        .interval()
+        .ok_or_else(|| bad("invalid UV curve interval"))?;
+    let [lo, hi] = interval;
+    if !(u0.is_finite() && u1.is_finite() && u0 < u1 && lo >= u0 && hi <= u1 && lo < hi) {
+        return Err(bad("edge interval outside UV curve"));
+    }
+    let uv = uv_trim(uv_curve, &Extent1d::from_raw(u0, u1), [1.0, 1.0])?;
+    let box_ = crate::geom::extent2d::Extent2d::from_bounds(ua, va, ub, vb);
+    let cos = crate::curve::crv_on_surf::CrvOnSurf::new(
+        k,
+        uv,
+        owner.clone_for_evaluation()?,
+        Some(box_),
+        3,
+    )?;
+    Ok(EdgeCurve {
+        curve: Curve::from(cos),
+        interval: Extent1d::from_raw(lo, hi),
+    })
 }
 
 /// A circle or ellipse edge on its NURBS form `form` (a spline or rational spline, the
@@ -335,6 +420,38 @@ pub fn record_of(k: &Kernel, c: &Curve, interval: &Extent1d) -> Result<RecordCur
         return Err(bad("the interval is not finite and increasing"));
     }
     match c.kind() {
+        CurveKind::CrvOnSurf(cos)
+            if cos
+                .surface()
+                .procedural_sweep()
+                .is_some_and(|s| s.definition().screw().is_some()) =>
+        {
+            let face =
+                crate::surface::face_surface::record_face(k, cos.surface(), cos.uv_domain())?;
+            if face.scale != [1.0, 1.0] {
+                return Err(bad("curve owner requires a non-identity UV map"));
+            }
+            let uv_interval = cos.uv_curve().natural_interval();
+            if !(lo >= uv_interval.min() && hi <= uv_interval.max()) {
+                return Err(bad("edge interval outside UV curve"));
+            }
+            let uv_curve = record_trim(
+                k,
+                cos.uv_curve(),
+                &uv_interval,
+                [uv_interval.min(), uv_interval.max()],
+                [1.0, 1.0],
+            )?;
+            return Ok(RecordCurve {
+                curve: Record::OnSurface {
+                    surface: Box::new(face.surface),
+                    uv_curve,
+                    domain: face.domain,
+                },
+                nurbs: None,
+                interval: [lo, hi],
+            });
+        }
         CurveKind::Line(l) => {
             let can = l.canonical();
             let (mut s0, mut s1) = (

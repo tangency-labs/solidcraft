@@ -395,6 +395,38 @@ fn a_trim_goes_back_onto_its_edges_record_interval() {
     );
 }
 
+#[test]
+fn a_trim_maps_the_edge_parameter_without_rescaling_its_support() {
+    let k = k();
+    let hi = f64::from_bits(1.0_f64.to_bits() - 2);
+    let edge = Extent1d::from_raw(0.0, hi);
+    let original = Record2::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[0.0, 0.0], [1.0, 1.0]],
+    };
+    let trim = uv_trim_on_edge(&original, [0.0, hi], &edge, [1.0, 1.0]).unwrap();
+    assert_eq!(
+        record_trim(&k, &trim, &edge, [0.0, hi], [1.0, 1.0]).unwrap(),
+        original
+    );
+    let copied = trim.copy(&k).unwrap();
+    assert_eq!(
+        record_trim(&k, &copied, &edge, [0.0, hi], [1.0, 1.0]).unwrap(),
+        original
+    );
+
+    let original = Record2::Spline {
+        knots: vec![-1.0, -1.0, 2.0, 2.0],
+        points: vec![[0.0, 0.0], [2.0, 4.0]],
+    };
+    let target = Extent1d::from_raw(0.0, 90.0);
+    let trim = uv_trim_on_edge(&original, [0.0, 1.0], &target, [2.0, 0.5]).unwrap();
+    assert_eq!(
+        record_trim(&k, &trim, &target, [0.0, 1.0], [0.5, 2.0]).unwrap(),
+        original
+    );
+}
+
 /// The unit circle about the origin of `frame([0, 0, 0])`, as the rational form of
 /// `((1 - s²), 2 s, 0) / (1 + s²)` with `s(t) = (t - a)²` over [0, 1]: degree 4 in t, its
 /// Bernstein coefficients from the power ones. `s` runs back from `a²` to 0 on [0, a]

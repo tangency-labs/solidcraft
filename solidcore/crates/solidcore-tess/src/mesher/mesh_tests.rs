@@ -137,7 +137,8 @@ fn two_faces_splitting_one_side_put_one_node_on_its_edge() {
     assert!(ts.len() == 2 && ts.iter().all(|(e, _)| *e == ei), "{ts:?}");
     let params: Vec<f64> = ts.iter().map(|(_, t)| *t).collect();
     assert!(params[0] != params[1], "apart by rounding: {params:?}");
-    edges::insert_at(&b, ei, &mut nodes[ei], &params).expect("inserted");
+    let curves = solidcore_convert::curve_context::BodyCurveContext::new(&b).expect("curves");
+    edges::insert_at(&b, &curves, ei, &mut nodes[ei], &params).expect("inserted");
     assert_eq!(nodes[ei].points.len(), 3, "one node: {:?}", nodes[ei].params);
 }
 

@@ -123,6 +123,7 @@ impl C3 {
                 let (o, x, y) = frame_axes(frame);
                 C3::Arc { o, x, y, r: *radii, range: t }
             }
+            Curve::OnSurface { .. } | Curve::OnSurfaceRef { .. } => return Err(HlrError::Unsupported("curve on a procedural sweep")),
             Curve::Polyline { points } => C3::Polyline(polyline_part(points, t)?),
             Curve::Spline { knots, points } => part(knots, points.iter().map(|p| [p[0], p[1], p[2], 1.]).collect(), t)?,
             Curve::RationalSpline { knots, homogeneous } => part(knots, homogeneous.clone(), t)?,
