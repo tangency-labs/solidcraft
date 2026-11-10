@@ -11,10 +11,10 @@ use egui::{FontDefinitions, FontFamily};
 use crate::ui_kit::type_face::{CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, UI_FONT, fallback_order, needs_cjk_font, sans_families};
 use solidcraft_look::fonts::{self as look, with_symbol_fallback};
 // The Thai, Hebrew and Arabic faces come only from the desktop's system font search (and the tests).
-#[cfg(any(test, not(target_arch = "wasm32")))]
-use crate::ui_kit::type_face::{ARABIC_FALLBACK, GEORGIAN_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui_kit::type_face::SYMBOL_FALLBACK;
+#[cfg(any(test, not(target_arch = "wasm32")))]
+use crate::ui_kit::type_face::{ARABIC_FALLBACK, GEORGIAN_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
 
 fn all_families() -> impl Iterator<Item = FontFamily> {
     sans_families().into_iter().chain([FontFamily::Monospace])
@@ -1029,9 +1029,15 @@ mod tests {
 
     #[test]
     fn a_chinese_ui_puts_the_chinese_face_before_the_japanese_one() {
-        assert_eq!(fallback_order("zh"), [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]);
+        assert_eq!(
+            fallback_order("zh"),
+            [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+        );
         assert_eq!(fallback_order("zh-TW"), fallback_order("zh"));
-        assert_eq!(fallback_order("ko"), [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]);
+        assert_eq!(
+            fallback_order("ko"),
+            [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+        );
         assert_eq!(fallback_order("ar")[0], ARABIC_FALLBACK);
         for lang in ["en", "ja", "de", "he"] {
             assert_eq!(
@@ -1048,7 +1054,10 @@ mod tests {
         for family in all_families() {
             let list = &fonts.families[&family];
             assert_eq!(list.first(), defaults.families[&family].first(), "the Latin UI font stays first");
-            assert_eq!(&list[list.len() - 7..], [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]);
+            assert_eq!(
+                &list[list.len() - 7..],
+                [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+            );
         }
     }
 
