@@ -150,7 +150,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     });
                     app.preferences.ui_scale
                 },
-                ui_kit::scale_specimen,
+                super::figures::scale_specimen,
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
@@ -201,10 +201,10 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
             });
-            ui_kit::status_palette_sample(ui, app.preferences.color_vision);
+            super::figures::status_palette_sample(ui, app.preferences.color_vision);
             // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
             // their colours in every mode.
-            ui_kit::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
+            super::figures::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
             if app.preferences.color_vision != mode {
                 ui.ctx().request_repaint();
             }
@@ -261,6 +261,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_icon_grid = selected == 1;
                             }
                         });
+                        let response = setting::construct_menu_groups(app, ui);
+                        crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
                         ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {
                             let places = [crate::viewport::ToastPlace::Corner, crate::viewport::ToastPlace::Centre];
                             let mut selected = places.iter().position(|p| *p == app.preferences.toast_place).unwrap_or(0);
@@ -281,6 +283,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        // The operations under way, with their Cancel, in the view's corner.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.operations_panel"),
+                            app.tr("prefs.operations_panel_note"),
+                            &mut app.preferences.operations_panel,
+                            "operations_panel",
+                        );
                     });
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,
@@ -290,7 +300,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dialog_left: app.preferences.dialog_place == crate::dialog_column::DialogPlace::LeftColumn,
                     }
                 },
-                ui_kit::layout_preview,
+                |ui, state| ui_kit::layout_preview(ui, state, solidcraft_ui_text::tr("prefs.layout_note")),
             );
             layout_check(
                 ui,

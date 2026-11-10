@@ -83,8 +83,8 @@ pub(crate) fn quad(boundary: &[[f64; 2]]) -> Option<Quad> {
     }
     let mut bbox = [(f64::MAX, f64::MIN); 2];
     for p in boundary {
-        for d in 0..2 {
-            bbox[d] = (bbox[d].0.min(p[d]), bbox[d].1.max(p[d]));
+        for (bb, x) in bbox.iter_mut().zip(p) {
+            *bb = (bb.0.min(*x), bb.1.max(*x));
         }
     }
     let ext = [bbox[0].1 - bbox[0].0, bbox[1].1 - bbox[1].0];
@@ -130,12 +130,12 @@ pub(crate) fn quad(boundary: &[[f64; 2]]) -> Option<Quad> {
         seen |= side.bit();
         let d = side.along();
         let mut chain: Vec<u32> = chain.into_iter().map(|i| i as u32).collect();
-        let coord = |i: &u32| boundary.get(*i as usize).map_or(0.0, |p| p[d]);
+        let coord = |i: &u32| boundary.get(*i as usize).and_then(|p| p.get(d)).map_or(0.0, |x| *x);
         if chain.first().map(coord) > chain.last().map(coord) {
             chain.reverse();
         }
         // The edge nodes must advance along the side.
-        if chain.windows(2).any(|w| coord(&w[0]) >= coord(&w[1])) && chain.len() > 2 {
+        if chain.windows(2).any(|w| matches!(w, [a, b] if coord(a) >= coord(b))) && chain.len() > 2 {
             return None;
         }
         let slot = SIDES.iter().position(|s| *s == side)?;
@@ -156,7 +156,7 @@ pub(crate) fn aligned_lines(boundary: &[[f64; 2]], q: &Quad, d: usize) -> Option
     let eps = (hi - lo) * 1e-9;
     let mut lines = Vec::with_capacity(a.len());
     for (i, j) in a.iter().zip(b) {
-        let (x, y) = (boundary.get(*i as usize)?[d], boundary.get(*j as usize)?[d]);
+        let (x, y) = (*boundary.get(*i as usize)?.get(d)?, *boundary.get(*j as usize)?.get(d)?);
         if (x - y).abs() > eps {
             return None;
         }
@@ -251,7 +251,7 @@ fn signed_area(uv: &[[f64; 2]], t: [u32; 3]) -> Option<f64> {
 /// the same parameter on both chains are joined straight across.
 fn zip(uv: &[[f64; 2]], outer: &[u32], inner: &[u32], d: usize, flip: bool, tris: &mut Vec<[u32; 3]>) -> Option<()> {
     let mut push = |a: u32, b: u32, c: u32| tris.push(if flip { [a, c, b] } else { [a, b, c] });
-    let coord = |chain: &[u32], k: usize| chain.get(k).and_then(|i| uv.get(*i as usize)).map(|p| p[d]);
+    let coord = |chain: &[u32], k: usize| chain.get(k).and_then(|i| uv.get(*i as usize)).and_then(|p| p.get(d).copied());
     let (mut a, mut b) = (0usize, 0usize);
     while a + 1 < outer.len() || b + 1 < inner.len() {
         let advance_outer = if a + 1 >= outer.len() {

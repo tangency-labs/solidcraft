@@ -128,6 +128,11 @@ with the motion axis along that edge. A revolute joint turns about the picked ed
 moves along it. Round edges use their circle's centre and normal. Existing saved joint origins
 keep their axes.
 
+A joint origin picked on a part inside a sub-assembly that is placed more than once stays on the
+copy it was picked on. A joint at it holds or moves that copy as a whole, since every copy shares
+the part inside. Scripts give the copy with `"path"`: the occurrence ids from the root down to the
+part, as `occurrence.properties` reports them.
+
 A joint origin on a face or a hole keeps the turn it had when it was picked: when the face tilts
 (a bend angle or a rotation changing with a parameter) the part on it tilts with the face but
 doesn't spin about it.
@@ -483,6 +488,14 @@ to use. Relinking updates that component's stored path and solid bodies for **al
 instances**, keeping their identities and placements. Cancelling or choosing a missing,
 invalid, empty or self-referencing design leaves the assembly unchanged. The operation is
 one undo step and the new path is saved relative to the assembly when possible.
+
+To swap only one occurrence of a component placed several times, right-click that occurrence
+and choose **Component → Relink Source…**. Only that occurrence shows the chosen design. It
+keeps its position, grounding and joints, which move to the same faces of the new design where
+it has them. It becomes an occurrence of the component already linked to that design, or of a
+new linked component; the other occurrences keep the old source. Scripts pass the occurrence:
+`component.relink {component, occurrence, path}`, and the reply's `component` is then the one
+the occurrence shows and `previous_component` the one it showed.
 
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's

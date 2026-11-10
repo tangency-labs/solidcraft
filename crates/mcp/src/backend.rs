@@ -48,6 +48,13 @@ pub trait Backend {
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         Ok(None)
     }
+    /// A bridge to the same app on a connection of its own, for a backend bridged to one: the
+    /// server answers `running` on it while this backend is busy with a call (#14007), as the
+    /// app answers `control.running` on any connection at once. `None`: nothing to ask apart
+    /// (an in-process session answers only between calls).
+    fn side_channel(&self) -> Option<Remote> {
+        None
+    }
 }
 
 /// Longest reply line accepted from the app.
@@ -646,6 +653,10 @@ impl Backend for Remote {
     fn has_ui(&self) -> bool {
         true
     }
+    /// The same app with this bridge's token, not yet connected: it connects when asked.
+    fn side_channel(&self) -> Option<Remote> {
+        Some(Remote::new(&self.addr, self.explicit_token.as_deref()).with_param_check(self.param_check))
+    }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         // This runs on the serve loop before a tool call, so it never waits: not behind a request
         // still running (ask again on a later call), and one try with no retry, because a retry
@@ -964,6 +975,9 @@ impl Backend for Auto {
             // Headless for now: the app may yet start, so ask again on a later call.
             None => Err("no app yet".into()),
         }
+    }
+    fn side_channel(&self) -> Option<Remote> {
+        self.remote.as_ref().and_then(Remote::side_channel)
     }
     fn notice(&self) -> Option<String> {
         self.headless.as_ref().map(|_| {

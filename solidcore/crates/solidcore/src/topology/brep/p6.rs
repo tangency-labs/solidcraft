@@ -611,7 +611,7 @@ pub(crate) fn make_face_topology_attempt_with_state(
         options,
     );
     if let Err(error) = &attempt.status {
-        if !matches!(error, SolidError::Upstream { .. }) {
+        if error.upstream_status().is_none() {
             return Err(error.clone());
         }
     }
@@ -1244,7 +1244,7 @@ fn find_sector(
             )?;
         }
         // the status is ignored
-        Err(SolidError::Upstream { .. }) => {}
+        Err(e) if e.upstream_status().is_some() => {}
         Err(error) => return Err(error),
     }
 
@@ -1271,7 +1271,7 @@ fn find_sector(
 
     match found {
         Ok(sector) => Ok(sector.radial_edgeuse),
-        Err(SolidError::Upstream { .. }) => Ok(None),
+        Err(e) if e.upstream_status().is_some() => Ok(None),
         Err(error) => Err(error),
     }
 }
@@ -1374,7 +1374,7 @@ fn finish_split_attempt(
 ) -> Result<RegionSplitAttempt> {
     match status {
         Ok(()) => Ok(attempt),
-        Err(error @ SolidError::Upstream { .. }) => {
+        Err(error) if error.upstream_status().is_some() => {
             attempt.status = Err(error);
             Ok(attempt)
         }

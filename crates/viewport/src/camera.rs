@@ -230,7 +230,8 @@ pub struct Camera {
     pub roll: f64,
     /// Distance from target to eye.
     pub distance: f64,
-    /// Vertical field of view (radians); 0 = orthographic.
+    /// Vertical field of view (radians); 0 = orthographic, also when a camera leaves it out.
+    #[serde(default)]
     pub fov: f64,
     /// The world's up axis.
     #[serde(default)]

@@ -36,6 +36,10 @@
 //! [`write_with_metadata`] (or [`write_faceted_with_metadata`]), which emits those
 //! entities directly; no post-write text rewriting is required.
 
+/// A kernel body as the neutral model this writer writes (moved from step-brep).
+pub mod brep_to_model;
+pub use brep_to_model::{brep_to_model, ExportModelError};
+
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 

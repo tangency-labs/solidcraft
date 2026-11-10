@@ -26,6 +26,7 @@ static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(en
 static JAPANESE: Catalog = Catalog::new("ja", "日本語", include_str!(concat!(env!("OUT_DIR"), "/locales/ja.json")));
 static GEORGIAN: Catalog = Catalog::new("ka", "ქართული", include_str!(concat!(env!("OUT_DIR"), "/locales/ka.json")));
 static KOREAN: Catalog = Catalog::new("ko", "한국어", include_str!(concat!(env!("OUT_DIR"), "/locales/ko.json")));
+static LATVIAN: Catalog = Catalog::new("lv", "Latviešu", include_str!(concat!(env!("OUT_DIR"), "/locales/lv.json")));
 static MALAY: Catalog = Catalog::new("ms", "Bahasa Melayu", include_str!(concat!(env!("OUT_DIR"), "/locales/ms.json")));
 static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(concat!(env!("OUT_DIR"), "/locales/nb.json")));
 static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
@@ -65,6 +66,7 @@ pub const LOCALES: &[&Catalog] = &[
     &JAPANESE,
     &GEORGIAN,
     &KOREAN,
+    &LATVIAN,
     &MALAY,
     &NORWEGIAN,
     &DUTCH,
@@ -81,8 +83,8 @@ pub const LOCALES: &[&Catalog] = &[
     &CHINESE_TRADITIONAL,
 ];
 
-/// Install SolidCraft's catalogs for every lookup: once, at startup, before the first message is
-/// read. Calling it again does nothing.
+/// Install SolidCraft's catalogs for every lookup, and how the kit's tree rows show labels: once,
+/// at startup, before the first message is read. Calling it again does nothing.
 pub fn install() {
     // This crate's own tests read English whatever the PC's language (#10297): the shared crate
     // only sees `cfg!(test)` in its own tests. Pinned before installing, so no test thread reads
@@ -90,6 +92,12 @@ pub fn install() {
     #[cfg(test)]
     solidcraft_ui_text::pin_system_language();
     solidcraft_ui_text::install(LOCALES);
+    crate::ui_kit::install_row_names(row_name);
+}
+
+/// How the kit's tree rows show a label: a given name with [`tr_name`], any other with [`tr_dyn`].
+fn row_name(label: &str, name: bool) -> String {
+    if name { tr_name(label) } else { tr_dyn(label) }
 }
 
 /// The names SolidCraft gives and the engine messages it shows, translated with a [`Locale`].
@@ -711,6 +719,8 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
         source_files(&root, &mut files);
+        // The UI kit and its components, which SolidCraft mounts as `crate::ui_kit`.
+        source_files(&crate::test_support::kit_src(), &mut files);
         files.sort();
         let sources: Vec<(std::path::PathBuf, String)> =
             files.into_iter().map(|path| (path.clone(), std::fs::read_to_string(&path).unwrap())).collect();
@@ -1299,6 +1309,7 @@ mod tests {
             ("hr", "Hrvatski", "Postavke", "Ekstrudiraj", "Skica1", "Spremiti promjene u My {design}?"),
             ("sr", "Српски", "Подешавања", "Екструдирај", "Скица1", "Сачувати промене у My {design}?"),
             ("ka", "ქართული", "პარამეტრები", "ამოწევა", "ესკიზი1", "შევინახოთ ცვლილებები My {design}-ში?"),
+            ("lv", "Latviešu", "Iestatījumi", "Izspiešana", "Skice1", "Saglabāt izmaiņas failā My {design}?"),
             ("hu", "Magyar", "Beállítások", "Kihúzás", "Vázlat1", "Menti a(z) My {design} módosításait?"),
             ("id", "Bahasa Indonesia", "Preferensi", "Ekstrusi", "Sketsa1", "Simpan perubahan ke My {design}?"),
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
@@ -1504,7 +1515,9 @@ mod tests {
         }
 
         fn inside_kit(&self, path: &std::path::Path) -> bool {
-            module_path(path).get(1).is_some_and(|module| module == "ui_kit")
+            let module = module_path(path);
+            module.get(1).is_some_and(|module| module == "ui_kit")
+                && !module.get(2).is_some_and(|name| crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str()))
         }
     }
 
@@ -1512,10 +1525,15 @@ mod tests {
     fn module_path(path: &std::path::Path) -> Vec<String> {
         let mut parts: Vec<String> = path.components().filter_map(|part| part.as_os_str().to_str().map(str::to_string)).collect();
         let start = parts.iter().rposition(|part| part == "src").map_or(0, |at| at + 1);
+        // The kit crate's files sit under `crate::ui_kit`, where SolidCraft mounts the crate.
+        let kit = start >= 2 && parts.get(start - 2).is_some_and(|dir| dir == "ui-kit");
         let mut relative: Vec<String> = parts.split_off(start);
         let file = relative.pop().unwrap_or_default();
         let stem = file.strip_suffix(".rs").unwrap_or(&file).to_string();
         let mut out = vec!["crate".to_string()];
+        if kit {
+            out.push("ui_kit".to_string());
+        }
         out.extend(relative);
         if !matches!(stem.as_str(), "lib" | "main" | "mod") {
             out.push(stem);
@@ -1547,7 +1565,18 @@ mod tests {
     /// module, `crate::…` unchanged.
     fn normalize(module: &[String], path: &[String]) -> Vec<String> {
         match path.first().map(String::as_str) {
+            // In the kit crate (`crate::ui_kit` here), `crate::` is the kit.
+            Some("crate") if module.get(1).is_some_and(|m| m == "ui_kit") && path.get(1).is_none_or(|p| p != "ui_kit") => {
+                let mut out = vec!["crate".to_string(), "ui_kit".to_string()];
+                out.extend_from_slice(&path[1..]);
+                out
+            }
             Some("crate") => path.to_vec(),
+            Some("solidcraft_ui_kit") => {
+                let mut out = vec!["crate".to_string(), "ui_kit".to_string()];
+                out.extend_from_slice(&path[1..]);
+                out
+            }
             Some("self") => {
                 let mut out = module.to_vec();
                 out.extend_from_slice(&path[1..]);

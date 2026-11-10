@@ -1,10 +1,11 @@
-//! JSON-RPC 2.0 framing and the MCP lifecycle / tools / resources methods.
+//! JSON-RPC 2.0 framing and the MCP lifecycle / tools / resources / prompts / completion methods.
 
 use std::io::{BufRead, Write};
 
 use serde_json::{Value, json};
 
-use crate::schema::check_arguments;
+use crate::content::Contents;
+use crate::schema::{check_arguments, check_prompt_arguments};
 
 /// The newest protocol revision we speak; offered when the client asks for one we don't know.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
@@ -19,6 +20,16 @@ const RESOURCE_NOT_FOUND: i64 = -32002;
 
 /// Most messages in one JSON-RPC batch.
 const MAX_BATCH: usize = 1000;
+/// Most suggestions in one `completion/complete` reply (the MCP limit).
+const MAX_COMPLETIONS: usize = 100;
+
+/// What `completion/complete` asks about: a prompt by its name, or a resource by its URI or URI
+/// template.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reference<'a> {
+    Prompt(&'a str),
+    Resource(&'a str),
+}
 
 /// An app's tools, served by [`Server`].
 pub trait Tools {
@@ -35,11 +46,35 @@ pub trait Tools {
     fn resources(&self) -> Vec<Value> {
         Vec::new()
     }
-    /// The JSON of resource `uri`: `None` when there is no such resource, `Err` when it could not
-    /// be read now.
-    fn read_resource(&mut self, uri: &str) -> Option<Result<Value, String>> {
+    /// The resource templates `resources/templates/list` serves (MCP `ResourceTemplate`:
+    /// uriTemplate, name, description, mimeType). A URI made from one is read with
+    /// [`Tools::read_resource`].
+    fn resource_templates(&self) -> Vec<Value> {
+        Vec::new()
+    }
+    /// The contents of resource `uri`: `None` when there is no such resource, `Err` when it could
+    /// not be read now.
+    fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
         let _ = uri;
         None
+    }
+    /// The prompts `prompts/list` serves (MCP `Prompt`: name, title, description, arguments).
+    fn prompts(&self) -> Vec<Value> {
+        Vec::new()
+    }
+    /// Prompt `name` filled in with `args` (MCP `GetPromptResult`: description, messages). The
+    /// server calls it only for a listed prompt, with `args` checked against that listing: an
+    /// object of strings with every required argument and no other. `Err` is an internal error.
+    fn get_prompt(&mut self, name: &str, args: &Value) -> Result<Value, String> {
+        let _ = args;
+        Err(format!("prompt `{name}` cannot be filled in"))
+    }
+    /// What argument `argument` of `reference` could be, given what has been typed (`value`).
+    /// Asked only of an app that serves prompts or resource templates; a prompt reference is
+    /// always a listed prompt. The reply holds the first 100.
+    fn complete(&mut self, reference: Reference<'_>, argument: &str, value: &str) -> Vec<String> {
+        let _ = (reference, argument, value);
+        Vec::new()
     }
 }
 
@@ -60,11 +95,64 @@ pub struct Server<T: Tools> {
     initialized: bool,
 }
 
-fn response(id: Value, result: Value) -> Value {
-    json!({"jsonrpc": "2.0", "id": id, "result": result})
-}
 fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}})
+}
+
+/// One message read from a newline-delimited stream by [`read_message`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum Incoming {
+    /// A line to handle ([`Server::handle_line`]), without its newline.
+    Line(String),
+    /// A line refused unread (too long, not UTF-8): the error reply to send for it.
+    Refused(String),
+}
+
+/// Read the next line of newline-delimited JSON-RPC from `input`; `None` once it closes. A line
+/// longer than `max_line` is consumed in bounded space, so a client cannot exhaust memory by
+/// sending an arbitrarily long request without a newline, and an unterminated last line counts.
+pub fn read_message(input: &mut impl BufRead, max_line: usize) -> std::io::Result<Option<Incoming>> {
+    let mut line = Vec::new();
+    let mut oversized = false;
+    let mut received = false;
+    loop {
+        let chunk = input.fill_buf()?;
+        if chunk.is_empty() {
+            break;
+        }
+        let count = chunk.iter().position(|&byte| byte == b'\n').map_or(chunk.len(), |i| i + 1);
+        let newline = chunk[count - 1] == b'\n';
+        let content_len = count - usize::from(newline);
+        if !oversized {
+            if line.len().saturating_add(content_len) > max_line {
+                oversized = true;
+                line.clear();
+            } else {
+                line.extend_from_slice(&chunk[..content_len]);
+            }
+        }
+        input.consume(count);
+        received = true;
+        if newline {
+            break;
+        }
+    }
+    if !received {
+        return Ok(None);
+    }
+    if oversized {
+        return Ok(Some(Incoming::Refused(error(Value::Null, INVALID_REQUEST, "request too large").to_string())));
+    }
+    Ok(Some(match String::from_utf8(line) {
+        Ok(line) => Incoming::Line(line),
+        // Not UTF-8: answer with a parse error and keep serving.
+        Err(_) => Incoming::Refused(error(Value::Null, PARSE_ERROR, "parse error: input is not UTF-8").to_string()),
+    }))
+}
+
+/// The JSON-RPC response to request `id`, as [`Server::handle`] sends it.
+pub fn response(id: Value, result: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
 
 impl<T: Tools> Server<T> {
@@ -82,43 +170,10 @@ impl<T: Tools> Server<T> {
     /// `output`; diagnostics belong on stderr. Consume oversized lines in bounded space so a
     /// client cannot exhaust memory by sending an arbitrarily long request without a newline.
     pub fn serve(&mut self, mut input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
-        loop {
-            let mut line = Vec::new();
-            let mut oversized = false;
-            let mut received = false;
-            loop {
-                let chunk = input.fill_buf()?;
-                if chunk.is_empty() {
-                    break;
-                }
-                let count = chunk.iter().position(|&byte| byte == b'\n').map_or(chunk.len(), |i| i + 1);
-                let newline = chunk[count - 1] == b'\n';
-                let content_len = count - usize::from(newline);
-                if !oversized {
-                    if line.len().saturating_add(content_len) > self.info.max_line {
-                        oversized = true;
-                        line.clear();
-                    } else {
-                        line.extend_from_slice(&chunk[..content_len]);
-                    }
-                }
-                input.consume(count);
-                received = true;
-                if newline {
-                    break;
-                }
-            }
-            if !received {
-                break;
-            }
-            let reply = if oversized {
-                Some(error(Value::Null, INVALID_REQUEST, "request too large").to_string())
-            } else {
-                match String::from_utf8(line) {
-                    Ok(line) => self.handle_line(&line),
-                    // Not UTF-8: answer with a parse error and keep serving.
-                    Err(_) => Some(error(Value::Null, PARSE_ERROR, "parse error: input is not UTF-8").to_string()),
-                }
+        while let Some(incoming) = read_message(&mut input, self.info.max_line)? {
+            let reply = match incoming {
+                Incoming::Line(line) => self.handle_line(&line),
+                Incoming::Refused(reply) => Some(reply),
             };
             if let Some(reply) = reply {
                 output.write_all(reply.as_bytes())?;
@@ -183,7 +238,7 @@ impl<T: Tools> Server<T> {
                 let Info { name, title, version: server_version, .. } = self.info;
                 Ok(json!({
                     "protocolVersion": version,
-                    "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
+                    "capabilities": self.capabilities(),
                     "serverInfo": {"name": name, "title": title, "version": server_version},
                     "instructions": self.tools.instructions(),
                 }))
@@ -200,18 +255,76 @@ impl<T: Tools> Server<T> {
                 Ok(self.tools.call(name, &args))
             }
             "resources/list" => Ok(json!({"resources": self.tools.resources()})),
-            "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
-            "prompts/list" => Ok(json!({"prompts": []})),
+            "resources/templates/list" => Ok(json!({"resourceTemplates": self.tools.resource_templates()})),
+            "prompts/list" => Ok(json!({"prompts": self.tools.prompts()})),
             "resources/read" => {
                 let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
-                let v = self
+                let contents = self
                     .tools
                     .read_resource(uri)
                     .ok_or_else(|| (RESOURCE_NOT_FOUND, format!("unknown resource `{uri}`")))?
                     .map_err(|e| (INTERNAL_ERROR, e))?;
-                Ok(json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": v.to_string()}]}))
+                Ok(json!({"contents": [contents.block(uri)]}))
+            }
+            "prompts/get" if !self.tools.prompts().is_empty() => {
+                let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "missing prompt `name`".to_string()))?;
+                let args = match params.get("arguments") {
+                    None | Some(Value::Null) => json!({}),
+                    Some(a) => a.clone(),
+                };
+                check_prompt_arguments(&self.tools.prompts(), name, &args).map_err(|e| (INVALID_PARAMS, e))?;
+                self.tools.get_prompt(name, &args).map_err(|e| (INTERNAL_ERROR, e))
+            }
+            "completion/complete" if self.completes() => {
+                let reference = params.get("ref").unwrap_or(&Value::Null);
+                let reference = match (reference.get("type").and_then(Value::as_str), reference.get("name"), reference.get("uri")) {
+                    (Some("ref/prompt"), Some(Value::String(name)), _) => {
+                        if !self.tools.prompts().iter().any(|p| p["name"] == name.as_str()) {
+                            return Err((INVALID_PARAMS, format!("unknown prompt `{name}`")));
+                        }
+                        Reference::Prompt(name)
+                    }
+                    (Some("ref/resource"), _, Some(Value::String(uri))) => Reference::Resource(uri),
+                    _ => {
+                        return Err((
+                            INVALID_PARAMS,
+                            "`ref` must be a prompt's {type: ref/prompt, name} or a resource's {type: ref/resource, uri}".into(),
+                        ));
+                    }
+                };
+                let argument = params.get("argument");
+                let (Some(argument), Some(value)) =
+                    (argument.and_then(|a| a.get("name")).and_then(Value::as_str), argument.and_then(|a| a.get("value")).and_then(Value::as_str))
+                else {
+                    return Err((INVALID_PARAMS, "`argument` must have a `name` and a `value`, both strings".into()));
+                };
+                let mut values = self.tools.complete(reference, argument, value);
+                let total = values.len();
+                values.truncate(MAX_COMPLETIONS);
+                Ok(json!({"completion": {"values": values, "total": total, "hasMore": total > MAX_COMPLETIONS}}))
             }
             _ => Err((METHOD_NOT_FOUND, format!("method `{method}` not found"))),
         }
+    }
+
+    /// What the server tells a client at `initialize` that it serves: the tools always, and the
+    /// rest only when the app has some.
+    fn capabilities(&self) -> Value {
+        let mut capabilities = json!({"tools": {"listChanged": false}});
+        if !self.tools.resources().is_empty() || !self.tools.resource_templates().is_empty() {
+            capabilities["resources"] = json!({"listChanged": false});
+        }
+        if !self.tools.prompts().is_empty() {
+            capabilities["prompts"] = json!({"listChanged": false});
+        }
+        if self.completes() {
+            capabilities["completions"] = json!({});
+        }
+        capabilities
+    }
+
+    /// Whether the app has arguments to complete: those of its prompts and resource templates.
+    fn completes(&self) -> bool {
+        !self.tools.prompts().is_empty() || !self.tools.resource_templates().is_empty()
     }
 }
