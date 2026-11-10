@@ -1731,8 +1731,14 @@ impl Session {
             }
         };
         // Cancelled while it ran: no result, even one finished before the cancel came in, and
-        // the design goes back as it was (solidcore#3247).
-        let r = if solidcraft_doc::progress::cancelled() { Err(EngineError::Cancelled(spec.id.to_string())) } else { r };
+        // the design goes back as it was (solidcore#3247). Opening, starting or recovering a
+        // design (which replaces the session) keeps its own Cancel: the features not yet built
+        // are skipped and what is built so far is shown (#10577).
+        let r = if solidcraft_doc::progress::cancelled() && self.replacements == replacements {
+            Err(EngineError::Cancelled(spec.id.to_string()))
+        } else {
+            r
+        };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
             EngineError::Internal(id, msg) if id.is_empty() => {
