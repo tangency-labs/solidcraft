@@ -822,7 +822,7 @@ pub fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) ->
 /// #12218), in the monospaced cell font when `mono`. Its tooltip is `hint`, with the whole value
 /// only if the cell clips it; `name` is what it reads as, the value with what it is ("Mass:
 /// 12.500 g"). True on the click that copied.
-pub(crate) fn copy_cell(ui: &mut Ui, value: &str, name: &str, mono: bool, hint: &str) -> bool {
+pub fn copy_cell(ui: &mut Ui, value: &str, name: &str, mono: bool, hint: &str) -> bool {
     let response = text_impl(ui, value, if mono { Text::MonoCell } else { Text::Cell }, Some(hint));
     // A copy control rather than a label: it reads as a button, and keyboard focus shows a ring
     // (Enter or Space copies, as a click does).

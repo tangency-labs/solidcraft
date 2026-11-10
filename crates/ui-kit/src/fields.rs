@@ -1794,7 +1794,7 @@ fn bounded_number_field<T: egui::emath::Numeric>(
 /// (#11829): an arrow steps the value by one within `range`, as Up and Down do. The field grows
 /// by the arrows' column, so its text keeps its room. Tokens: `control_height`, number_field and
 /// step arrow tokens.
-pub(crate) fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, suffix: &str) -> Response {
+pub fn whole_number_field<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, suffix: &str) -> Response {
     let reserve = (Tokens::get().control_height * 0.75).round();
     let mut response = ui
         .scope(|ui| {
