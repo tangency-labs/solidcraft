@@ -5,6 +5,9 @@
 //! uniform model-space cap. The cap is an accuracy requirement, not an assumed
 //! libm error estimate: every successful call proves it, otherwise it refuses.
 
+use std::sync::OnceLock;
+
+use super::screw_offset::ScrewOffsetSection;
 use super::{Ivl, ProceduralSweep, TAU};
 use crate::blend::fillet_section::interval::{sin_cos_certified, tan_certified};
 use crate::error::{Result, SolidError};
@@ -16,6 +19,43 @@ const OP: &str = "surface::procedural_sweep::checked";
 // a failed check and is included explicitly in the model-space certificate.
 const ACCURACY_UNITS: usize = 256;
 type Box3 = [Ivl; 3];
+
+/// The exact screw section and its source interval
+/// ([`ProceduralSweep::screw_offset_section`]).
+pub(super) type KeptSection = (ScrewOffsetSection, [f64; 2]);
+
+/// What the checked evaluator derives from the definition alone, kept so that each
+/// point check stops re-deriving it: the exact screw section (`None` for a class the
+/// evaluator does not cover) and each station span's turn constants. Every slot holds
+/// the value of the same expression a fresh derivation evaluates, so a hit cannot
+/// change an answer; a failed derivation is not kept. Cleared with the runtime
+/// allowance ([`ProceduralSweep::invalidate_runtime_allowance`]).
+#[derive(Clone, Debug, Default)]
+pub(super) struct CheckedCache {
+    // (boxed: the section is large, and a definition is kept in every swept face)
+    section: OnceLock<Option<Box<KeptSection>>>,
+    spans: OnceLock<Vec<SpanTurn>>,
+}
+
+/// A station span's turn constants: `tan(width / 4)` enclosed, and its scalar candidate
+/// when that candidate passed [`verify`] (`None` keeps the refusal for a fresh call).
+#[derive(Clone, Copy, Debug)]
+struct SpanTurn {
+    tau_box: Ivl,
+    tau: Option<f64>,
+}
+
+/// The enclosure of `tan(width / 4)` for the station span `[a, b]`.
+fn span_tau_box(a: f64, b: f64) -> Ivl {
+    let width = Ivl::from(b) - Ivl::from(a);
+    tan_certified(width / Ivl::from(4.0))
+}
+
+/// The checked scalar `tan(width / 4)` for the station span `[a, b]`.
+fn span_tau(a: f64, b: f64) -> Result<f64> {
+    let width = b - a;
+    tan(0.25 * width)
+}
 
 fn bad(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
@@ -43,23 +83,26 @@ fn verify(candidate: f64, enclosure: Ivl, scale: f64) -> Result<f64> {
     Ok(candidate)
 }
 
+/// The enclosure of `atan` at the point `v`, either sign.
+fn atan_point_enclosure(v: f64) -> Ivl {
+    if v < 0.0 {
+        let a = super::atan_point(-v);
+        Ivl::new(-a.hi, -a.lo)
+    } else {
+        super::atan_point(v)
+    }
+}
+
 fn atan_enclosure(x: Ivl) -> Ivl {
-    let point = |v: f64| {
-        if v < 0.0 {
-            let a = super::atan_point(-v);
-            Ivl::new(-a.hi, -a.lo)
-        } else {
-            super::atan_point(v)
-        }
-    };
-    Ivl::new(point(x.lo).lo, point(x.hi).hi)
+    Ivl::new(atan_point_enclosure(x.lo).lo, atan_point_enclosure(x.hi).hi)
 }
 
 pub(super) fn tan(x: f64) -> Result<f64> {
     verify(x.tan(), tan_certified(Ivl::from(x)), x)
 }
 fn atan(x: f64) -> Result<f64> {
-    verify(x.atan(), atan_enclosure(Ivl::from(x)), x)
+    // atan_enclosure of the point interval [x, x], its one endpoint enclosed once
+    verify(x.atan(), atan_point_enclosure(x), x)
 }
 
 pub(super) fn powi(x: f64, n: usize) -> Result<f64> {
@@ -132,7 +175,67 @@ fn finite_box(a: Box3) -> bool {
 }
 
 impl ProceduralSweep {
+    /// Each station span's turn constants, derived once per definition.
+    fn span_turns(&self) -> &[SpanTurn] {
+        self.checked_cache.spans.get_or_init(|| {
+            self.stations
+                .windows(2)
+                .map(|pair| match *pair {
+                    [a, b] => SpanTurn {
+                        tau_box: span_tau_box(a, b),
+                        tau: span_tau(a, b).ok(),
+                    },
+                    // windows(2) gives pairs only; an unreachable arm refuses on use
+                    _ => SpanTurn {
+                        tau_box: Ivl::whole(),
+                        tau: None,
+                    },
+                })
+                .collect()
+        })
+    }
+
+    /// [`span_tau_box`] of span `index`, `[a, b]`, from the kept table.
+    fn span_tau_box_at(&self, index: usize, a: f64, b: f64) -> Ivl {
+        match self.span_turns().get(index) {
+            Some(span) => span.tau_box,
+            None => span_tau_box(a, b),
+        }
+    }
+
+    /// [`span_tau`] of span `index`, `[a, b]`, from the kept table; a refusal is
+    /// derived afresh, so it carries the same error.
+    fn span_tau_at(&self, index: usize, a: f64, b: f64) -> Result<f64> {
+        match self.span_turns().get(index).and_then(|span| span.tau) {
+            Some(tau) => Ok(tau),
+            None => span_tau(a, b),
+        }
+    }
+
+    /// The exact screw section and its source interval
+    /// ([`ProceduralSweep::screw_offset_section`]), derived once per definition.
+    ///
+    /// # Errors
+    /// Those of the derivation, which is not kept when it fails.
+    pub(super) fn cached_screw_offset_section(&self) -> Result<Option<&KeptSection>> {
+        if let Some(section) = self.checked_cache.section.get() {
+            return Ok(section.as_deref());
+        }
+        let section = self.derive_screw_offset_section()?.map(Box::new);
+        // Concurrent readers may derive the same section; either is the same value.
+        let _ = self.checked_cache.section.set(section);
+        match self.checked_cache.section.get() {
+            Some(section) => Ok(section.as_deref()),
+            None => Err(bad("screw section cache was not filled")),
+        }
+    }
+
     fn checked_span(&self, t: f64, ending: bool) -> Result<(f64, f64, f64)> {
+        self.checked_span_index(t, ending)
+            .map(|(t, a, b, _)| (t, a, b))
+    }
+
+    fn checked_span_index(&self, t: f64, ending: bool) -> Result<(f64, f64, f64, usize)> {
         if !t.is_finite() {
             return Err(bad("screw parameter must be finite"));
         }
@@ -151,13 +254,13 @@ impl ProceduralSweep {
         let (Some(&a), Some(&b)) = (self.stations.get(index), self.stations.get(index + 1)) else {
             return Err(bad("missing screw span"));
         };
-        Ok((t, a, b))
+        Ok((t, a, b, index))
     }
 
     fn turn_enclosure(&self, t: f64, ending: bool) -> Result<(Ivl, Ivl)> {
-        let (t, a, b) = self.checked_span(t, ending)?;
+        let (t, a, b, index) = self.checked_span_index(t, ending)?;
         let width = Ivl::from(b) - Ivl::from(a);
-        let tau = tan_certified(width / Ivl::from(4.0));
+        let tau = self.span_tau_box_at(index, a, b);
         let x = tau * (Ivl::from(2.0) * (Ivl::from(t) - Ivl::from(a)) / width - Ivl::from(1.0));
         let theta =
             (Ivl::from(a) + Ivl::from(b)) / Ivl::from(2.0) + Ivl::from(2.0) * atan_enclosure(x);
@@ -166,9 +269,9 @@ impl ProceduralSweep {
     }
 
     pub(super) fn checked_turn_at_side(&self, t: f64, ending: bool) -> Result<Turn> {
-        let (t, a, b) = self.checked_span(t, ending)?;
+        let (t, a, b, index) = self.checked_span_index(t, ending)?;
         let width = b - a;
-        let tau = tan(0.25 * width)?;
+        let tau = self.span_tau_at(index, a, b)?;
         let x = tau * (2.0 * (t - a) / width - 1.0);
         let theta = 0.5 * (a + b) + 2.0 * atan(x)?;
         let rate = 2.0 * tau / (1.0 + x * x) * (2.0 / width);
@@ -239,7 +342,7 @@ impl ProceduralSweep {
     /// # Errors
     /// Those of inspecting the class and of [`Self::runtime_evaluation_allowance`].
     pub(crate) fn runtime_evaluation_allowance_if_proved(&self) -> Result<Option<f64>> {
-        if !self.checked_source_class()? || self.screw_offset_section()?.is_none() {
+        if !self.checked_source_class()? || self.cached_screw_offset_section()?.is_none() {
             return Ok(None);
         }
         self.runtime_evaluation_allowance().map(Some)
@@ -249,6 +352,7 @@ impl ProceduralSweep {
     /// Stored records contain no runtime cache and always prove their own cap.
     pub(super) fn invalidate_runtime_allowance(&mut self) {
         let _ = self.runtime_allowance.take();
+        self.checked_cache = CheckedCache::default();
     }
 
     fn compute_runtime_evaluation_allowance(&self) -> Result<f64> {
@@ -257,11 +361,12 @@ impl ProceduralSweep {
                 "checked point allowance needs exact nonrational source controls",
             ));
         }
-        let Some((section, [lo, hi])) = self.screw_offset_section()? else {
+        let Some((section, [lo, hi])) = self.cached_screw_offset_section()? else {
             return Err(bad(
                 "checked point allowance needs an invariant affine source",
             ));
         };
+        let (lo, hi) = (*lo, *hi);
         let motion = self.screw().ok_or_else(|| bad("missing screw motion"))?;
         let domain = self.profile.natural_interval();
         let width = Ivl::from(hi) - Ivl::from(lo);
@@ -335,9 +440,10 @@ impl ProceduralSweep {
         if !self.checked_source_class()? {
             return Ok(None);
         }
-        let Some((section, [lo, hi])) = self.screw_offset_section()? else {
+        let Some((section, [lo, hi])) = self.cached_screw_offset_section()? else {
             return Ok(None);
         };
+        let (lo, hi) = (*lo, *hi);
         if ![u.lo, u.hi, v.lo, v.hi].iter().all(|x| x.is_finite()) || u.lo > u.hi || v.lo > v.hi {
             return Err(bad("face parameters must be finite"));
         }
@@ -531,5 +637,65 @@ mod tests {
             moved.compute_runtime_evaluation_allowance().unwrap()
         );
         assert_eq!(definition.runtime_evaluation_allowance().unwrap(), original);
+    }
+
+    /// The kept section and station-span constants are the values a fresh derivation
+    /// gives, bit for bit, so evaluations with and without them agree exactly; an
+    /// edit of the definition drops them with the allowance.
+    #[test]
+    fn kept_checked_values_are_the_fresh_ones() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::ScrewMotion;
+
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.7, 1.2, 1.25];
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.3).unwrap();
+        let points = [
+            Point2::new(0.37, 0.0),
+            Point2::new(0.5, 0.3),
+            Point2::new(0.91, 0.64),
+            Point2::new(0.12, 1.249),
+        ];
+        let bits = |d: &ProceduralSweep| -> Vec<u64> {
+            points
+                .iter()
+                .flat_map(|&uv| d.evaluate_definition(uv, 2, 2).unwrap().concat())
+                .flat_map(|v| [v.x, v.y, v.z])
+                .map(f64::to_bits)
+                .collect()
+        };
+        let kept = bits(&definition);
+        let spans = definition.checked_cache.spans.get().unwrap();
+        assert_eq!(spans.len(), stations.len() - 1);
+        for (span, pair) in spans.iter().zip(stations.windows(2)) {
+            let (a, b) = (pair[0], pair[1]);
+            assert_eq!(span.tau_box, span_tau_box(a, b));
+            assert_eq!(
+                span.tau.map(f64::to_bits),
+                Some(span_tau(a, b).unwrap().to_bits())
+            );
+        }
+        assert_eq!(
+            definition.cached_screw_offset_section().unwrap().cloned(),
+            definition.derive_screw_offset_section().unwrap()
+        );
+        // the same evaluations again from the kept values, and on a copy without them
+        assert_eq!(bits(&definition), kept);
+        let mut fresh = definition.clone();
+        fresh.invalidate_runtime_allowance();
+        assert!(fresh.checked_cache.spans.get().is_none());
+        assert!(fresh.checked_cache.section.get().is_none());
+        assert_eq!(bits(&fresh), kept);
+        // an edit drops them
+        let mut moved = definition.clone();
+        moved.swap_map();
+        assert!(moved.checked_cache.spans.get().is_none());
+        assert!(moved.checked_cache.section.get().is_none());
     }
 }

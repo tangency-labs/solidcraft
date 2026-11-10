@@ -180,6 +180,14 @@ impl ProceduralSweep {
     /// # Errors
     /// Those of inspecting the source or constructing its exact section.
     pub fn screw_offset_section(&self) -> Result<Option<(ScrewOffsetSection, [f64; 2])>> {
+        self.cached_screw_offset_section().map(Option::<&_>::cloned)
+    }
+
+    /// [`Self::screw_offset_section`] derived from the definition's fields, which the
+    /// checked evaluator keeps once per definition.
+    pub(super) fn derive_screw_offset_section(
+        &self,
+    ) -> Result<Option<(ScrewOffsetSection, [f64; 2])>> {
         let Some(motion) = self.screw() else {
             return Ok(None);
         };

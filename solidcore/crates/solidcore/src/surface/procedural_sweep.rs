@@ -91,6 +91,7 @@ const OP_CREATE: &str = "surface::procedural_sweep::ProceduralSweep::create";
 const OP_MOTION: &str = "surface::procedural_sweep::ScrewMotion::new";
 const OP_LAW: &str = "surface::procedural_sweep::RadialLaw::new";
 const OP_EVAL: &str = "surface::procedural_sweep::ProceduralSweep::evaluate_definition";
+const OP_EXACT: &str = "surface::procedural_sweep::SweepRef::evaluate";
 
 /// The widest half angle of a span of a screw sweep's net: its spans turn at most an
 /// eighth of a turn ([`crate::sweep::screw`]), so `tau <= tan(pi / 16)`.
@@ -345,6 +346,10 @@ pub struct ProceduralSweep {
     /// A successful definition-wide runtime proof, never a sampled point result.
     /// Every mutation of S or its parameter map invalidates this independent slot.
     runtime_allowance: OnceLock<f64>,
+    /// Values the checked evaluator derives from the definition alone (its exact
+    /// screw section, each station span's turn constants), cleared with
+    /// `runtime_allowance`: a hit returns the bits a fresh derivation would.
+    checked_cache: checked::CheckedCache,
 }
 
 /// `sum_{n >= 0} (-1)^n c(n) p0 r^n` enclosed, for `0 <= p0`, `0 <= r` and terms that fall
@@ -543,6 +548,7 @@ impl ProceduralSweep {
             bound: 0.0,
             map: SweepMap::default(),
             runtime_allowance: OnceLock::new(),
+            checked_cache: checked::CheckedCache::default(),
         };
         sweep.bound = sweep.certify()?;
         Ok(sweep)
@@ -1124,6 +1130,7 @@ impl ProceduralSweep {
                 ..SweepMap::default()
             },
             runtime_allowance: OnceLock::new(),
+            checked_cache: checked::CheckedCache::default(),
         };
         Ok((sweep, net))
     }
@@ -1151,6 +1158,7 @@ impl ProceduralSweep {
                 ..SweepMap::default()
             },
             runtime_allowance: OnceLock::new(),
+            checked_cache: checked::CheckedCache::default(),
         })
     }
 }
@@ -1210,6 +1218,9 @@ impl<'a> SweepRef<'a> {
         if self.sweep.net_answers(k) {
             return self.net.evaluate_point(uv);
         }
+        // every exact point is checked against its certificate: a solve that asks for
+        // many stops at the next one once cancelled
+        k.check_cancelled(OP_EXACT)?;
         self.sweep.evaluate_definition_point(uv)
     }
 
@@ -1235,6 +1246,7 @@ impl<'a> SweepRef<'a> {
                 EvaluateFlags::default(),
             );
         }
+        k.check_cancelled(OP_EXACT)?;
         self.sweep.evaluate_definition_side(
             uv,
             highest_u_deriv,
