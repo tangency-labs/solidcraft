@@ -637,7 +637,7 @@ impl ProceduralSweep {
         let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
             return (t, 1.0);
         };
-        let t = t.clamp(first, last);
+        let t = crate::math::clamp_between(t, first, last);
         let spans = self.stations.len().saturating_sub(1);
         let i = self
             .stations
@@ -725,7 +725,7 @@ impl ProceduralSweep {
                 "a screw profile needs ordered parameter bounds",
             ));
         }
-        let w = wt.x.clamp(domain.min(), domain.max());
+        let w = crate::math::clamp_between(wt.x, domain.min(), domain.max());
         let (point, tangent) = if let Some(offset) = &self.offset {
             offset.evaluate(m, w)?
         } else {

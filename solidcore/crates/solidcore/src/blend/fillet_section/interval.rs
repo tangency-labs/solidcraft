@@ -256,7 +256,8 @@ pub(crate) fn sin_cos_certified(angle: Ivl) -> (Ivl, Ivl) {
     let reduced = angle - Ivl::from(quadrant) * (Ivl::checked(tau, tau) / Ivl::from(4.0));
     let (s, c) = sin_cos_local(reduced);
     let negative = |x: Ivl| Ivl::from(0.0) - x;
-    match (quadrant as i64).rem_euclid(4) {
+    // `& 3` is the Euclidean remainder by 4 in two's complement.
+    match (quadrant as i64) & 3 {
         0 => (s, c),
         1 => (c, negative(s)),
         2 => (negative(s), negative(c)),

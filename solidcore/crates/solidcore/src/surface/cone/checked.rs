@@ -296,7 +296,7 @@ impl Cone {
         let u = if polar.base().is_out_of_bounds_enabled() {
             u
         } else {
-            u.clamp(lo, hi)
+            crate::math::clamp_between(u, lo, hi)
         };
         let index = canonical
             .knots
@@ -365,8 +365,8 @@ impl Cone {
                 return Err(bad("invalid cylinder height domain"));
             }
             height = Ivl::new(
-                height.lo.clamp(domain.min(), domain.max()),
-                height.hi.clamp(domain.min(), domain.max()),
+                crate::math::clamp_between(height.lo, domain.min(), domain.max()),
+                crate::math::clamp_between(height.hi, domain.min(), domain.max()),
             );
         }
         let radial = add(

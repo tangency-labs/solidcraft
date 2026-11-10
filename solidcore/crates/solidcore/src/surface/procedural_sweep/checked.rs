@@ -142,7 +142,7 @@ impl ProceduralSweep {
         if !first.is_finite() || !last.is_finite() || first >= last {
             return Err(bad("invalid screw station bounds"));
         }
-        let t = t.clamp(first, last);
+        let t = crate::math::clamp_between(t, first, last);
         let index = self
             .stations
             .partition_point(|&s| if ending { s < t } else { s <= t })
@@ -352,8 +352,8 @@ impl ProceduralSweep {
             return Err(bad("invalid screw profile bounds"));
         }
         let w = Ivl::new(
-            w.lo.clamp(domain.min(), domain.max()),
-            w.hi.clamp(domain.min(), domain.max()),
+            crate::math::clamp_between(w.lo, domain.min(), domain.max()),
+            crate::math::clamp_between(w.hi, domain.min(), domain.max()),
         );
         let point =
             section.point_enclosure((w - Ivl::from(lo)) / (Ivl::from(hi) - Ivl::from(lo)))?;
