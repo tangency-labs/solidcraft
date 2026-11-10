@@ -66,6 +66,14 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
 /// preview, or a mesh body.
 pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     (
+        "crates/doc/src/construct.rs:mesh_edge_direction",
+        "mesh bodies: a coordinate system on an imported mesh reads its outline, the only edges it has (B-rep edges are found exactly)",
+    ),
+    (
+        "crates/doc/src/construct.rs:mesh_vertex",
+        "mesh bodies: a coordinate system on an imported mesh reads its triangles' corners, the only vertices it has (B-rep vertices are found exactly)",
+    ),
+    (
         "crates/doc/src/document.rs:MeshData::generate_crease_normals",
         "mesh bodies: explicit shading metadata; positions, triangles and model decisions are unchanged",
     ),
