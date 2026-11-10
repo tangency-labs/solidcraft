@@ -23,39 +23,86 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     if app.close_editor_for_history().is_err() {
         return;
     }
+    if control == crate::ui_kit::HistoryTransport::Play {
+        app.start("timeline.play");
+        return;
+    }
     let n = app.session.doc.features.len();
-    let marker = app.session.doc.marker.unwrap_or(n);
-    // The steps are the features the History shows: in the bottom bar, only those of the
-    // component it shows (`timeline_scope`, #11430). A step lands where dropping the marker in
-    // that slot would.
-    let view = transport_view(app);
-    let len = view.len();
-    if len == 0 && n > 0 && !matches!(control, crate::ui_kit::HistoryTransport::Play) {
+    let Some(position) = step_position(app, app.session.doc.marker.unwrap_or(n), control) else {
         // The marker stays, but the click still takes over from playback, as a step does.
         stop_playback(app);
         return;
+    };
+    let params = if position < n { json!({"position":position}) } else { json!({}) };
+    let _ = app.run_heavy("timeline.roll_to", params);
+}
+
+/// Where a step control (not Play) takes the marker from `marker`, or `None` when it keeps it.
+/// The steps are the features the History shows: in the bottom bar, only those of the component
+/// it shows (`timeline_scope`, #11430). A step lands where dropping the marker in that slot would.
+fn step_position(app: &SolveApp, marker: usize, control: crate::ui_kit::HistoryTransport) -> Option<usize> {
+    use crate::ui_kit::HistoryTransport;
+    let n = app.session.doc.features.len();
+    let view = transport_view(app);
+    let len = view.len();
+    if len == 0 && n > 0 {
+        return None;
     }
     let slot = view.slot(marker);
     let slot = match control {
-        crate::ui_kit::HistoryTransport::First => 0,
-        crate::ui_kit::HistoryTransport::Back => slot.saturating_sub(1),
-        crate::ui_kit::HistoryTransport::Play => {
-            app.start("timeline.play");
-            return;
-        }
-        crate::ui_kit::HistoryTransport::Forward => slot.saturating_add(1).min(len),
-        crate::ui_kit::HistoryTransport::Last => len,
+        HistoryTransport::First => 0,
+        HistoryTransport::Back => slot.saturating_sub(1),
+        HistoryTransport::Play => return None,
+        HistoryTransport::Forward => slot.saturating_add(1).min(len),
+        HistoryTransport::Last => len,
     };
     let position = view.index(slot);
     // From a marker outside the shown features, the nearest shown slot can lie the other way:
     // First and Back never add features, and Forward and Last never roll any back.
-    let backwards = matches!(control, crate::ui_kit::HistoryTransport::First | crate::ui_kit::HistoryTransport::Back);
-    if (backwards && position > marker) || (!backwards && position < marker) {
-        stop_playback(app);
-        return;
+    let backwards = matches!(control, HistoryTransport::First | HistoryTransport::Back);
+    if (backwards && position > marker) || (!backwards && position < marker) { None } else { Some(position) }
+}
+
+/// Whether a History control would do anything now: a step that moves the marker, or Play (Stop
+/// while History plays) when it can run. Only Play says why not: a dimmed step already says the
+/// marker is at that end.
+pub(crate) fn transport_effect(app: &SolveApp, control: crate::ui_kit::HistoryTransport) -> Result<(), Option<String>> {
+    transport_availability(app, control).map_err(Some)?;
+    if control == crate::ui_kit::HistoryTransport::Play {
+        return Ok(());
     }
-    let params = if position < n { json!({"position":position}) } else { json!({}) };
-    let _ = app.run_heavy("timeline.roll_to", params);
+    // An open feature editor has rolled the marker to its feature; a step starts from the
+    // design's own marker, which it gets back when the step closes the editor (#10688).
+    let doc = app.editing_state.as_ref().map_or(&app.session.doc, |editing| &editing.original.doc);
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    match step_position(app, marker, control) {
+        Some(position) if position != marker => Ok(()),
+        _ => Err(None),
+    }
+}
+
+/// The History folder's menu, with History in the browser: the History controls (first,
+/// previous, Play History when shown, next, last), each greyed out while it would do nothing,
+/// then the controls' own menu.
+pub(crate) fn history_folder_items(app: &SolveApp) -> Vec<Item> {
+    let playing = app.timeline_playback.is_some();
+    let mut items: Vec<Item> = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button)
+        .iter()
+        .map(|&control| {
+            let icon = match control {
+                crate::ui_kit::HistoryTransport::Play if playing => "timeline_stop".to_owned(),
+                _ => format!("timeline_{}", control.id()),
+            };
+            let effect = transport_effect(app, control);
+            Item::action("ui.historyTransport", control.label(playing, play_labels()), &icon)
+                .with(json!({ "control": control.id() }))
+                .on(effect.is_ok())
+                .off_because(effect.err().flatten())
+        })
+        .collect();
+    items.push(Item::sep());
+    items.extend(transport_items(app));
+    items
 }
 
 /// Shared-header actions use the same command availability as History playback.
@@ -1606,6 +1653,50 @@ mod tests {
         h.app.run("select.clear", json!({})).unwrap();
         h.frames(4);
         h
+    }
+
+    /// With History in the browser its bar is hidden, so a right-click on the History folder
+    /// offers the bar's controls, each greyed out while it would leave the marker where it is
+    /// (#14521).
+    #[test]
+    fn the_browser_history_folder_menu_steps_and_greys_out_what_would_not_move() {
+        let mut h = two_boxes(false);
+        let folder = crate::context_menu::Target::HistoryFolder;
+        assert!(crate::context_menu::check_target(&h.app, &folder).is_err(), "only the browser lists History as a folder");
+        h.app.run("view.history_layout", json!({"dock": "browser"})).unwrap();
+        h.frames(4);
+        assert!(crate::context_menu::check_target(&h.app, &folder).is_ok());
+        let enabled = |h: &Harness| -> Vec<(String, bool)> {
+            crate::context_menu::items(&h.app, &crate::context_menu::Target::HistoryFolder)
+                .into_iter()
+                .filter(|i| i.id == "ui.historyTransport")
+                .map(|i| (i.params.as_ref().and_then(|p| p["control"].as_str()).unwrap_or_default().to_owned(), i.enabled))
+                .collect()
+        };
+        let state = |pairs: [(&str, bool); 5]| pairs.map(|(c, on)| (c.to_owned(), on)).to_vec();
+        // At the end: only the steps back are on, and Play has nothing left to play.
+        assert_eq!(enabled(&h), state([("first", true), ("back", true), ("play", false), ("forward", false), ("last", false)]));
+        let play = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.id == "ui.historyTransport" && i.label == "Play History");
+        assert_eq!(play.and_then(|i| i.tip).as_deref(), Some(solidcraft_ui_text::tr("ui.history_play_roll_back")), "Play says why it is off");
+        // The bar's controls menu follows a separator.
+        let items = crate::context_menu::items(&h.app, &folder);
+        assert!(items.iter().any(|i| i.is_sep()) && items.iter().any(|i| i.id == "ui.historyPlayButton"));
+        // A right-click on the folder opens the menu; Go to beginning rolls to the start.
+        h.step(&json!({"click": {"browser": solidcraft_ui_text::tr("ui.history_title")}, "button": "right"})).unwrap();
+        assert_eq!(h.app.menu.target, folder);
+        h.call("ui.menuPick", json!({"item": solidcraft_ui_text::tr("ui.history_first")}));
+        h.frames(4);
+        assert_eq!(h.app.session.doc.marker, Some(0));
+        assert_eq!(enabled(&h), state([("first", false), ("back", false), ("play", true), ("forward", true), ("last", true)]));
+        // One step forward leaves every control something to do.
+        let forward = crate::context_menu::items(&h.app, &folder).into_iter().find(|i| i.label == solidcraft_ui_text::tr("ui.history_forward"));
+        crate::context_menu::run_item(&mut h.app, &forward.unwrap(), egui::Pos2::ZERO);
+        h.frames(4);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert!(enabled(&h).iter().all(|(_, on)| *on), "{:?}", enabled(&h));
+        // With the Play button hidden, the menu leaves Play out, as the bar does.
+        h.app.preferences.history_play_button = false;
+        assert!(enabled(&h).iter().all(|(c, _)| c != "play"));
     }
 
     #[test]
