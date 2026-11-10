@@ -2419,6 +2419,7 @@ fn own_corner_members(corners: &mut [solidcraft_doc::frame::CornerOverride], own
     Ok(())
 }
 
+/// Rebuild a feature in its original timeline slot and authoring context before accepting the edit.
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -2451,6 +2452,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.rest"
                 | "frame.end_cap"
                 | "frame.rotate_member"
+                | "frame.gusset"
                 | "frame.member"
         );
     if !constructor {
@@ -2586,6 +2588,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     trial.active_component = old.component;
     if let FeatureKind::FrameEndCap { ends, .. } = &old.kind
         && let Some(anchor) = ends.first().and_then(|e| super::sketch::face::anchor(&e.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
+    if let FeatureKind::FrameGusset { supports, .. } = &old.kind
+        && let Some(anchor) = supports.first().and_then(|s| super::sketch::face::anchor(&s.plane))
     {
         trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
     }
