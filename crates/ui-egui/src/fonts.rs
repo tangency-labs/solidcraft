@@ -817,8 +817,7 @@ pub fn setup_fonts(ctx: &egui::Context) {
 /// A context with the production bundled faces, for isolated widget tests.
 #[cfg(test)]
 pub(crate) fn test_context() -> egui::Context {
-    crate::i18n::install();
-    crate::icon_svg::install();
+    crate::test_support::host_data();
     let ctx = egui::Context::default();
     setup_bundled_fonts(&ctx);
     ctx

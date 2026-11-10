@@ -56,7 +56,9 @@ impl HistoryStyle {
 pub(crate) struct HistoryChip<'a> {
     pub icon: &'a str,
     pub name: &'a str,
-    pub kind: &'a str,
+    /// The icon's accent (an icon palette name the host gives each step; `None`: its artwork's
+    /// own colours).
+    pub icon_accent: Option<&'a str>,
     pub selected: bool,
     pub hovered: bool,
     pub dim: bool,
@@ -71,33 +73,9 @@ pub(crate) struct HistoryChip<'a> {
     pub ink: Option<egui::Color32>,
 }
 
-/// Share the feature classification across chips and name rows. Surface aliases also
-/// cover Patch/Stitch/Thicken and other surface features without a Surface-prefixed kind.
-pub(crate) fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
-    let tab = if kind.starts_with("Sketch") {
-        "SKETCH"
-    } else if kind.starts_with("Surface") || icon.starts_with("surface_") || icon == "continuity" {
-        "SURFACE"
-    } else if kind.starts_with("Mesh") {
-        "MESH"
-    } else if kind.starts_with("Form") {
-        "FORM"
-    } else {
-        "MODEL"
-    };
-    solidcraft_theme::icon_accent_for_tab(tab)
-}
-
 impl HistoryChip<'_> {
-    /// All strip variants use this painter; no connections are drawn between features. The
-    /// icon takes the accent of the feature's kind ([`feature_icon_accent`]).
+    /// All strip variants use this painter; no connections are drawn between features.
     pub fn paint(&self, painter: &Painter, rect: Rect, style: HistoryStyle) {
-        self.paint_with_accent(painter, rect, style, feature_icon_accent(self.kind, self.icon));
-    }
-
-    /// [`HistoryChip::paint`] with the icon's accent given (an icon palette name; `None`: its
-    /// artwork's own colours).
-    pub fn paint_with_accent(&self, painter: &Painter, rect: Rect, style: HistoryStyle, icon_accent: Option<&str>) {
         let t = Tokens::get();
         let mut p = painter.clone();
         if self.dim || self.suppressed {
@@ -146,7 +124,7 @@ impl HistoryChip<'_> {
             Rect::from_center_size(if names { pos2(rect.left() + t.space_8 + side / 2.0, rect.center().y) } else { rect.center() }, vec2(side, side));
         match self.ink {
             Some(ink) => icons::paint_ink(&p, icon, self.icon, ink),
-            None => icons::paint_accented(&p, icon, self.icon, icon_accent, 1.0),
+            None => icons::paint_accented(&p, icon, self.icon, self.icon_accent, 1.0),
         }
         if names {
             let ink = if self.selected {
@@ -593,7 +571,7 @@ mod tests {
         for dark in [false, true] {
             solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
-            let accent = TabAccent::for_tab(&t, "SURFACE");
+            let accent = TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Surface);
             for style in [HistoryStyle::Icons, HistoryStyle::Names] {
                 for (selected, error, dim) in [(true, false, false), (false, true, false), (true, false, true)] {
                     let rect = Rect::from_min_size(pos2(20.0, 20.0), vec2(158.0, style.height()));
@@ -602,7 +580,7 @@ mod tests {
                         HistoryChip {
                             icon: "surface_extrude",
                             name: "Offset1",
-                            kind: "SurfaceOffsetFeature",
+                            icon_accent: None,
                             selected,
                             hovered: false,
                             dim,
@@ -664,7 +642,7 @@ mod tests {
                         HistoryChip {
                             icon: "box",
                             name: "Box",
-                            kind: "BoxFeature",
+                            icon_accent: None,
                             selected: index == 0,
                             hovered: false,
                             dim: index == 2,
@@ -672,7 +650,7 @@ mod tests {
                             error: false,
                             warning: false,
                             reference: false,
-                            accent: TabAccent::for_tab(&t, "MODEL"),
+                            accent: TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Main),
                             ink: None,
                         }
                         .paint(ui.painter(), rect, style);
@@ -696,7 +674,7 @@ mod tests {
     #[test]
     fn both_strip_orientations_share_the_drop_bar_and_marker_geometry() {
         let t = Tokens::get();
-        let accent = TabAccent::for_tab(&t, "SURFACE");
+        let accent = TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Surface);
         for vertical in [false, true] {
             let rect = Rect::from_min_size(pos2(20.0, 20.0), if vertical { vec2(160.0, 12.0) } else { vec2(12.0, 28.0) });
             let ctx = crate::ui_kit::test_support::context();
@@ -715,7 +693,7 @@ mod tests {
         for dark in [false, true] {
             solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
-            let accent = TabAccent::for_tab(&t, "SURFACE");
+            let accent = TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Surface);
             // Both vertical widths retain the 12 pt marker row; the bottom strip rotates it.
             for (vertical, size) in [(true, vec2(46.0, 12.0)), (true, vec2(158.0, 12.0)), (false, vec2(12.0, 28.0))] {
                 let rect = Rect::from_min_size(pos2(20.0, 20.0), size);

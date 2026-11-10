@@ -1046,7 +1046,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("history_marker", |ui, _| {
         let t = Tokens::get();
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
+        let accent = solidcraft_theme::TabAccent::for_ramp(&t, solidcraft_theme::AccentRamp::Surface);
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(t.space_24 * 7.0, t.space_12), egui::Sense::hover());
             ui.painter().rect_filled(rect, 0.0, t.panel);

@@ -406,7 +406,7 @@ impl Strip<'_, '_> {
         HistoryChip {
             icon: step.icon,
             name: step.label,
-            kind: "",
+            icon_accent: step.icon_accent,
             selected: step.state.selected,
             hovered: resp.hovered() || step.state.highlighted,
             dim: step.state.rolled_back,
@@ -417,7 +417,7 @@ impl Strip<'_, '_> {
             ink: step.ink,
             accent: if dragged { self.bar.drag_accent } else { self.bar.accent },
         }
-        .paint_with_accent(&self.painter, br, HistoryStyle::Bottom, step.icon_accent);
+        .paint(&self.painter, br, HistoryStyle::Bottom);
         if self.bar.floating && step.state.last_done {
             self.painter.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, self.bar.accent.color);
         }

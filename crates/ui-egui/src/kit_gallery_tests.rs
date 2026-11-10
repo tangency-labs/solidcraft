@@ -326,7 +326,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                         HistoryChip {
                             icon,
                             name: "Extrude1",
-                            kind,
+                            icon_accent: crate::workspace::feature_icon_accent(kind, icon),
                             selected: false,
                             hovered: false,
                             dim: false,
@@ -334,7 +334,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             error: false,
                             warning: false,
                             reference: false,
-                            accent: solidcraft_theme::TabAccent::for_tab(&Tokens::get(), "MODEL"),
+                            accent: crate::workspace::tab_accent(&Tokens::get(), "MODEL"),
                             ink: None,
                         }
                         .paint(

@@ -1247,6 +1247,7 @@ mod web {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         solidcraft_ui_egui::i18n::install();
         solidcraft_ui_egui::icon_svg::install();
+        solidcraft_ui_egui::workspace::install_tabs();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());

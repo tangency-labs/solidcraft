@@ -953,8 +953,8 @@ fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
         marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
         play: app.preferences.history_play_button,
         playing: app.timeline_playback.is_some(),
-        accent: solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab),
-        drag_accent: solidcraft_theme::TabAccent::for_tab(&t, "SKETCH"),
+        accent: crate::workspace::tab_accent(&t, &app.ui.tab),
+        drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker: 0,
         steps: 0,
         floating,
@@ -979,7 +979,7 @@ pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
     let t = Tokens::get();
-    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
     let n = app.session.doc.features.len();
@@ -1171,7 +1171,7 @@ impl history_bar::Contents for BarSteps<'_> {
                 slot: i,
                 label: name,
                 icon,
-                icon_accent: crate::ui_kit::feature_icon_accent(ty, icon),
+                icon_accent: crate::workspace::feature_icon_accent(ty, icon),
                 state: history_bar::StepState {
                     selected: picked.contains(id),
                     highlighted: strip.from_view.contains(&Some(*id)),
@@ -2898,7 +2898,7 @@ mod tests {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
         let t = solidcraft_theme::Tokens::get();
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
+        let accent = crate::workspace::tab_accent(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);

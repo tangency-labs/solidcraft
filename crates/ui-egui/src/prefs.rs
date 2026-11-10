@@ -4156,6 +4156,7 @@ mod tests {
 
     #[test]
     fn theme_traits_use_resolved_background_and_maximal_contrast() {
+        crate::test_support::host_data();
         use theme_picker::{Classification, theme_traits};
         let light = Tokens::light();
         let dark = Tokens::dark();
@@ -7584,6 +7585,7 @@ mod tests {
 
     #[test]
     fn blur_slider_reserves_readout_meter_and_disabled_reason() {
+        crate::test_support::host_data();
         crate::i18n::install();
         use crate::theme_files::OptionValue;
         use crate::theme_options::Availability;
@@ -7986,6 +7988,7 @@ mod tests {
 
     #[test]
     fn tabs_preferences_validate_atomically_restore_safely_and_preserve_export_defaults() {
+        crate::test_support::host_data();
         for base in ["dark", "light"] {
             let file = crate::theme_files::tab_fixture(base);
             let source = serde_json::to_value(&file).unwrap();

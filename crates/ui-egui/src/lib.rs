@@ -855,6 +855,8 @@ impl SolveApp {
         i18n::install();
         // The app's icons, likewise, before the first frame.
         icon_svg::install();
+        // The tab table theme files are read against, likewise.
+        workspace::install_tabs();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]

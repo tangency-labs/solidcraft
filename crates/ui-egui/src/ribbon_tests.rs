@@ -233,7 +233,7 @@ impl RowRig {
                 group("B", vec![button("b.on", true), button("b.off", false)]),
             ],
             labels: true,
-            accent: TabAccent::for_tab(&t, "MODEL"),
+            accent: crate::workspace::tab_accent(&t, "MODEL"),
             exit: false,
             reveal: None,
             more_tip: "More",
@@ -338,7 +338,7 @@ impl TabsRig {
             ..Default::default()
         };
         let t = Tokens::get();
-        let accent = TabAccent::for_tab(&t, "MODEL");
+        let accent = crate::workspace::tab_accent(&t, "MODEL");
         let row = Tabs {
             tabs: vec![
                 Tab { id: "ONE", label: "One", accent, contextual: false, aliases: &[] },
@@ -466,7 +466,7 @@ fn menu_style() -> MenuStyle<'static> {
     MenuStyle {
         pin_tip: "Pin",
         unpin_tip: "Unpin",
-        accent: TabAccent::for_tab(&Tokens::get(), "MODEL"),
+        accent: crate::workspace::tab_accent(&Tokens::get(), "MODEL"),
         focus: egui::Id::unique("test_menu"),
         entry: &["t:entry:"],
         pin: "t:pin:",
@@ -613,7 +613,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
     let row = Row {
         groups: vec![group("A", vec![on, button("a.off", true)])],
         labels: true,
-        accent: TabAccent::for_tab(&t, "MODEL"),
+        accent: crate::workspace::tab_accent(&t, "MODEL"),
         exit: false,
         reveal: None,
         more_tip: "More",
@@ -635,7 +635,7 @@ fn a_deferred_button_is_painted_as_the_app_resolves_it() {
             enabled: true,
             name: "On".into(),
             checkable: true,
-            accent: TabAccent::for_tab(&t, "MODEL"),
+            accent: crate::workspace::tab_accent(&t, "MODEL"),
         };
         paint_deferred(ui, deferred.drain(..).map(|d| (d, look.clone())).collect(), "t:ns");
     });
