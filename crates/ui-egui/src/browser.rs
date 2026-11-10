@@ -963,7 +963,7 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
-    /// The feature row under the pointer: lit as hovering its timeline item lights it.
+    /// The feature or sketch whose row is under the pointer (#14263).
     pub(crate) hover_feature: Option<u64>,
     pub(crate) hover_joint: Option<u64>,
     drop: Option<(crate::semantic_content::ContentSource, DropAction)>,
@@ -3434,6 +3434,12 @@ fn entry_row(
         && let Thing::Plane(name) = &e.thing
     {
         acts.hover_plane = Some(name.clone());
+    }
+    if r.hovered
+        && let Thing::Sketch(id) = &e.thing
+    {
+        acts.hover_feature = Some(*id);
+        acts.hovered = true;
     }
     if let Some(p) = r.secondary
         && let Some(t) = e.target.clone()
