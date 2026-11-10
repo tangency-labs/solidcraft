@@ -173,7 +173,9 @@ impl ProceduralSweep {
 
     /// The exact affine screw section and its original profile parameter interval.
     /// `x=(w-w0)/(w1-w0)` maps that interval to the section's line parameter.
-    /// `None` identifies a different geometric class, never an approximation.
+    /// `None` identifies a different geometric class, never an approximation:
+    /// a varying radial law, a non-affine source, or rational source controls
+    /// (which the runtime certificate cannot take as exact).
     ///
     /// # Errors
     /// Those of inspecting the source or constructing its exact section.
@@ -186,6 +188,11 @@ impl ProceduralSweep {
                 .first()
                 .is_none_or(|first| law.offsets().iter().any(|x| x != first))
         }) {
+            return Ok(None);
+        }
+        // The exact section must agree with the runtime certificate, which
+        // refuses rational source controls (equal weights included).
+        if !self.checked_source_class()? {
             return Ok(None);
         }
         if let Some(offset) = &self.offset {

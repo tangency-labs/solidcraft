@@ -526,11 +526,7 @@ impl CrvOnSurf {
     /// 3D approximation remains only a subdivision seed, never a root evaluator.
     pub(crate) fn screw_line_enclosure(&self, interval: &Extent1d) -> Result<Option<Extent3d>> {
         use crate::blend::fillet_section::interval::Ivl;
-        if self
-            .surface
-            .procedural_sweep()
-            .is_none_or(|s| s.definition().screw().is_none())
-        {
+        if self.surface.retained_screw().is_none() {
             return Ok(None);
         }
         let CurveKind::Line(line) = self.uv_curve.kind() else {
@@ -566,15 +562,16 @@ impl CrvOnSurf {
         // Retained screw evaluation clamps both independent source coordinates;
         // its signed/permuted diagonal chart maps this to domain clamping.
         let domain = self.surface.natural_uv_domain_if_built();
+        let (lo, hi) = (domain.min(), domain.max());
+        if ![lo.x, lo.y, hi.x, hi.y].iter().all(|v| v.is_finite()) || lo.x > hi.x || lo.y > hi.y {
+            return Err(SolidError::invalid_input(
+                OP_EVAL,
+                "retained screw UV domain is not finite and ordered",
+            ));
+        }
         let patch = Extent2d::from_points(
-            Point2::new(
-                x.lo.clamp(domain.min().x, domain.max().x),
-                y.lo.clamp(domain.min().y, domain.max().y),
-            ),
-            Point2::new(
-                x.hi.clamp(domain.min().x, domain.max().x),
-                y.hi.clamp(domain.min().y, domain.max().y),
-            ),
+            Point2::new(x.lo.max(lo.x).min(hi.x), y.lo.max(lo.y).min(hi.y)),
+            Point2::new(x.hi.max(lo.x).min(hi.x), y.hi.max(lo.y).min(hi.y)),
         );
         crate::curve::iso_curve::screw_patch_enclosure(&self.surface, patch)
     }
@@ -646,10 +643,7 @@ impl CrvOnSurf {
         let owns_curve = self.owner_flag == 1 || self.owner_flag == 2 || self.owner_flag == 3;
         let owns_surface = self.owner_flag == 2 || self.owner_flag == 3;
 
-        let retained_screw = self
-            .surface
-            .procedural_sweep()
-            .is_some_and(|s| s.definition().screw().is_some());
+        let retained_screw = self.surface.retained_screw().is_some();
         let uv_curve = if owns_curve && retained_screw {
             // The exact lift keeps the UV spline's literal parameters. Its legacy
             // owning copy may merge close knots; reset the wrapper's ownership and
@@ -921,10 +915,7 @@ impl CrvOnSurf {
     ) -> Result<Vec<Vec3>> {
         // A curve on a retained screw denotes its exact lift, even when a caller
         // permits the support net for a separate surface query.
-        let screw = self
-            .surface
-            .procedural_sweep()
-            .is_some_and(|s| s.definition().screw().is_some());
+        let screw = self.surface.retained_screw().is_some();
         let _exact = screw.then(|| crate::surface::procedural_blend::NetScope::exact(k));
         // limit the number of derivatives to 3
         let mut n_eval = num_derivs.min(MAX_DERIVS);
@@ -1037,8 +1028,8 @@ impl CrvOnSurf {
     pub fn evaluate_point(&self, k: &Kernel, t: f64) -> Result<Point3> {
         let _exact = self
             .surface
-            .procedural_sweep()
-            .is_some_and(|s| s.definition().screw().is_some())
+            .retained_screw()
+            .is_some()
             .then(|| crate::surface::procedural_blend::NetScope::exact(k));
         // UVCurve eval
         let p = self.uv_curve.evaluate_point(k, t)?;
@@ -1683,12 +1674,7 @@ impl CrvOnSurf {
         // A freshly made approximation can report a gap above APPROX_TOL_3D, so
         // asking for that accuracy at every drop would rebuild the identical seed.
         // Do not change the accuracy contract of get_or_create_bs_approx_as.
-        let seed = if derived.is_none()
-            && self
-                .surface
-                .procedural_sweep()
-                .is_some_and(|s| s.definition().screw().is_some())
-        {
+        let seed = if derived.is_none() && self.surface.retained_screw().is_some() {
             let cached = self.approx_cache_mut();
             if cached.parametrization_matches {
                 cached.bs_approx.as_deref().map(BSplineCurve::clone_exact)

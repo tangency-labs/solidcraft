@@ -1,9 +1,15 @@
 //! Retained-parameter subdivision of rational screw spans.
 //!
-//! Prototype: constructs an untrusted refined net and encloses its exact-real
-//! discrepancy from a screw definition, including saved-net mapping, lift and
-//! recertified offset-profile terms. Runtime definition evaluation is not yet
-//! certified; the candidate must not be attached to a production surface.
+//! Builds a refined net from a screw definition and certifies it against the
+//! definition. `certify_refined` produces the bound stored on the definition:
+//! the exact-real reference error (`exact_real_error_bound`: lift and
+//! coefficient terms, including recertified offset-profile terms), plus the
+//! discrepancy of the actual net from the reference through a saved parameter
+//! map, plus the net's own evaluation rounding (`net_evaluation_rounding`),
+//! plus the checked definition's runtime evaluation allowance. Only that sum
+//! certifies a surface; `exact_real_error_bound` and
+//! `candidate_coefficient_error` are partial terms of it and never authorize
+//! keeping a net on their own.
 //! Allocations and interval comparison work are explicitly bounded; no recursion.
 
 use crate::blend::fillet_section::interval::Ivl;
@@ -692,9 +698,9 @@ fn net_evaluation_rounding(net: &crate::nurbs::b_spline_surface::BSplineSurface)
     Ok(distance.hi)
 }
 
-/// Enclose the exact-real net-to-definition error for the restricted prototype.
-/// This is not a runtime evaluation certificate: it omits rounding in evaluating
-/// the final net and definition, so it must not authorize keeping a surface.
+/// Enclose the exact-real net-to-definition error, one partial term of
+/// `certify_refined`'s bound. It omits rounding in evaluating the final net
+/// and the definition, so on its own it never authorizes keeping a surface.
 ///
 /// On each subarc the interval coefficient error encloses |B-H|. The ideal H
 /// differs from S only in lift; endpoint-preserving Möbius reparameterization is

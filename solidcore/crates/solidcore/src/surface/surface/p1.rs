@@ -5153,6 +5153,39 @@ mod tests {
         assert!(matches!(offset.kind(), SurfaceKind::OffsetSurface(_)));
     }
 
+    /// A line profile with equal rational weights is affine in shape, but the
+    /// runtime certificate refuses rational source controls, so the exact
+    /// screw-offset gate refuses it too and the offset takes the general path
+    /// (an earlier gate accepted it and the exact offset then failed).
+    #[test]
+    fn rational_line_screw_offset_uses_general_surface_path() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+
+        // (3, 0, 0) to (3.5, 0, 0.4), both homogeneous with weight 2
+        let pw = vec![
+            CPoint::new(6.0, 0.0, 0.0, 2.0),
+            CPoint::new(7.0, 0.0, 0.8, 2.0),
+        ];
+        let nl = NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        let profile = BSplineCurve::from_nurb(nl, 3, false);
+        assert!(profile.is_rational().unwrap());
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 1.5, None).unwrap();
+        let stations = [0.0, 0.3];
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+        assert!(definition.screw_offset_section().unwrap().is_none());
+        let mut surface = Surface::from(net);
+        surface.set_sweep_definition(definition);
+        let offset = surface
+            .create_offset_surface(&Kernel::default(), 0.1, 1e-3)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(offset.kind(), SurfaceKind::OffsetSurface(_)));
+    }
+
     #[test]
     fn step_surface_wraps_base() {
         let k = &Kernel::default();

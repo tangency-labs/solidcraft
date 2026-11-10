@@ -2179,10 +2179,7 @@ pub(super) fn create_iso_parametric_curve(
     value: f64,
     domain: Option<&Extent2d>,
 ) -> Result<(Curve, f64)> {
-    if surface
-        .procedural_sweep()
-        .is_some_and(|s| s.definition().screw().is_some())
-    {
+    if surface.retained_screw().is_some() {
         let iso = surface.create_iso_parametric_curve(k, dir, value, 0.0, domain, true)?;
         let uv = iso.uv_iso_curve.ok_or_else(|| {
             SolidError::invalid_input(
@@ -2216,14 +2213,11 @@ pub(super) fn create_iso_parametric_curve(
                 let wa = definition.definition_parameters(a).x;
                 let wb = definition.definition_parameters(b).x;
                 // The line's rounding is bounded by the definition's proved evaluation
-                // allowance. A sweep without one (a radial law, for instance) keeps the
-                // curve on its surface below, which needs no such bound.
+                // allowance. A class without one (a radial law, for instance) keeps the
+                // curve on its surface below, which needs no such bound; a covered
+                // class whose proof fails is an error, never a silent fallback.
                 let allowance = if wa.min(wb) >= lo && wa.max(wb) <= hi && wa != wb {
-                    match definition.runtime_evaluation_allowance() {
-                        Ok(allowance) => Some(allowance),
-                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                        Err(_) => None,
-                    }
+                    definition.runtime_evaluation_allowance_if_proved()?
                 } else {
                     None
                 };

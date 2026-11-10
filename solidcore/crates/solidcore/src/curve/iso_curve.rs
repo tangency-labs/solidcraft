@@ -377,11 +377,7 @@ impl IsoCurve {
 
     /// The backing iso is a partition/seed only, never this curve's evaluator.
     pub(crate) fn screw_seed(&self, k: &Kernel) -> Result<Option<BSplineCurve>> {
-        let Some(sweep) = self
-            .surface
-            .procedural_sweep()
-            .filter(|s| s.definition().screw().is_some())
-        else {
+        let Some(sweep) = self.surface.retained_screw() else {
             return Ok(None);
         };
         Ok(Some(
@@ -609,10 +605,7 @@ pub(crate) fn screw_patch_enclosure(
     surface: &Surface,
     patch: Extent2d,
 ) -> Result<Option<Extent3d>> {
-    let Some(sweep) = surface
-        .procedural_sweep()
-        .filter(|s| s.definition().screw().is_some())
-    else {
+    let Some(sweep) = surface.retained_screw() else {
         return Ok(None);
     };
     if let Some(bounds) = sweep.definition().definition_patch_enclosure(patch)? {

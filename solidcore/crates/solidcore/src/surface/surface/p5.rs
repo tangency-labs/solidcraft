@@ -520,10 +520,7 @@ impl Surface {
     ) -> Result<IsoParametricCurve> {
         // A retained screw's net is only its search enclosure. Boundary roots
         // must solve C(t)=S(iso,t), not the net's different boundary curve.
-        if self
-            .procedural_sweep()
-            .is_some_and(|s| s.definition().screw().is_some())
-        {
+        if self.retained_screw().is_some() {
             let natural = self.natural_uv_domain_if_built();
             let domain = domain.copied().unwrap_or(natural);
             let fixed = if param == SurfParamType::U {

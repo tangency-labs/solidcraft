@@ -1264,6 +1264,17 @@ impl Surface {
         }
     }
 
+    /// The retained screw sweep this surface answers by exactly: its
+    /// [`Surface::procedural_sweep`] when that definition is a screw motion.
+    /// Evaluation, copies and iso curves take the definition through this one
+    /// guard. Path sweeps are excluded on purpose: only a screw definition has a
+    /// certified runtime evaluation, so a path sweep still answers by its net.
+    #[must_use]
+    pub fn retained_screw(&self) -> Option<SweepRef<'_>> {
+        self.procedural_sweep()
+            .filter(|s| s.definition().screw().is_some())
+    }
+
     /// The definition this surface is the net of, whatever made it (#2572): a blend's
     /// ([`Surface::procedural_blend`]) or a sweep's ([`Surface::procedural_sweep`]).
     #[must_use]
@@ -1924,10 +1935,7 @@ impl Surface {
     /// [`MAX_GEOMETRY_NESTING`]; none
     /// for the other ported kinds (the base default is `SM_ERR`).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
-        if let Some(sweep) = self
-            .procedural_sweep()
-            .filter(|s| s.definition().screw().is_some())
-        {
+        if let Some(sweep) = self.retained_screw() {
             self.check_evaluation_copy_depth(0)?;
             // Knot normalization changes B while carrying S's existing certificate.
             // Keep both literal objects; the fresh wrapper still resets ownership,
@@ -2124,10 +2132,7 @@ impl Surface {
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec<Vec3>>> {
         self.check_evaluation_copy_depth(0)?;
-        if let Some(sweep) = self
-            .procedural_sweep()
-            .filter(|s| s.definition().screw().is_some())
-        {
+        if let Some(sweep) = self.retained_screw() {
             if sweep.definition().net_answers(k) {
                 return sweep
                     .net()
@@ -2219,10 +2224,7 @@ impl Surface {
         highest_v_deriv: usize,
         flags: EvaluateFlags,
     ) -> Result<Option<Vec<Vec<Vec3>>>> {
-        if let Some(sweep) = self
-            .procedural_sweep()
-            .filter(|s| s.definition().screw().is_some())
-        {
+        if let Some(sweep) = self.retained_screw() {
             if sweep.definition().net_answers(k) {
                 return sweep.net().evaluate_ignoring_status(
                     uv,
@@ -2314,10 +2316,7 @@ impl Surface {
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn evaluate_point(&self, k: &Kernel, uv: Point2) -> Result<Point3> {
         self.check_evaluation_copy_depth(0)?;
-        if let Some(sweep) = self
-            .procedural_sweep()
-            .filter(|s| s.definition().screw().is_some())
-        {
+        if let Some(sweep) = self.retained_screw() {
             return sweep.evaluate_point(k, uv);
         }
         match self.kind_with_nurb(k)? {
@@ -5591,9 +5590,10 @@ fn eval_second_derivatives_with_output(
         // A retained screw's net is an approximation. Lazy evaluation must
         // honor the same exact-definition/NetScope boundary as Evaluate; the
         // partial-output B-spline path below is valid only when B answers.
-        if surface.procedural_sweep().is_some_and(|sweep| {
-            sweep.definition().screw().is_some() && !sweep.definition().net_answers(k)
-        }) {
+        if surface
+            .retained_screw()
+            .is_some_and(|sweep| !sweep.definition().net_answers(k))
+        {
             let result = if step {
                 surface.evaluate_step(k, uv, 2, 2, flags)
             } else {
