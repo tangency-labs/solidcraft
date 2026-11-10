@@ -15,26 +15,24 @@
 //! | [`SM_ERR_OFFSET_WALLS_TOUCH`], [`SM_ERR_OFFSET_EDGE_VANISHES`], [`SolidError::is_offset_edge_vanishes`] | the fork's `SmMessages.h` statuses 1042, 1043 |
 //! | [`SM_TRUE`], [`SM_FALSE`], [`SM_UNSURE`] | `TRUE`, `FALSE`, `UNSURE` of an `SmBoolean` (`SmTypes.h`) |
 //! | [`SM_ERR_NULL_POINTER`], [`SolidError::null_pointer`] | `SM_ERR_NULL_POINTER`, `NER(...)` on `NULL` |
-//! | [`SolidError::Nlib`], [`SolidError::nlib`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`) |
 //! | [`SolidError::Unported`], [`SolidError::unported`], [`SolidError::is_unported`] | (none: call into a unit not ported yet) |
 //! | [`SolidError::Cancelled`], [`SolidError::cancelled`], [`SolidError::is_cancelled`] | (none: cooperative cancellation on [`crate::Kernel`]) |
 //! | [`SolidError::invalid_input`] | (none: out-of-range reads / null dereferences upstream) |
 //! | `ignored`, `ignore_status` (crate) | a call whose `SmStatus` upstream ignores    |
 //! | `checked_or_ignored` (crate) | per-call opt-in status policy (#483); legacy helpers unchanged |
 //! | `native_failure` (crate)  | a call whose failing `SmStatus` upstream handles (internal errors propagate) |
-//! | [`NlibCode`]                | `NL_*_ERR` numbers (`source/SMLib/inc/NL_DataStruct.h`) |
 //! | `?` operator                | `SER(...)` / `NER(...)` (return on error)        |
 //! | [`SolidError::Failed`], [`Failure`], [`Reason`] | none: a failure in solidcore's own terms (#2615) |
 //! | [`ErrorKind`], [`SolidError::kind`] | none: solidcore's stable error codes (#2615) |
 //! | [`offset::OffsetFailure`]   | none: the offset subsystem's refusals (#2615)    |
 //! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
-//! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
+//! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses (#3140)         |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
-//! error number in the process-wide `NL_ERROR` record; solidcore returns
-//! [`SolidError::Nlib`] carrying that number as an [`NlibCode`] instead.
+//! error number in the process-wide `NL_ERROR` record; solidcore returns a
+//! [`SolidError::Failed`] with a [`nurbs::NurbsFailure`] reason instead.
 //!
 //! Every variant names the `operation` (a `&'static str`, by convention the Rust path
 //! of the failing function, e.g. `"geom::vector3d::Vec3::unitize"`) so that errors surfaced to
@@ -70,7 +68,7 @@
 //! [`SolidError::sm_status`] is the one hook that reads it, for difftest (and the FFI
 //! side) only. It is not a public field, never part of a message, and not for callers.
 //!
-//! **Retiring "upstream".** The goal is no [`SolidError::Upstream`] (nor `Nlib`,
+//! **Retiring "upstream".** The goal is no [`SolidError::Upstream`] (nor
 //! `FilletRefused`) variant and no "upstream status" text in the public API. They are
 //! the pre-#2615 shape: subsystems move their sites to [`SolidError::Failed`] one PR at
 //! a time (offset first), and the variants go when their last site does. Then
@@ -318,16 +316,6 @@ pub enum SolidError {
         entity: Option<EntityRef>,
     },
 
-    /// An NLib routine failed (upstream: returned its error flag after `N_ErrSet`
-    /// stored `code` in the global `NL_ERROR.eno`).
-    #[error("{operation}: NLib error {code:?} ({})", .code.code())]
-    Nlib {
-        /// Operation that failed.
-        operation: &'static str,
-        /// Upstream NLib error number.
-        code: NlibCode,
-    },
-
     /// A port-side invariant or adapter failure with no upstream `SmStatus`: an owner,
     /// handle or identity the port could not resolve where upstream follows a pointer
     /// (e.g. a B-rep cache owner that is not in the source B-rep under the caller's
@@ -445,67 +433,6 @@ pub enum SolidError {
         /// Plan unit id that will port it (e.g. `"geom.curve"`).
         unit: &'static str,
     },
-}
-
-/// NLib error numbers (`NL_*_ERR`, `source/SMLib/inc/NL_DataStruct.h`); the
-/// discriminant is the upstream value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum NlibCode {
-    /// `NL_CUR_ERR`: curve definition error (e.g. `n+p+1 != m`).
-    Curve = 1,
-    /// `NL_SUR_ERR`: surface definition error.
-    Surface = 2,
-    /// `NL_DEG_ERR`: degree limit error (`p > NL_MAXDEG`).
-    Degree = 3,
-    /// `NL_KNT_ERR`: knot vector error (e.g. `U[i] > U[i+1]`).
-    Knot = 4,
-    /// `NL_WEI_ERR`: weight error (negative or too small).
-    Weight = 5,
-    /// `NL_PAR_ERR`: parameter value error (e.g. `u < U[0]`).
-    Parameter = 6,
-    /// `NL_IND_ERR`: index range error (e.g. `i < 0`).
-    Index = 7,
-    /// `NL_DER_ERR`: derivative value error (e.g. `C'(u) = 0`).
-    Derivative = 8,
-    /// `NL_STO_ERR`: insufficient storage.
-    Storage = 9,
-    /// `NL_MAT_ERR`: math function error (e.g. domain error).
-    Math = 10,
-    /// `NL_NUM_ERR`: numerical failure (e.g. zero division).
-    Numerical = 11,
-    /// `NL_CON_ERR`: convergence failure.
-    Convergence = 12,
-    /// `NL_CAL_ERR`: error in called routine.
-    Call = 13,
-    /// `NL_INP_ERR`: input data is corrupt.
-    Input = 14,
-    /// `NL_MEM_ERR`: memory allocation error.
-    Memory = 15,
-    /// `NL_SEQ_ERR`: system of equations error (e.g. singular).
-    Equations = 16,
-    /// `NL_GEO_ERR`: geometric operation failure.
-    Geometry = 17,
-    /// `NL_FIL_ERR`: cannot open file.
-    File = 18,
-    /// `NL_TOL_ERR`: tolerance error.
-    Tolerance = 19,
-    /// `NL_MXD_ERR`: derivative limit error (`der > NL_MAXDER`).
-    MaxDerivative = 20,
-    /// `NL_KML_ERR`: knot multiplicity error (multiplicity > degree).
-    KnotMultiplicity = 21,
-    /// `NL_CUR_REV`: curve end control points reverse direction.
-    CurveReversed = 22,
-    /// `NL_SCN_ERR`: scan (read) error.
-    Scan = 23,
-}
-
-impl NlibCode {
-    /// The upstream `NL_*_ERR` number.
-    #[must_use]
-    pub fn code(self) -> i32 {
-        self as i32
-    }
 }
 
 // ---- SmStatus codes -------------------------------------------------------------------
@@ -1076,9 +1003,6 @@ impl SolidError {
     ///
     /// - [`SolidError::Upstream`]: its `code`.
     /// - [`SolidError::Failed`]: its failure's `status`.
-    /// - [`SolidError::Nlib`]: [`SM_ERR`]. The `Sm*` callers of an NLib routine
-    ///   surface its failure as `SER(SM_ERR)` (`if (NL_YES == N_...) SER(SM_ERR)`;
-    ///   `nl_ser`), never as the `NL_*_ERR` number.
     /// - Every other variant: `None`. [`SolidError::InvalidInput`],
     ///   [`SolidError::NotFound`], [`SolidError::Degenerate`],
     ///   [`SolidError::NotConverged`] and [`SolidError::Unsupported`] are used both for
@@ -1094,7 +1018,6 @@ impl SolidError {
             | Self::BlendRefused { code, .. }
             | Self::RoundRefused { code, .. } => Some(*code),
             Self::Failed(f) => Some(f.status),
-            Self::Nlib { .. } => Some(SM_ERR),
             Self::InvalidInput { .. }
             | Self::NotFound { .. }
             | Self::Degenerate { .. }
@@ -1194,10 +1117,6 @@ impl SolidError {
             }
             Self::FaceTrimsUnavailable { .. } => ErrorKind::FaceTrimsUnavailable,
             Self::Upstream { code, .. } => ErrorKind::of_status(*code),
-            Self::Nlib { code, .. } => match code {
-                NlibCode::Convergence => ErrorKind::NotConverged,
-                _ => ErrorKind::Failed,
-            },
             Self::PortInvariant { .. } => ErrorKind::PortInvariant,
             Self::PreparationRequired { .. } => ErrorKind::PreparationRequired,
             Self::Cancelled { .. } => ErrorKind::Cancelled,
@@ -1297,13 +1216,6 @@ impl SolidError {
             .into_error()
     }
 
-    /// [`SolidError::Nlib`] with the upstream error number `code` (NLib's
-    /// `N_ErrSet(.., code, ..)` followed by an error return).
-    #[must_use]
-    pub const fn nlib(operation: &'static str, code: NlibCode) -> Self {
-        Self::Nlib { operation, code }
-    }
-
     /// The operation that produced this error (for [`SolidError::Unported`], the
     /// upstream symbol that is not ported yet).
     #[must_use]
@@ -1321,7 +1233,6 @@ impl SolidError {
             | Self::BlendRefused { operation, .. }
             | Self::RoundRefused { operation, .. }
             | Self::ExtendRefused { operation, .. }
-            | Self::Nlib { operation, .. }
             | Self::PreparationRequired { operation }
             | Self::FaceTrimsUnavailable { operation, .. }
             | Self::Cancelled { operation } => operation,
@@ -1348,7 +1259,6 @@ impl SolidError {
             | Self::Unsupported { .. }
             | Self::PortInvariant { .. }
             | Self::ExtendRefused { .. }
-            | Self::Nlib { .. }
             | Self::Unported { .. }
             | Self::Cancelled { .. }
             | Self::RoundRefused { .. }
@@ -2160,11 +2070,11 @@ mod tests {
         assert_eq!(port.sm_status(), Some(SM_ERR));
     }
 
-    /// The NURBS routines report their failures as `NurbsFailure`s: no source file of
-    /// `src/nurbs` builds or names an NLib error number any more. (`crv_common.rs` is
-    /// the one file left, until the change that edits it lands.)
+    /// The NURBS routines report their failures as `NurbsFailure`s, and `SolidError::Nlib`,
+    /// `SolidError::nlib` and `NlibCode` are gone: no library source file of the crate
+    /// builds, matches or names an NLib error number variant any more.
     #[test]
-    fn the_nurbs_sources_construct_no_nlib_errors() {
+    fn no_source_builds_an_nlib_error() {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
             let mut entries: Vec<_> = std::fs::read_dir(dir)
                 .expect("read_dir")
@@ -2179,17 +2089,30 @@ mod tests {
                 }
             }
         }
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/nurbs");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
         walk(&root, &mut files);
-        assert!(files.len() > 40, "{} files under {root:?}", files.len());
+        assert!(files.len() > 400, "{} files under {root:?}", files.len());
+        assert!(files.iter().any(|p| p.ends_with("nurbs/crv_common.rs")));
         for path in files {
-            if path.file_name().is_some_and(|n| n == "crv_common.rs") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).expect("read");
-            for needle in ["SolidError::Nlib", "NlibCode", "SolidError::nlib("] {
-                assert!(!text.contains(needle), "{needle} in {path:?}");
+            // a checkout with CRLF line endings reads the same
+            let text = std::fs::read_to_string(&path)
+                .expect("read")
+                .replace("\r\n", "\n");
+            // this test's own needles sit in the test tail
+            let library = match text.find("#[cfg(test)]\nmod tests") {
+                Some(at) => &text[..at],
+                None => &text[..],
+            };
+            for needle in [
+                "SolidError::Nlib",
+                "Self::Nlib",
+                "Nlib {",
+                "NlibCode",
+                "SolidError::nlib(",
+                "fn nlib(",
+            ] {
+                assert!(!library.contains(needle), "{needle} in {path:?}");
             }
         }
     }
