@@ -938,6 +938,50 @@ fn browser_feature_menu_renames_its_target_and_supports_undo() {
     assert_eq!(app.session.doc.feature(target).unwrap().name, "Renamed feature");
 }
 
+/// A refused name keeps the Rename box open with the reason on the status line, as the
+/// browser's inline editor does (#10654); `ui.rename` answers with the refusal.
+#[test]
+fn a_refused_rename_keeps_the_rename_box_open_and_says_why() {
+    let mut h = crate::scenario::Harness::new();
+    for name in ["Base", "Lid"] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": name})).unwrap();
+    }
+    let lid = h.app.session.doc.find_feature("Lid").unwrap().id;
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Feature(lid), pos2(300.0, 200.0));
+    h.frames(2);
+    h.step(&json!({"text": "Base"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some() && crate::scenario::rect_of("rename:name").is_some(), "the box stays open after a refused rename");
+    let (text, _, error) = h.app.status.clone().expect("the refusal is shown");
+    assert!(error && text.contains("another feature is called"), "{text}");
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Lid");
+    // The typed name can be corrected at once, without clicking the box first.
+    h.step(&json!({"text": "Top"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Top");
+}
+
+/// `ui.rename` answers a refused name with the reason and leaves the rename in progress.
+#[test]
+fn ui_rename_answers_a_refused_name_with_the_reason() {
+    let mut h = crate::scenario::Harness::new();
+    for name in ["Base", "Lid"] {
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": name})).unwrap();
+    }
+    let lid = h.app.session.doc.find_feature("Lid").unwrap().id;
+    context_menu::start_rename(&mut h.app, context_menu::RenameWhat::Feature(lid), pos2(300.0, 200.0));
+    let reply = h.call("ui.rename", json!({"text": "Base"}));
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert!(reply["error"].as_str().is_some_and(|e| e.contains("another feature is called")), "{reply}");
+    assert!(h.app.menu.rename.is_some(), "the rename is still in progress");
+    assert_eq!(h.call("ui.rename", json!({"text": "Top"}))["ok"], true);
+    assert!(h.app.menu.rename.is_none());
+    assert_eq!(h.app.session.doc.feature(lid).unwrap().name, "Top");
+}
+
 #[test]
 fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
     let mut app = sample_app();
