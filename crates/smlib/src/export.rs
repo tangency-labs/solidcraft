@@ -29,7 +29,7 @@
 //!   on the surface's internal rational B-spline, whose angular parameter is not the angle
 //!   (SmCylinder.h: "the map from one to the other is not linear"), and a circle's or ellipse's
 //!   on its NURBS parameter, not its angle; those pcurves are computed from the edge record on
-//!   the face's surface record (`solidcraft_geom::brep::pcurve`). Every loop is moved by whole
+//!   the face's surface record (`solidcore_ops::pcurve`). Every loop is moved by whole
 //!   periods into the face's domain.
 //! - **Tolerances:** each edge's and vertex's own as SMLib reports it (`EDGE_TOLERANCE`,
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
@@ -774,7 +774,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
         // A face with a NURBS form is parameterised on it: its range and trims are that NURBS's.
         let params = nurbs.as_ref().unwrap_or(&surface);
-        let natural = solidcraft_geom::brep::label::surface_natural(params);
+        let natural = solidcore_ops::label::surface_natural(params);
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
         // SMLib's own trims are taken where the arrays carry them: B-spline faces, NURBS forms, and
         // planes (mapped onto the plane's own (u, v) by the export).
@@ -1296,7 +1296,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         })
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
-    solidcraft_geom::brep::check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
+    solidcore_ops::record_check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };
@@ -1549,7 +1549,7 @@ fn pcurves<'a>(
         let mut loop_uses = Vec::with_capacity(l.len());
         for (&(e, forward), given) in l.iter().zip(g) {
             let geometry = edge(e).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(solidcraft_geom::brep::pcurve::EdgeUse {
+            loop_uses.push(solidcore_ops::pcurve::EdgeUse {
                 edge: e,
                 curve: geometry.curve,
                 interval: geometry.interval,
@@ -1560,8 +1560,7 @@ fn pcurves<'a>(
         }
         uses.push(loop_uses);
     }
-    let mut curves =
-        solidcraft_geom::brep::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
+    let mut curves = solidcore_ops::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
     into_domain(surface, domain, &mut curves);
     Ok(curves)
 }
@@ -1619,7 +1618,7 @@ fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
 
 /// Moves each loop's pcurves by whole periods so the loop's middle is nearest the domain's.
 fn into_domain(surface: &b::Surface, domain: [[f64; 2]; 2], curves: &mut [Vec<b::Curve2>]) {
-    for (d, natural) in solidcraft_geom::brep::label::surface_natural(surface).into_iter().enumerate() {
+    for (d, natural) in solidcore_ops::label::surface_natural(surface).into_iter().enumerate() {
         if natural != b::Natural::Periodic {
             continue;
         }
