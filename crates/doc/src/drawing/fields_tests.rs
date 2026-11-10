@@ -95,7 +95,8 @@ fn revision_fields_read_the_newest_row() {
 
 /// The fields a cell shows nothing for, by source and key: a component's empty part number and a
 /// prompt nobody answered, not its name, the sheet's number or literal text. A revision field is
-/// one only once the drawing has a revision row, and then only while that row lacks it.
+/// one only once the drawing has a revision row, and then only while that row lacks it. A field
+/// that reads lost or unknown has no value either.
 #[test]
 fn empty_fields_are_named_by_source_and_key() {
     let mut d = drawing();
@@ -115,6 +116,11 @@ fn empty_fields_are_named_by_source_and_key() {
     assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by", "revision.date"]);
     Arc::make_mut(&mut d.revisions).set(901, Field::Date, "2026-11-07").unwrap();
     assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by"]);
+    let lost = Values { drawing: &d, sheet: 0, component: Documented::Gone }.empty_fields(&content);
+    assert_eq!(lost, ["component.name", "component.part_number", "prompt.checked_by"], "a component since deleted");
+    let unknown = Content(vec![field(Source::Component, "weight"), field(Source::Sheet, "page")]);
+    let present = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket) };
+    assert_eq!(present.empty_fields(&unknown), ["component.weight", "sheet.page"], "a drawing saved with fields its sources lack");
 }
 
 /// A component's fields: its name and part properties, its free-text properties, and the material

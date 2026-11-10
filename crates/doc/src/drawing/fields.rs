@@ -164,15 +164,16 @@ impl Values<'_> {
         }
     }
 
-    /// The fields of `content` with no value, each as `source.key` (`component.part_number`): what
-    /// [`text`](Values::text) shows as [`MISSING`]. A revision field before the sheet's first revision
-    /// row isn't one: the drawing has no revision to show yet.
+    /// The fields of `content` that read no value ([`state`](Values::state): empty, lost or unknown),
+    /// each as `source.key` (`component.part_number`): what [`text`](Values::text) shows as [`MISSING`].
+    /// A revision field before the sheet's first revision row reads empty but isn't one: the drawing
+    /// has no revision to show yet.
     pub fn empty_fields(&self, content: &Content) -> Vec<String> {
         let unrevised = self.newest().is_none();
         let empty = |part: &Part| match part {
             Part::Field { source: Source::Revision, .. } if unrevised => None,
             Part::Field { source, key, .. } => {
-                self.field(*source, key).is_none_or(|v| v.is_empty()).then(|| format!("{}.{key}", source_name(*source)))
+                (!matches!(self.state(*source, key), FieldState::Shown(_))).then(|| format!("{}.{key}", source_name(*source)))
             }
             Part::Text(_) => None,
         };
