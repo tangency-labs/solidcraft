@@ -1115,6 +1115,8 @@ pub struct ArcSlotResult {
     pub drawn: DrawResult,
     /// The id of the construction arc along the slot's middle.
     pub centre_arc: Option<String>,
+    /// The point held halfway along the construction centre arc.
+    pub middle: Option<String>,
 }
 
 /// What `sketch.centerline` and `sketch.infinite` return.

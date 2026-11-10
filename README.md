@@ -28,7 +28,7 @@
   <a href="https://docs.solidcraft.io/">Documentation</a> ·
   <a href="https://www.blacksmith.sh"><img src="https://img.shields.io/badge/CI-Blacksmith-000000?logo=githubactions&logoColor=white" alt="CI powered by Blacksmith" /></a>
   <a href="https://discord.gg/FtU4NQNVDH">Discord</a> ·
-  <a href="https://github.com/bherbruck/solidcore">SolidCore</a>
+  <a href="https://github.com/tangency-labs/solidcore">SolidCore</a>
 </p>
 
 <p align="center">

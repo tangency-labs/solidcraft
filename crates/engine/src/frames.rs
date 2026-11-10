@@ -430,6 +430,26 @@ impl Drop for LocalGeometry {
     }
 }
 
+thread_local! {
+    /// Whether an undoable command run inside the current outermost one changed the design.
+    static INNER_UNDOABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A new outermost command starts with no undoable inner change.
+pub fn reset_inner_undoable() {
+    INNER_UNDOABLE.with(|c| c.set(false));
+}
+
+/// An undoable command run inside another changed the design: the outer one saves the step.
+pub fn note_inner_undoable() {
+    INNER_UNDOABLE.with(|c| c.set(true));
+}
+
+/// Whether [`note_inner_undoable`] was called since the outermost command began.
+pub fn inner_undoable() -> bool {
+    INNER_UNDOABLE.with(std::cell::Cell::get)
+}
+
 /// A command running inside another (its parameters are already in component frames).
 pub struct Nested;
 
@@ -696,7 +716,10 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                 Axis => {
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
-                        if let Some(origin) = axis.get("origin").and_then(|o| m.make(o)) {
+                        // An `{origin, dir}` axis without its origin passes through the world's,
+                        // which the component may have moved.
+                        let origin = axis.get("origin").cloned().or_else(|| axis.contains_key("dir").then(|| pt(Vec3::ZERO)));
+                        if let Some(origin) = origin.and_then(|o| m.make(&o)) {
                             axis.insert("origin".into(), origin);
                         }
                         if let Some(dir) = axis.get("dir").and_then(vec3)

@@ -109,12 +109,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.shell_inner_shell_of_statuses = true;
-    f.local_operation_offset_status = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
     f.fillet_nx1_opposite_continuation_side_edge = true;
-    f.fillet_trace_rejects_short_step = true;
     f.torus_iso_circle_axis_from_midpoint = true;
     f.torus_keeps_inside_out = true;
     f.internal_pole_row_through_knot = true;
@@ -161,7 +159,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.shell_empty_cavity_fails = true;
     f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
-    f.sphere_small_circle_not_touching = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
     f.ssi_singular_start_inside_direction = true;
@@ -204,7 +201,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
-    f.offset_closes_loop_gaps = true;
     f.cylinder_plane_tangent_within_tolerance = true;
     f.boolean_wire_edge_keeps_faceuse_shell = true;
     f.fillet_nx1_tangent_corner_edge = true;
@@ -262,9 +258,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_statuses_pass_on = true;
     f.fillet_corner_per_vertex_fan = true;
     f.fillet_rail_trim_at_near_knot = true;
-    f.offset_splits_corner_vertices = true;
     f.offset_keep_cavity_regions = true;
-    f.offset_four_face_vertex_split = true;
     f.gap_samples_non_bspline_v_stride = true;
     f.imprint_skips_collapsed_definition = true;
     f.fillet_blend_curve_revolved_on_arc = true;
@@ -291,7 +285,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
     f.analytic_corner_failure_is_false = true;
-    f.defeature_refuses_open_base = true;
     f.ssi_start_loop_trace_budget = true;
     f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
@@ -353,9 +346,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.point_class_gap_3d_propagates_no_drop_error = true;
     f.fillet_surface_plane_curve_on_plane_equation = true;
     f.fillet_gn_section_generator = true;
-    f.face_trim_curves_kept_where_exact = true;
-    f.swap_uv_keeps_analytic_definition = true;
-    f.face_shrink_bound_on_knot = true;
     f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.boolean_coincident_strip_drops_crossing = true;

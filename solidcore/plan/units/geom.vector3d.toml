@@ -1,0 +1,12 @@
+id = "geom.vector3d"
+upstream = ["source/SMLib/inc/SmVector3d.h", "source/SMLib/src/SmMath.cpp", "source/SMLib/src/SmVector3d.cpp"]
+rust_module = "geom::vector3d"
+depends_on = []
+soft_depends_on = ["geom.tol"]
+est_lines = 1145
+layer = 2
+tests = ["prog_test:my_test_polynomial", "SM_API_test:TestSmPrincipalDirectionPairing", "prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point"]
+status = "green"
+claimed_by = "swarm-geom.vector3d-a1"
+claimed_at = "2026-10-12T19:48:09Z"
+notes = "65 fns; largest: SmVector3d::CCWAngleBetween, SmVector3d::AngleBetween, SmVector3d::MakeUnitOrthoVectors, SmVector3d::UnitizedDerivative3; unit-SCC #22 (220 units); 321 upstream test entry points reach this unit; GREEN: difftest 6114 cases (114 fixture from my_test_vector3d + edge cases, 6000 generated), all bit-identical, 0 deferred, perturb SENSITIVE; Vec3 moved from math.rs to geom::vector3d (re-exported); wired UNPORTED(geom.vector3d) in geom.tol (AreParallel/ArePerpendicular) and replaced CO-PORTs in tol/vector2d/extent3d"

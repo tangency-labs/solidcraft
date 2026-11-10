@@ -378,6 +378,22 @@ fn browser_sketch_rename_stays_inline() {
 }
 
 #[test]
+fn browser_sketches_after_history_marker_are_not_listed() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Earlier"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Later"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
+    assert!(labels.contains(&"Earlier".to_owned()), "{labels:?}");
+    assert!(!labels.contains(&"Later".to_owned()), "{labels:?}");
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
@@ -504,16 +520,16 @@ fn a_second_click_on_a_document_settings_entry_closes_its_window() {
 
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: the first click opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: the first click opens Preferences");
         let decimals = h.app.preferences.angle_decimals;
         h.app.preferences.angle_decimals = decimals + 2;
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(!h.app.prefs_window.open, "{mode:?}: the second click closes it");
+        assert!(!h.app.prefs_window.shell.open, "{mode:?}: the second click closes it");
         assert_eq!(h.app.preferences.angle_decimals, decimals, "{mode:?}: and puts back what changed there, as × does");
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: a third opens it again");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: a third opens it again");
         h.step(&json!({"key":"Escape"})).unwrap();
 
         h.step(&row("Parameters")).unwrap();
@@ -716,7 +732,7 @@ fn browser_title_uses_a_single_semibold_run() {
         })
         .collect();
     assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(Tokens::get().font_heading));
+    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(Tokens::get().font_heading));
 }
 
 #[test]
@@ -849,6 +865,7 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),

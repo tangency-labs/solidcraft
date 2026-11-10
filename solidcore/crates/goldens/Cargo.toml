@@ -1,0 +1,24 @@
+[package]
+name = "goldens"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+description = "Checks every unit's cases against its committed expected output (goldens)."
+build = "build.rs"
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+# The `ssi` engine of --ssi-corpus (a surface/surface intersection of its own, not a port).
+ssi = { path = "../ssi" }
+# The `solidcore-ssi` engine of --ssi-corpus (`ssi` behind the port's inputs and output).
+solidcore-ssi = { path = "../solidcore-ssi" }
+# The clean-room STEP importer of --step-corpus.
+step-import = { path = "../step-import" }
+serde = { version = "1", features = ["derive"] }
+# float_roundtrip: parse decimals exactly (correctly rounded, as C strtod), not to within 1 ULP
+serde_json = { version = "1", features = ["float_roundtrip"] }
+toml = "0.8"
+
+[lints]
+workspace = true

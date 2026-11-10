@@ -1,0 +1,7 @@
+{
+  "unit": "geom.grid",
+  "cases": [
+    {"name": "fuzz09254_grid_box", "origin": "fuzz-out/geom/geom.grid/fuzz09254.json (timeout: rust: no result after 20 s)", "issue": "HANG-40", "cpp": "harness: invalid argument: grid box", "rust": "ok", "inputs": {"grid": {"bbox": [-0.0001, -0.0001, -0.0001, 1e+300, 1.0, 1.0], "size": [10, 10, 10]}, "ops": [{"op": "dump"}]}},
+    {"name": "fuzz01973_alloc_new_voxels", "origin": "fuzz-out/n2000/geom.grid/fuzz01973.json (enomem: rust: Grid::new voxels sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: invalid argument: voxel counts", "rust": "error: rust_error: geom::grid::Grid::new: upstream status 1001", "inputs": {"grid": {"bbox": [905.0, 740.0, 716.0, 1220.0, 2070.0, 1560.0], "size": [2147483648, 1, 8]}, "ops": [{"op": "dump"}]}}
+  ]
+}

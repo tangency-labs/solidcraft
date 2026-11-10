@@ -93,7 +93,7 @@ impl State {
             State::Failed => "failed",
         }
     }
-    fn label(self) -> &'static str {
+    pub(crate) fn label(self) -> &'static str {
         tr(match self {
             State::Off => "ui.agent_chat_state_off",
             State::Starting => "ui.agent_chat_state_starting",
@@ -373,6 +373,10 @@ pub struct AgentChat {
     restore_mode: Option<String>,
     /// New chat is waiting for the user's yes (a message is running or queued).
     pub confirm_new: bool,
+    /// What the panel recorded this frame, run after it is drawn (`panel::run`).
+    pub actions: Vec<panel::PanelAction>,
+    /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
+    pub report: panel::ContentReport,
     /// Where the panel was drawn last (for its shortcuts).
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
@@ -461,6 +465,53 @@ pub struct AgentChat {
 impl Drop for AgentChat {
     fn drop(&mut self) {
         self.stop_backend(true);
+    }
+}
+
+/// What the chat panel asks of the conversation while drawing, from the chat's own state.
+impl AgentChat {
+    /// New chat would lose something: a turn running, queued messages or attached files.
+    pub fn new_chat_needs_confirm(&self) -> bool {
+        self.state() == State::Busy || !self.pending.is_empty() || self.files() > 0
+    }
+
+    /// The agent reports models and is running.
+    pub fn models_shown(&self) -> bool {
+        !self.models.is_empty() && self.state().running()
+    }
+
+    /// The providers the models come from, with how many each, when there are two or more.
+    pub fn model_providers(&self) -> Vec<(String, usize)> {
+        providers_of(&self.models)
+    }
+
+    /// The provider whose models the picker opens on: the chosen one, else the current model's, else the first.
+    pub fn shown_provider(&self) -> Option<String> {
+        let providers = self.model_providers();
+        if let Some(p) = &self.model_provider
+            && providers.iter().any(|(n, _)| n == p)
+        {
+            return Some(p.clone());
+        }
+        let current = self.models.iter().find(|m| m.id == self.model).map(provider_of);
+        current.filter(|p| providers.iter().any(|(n, _)| n == p)).or_else(|| providers.first().map(|(n, _)| n.clone()))
+    }
+
+    /// Every model with its label, provider group and tip, as the picker lists them.
+    pub fn grouped_models(&self) -> Vec<(acp::ModelInfo, String, Option<String>, String)> {
+        let rows = model_rows(&self.models);
+        self.models.iter().cloned().zip(rows).map(|(m, (label, group, tip))| (m, label, group, tip)).collect()
+    }
+
+    /// The running agent takes a model typed in rather than picked from its list.
+    pub fn custom_models_accepted(&self) -> bool {
+        if self.backend.is_none() || !self.state().running() {
+            return false;
+        }
+        match self.config_options.as_ref() {
+            Some(options) => options.iter().any(|o| o.category == "model"),
+            None => !self.running_endpoint.is_empty() || !self.models.is_empty(),
+        }
     }
 }
 
@@ -1522,7 +1573,7 @@ pub fn new_chat(app: &mut SolveApp) {
 
 /// Whether New chat would throw something away that the user may want (so it asks first).
 pub fn new_chat_needs_confirm(app: &SolveApp) -> bool {
-    app.agent_chat.state() == State::Busy || !app.agent_chat.pending.is_empty() || app.agent_chat.files() > 0
+    app.agent_chat.new_chat_needs_confirm()
 }
 
 /// Take a queued message out of the queue.
@@ -1674,7 +1725,7 @@ pub fn paste_picture(app: &mut SolveApp) -> std::result::Result<String, String> 
 /// the platform gives no position during a drag (winit 0.30), so that is the best the chat can
 /// know; the + button always works.
 pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
-    if !drop_is_ours(app, ctx) || !ctx.input(|i| !i.raw.dropped_files.is_empty()) {
+    if !drop_is_ours(&app.agent_chat, ctx) || !ctx.input(|i| !i.raw.dropped_files.is_empty()) {
         return;
     }
     let files = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
@@ -1682,8 +1733,9 @@ pub fn take_drops(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 /// Whether files dropped now would be the chat's: the pointer was last seen over it.
-pub(crate) fn drop_is_ours(app: &SolveApp, ctx: &egui::Context) -> bool {
-    let Some(rect) = app.agent_chat.drop_rect else { return false };
+pub(crate) fn drop_is_ours(chat: &AgentChat, ctx: &egui::Context) -> bool {
+    let Some(rect) = chat.drop_rect else { return false };
+
     ctx.input(|i| i.pointer.latest_pos()).is_some_and(|p| rect.contains(p))
 }
 
@@ -2135,14 +2187,7 @@ pub fn set_model(app: &mut SolveApp, model: &str) {
 /// Whether a model the agent did not list can be sent: an endpoint, an ACP agent with a model
 /// option, or a legacy ACP agent that listed models.
 pub fn custom_models_accepted(app: &SolveApp) -> bool {
-    let chat = &app.agent_chat;
-    if chat.backend.is_none() || !chat.state().running() {
-        return false;
-    }
-    match chat.config_options.as_ref() {
-        Some(options) => options.iter().any(|o| o.category == "model"),
-        None => !chat.running_endpoint.is_empty() || !chat.models.is_empty(),
-    }
+    app.agent_chat.custom_models_accepted()
 }
 
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
@@ -2204,7 +2249,7 @@ fn apply_saved_model(app: &mut SolveApp) {
 
 /// Whether the model picker shows: only for an agent that reports models.
 pub fn models_shown(app: &SolveApp) -> bool {
-    !app.agent_chat.models.is_empty() && app.agent_chat.state().running()
+    app.agent_chat.models_shown()
 }
 
 /// Longest provider name kept from an agent's model list.
@@ -2285,8 +2330,13 @@ fn provider_of(m: &acp::ModelInfo) -> String {
 /// The providers of the agent's models in the order the agent lists them, each with how many
 /// models it serves. Empty when the models come from fewer than two providers: one list is enough.
 pub fn model_providers(app: &SolveApp) -> Vec<(String, usize)> {
+    app.agent_chat.model_providers()
+}
+
+/// [`AgentChat::model_providers`] of a model list.
+fn providers_of(models: &[acp::ModelInfo]) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
-    for m in &app.agent_chat.models {
+    for m in models {
         let p = provider_of(m);
         match out.iter_mut().find(|(n, _)| *n == p) {
             Some(e) => e.1 += 1,
@@ -2302,14 +2352,7 @@ pub fn model_providers(app: &SolveApp) -> Vec<(String, usize)> {
 /// The provider whose models the header lists: the one picked while the agent still offers it,
 /// else the current model's, else the first. `None` when there is no provider picker.
 pub fn shown_provider(app: &SolveApp) -> Option<String> {
-    let providers = model_providers(app);
-    if let Some(p) = &app.agent_chat.model_provider
-        && providers.iter().any(|(n, _)| n == p)
-    {
-        return Some(p.clone());
-    }
-    let current = app.agent_chat.models.iter().find(|m| m.id == app.agent_chat.model).map(provider_of);
-    current.filter(|p| providers.iter().any(|(n, _)| n == p)).or_else(|| providers.first().map(|(n, _)| n.clone()))
+    app.agent_chat.shown_provider()
 }
 
 /// The models the header's model picker lists, each with the name it shows: with a provider picker,
@@ -2331,8 +2374,7 @@ pub fn listed_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String)> {
 /// ([`model_rows`]).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub fn grouped_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String, Option<String>, String)> {
-    let rows = model_rows(&app.agent_chat.models);
-    app.agent_chat.models.iter().cloned().zip(rows).map(|(m, (label, group, tip))| (m, label, group, tip)).collect()
+    app.agent_chat.grouped_models()
 }
 
 /// The provider whose group the header's model picker opens first (the control channel's
@@ -2387,8 +2429,8 @@ fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_o
 
 /// `ui.agent_chat` on the control channel (tests and screenshots): `enabled`, `command`,
 /// `connect_at_start` and `open_at_start` (the launch preferences), `instructions` (the custom
-/// instructions, #8220), `open`,
-/// `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
+/// instructions, #8220), `open`, `toggle` (show or hide the panel as its button does, unfolding a
+/// folded one), `side`, `minimized`, `width`, `refresh`, `connect`, `stop`, `attach` (a file's path, for the
 /// next message), `remove_file` (index), `send`, `attach_view`, `attach_selection`, `pick`,
 /// `permission` (an option id, or `"cancel"`), `approve` (`true`/`false`, the oldest held
 /// request), `cancel` (Stop), `send_now` (steer: stop, then send the queue), `remove_pending` (index), `undo` (the newest message's changes); returns the panel's state.
@@ -2502,6 +2544,9 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(o) = p.get("open").and_then(Value::as_bool) {
         app.agent_chat.open = o;
+    }
+    if p.get("toggle").and_then(Value::as_bool) == Some(true) {
+        toggle(app);
     }
     if let Some(s) = p.get("side").and_then(Value::as_str) {
         if !matches!(s, "left" | "right") {

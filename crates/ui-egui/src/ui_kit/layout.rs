@@ -45,7 +45,7 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
         ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, egui::FontId::monospace(t.font_body));
         let visuals = ui.visuals_mut();
         visuals.weak_text_color = Some(t.form_dim);
-        visuals.selection.stroke = egui::Stroke::new(1.0, t.form_primary);
+        visuals.selection.stroke = egui::Stroke::new(1.0, selection_ink(&t));
         visuals.selection.bg_fill = t.selected_bg;
         visuals.widgets.noninteractive.bg_stroke = t.tertiary_border(t.dialog_rule);
         for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active, &mut visuals.widgets.open] {
@@ -61,6 +61,19 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
     })
     .inner
 }
+
+/// The colour egui draws selected text, a selected button's label and a focused field's outline
+/// in, on a form: the form's primary colour, unless it all but vanishes on `selected_bg` (below
+/// 1.5:1), as in SolidCraft 95 and CGA where they are the same colour; then the theme's ink for
+/// selected elements (#11804). Every other theme keeps its look. Tokens: `form_primary,
+/// selected_bg, selected_ink`.
+fn selection_ink(t: &Tokens) -> egui::Color32 {
+    if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
+}
+
+/// Below this contrast with `selected_bg`, a form's primary colour counts as the selection's own
+/// colour (`selection_ink`).
+const SELECTION_INK_MIN_CONTRAST: f64 = 1.5;
 
 /// Compact library cards share search, segment, chip and footer metrics.
 pub(crate) fn catalog_scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
@@ -90,7 +103,7 @@ pub(crate) fn catalog_footer(ui: &mut Ui, text: &str) -> Response {
     let icon =
         egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_6, rect.top() + t.space_8 + t.font_small * 0.5), vec2(t.space_12, t.space_12));
     ui.painter().circle_stroke(icon.center(), t.space_4, t.control_border_stroke(t.form_dim));
-    ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, "i", crate::fonts::semibold(t.font_badge), t.form_dim);
+    ui.painter().text(icon.center(), egui::Align2::CENTER_CENTER, "i", crate::ui_kit::type_face::semibold(t.font_badge), t.form_dim);
     let mut job =
         egui::text::LayoutJob::simple(text.to_owned(), egui::FontId::proportional(t.font_small), t.form_dim, (rect.width() - t.space_24).max(1.0));
     job.wrap.max_rows = 1;
@@ -471,7 +484,7 @@ pub(crate) fn figure_rows(
 pub(crate) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), egui::Sense::hover());
-    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, rect, &solidcraft_ui_text::tr_label(title).to_uppercase(), crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
     solidcraft_ui_registry::publish_rect(&format!("dialog:heading:{title}"), rect);
 }
 
@@ -579,7 +592,7 @@ fn section_with_badge<R>(
     let badge_value = count;
     let badge_width = badge_value.as_ref().map_or(0.0, |value| label_width(ui, value) + t.space_12);
     let reserved = if badge_value.is_some() { badge_width + t.space_12 } else { 0.0 };
-    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    let mut format = egui::TextFormat::simple(crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim);
     format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
     let title_width = ui
         .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
@@ -588,7 +601,7 @@ fn section_with_badge<R>(
         .ceil()
         .min((text_rect.width() - reserved).max(0.0));
     let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
-    paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, title_rect, &caption, crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
     let mut rule_left = title_rect.right() + t.space_12;
     let mut rule_right = rect.right();
     if let Some(value) = badge_value {
@@ -662,7 +675,7 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
     let badge_value = count.to_string();
     let badge_width = label_width(ui, &badge_value) + t.space_12;
     let reserved = badge_width + t.space_12;
-    let mut format = egui::TextFormat::simple(crate::fonts::semibold(t.font_caption), t.form_dim);
+    let mut format = egui::TextFormat::simple(crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim);
     format.extra_letter_spacing = t.font_caption * t.font_section_tracking;
     let title_width = ui
         .fonts_mut(|fonts| fonts.layout_job(egui::text::LayoutJob::single_section(caption.clone(), format)))
@@ -671,7 +684,7 @@ pub(crate) fn search_fold<R>(ui: &mut Ui, title: &str, count: usize, add: impl F
         .ceil()
         .min((text_rect.width() - reserved).max(0.0));
     let title_rect = egui::Rect::from_min_max(text_rect.min, egui::pos2(text_rect.left() + title_width, text_rect.bottom()));
-    paint_text(ui, title_rect, &caption, crate::fonts::semibold(t.font_caption), t.form_dim, true);
+    paint_text(ui, title_rect, &caption, crate::ui_kit::type_face::semibold(t.font_caption), t.form_dim, true);
     let mut rule_left = title_rect.right() + t.space_12;
     let width = badge_width.min((rect.right() - rule_left).max(0.0));
     let badge = egui::Rect::from_min_size(egui::pos2(rule_left.min(rect.right()), rect.center().y - t.space_10), vec2(width, t.space_10 * 2.0));
@@ -837,10 +850,10 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         _ => t.form_ink,
     };
     let font = match style {
-        Text::Inline if in_catalog(ui) => crate::fonts::semibold(t.font_small),
-        Text::NameCell(true) | Text::SelectedNameCell => crate::fonts::semibold(t.font_label),
-        Text::NameCell(false) => crate::fonts::medium(t.font_label),
-        Text::Heading(_) => crate::fonts::semibold(t.font_button),
+        Text::Inline if in_catalog(ui) => crate::ui_kit::type_face::semibold(t.font_small),
+        Text::NameCell(true) | Text::SelectedNameCell => crate::ui_kit::type_face::semibold(t.font_label),
+        Text::NameCell(false) => crate::ui_kit::type_face::medium(t.font_label),
+        Text::Heading(_) => crate::ui_kit::type_face::semibold(t.font_button),
         Text::MonoCell | Text::Value(_, _) => egui::FontId::monospace(t.font_body),
         Text::MonoNote(_) => egui::FontId::monospace(t.font_small),
         Text::Hint(_) | Text::Error(_) => egui::FontId::proportional(t.font_body),
@@ -926,7 +939,7 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
     );
     let title = egui::Rect::from_min_max(text.min, egui::pos2(text.right(), text.center().y));
     let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
-    paint_text(ui, title, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
+    paint_text(ui, title, name, crate::ui_kit::type_face::semibold(t.font_label), t.form_ink, false);
     paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
     let response = ui.interact(text, ui.scope_id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{name}: {summary}")));
@@ -939,4 +952,52 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
         actions,
     );
     changed
+}
+
+#[cfg(test)]
+mod selection_ink_tests {
+    use super::selection_ink;
+    use solidcraft_theme::{Tokens, contrast_ratio};
+
+    /// Selected text in a form field stands out from the selection in every built-in theme
+    /// (#11804): none draws it in the selection's own colour.
+    #[test]
+    fn selected_form_text_reads_in_every_built_in_theme() {
+        let mut themes = vec![("Dark".to_string(), Tokens::dark()), ("Light".to_string(), Tokens::light())];
+        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.id.clone(), crate::theme_files::resolve(theme))));
+        let mut failures = Vec::new();
+        for (name, t) in &themes {
+            let ratio = contrast_ratio(selection_ink(t), t.selected_bg);
+            if ratio < 2.0 {
+                failures.push(format!("{name}: {ratio:.2}:1"));
+            }
+        }
+        assert!(failures.is_empty(), "selected form text below 2:1 on selected_bg:\n{}", failures.join("\n"));
+    }
+
+    /// Themes whose primary colour stands out from the selection keep it, Dark and Light
+    /// included; SolidCraft 95 and CGA, where it is the selection colour itself, take the ink for
+    /// selected elements.
+    #[test]
+    fn only_themes_whose_primary_vanishes_switch_to_the_selected_ink() {
+        for t in [Tokens::dark(), Tokens::light()] {
+            assert_eq!(selection_ink(&t), t.form_primary);
+        }
+        let mut switched: Vec<&str> = crate::theme_files::builtin()
+            .iter()
+            .filter(|theme| {
+                let t = crate::theme_files::resolve(theme);
+                selection_ink(&t) != t.form_primary
+            })
+            .map(|theme| theme.id.as_str())
+            .collect();
+        switched.sort_unstable();
+        assert_eq!(switched, ["cga", "solidcraft-95"]);
+        for id in ["solidcraft-95", "cga"] {
+            let theme = crate::theme_files::builtin().iter().find(|theme| theme.id == id).unwrap();
+            let t = crate::theme_files::resolve(theme);
+            assert_eq!(t.form_primary, t.selected_bg, "{id}");
+            assert_eq!(selection_ink(&t), t.selected_ink, "{id}");
+        }
+    }
 }

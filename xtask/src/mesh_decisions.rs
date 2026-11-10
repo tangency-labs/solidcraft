@@ -36,6 +36,7 @@ const MODEL_BODY_CRATES: &[&str] = &["crates/doc", "crates/engine"];
 /// only a field the check's syntactic pattern takes for one.
 pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/doc/src/display_quality.rs", "the viewport's display quality levels"),
+    ("crates/doc/src/gpu_plan.rs", "the display plan in the form the viewport evaluates on the GPU"),
     ("crates/doc/src/placed_mesh.rs", "the display meshes and plans of bodies and placed parts"),
     ("crates/doc/src/point_cloud.rs", "no mesh: the triangles of a point cloud's own complex"),
     ("crates/doc/src/point_cloud_complex.rs", "no mesh: the triangles of a point cloud's own complex"),
@@ -59,15 +60,19 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
     ("crates/kernel/src/meshbody.rs", "mesh bodies"),
     ("crates/kernel/src/native/preview.rs", "a feature's preview mesh"),
     ("crates/kernel/src/polybool.rs", "mesh bodies: booleans of a body with a closed triangle mesh"),
-    ("crates/kernel/src/tess", "the mesher: a body's display tessellation"),
 ];
 
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a
 /// preview, or a mesh body.
 pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
+    (
+        "crates/doc/src/document.rs:MeshData::generate_crease_normals",
+        "mesh bodies: explicit shading metadata; positions, triangles and model decisions are unchanged",
+    ),
     ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
     ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),
+    ("crates/doc/src/eval.rs:ModelBody::gpu_plan_at", "the display plan in the form the GPU evaluates"),
     ("crates/doc/src/eval.rs:ModelBody::mesh", "the display mesh"),
     ("crates/doc/src/eval.rs:ModelBody::mesh_in_place", "the display mesh where the body stands"),
     ("crates/doc/src/eval.rs:ModelBody::plan_mesh", "the display plan's mesh"),
@@ -81,6 +86,7 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:feature_json", "fingerprints feature inputs; triangles are only embedded mesh-body source data"),
     ("crates/doc/src/eval.rs:mesh_bodies", "mesh bodies: a mesh import's triangles"),
     ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
+    ("crates/doc/src/project3d.rs:flat_outline", "mesh bodies: the flat patch of an imported mesh's triangles that a face pick on it means"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),

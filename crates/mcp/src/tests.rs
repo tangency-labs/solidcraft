@@ -323,14 +323,14 @@ fn document_only_atomic_tool_fallback_keeps_existing_checkpoint_rollback_behavio
 /// tests install the same one. `false`, with the reason printed, on a machine without a GPU
 /// adapter: the screenshots are then left out of the test.
 fn renders() -> bool {
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                 c.rgba(scene, cam, w, h).map(|rgba| solidcraft_engine::capture::Picture { rgba, renderer: c.renderer() }).map_err(|e| e.to_string())
             }));
             true
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("screenshots left out: {e}");
             false
         }
@@ -551,6 +551,22 @@ fn export_tool_writes_a_urdf_package() {
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
+#[test]
+fn export_tool_format_argument_accepts_iges() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-iges-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (format, expect) in [("iges", "Iges"), ("igs", "Iges"), ("stp", "Step")] {
+        let path = dir.join(format!("part-{format}.out"));
+        let r = tool(&mut s, "export", json!({"path": path.to_string_lossy(), "format": format}));
+        assert_eq!(r["format"], expect, "{format}: {r}");
+        assert!(std::fs::metadata(&path).unwrap().len() > 0, "{format}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2487,6 +2503,26 @@ fn compact_execute_keeps_changes_ids_and_default_replies() {
     }
 }
 
+/// #9180: a compact sketch reply counts the points of a spline's poles instead of listing them,
+/// and keeps the point ids of curves with only their ends.
+#[test]
+fn compact_sketch_replies_count_spline_poles() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY"}}));
+    let points = json!([[0, 0], [10, 5], [20, 0], [30, 5], [40, 0], [50, 5]]);
+    let full = tool(&mut s, "execute", json!({"command": "sketch.spline.fit_point", "params": {"points": points}}));
+    let listed = full["created"]["points"].as_array().unwrap().len();
+    let curves = full["created"]["curves"].as_array().unwrap().len();
+    assert!(listed > 2 * curves, "{full}");
+    let compact = tool(&mut s, "execute", json!({"command": "sketch.spline.fit_point", "params": {"points": points}, "verbose": false}));
+    assert_eq!(compact["created"]["point_count"], json!(listed), "{compact}");
+    assert!(compact["created"].get("points").is_none(), "{compact}");
+    assert_eq!(compact["created"]["curves"].as_array().map(Vec::len), Some(curves));
+    let rectangle =
+        tool(&mut s, "execute", json!({"command": "sketch.rectangle.two_point", "params": {"p0": [0, 20], "p1": [10, 30]}, "verbose": false}));
+    assert_eq!(rectangle["created"]["points"].as_array().map(Vec::len), Some(4), "{rectangle}");
+}
+
 /// A connected app sees exactly one engine call; no inventory inspection is needed.
 #[test]
 fn compact_execute_uses_one_backend_call_and_keeps_removed_bodies() {
@@ -3586,9 +3622,14 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
     assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
-    let r = raw_tool(&mut s, "execute", json!({"command": "solid.chamfer", "params": {"nonsense": 1}}));
-    assert_ne!(r["result"]["isError"], json!(true), "{r}");
-    assert_eq!(sent("engine.execute solid.chamfer"), 1, "no contract here: the app decides");
+    // A body command with no contract yet: the first stands for them all, so converting a command
+    // doesn't break this.
+    let unchecked = solidcraft_engine::cmd::command_specs().into_iter().find(|c| c.contract.is_none() && c.id.starts_with("solid."));
+    if let Some(id) = unchecked.map(|c| c.id) {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {"nonsense": 1}}));
+        assert_ne!(r["result"]["isError"], json!(true), "{id}: {r}");
+        assert_eq!(sent(&format!("engine.execute {id}")), 1, "{id}: no contract here, so the app decides");
+    }
     let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
@@ -3897,4 +3938,46 @@ fn compact_output_follows_the_apps_preference() {
     assert!(inspect_design_is_compact(&mut s));
     let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true });
     assert!(inspect_design_is_compact(&mut s));
+}
+
+/// A screw's counterbore through MCP alone (#12321): `describe_command` lists `head` and
+/// `head_gap`, `execute` forwards them to `solid.hole` unchanged (the command has no typed
+/// contract), the recess measures as the head table says, and a wrong head or gap is refused
+/// with the value named, leaving the part as it was.
+#[test]
+fn execute_forwards_a_screw_head_to_a_hole_and_describes_it() {
+    let mut s = server();
+    let d = tool(&mut s, "describe_command", json!({"id": "solid.hole"}));
+    let params = d["params"].as_str().unwrap();
+    assert!(params.contains("head?: \"ISO 4762\"") && params.contains("head_gap?"), "{params}");
+    assert!(d["input"].is_null(), "no typed contract: execute forwards the parameters to the command unchanged: {d}");
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 80, "width": 30, "height": 10, "body_name": "Plate"}}));
+    // ISO 4762 M4 (dk 7, k 4) with the default 0.5 mm gap: a Ø4.5 bore under a Ø8 × 4.5 recess.
+    let want = 24000.0 - PI * 2.25 * 2.25 * (10.0 - 4.5) - PI * 4.0 * 4.0 * 4.5;
+    let r = tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.hole", "params": {"position": [15, 15, 10], "clearance": "M4", "head": "ISO 4762"}, "expect": {"volume_mm3": want, "tol": 0.01}}),
+    );
+    assert_eq!(r["expectation"]["mismatch"], json!([]), "{r}");
+    assert!(rel(volume(&mut s), want) < 1e-6, "{want}");
+    // ISO 7380-1 M4 (dk 7.6, k 2.2) with a 0.25 mm gap: Ø8.1 × 2.45.
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "solid.hole", "params": {"position": [40, 15, 10], "clearance": "M4", "head": "ISO 7380-1", "head_gap": "0.25 mm"}}),
+    );
+    let want = want - PI * 2.25 * 2.25 * (10.0 - 2.45) - PI * 4.05 * 4.05 * 2.45;
+    assert!(rel(volume(&mut s), want) < 1e-6, "{want}");
+    for (params, names) in [
+        (json!({"position": [65, 15, 10], "clearance": "M4", "head": "DIN 912"}), "no head standard `DIN 912`"),
+        (json!({"position": [65, 15, 10], "clearance": "M4", "head": "ISO 4762", "head_gap": -1}), "`head_gap` must be 0 to 7 mm"),
+        (json!({"position": [65, 15, 10], "diameter": 4.5, "head": "ISO 4762"}), "`head` needs `clearance`"),
+    ] {
+        let r = raw_tool(&mut s, "execute", json!({"command": "solid.hole", "params": params}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(names), "{text}");
+    }
+    assert!(rel(volume(&mut s), want) < 1e-6, "a refused hole changes nothing");
 }
