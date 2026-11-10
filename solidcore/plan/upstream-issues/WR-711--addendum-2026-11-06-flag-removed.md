@@ -17,11 +17,10 @@ tangency-labs/solidcore#2330.
   fork 5e8c9c1's 11956.222433581395 to 1e-9, and the five cliff overflows of
   `wr685_variable_round_touch_circle` are fork 5e8c9c1's to 1e-12.
 - **Needs the stations that follow the law:** the exact circles are skinned between the
-  trace's stations. On a kernel with the G^n section but without
-  `fillet_variable_span_follows_fillet` (the fork's 4438859), the progressive round is 5.0e-4
-  off its balls between stations, and its volume is 1.2e-7 over the envelope's. With it, the
-  round is 8.1e-5 off. `fork_ea59e9c_section_orders`' G^n kernel case now sets that flag.
-  SolidCraft's set has it.
+  trace's stations. On a kernel without `fillet_variable_span_follows_fillet` (the fork's
+  4438859), the progressive round is 5.0e-4 off its balls between stations, and its volume is
+  1.2e-7 over the envelope's. With it, the round is 8.1e-5 off. `fork_ea59e9c_section_orders`'
+  default-kernel case now sets that flag. SolidCraft's set has it.
 - **Tests:** the flag-off half of
   `wr711_exact_circles_of_one_arc_count_keep_the_progressive_round_on_its_balls` and the fork
   5e8c9c1 kernel of `wr685_variable_round_touch_circle` are removed. The 5e8c9c1 values that
