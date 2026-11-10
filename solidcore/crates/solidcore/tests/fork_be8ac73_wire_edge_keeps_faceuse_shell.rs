@@ -40,7 +40,7 @@ struct Joined {
     cube_shell: ShellId,
     wire_shell: ShellId,
     vertex_shell: ShellId,
-    navigator_faceuses: Vec<FaceuseId>,
+    cube_faceuses: Vec<FaceuseId>,
     /// the infinite region's shells after the join
     shells: Vec<ShellId>,
     /// the joined shell's face uses and wire edges (sorted)
@@ -57,8 +57,8 @@ fn join(fix: bool) -> Joined {
     assert_eq!(b.region(infinite).unwrap().shells.len(), 1);
     let cube_shell = b.region(infinite).unwrap().shells[0];
     assert!(b.shell(cube_shell).unwrap().is_faceuse_shell());
-    let navigator_faceuses = b.shell(cube_shell).unwrap().get_faceuses().unwrap();
-    assert_eq!(navigator_faceuses.len(), 6);
+    let cube_faceuses = b.shell(cube_shell).unwrap().get_faceuses().unwrap();
+    assert_eq!(cube_faceuses.len(), 6);
     let corner = b.edge(b.edges().iter().next().unwrap().0).unwrap().vertices[0];
 
     let (wire_shell, v0) = make_shell_vertex_topology(&mut b, None).unwrap();
@@ -91,7 +91,7 @@ fn join(fix: bool) -> Joined {
         cube_shell,
         wire_shell,
         vertex_shell,
-        navigator_faceuses,
+        cube_faceuses,
         shells,
         faceuses,
         wires,
@@ -102,7 +102,7 @@ fn join(fix: bool) -> Joined {
 fn check_common(j: &Joined) {
     assert_eq!(j.shells.len(), 2);
     assert_eq!(j.shells[1], j.vertex_shell);
-    assert_eq!(j.faceuses, j.navigator_faceuses);
+    assert_eq!(j.faceuses, j.cube_faceuses);
     let mut expected = j.new_edges.to_vec();
     expected.sort_unstable();
     assert_eq!(j.wires, expected);

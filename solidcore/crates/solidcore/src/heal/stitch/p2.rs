@@ -2061,7 +2061,7 @@ mod tests {
     /// The faces of the cube `[lo, hi]^3` as loose planar faces of `b`, each loop
     /// counterclockwise about the outward normal (`inward`: about the inward one, the
     /// faces of a cavity).
-    fn add_navigator_faces(k: &mut Kernel, b: &mut Brep, lo: f64, hi: f64, inward: bool) {
+    fn add_cube_faces(k: &mut Kernel, b: &mut Brep, lo: f64, hi: f64, inward: bool) {
         use crate::math::Point3;
 
         let p = |x: f64, y: f64, z: f64| Point3::new(x, y, z);
@@ -2107,8 +2107,8 @@ mod tests {
                 crate::geom::tol::USE_DEFAULT,
             )
             .unwrap();
-            add_navigator_faces(&mut k, &mut b, 0.0, 10.0, false);
-            add_navigator_faces(&mut k, &mut b, 3.0, 7.0, true);
+            add_cube_faces(&mut k, &mut b, 0.0, 10.0, false);
+            add_cube_faces(&mut k, &mut b, 3.0, 7.0, true);
             let r = stitch_into_solid(&mut k, &mut b).unwrap();
             assert!(r.produces_a_solid, "{r:?}");
             assert_eq!(r.lamina_edges, 0);
