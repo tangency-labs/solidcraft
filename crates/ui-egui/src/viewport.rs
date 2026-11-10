@@ -218,7 +218,7 @@ pub struct ViewportState {
     /// Joint whose browser row is under the cursor: its glyph is drawn in the hover colour.
     pub hover_joint: Option<u64>,
     /// The point the orbit under way turns around (Preferences: orbit around the cursor, or the
-    /// view's centre beside an open panel), chosen when it begins.
+    /// view's centre (`navigation::view_middle`)), chosen when it begins.
     pub orbit_pivot: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
@@ -228,8 +228,8 @@ pub struct ViewportState {
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
     /// The point continuous orbit turns about (Orbit around: origin, the cursor's model point, or
-    /// the view's centre beside an open panel),
-    /// chosen when it starts and kept until it stops, so the model stays in view (#1044).
+    /// the view's centre (`navigation::view_middle`)), chosen when it starts and kept until it
+    /// stops, so the model stays in view (#1044).
     pub spin_pivot: Option<Vec3>,
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
     /// camera may do (`navigation::device`).
