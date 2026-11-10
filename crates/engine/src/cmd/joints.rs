@@ -54,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ORIGIN_CONTRACT)
         .output(output_schema_for::<MakeJointOriginResult>)
         .params(
-        "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z]; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
+        "name?, occurrence?: id|name (default: from the pick, or the named face's component), path?: [occurrence ids from the root] (the placement picked on, ending at the occurrence: a part in a sub-assembly placed more than once is then on that copy; default: the occurrence's first placement, or with no occurrence the placement nearest the pick), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"o:<ids>/origin/<item>\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
     CommandSpec::new("joint.create", "Joint", crate::checked!("joint.create", joint))
         .at("SOLID", "ASSEMBLE")
@@ -64,9 +64,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<JointAddedResult>)
         .params(
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, or a relation: parallel|perpendicular|angle|point_on_plane|point_on_line|line_on_plane \
-         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
+         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\", plane: \"XY\"|\"o:<ids>/origin/<item>\"|\"<name>\", axis: \"Z\"|\"o:<ids>/origin/<item>\"|\"<name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool (default false: the origins are mated, \
-         b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
+         b's z against a's as two faces meet - two plane or axis datums mate aligned, each part keeping its side of the datum, and flip mates them; \
+         true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
          a point origin without x takes its x from z, so give x on both, or use joint.as_built, to keep a turned part where it is); \
          offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
          is none, or a half turn where that turns b less, so faces that already meet stay as they are); name?; quiet?: bool (leave \
@@ -557,18 +558,209 @@ pub(crate) fn in_first_placement(s: &Session, v: &Value, path: &[u64], cmd: &str
     Ok(out)
 }
 
+/// The occurrence path of an occurrence id, root first (the ids `Document::placement_frame`
+/// walks; the first occurrence stands in for a parent component, as `occurrence_world` does).
+fn occurrence_path(s: &Session, occurrence: u64) -> Vec<u64> {
+    let mut path = Vec::new();
+    let mut cur = s.doc.occurrences.iter().find(|o| o.id == occurrence);
+    for _ in 0..64 {
+        let Some(o) = cur else { break };
+        path.insert(0, o.id);
+        if o.parent == 0 {
+            break;
+        }
+        cur = s.doc.occurrence_of(o.parent);
+    }
+    path
+}
+
+/// The side's own origin plane: the root keeps `PlaneRef::Origin` ("XY" of the design, as
+/// before), a placement saves its exact datum, re-resolved at every solve.
+fn own_plane(s: &Session, occurrence: u64, name: &str) -> solidcraft_doc::PlaneRef {
+    match solidcraft_doc::construct::DatumItem::parse(name).filter(|_| occurrence != 0) {
+        Some(item) => solidcraft_doc::PlaneRef::Datum { datum: solidcraft_doc::construct::DatumRef { path: occurrence_path(s, occurrence), item } },
+        None => solidcraft_doc::PlaneRef::Origin { name: name.to_string() },
+    }
+}
+
+/// A side's plane from a name, in the order every resolver shares: the feature named exactly,
+/// then the datum key, then the origin planes. A bare "XY"/"XZ"/"YZ" is the side's own
+/// component's datum (the root's own when `occurrence` is 0).
+fn plane_side(s: &Session, name: &str, occurrence: u64, cmd: &str) -> Result<solidcraft_doc::PlaneRef> {
+    let trimmed = name.trim();
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
+        if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Plane(_)) {
+            return Ok(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() });
+        }
+        return Err(bad(cmd, format!("`{trimmed}` is not a construction plane")));
+    }
+    if let Some(datum) = solidcraft_doc::construct::DatumRef::parse_key(trimmed) {
+        return Ok(solidcraft_doc::PlaneRef::Datum { datum });
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+        return Ok(own_plane(s, occurrence, &upper));
+    }
+    Err(bad(cmd, format!("no plane `{trimmed}`")))
+}
+
+/// A side's axis from a name, in the same order: the feature named exactly, then the datum key,
+/// then the origin axes. A bare "X"/"Y"/"Z" is the side's own component's axis.
+fn axis_side(s: &Session, name: &str, cmd: &str) -> Result<solidcraft_doc::joints::AxisRef> {
+    let trimmed = name.trim();
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
+        if matches!(c.geom, solidcraft_doc::construct::ConstructGeom::Axis { .. }) {
+            return Ok(solidcraft_doc::joints::AxisRef::construction(trimmed.to_string()));
+        }
+        return Err(bad(cmd, format!("`{trimmed}` is not a construction axis")));
+    }
+    if let Some(datum) = solidcraft_doc::construct::DatumRef::parse_key(trimmed) {
+        return Ok(solidcraft_doc::joints::AxisRef::datum(datum));
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if matches!(upper.as_str(), "X" | "Y" | "Z") {
+        return Ok(solidcraft_doc::joints::AxisRef::origin(upper));
+    }
+    Err(bad(cmd, format!("no axis `{trimmed}`")))
+}
+
+/// The occurrence a string side sits on when none is given, in the order every resolver shares:
+/// the named construction feature's component, then its datum key's own placement, the root for
+/// a bare origin name, else where the pick is.
+fn side_occurrence(s: &Session, name: &str, world_pick: Option<Vec3>) -> u64 {
+    let trimmed = name.trim();
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == trimmed) {
+        let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+        return if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) };
+    }
+    if let Some(datum) = solidcraft_doc::construct::DatumRef::parse_key(trimmed) {
+        return datum.path.last().copied().unwrap_or(0);
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ" | "X" | "Y" | "Z") {
+        return 0;
+    }
+    world_pick.map_or(0, |w| occurrence_at(s, w).unwrap_or(0))
+}
+
+/// Resolve an origin from a name, in the order every resolver shares: a construction plane or
+/// axis named exactly (bound to its component), then the origin planes ("XY", "XZ", "YZ") and
+/// axes ("X", "Y", "Z"). A named joint origin is the caller's.
+fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str) -> Result<Option<JointOrigin>> {
+    let name_trim = name.trim();
+    // A construction plane or axis feature, by name, bound to its component: the side sits on
+    // that component's first occurrence unless an explicit one is given.
+    let st = s.model.state();
+    if let Some(c) = st.construct.iter().find(|c| c.name == name_trim) {
+        let occ = occurrence.unwrap_or_else(|| {
+            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+            if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) }
+        });
+        let snap = match &c.geom {
+            solidcraft_doc::construct::ConstructGeom::Plane(_) => {
+                Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Construction { feature: c.feature.into() }), pick: None, x: None }
+            }
+            solidcraft_doc::construct::ConstructGeom::Axis { .. } => {
+                Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::construction(name_trim.to_string())), pick: None, x: None }
+            }
+            _ => return Ok(None),
+        };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
+    let upper = name_trim.to_ascii_uppercase();
+    let occ = occurrence.unwrap_or(0);
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+        let snap = Snap::Plane { plane: Box::new(own_plane(s, occ, &upper)), pick: None, x: None };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
+    if matches!(upper.as_str(), "X" | "Y" | "Z") {
+        let snap = Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::origin(upper)), pick: None, x: None };
+        return settle(s, JointOrigin::new(occ, snap), &json!({}), cmd).map(Some);
+    }
+    Ok(None)
+}
+
+/// A joint origin on a plane: a construction plane by name, a placement's datum key
+/// ("o:2/origin/XY"), the root's origin planes ("XY"), or a plane definition object. Optional
+/// `pick: [x,y,z]` sets the origin along the plane; `x` sets the turn.
+fn plane_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let p_val = v.get("plane").ok_or_else(|| bad(cmd, "`plane` parameter required"))?;
+    let world_pick = ["pick", "at", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None => p_val
+            .as_str()
+            .map(|name| side_occurrence(s, name, world_pick))
+            .unwrap_or_else(|| world_pick.map_or(0, |w| occurrence_at(s, w).unwrap_or(0))),
+    };
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local = |p: Vec3| solidcraft_doc::apply_point(&inv, p);
+    let component = component_of(s, occurrence);
+
+    let plane_ref = match p_val {
+        Value::String(name) => plane_side(s, name, occurrence, cmd)?,
+        Value::Object(_) => serde_json::from_value(p_val.clone()).map_err(|e| bad(cmd, format!("invalid plane definition: {e}")))?,
+        _ => return Err(bad(cmd, "`plane` must be a plane name (e.g. \"XY\", \"o:2/origin/XY\", \"Plane1\") or a plane definition object")),
+    };
+
+    let pick = world_pick.map(local);
+    let x = x_param(s, v, component, &inv, cmd)?;
+    let snap = Snap::Plane { plane: Box::new(plane_ref), pick, x };
+    settle(s, JointOrigin::new(occurrence, snap), v, cmd)
+}
+
+/// A joint origin on an axis: a construction axis by name, a placement's datum key
+/// ("o:2/origin/X"), the root's origin axes ("X"), or an axis definition object. Optional
+/// `pick: [x,y,z]` sets the origin along the line; `x` sets the turn.
+fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let a_val = v.get("axis").ok_or_else(|| bad(cmd, "`axis` parameter required"))?;
+    let world_pick = ["pick", "at", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None => a_val
+            .as_str()
+            .map(|name| side_occurrence(s, name, world_pick))
+            .unwrap_or_else(|| world_pick.map_or(0, |w| occurrence_at(s, w).unwrap_or(0))),
+    };
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local = |p: Vec3| solidcraft_doc::apply_point(&inv, p);
+    let component = component_of(s, occurrence);
+
+    let axis_ref = match a_val {
+        Value::String(name) => axis_side(s, name, cmd)?,
+        Value::Object(_) => serde_json::from_value(a_val.clone()).map_err(|e| bad(cmd, format!("invalid axis definition: {e}")))?,
+        _ => return Err(bad(cmd, "`axis` must be an axis name (e.g. \"Z\", \"o:2/origin/X\", \"Axis1\") or an axis definition object")),
+    };
+
+    let pick = world_pick.map(local);
+    let x = x_param(s, v, component, &inv, cmd)?;
+    let snap = Snap::Axis { axis: Box::new(axis_ref), pick, x };
+    settle(s, JointOrigin::new(occurrence, snap), v, cmd)
+}
+
 /// A joint origin from parameters: a named origin, or a snap given in world coordinates.
 pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
     let v = v.ok_or_else(|| bad(cmd, "joint origins `a` and `b` are required"))?;
     if let Value::String(name) = v {
-        return s
-            .doc
-            .assembly
-            .origins
-            .iter()
-            .find(|o| &o.name == name)
-            .map(|o| o.origin.clone())
-            .ok_or_else(|| bad(cmd, format!("no joint origin `{name}`")));
+        if let Some(o) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
+            return Ok(o.origin.clone());
+        }
+        if let Some(o) = origin_from_name(s, name, None, cmd)? {
+            return Ok(o);
+        }
+        return Err(bad(cmd, format!("no joint origin `{name}`")));
+    }
+    // A plane or axis origin given in object form.
+    if v.get("plane").is_some() {
+        return plane_origin(s, v, cmd);
+    }
+    if v.get("axis").is_some() && v.get("edge").is_none() && v.get("point").is_none() {
+        return axis_origin(s, v, cmd);
     }
     let world = ["face", "circle", "edge", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
     let world = world.or_else(|| v.get("frame").and_then(|f| f.get("origin")).and_then(vec3));
@@ -595,7 +787,7 @@ fn origin_on_part(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
     let (what, world) = match (pick, v.get("frame")) {
         (Some(x), _) => x,
         (None, Some(f)) => ("frame", f.get("origin").and_then(vec3).ok_or_else(|| bad(cmd, "`frame` needs origin and z"))?),
-        _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name")),
+        _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name")),
     };
     let occurrence = match v.get("occurrence") {
         Some(o) => occurrence_id(s, Some(o), cmd)?,
@@ -773,6 +965,10 @@ fn settle(s: &Session, mut o: JointOrigin, v: &Value, cmd: &str) -> Result<Joint
     // A face or circle given no `x` keeps the x it has now, so its frame doesn't turn as the face
     // tilts.
     o.snap = o.snap.with_frame_x(Vec3::new(m[0][0], m[0][1], m[0][2]));
+    // A datum side given no pick keeps the origin it took now: the solve re-lays it onto the
+    // datum as the datum is then, instead of mapping the datum through the side's own current
+    // frame, which would move the side again on every solve.
+    o.snap = o.snap.with_datum_pick(Vec3::new(m[3][0], m[3][1], m[3][2]));
     Ok(o)
 }
 
@@ -945,6 +1141,12 @@ fn closes_loop(s: &Session, j: &Joint) -> bool {
     false
 }
 
+/// Either side sits on a plane or axis snap (a datum, a construction feature, an origin alias):
+/// the joint anchors its part to that geometry.
+fn datum_sided(j: &Joint) -> bool {
+    matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) || matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. })
+}
+
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
@@ -952,9 +1154,12 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     check_sides(&j.a, &j.b, "joint.create")?;
     // Relations and loop-closing typed joints start where their parts are. A typed joint in
     // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
+    // A joint on a plane or axis side anchors its part to that geometry: it starts where its
+    // parts are too, so the part keeps its place on the plane (or along the axis) instead of
+    // jumping to the geometry's origin.
     if p.get("values").is_none()
         && p.get("value").is_none()
-        && (j.kind.is_relation() || closes_loop(s, &j))
+        && (j.kind.is_relation() || closes_loop(s, &j) || datum_sided(&j))
         && let Some(q) = joints::relation_values(&s.doc, &s.model.state(), &j)
     {
         j.values = q;
@@ -1845,7 +2050,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let sides = a.is_some() || b.is_some();
     if sides {
         let j = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
-        check_sides(a.as_ref().unwrap_or(&j.a), b.as_ref().unwrap_or(&j.b), cmd)?;
+        let orig_a = a.as_ref().unwrap_or(&j.a);
+        let orig_b = b.as_ref().unwrap_or(&j.b);
+        check_sides(orig_a, orig_b, cmd)?;
     }
     let doc = s.doc_mut();
     let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };

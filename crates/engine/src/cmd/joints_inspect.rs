@@ -147,6 +147,11 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
                 out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
             }
         }
+        Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
+            }
+        }
         Snap::Frame { .. } | Snap::Point { .. } => {}
     }
     out
