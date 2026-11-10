@@ -2127,6 +2127,49 @@ pub(super) fn boundary_iso_curve(
     )?))
 }
 
+/// Endpoint evaluation contributes one checked S cap; comparison to an S query
+/// contributes another. The remaining terms enclose the stored line direction,
+/// four-operation normalized parameter quotient and three coordinate operations.
+fn screw_line_roundoff(cap: f64, line: &Line, start: Point3, end: Point3) -> Result<f64> {
+    use crate::blend::fillet_section::interval::Ivl;
+    let interval = line.natural_interval();
+    let width = Ivl::from(interval.max()) - Ivl::from(interval.min());
+    if width.lo < f64::MIN_POSITIVE {
+        return Err(SolidError::invalid_input(
+            "surface::natural_screw_boundary",
+            "line parameter width is not normal",
+        ));
+    }
+    let eta = Ivl::from(f64::from_bits(1));
+    let quotient = Ivl::checked(crate::nurbs::math::gamma(4), crate::nurbs::math::gamma(4))
+        + Ivl::from(4.0) * eta / width;
+    let coordinate = Ivl::checked(crate::nurbs::math::gamma(3), crate::nurbs::math::gamma(3));
+    let v = line.line_vector();
+    let mut square = Ivl::from(0.0);
+    for (p, q, v) in [
+        (start.x, end.x, v.x),
+        (start.y, end.y, v.y),
+        (start.z, end.z, v.z),
+    ] {
+        let direction = Ivl::from(v) * Ivl::from(line.line_scale());
+        let difference = direction - (Ivl::from(q) - Ivl::from(p));
+        let error = Ivl::from(difference.mag())
+            + quotient * Ivl::from(direction.mag())
+            + coordinate
+                * (Ivl::from(p.abs()) + (Ivl::from(1.0) + quotient) * Ivl::from(direction.mag()))
+            + Ivl::from(3.0) * eta;
+        square = square + error * error;
+    }
+    let result = (Ivl::from(2.0) * Ivl::from(cap) + square.sqrt()).hi;
+    if !result.is_finite() {
+        return Err(SolidError::invalid_input(
+            "surface::natural_screw_boundary",
+            "line rounding bound is not finite",
+        ));
+    }
+    Ok(result)
+}
+
 /// `CreateIsoParametricCurve(ctx, dir, value, 0.0, pCurve, pOptDomain, &maxGap)`
 /// (virtual): the curve and its achieved maximum gap.
 pub(super) fn create_iso_parametric_curve(
@@ -2136,6 +2179,75 @@ pub(super) fn create_iso_parametric_curve(
     value: f64,
     domain: Option<&Extent2d>,
 ) -> Result<(Curve, f64)> {
+    if surface
+        .procedural_sweep()
+        .is_some_and(|s| s.definition().screw().is_some())
+    {
+        let iso = surface.create_iso_parametric_curve(k, dir, value, 0.0, domain, true)?;
+        let uv = iso.uv_iso_curve.ok_or_else(|| {
+            SolidError::invalid_input(
+                "surface::natural_screw_boundary",
+                "missing exact iso UV line",
+            )
+        })?;
+        let sweep = surface.procedural_sweep().ok_or_else(|| {
+            SolidError::invalid_input(
+                "surface::natural_screw_boundary",
+                "missing screw definition",
+            )
+        })?;
+        let definition = sweep.definition();
+        let (origin, scale, swapped) = definition.definition_map();
+        let constant_turn =
+            (dir == SurfParamType::V && !swapped) || (dir == SurfParamType::U && swapped);
+        if constant_turn
+            && !definition.is_normal_offset()
+            && origin.into_iter().chain(scale).all(f64::is_finite)
+            && scale.into_iter().all(|s| s != 0.0)
+        {
+            if let Some((_, [lo, hi])) =
+                crate::surface::procedural_sweep::affine_source(definition.profile())?
+            {
+                let interval = uv.natural_interval();
+                let start_uv = uv.evaluate_point(k, interval.min())?;
+                let end_uv = uv.evaluate_point(k, interval.max())?;
+                let a = Point2::new(start_uv.x, start_uv.y);
+                let b = Point2::new(end_uv.x, end_uv.y);
+                let wa = definition.definition_parameters(a).x;
+                let wb = definition.definition_parameters(b).x;
+                // The line's rounding is bounded by the definition's proved evaluation
+                // allowance. A sweep without one (a radial law, for instance) keeps the
+                // curve on its surface below, which needs no such bound.
+                let allowance = if wa.min(wb) >= lo && wa.max(wb) <= hi && wa != wb {
+                    match definition.runtime_evaluation_allowance() {
+                        Ok(allowance) => Some(allowance),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(allowance) = allowance {
+                    // At fixed turn the retained motion is affine in its source.
+                    // A signed/permuted chart preserves this line. Build from S,
+                    // never the display net, keeping its varying-coordinate interval.
+                    let start = definition.evaluate_definition_point(a)?;
+                    let end = definition.evaluate_definition_point(b)?;
+                    let line = Line::create_line_segment(3, start, end, Some(&interval))?;
+                    let gap = screw_line_roundoff(allowance, &line, start, end)?;
+                    return Ok((Curve::from(line), gap));
+                }
+            }
+        }
+        let curve = crate::curve::crv_on_surf::CrvOnSurf::new(
+            k,
+            uv,
+            surface.clone_exact_bounded(),
+            domain.copied(),
+            3,
+        )?;
+        return Ok((Curve::from(curve), 0.0));
+    }
     match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => {
             let iso = b.create_iso_parametric_curve(

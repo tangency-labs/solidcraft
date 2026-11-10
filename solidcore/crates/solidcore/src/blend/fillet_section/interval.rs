@@ -187,6 +187,101 @@ impl From<f64> for Ivl {
     }
 }
 
+/// Absolute rounding error of each linear B-spline basis quotient on one span.
+/// `basis_eval_into` computes L=t-k0, R=k1-t, D=L+R, then L/D and R/D.
+/// For t in [k0,k1], nonnegative operands give
+/// `E_D <= gamma_2*width+4*eta` and `E_numerator <= UNIT*width+eta`,
+/// where eta is the smallest subnormal (including propagated underflow).
+/// The quotient perturbation and its final rounding give the returned bound.
+/// A denominator not proved finite, normal and positive returns the whole line.
+pub(crate) fn linear_basis_quotient_rounding(width: Ivl) -> Ivl {
+    use crate::nurbs::math::{gamma, UNIT};
+
+    if width.lo <= 0.0 || !width.lo.is_finite() || !width.hi.is_finite() {
+        return Ivl::whole();
+    }
+    let tiny = Ivl::from(f64::from_bits(1));
+    let unit = Ivl::from(UNIT);
+    // For n=2 the shared gamma's numerator and denominator are exact; enclose
+    // its single rounded division before using it in interval arithmetic.
+    let g = gamma(2);
+    let edelta = Ivl::checked(g, g) * width + Ivl::from(4.0) * tiny;
+    let numerator = unit * width + tiny;
+    let delta = width - edelta;
+    if delta.lo < f64::MIN_POSITIVE || !(width + edelta).hi.is_finite() {
+        return Ivl::whole();
+    }
+    (numerator + edelta) / delta + unit * (width + numerator) / delta + tiny
+}
+
+/// Rigorous sine/cosine intervals from Taylor's alternating remainder on |x|<=1.5.
+/// Twenty terms are evaluated with outward arithmetic and widened by the next
+/// term. This primitive makes no assumption about a platform libm error bound.
+fn sin_cos_local(x: Ivl) -> (Ivl, Ivl) {
+    if !x.lo.is_finite() || !x.hi.is_finite() || x.lo > x.hi || x.mag() > 1.5 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let square = x * x;
+    let mut sine = x;
+    let mut cosine = Ivl::from(1.0);
+    let mut st = x;
+    let mut ct = Ivl::from(1.0);
+    for n in 1..=20_u32 {
+        st = st * square / Ivl::from(f64::from(2 * n * (2 * n + 1)));
+        ct = ct * square / Ivl::from(f64::from((2 * n - 1) * 2 * n));
+        if n % 2 == 0 {
+            sine = sine + st;
+            cosine = cosine + ct;
+        } else {
+            sine = sine - st;
+            cosine = cosine - ct;
+        }
+    }
+    let sr = (st * square / Ivl::from(42.0 * 43.0)).mag();
+    let cr = (ct * square / Ivl::from(41.0 * 42.0)).mag();
+    (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr))
+}
+
+/// Sine/cosine with interval-enclosed quadrant reduction. The selected quadrant
+/// is an exactly representable integer; the remainder must fit the local Taylor
+/// interval. Unproved argument reduction returns the whole line in both outputs.
+pub(crate) fn sin_cos_certified(angle: Ivl) -> (Ivl, Ivl) {
+    let quadrant = (angle.mid() / std::f64::consts::FRAC_PI_2).round();
+    // Binary64 represents every integer through 2^52 exactly. This also keeps
+    // the conversion to i64 and subsequent modulo operation in their ranges.
+    if !quadrant.is_finite() || quadrant.abs() > 4_503_599_627_370_496.0 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let tau = std::f64::consts::TAU;
+    let reduced = angle - Ivl::from(quadrant) * (Ivl::checked(tau, tau) / Ivl::from(4.0));
+    let (s, c) = sin_cos_local(reduced);
+    let negative = |x: Ivl| Ivl::from(0.0) - x;
+    match (quadrant as i64).rem_euclid(4) {
+        0 => (s, c),
+        1 => (c, negative(s)),
+        2 => (negative(s), negative(c)),
+        _ => (negative(c), s),
+    }
+}
+
+/// Tangent on an interval inside [-1.5,1.5]. Monotonic endpoint evaluation uses
+/// the same Taylor primitive as sine/cosine and proves the denominator positive.
+/// An unproved finite tangent returns the whole line.
+pub(crate) fn tan_certified(x: Ivl) -> Ivl {
+    let endpoint = |x: f64| {
+        let (s, c) = sin_cos_local(Ivl::from(x));
+        if c.lo <= 0.0 {
+            Ivl::whole()
+        } else {
+            s / c
+        }
+    };
+    if x.lo > x.hi {
+        return Ivl::whole();
+    }
+    Ivl::new(endpoint(x.lo).lo, endpoint(x.hi).hi)
+}
+
 impl Ivl {
     /// `sm_Ivl(double a, double b)`.
     #[must_use]

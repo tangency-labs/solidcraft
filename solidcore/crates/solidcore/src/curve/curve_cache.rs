@@ -601,6 +601,17 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             approx_tol = context_approx_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
         }
 
+        // A certified screw iso uses B only for parameter subdivision. Its leaf
+        // boxes below enclose S directly, and all local solves keep self.curve.
+        let screw_seed = match self.curve.kind() {
+            CurveKind::Iso(iso) => iso.screw_seed(k)?,
+            _ => None,
+        };
+        let certified_screw = screw_seed.is_some()
+            || match self.curve.kind() {
+                CurveKind::CrvOnSurf(c) => c.screw_line_enclosure(&self.interval)?.is_some(),
+                _ => false,
+            };
         // force curve to have a NURB representation
         let owner = self.curve.owner();
         let is_bspline = match self.curve.kind_mut() {
@@ -646,6 +657,8 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             | CurveKind::Composite(_) => false,
         };
 
+        let is_bspline = is_bspline || screw_seed.is_some();
+
         // ordered leaf Beziers each passing the tessellation tests
         let mut leaf_beziers: Vec<Nurb> = Vec::new();
 
@@ -656,7 +669,9 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         }
 
         // 1. build a Bezier span for each unique-knot span
-        let beziers = {
+        let beziers = if let Some(seed) = &screw_seed {
+            create_bezier_segment_block(k, seed.gw_nurb(), &self.curve)?
+        } else {
             let nurb = match self.curve.kind() {
                 CurveKind::BSpline(b) => b.gw_nurb(),
                 CurveKind::Hyperbola(h) => h.base().gw_nurb(),
@@ -729,7 +744,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
 
             // skip short spans - unless its the last span and no other spans have
             // yet to be output
-            if c.null_curve && (!self.spans.is_empty() || i + 1 < num_beziers) {
+            if !certified_screw && c.null_curve && (!self.spans.is_empty() || i + 1 < num_beziers) {
                 continue;
             }
 
@@ -809,7 +824,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 )?;
 
                 // skip very small curves
-                if c.null_curve {
+                if !certified_screw && c.null_curve {
                     continue;
                 }
 
@@ -955,7 +970,18 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 .map_or_else(PseudoBox::zero_filled, |s| s.pseudo_box);
             let boxes =
                 ignored(bsp.calculate_bounding_box_onto(&bsp.natural_interval(), req, initial))?;
-            let (bbox, pseudo) = boxes.map_or((None, None), |b| (b.normal, b.pseudo));
+            let (mut bbox, mut pseudo) = boxes.map_or((None, None), |b| (b.normal, b.pseudo));
+            let certified = match self.curve.kind() {
+                CurveKind::Iso(iso) => iso.screw_enclosure(&bsp.natural_interval())?,
+                CurveKind::CrvOnSurf(c) => c.screw_line_enclosure(&bsp.natural_interval())?,
+                _ => None,
+            };
+            {
+                if let Some(certified) = certified {
+                    bbox = Some(certified);
+                    pseudo = Some(PseudoBox::from_extent3d(&certified));
+                }
+            }
             if let (Some(p), Some(span)) = (pseudo, self.spans.get_mut(i)) {
                 span.pseudo_box = p;
             }

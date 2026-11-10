@@ -2564,6 +2564,14 @@ impl Surface {
         signed_offset_distance: f64,
         approx_tol_3d: f64,
     ) -> Result<Option<Self>> {
+        if let Some(sweep) = self.procedural_sweep() {
+            if sweep.definition().screw_offset_section()?.is_some() {
+                return sweep
+                    .definition()
+                    .normal_offset(sweep.net(), signed_offset_distance, approx_tol_3d)
+                    .map(Some);
+            }
+        }
         // a blend by its definition (#2487): the round of the moved radius on the offset
         // supports, built from its definition S, never an offset of its net
         if let Some(blend) = self.procedural_blend() {
@@ -5114,6 +5122,35 @@ mod tests {
             panic!("expected an offset surface");
         };
         assert_eq!(o.offset_distance(), 0.5);
+    }
+
+    #[test]
+    fn non_affine_screw_offset_uses_general_surface_path() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+        use crate::surface::procedural_sweep::{ProceduralSweep, ScrewMotion};
+
+        let frame = Axis2Placement::new(Vec3::new(3.0, 0.0, 0.0), Vec3::X, Vec3::Z);
+        let profile = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            0.5,
+            0.0,
+            90.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 1.5, None).unwrap();
+        let stations = [0.0, 0.3];
+        let net = crate::sweep::screw::screw_net(&profile, &motion, &stations).unwrap();
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.15).unwrap();
+        let mut surface = Surface::from(net);
+        surface.set_sweep_definition(definition);
+        let offset = surface
+            .create_offset_surface(&Kernel::default(), 0.1, 1e-3)
+            .unwrap()
+            .unwrap();
+        assert!(matches!(offset.kind(), SurfaceKind::OffsetSurface(_)));
     }
 
     #[test]

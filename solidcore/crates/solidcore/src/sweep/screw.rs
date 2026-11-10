@@ -521,9 +521,16 @@ fn cylinder_piece(
 /// arcs'. A wall's point is the curve's weighted mean of its control points' paths at
 /// the same parameter, which all turn and lift alike, so the wall is the profile curve
 /// turned and lifted as one.
-fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
+fn screw_wall(m: &Screw, c: &Nurbs, pieces: &[Stations]) -> Result<BSplineSurface> {
     let count = c.points.len();
-    let across = 2 * st.spans() + 1;
+    let spans = pieces
+        .iter()
+        .try_fold(0usize, |n, st| n.checked_add(st.spans()))
+        .ok_or_else(|| bad("a wall's control net is too large"))?;
+    let across = spans
+        .checked_mul(2)
+        .and_then(|n| n.checked_add(1))
+        .ok_or_else(|| bad("a wall's control net is too large"))?;
     let size = count
         .checked_mul(across)
         .filter(|&n| n <= MAX_NET_POINTS)
@@ -532,9 +539,15 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
     let mut weights = Vec::new();
     for (l, &p) in c.points.iter().enumerate() {
         let w = c.weights.get(l).copied().unwrap_or(1.0);
-        for (j, q) in path(m, p, st).into_iter().enumerate() {
-            net.push(q);
-            weights.push(w * st.weight(j));
+        for (i, st) in pieces.iter().enumerate() {
+            for (j, q) in path(m, p, st)
+                .into_iter()
+                .enumerate()
+                .skip(usize::from(i > 0))
+            {
+                net.push(q);
+                weights.push(w * st.weight(j));
+            }
         }
     }
     if net.len() != size {
@@ -543,7 +556,7 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
             "the screw surface's control net has the wrong size",
         ));
     }
-    let (vknots, vmult) = st.knots();
+    let (vknots, vmult) = joined_stations(pieces).knots();
     BSplineSurface::create_canonical(&CanonicalSurfaceData {
         u_degree: c.degree,
         v_degree: 2,
@@ -557,6 +570,66 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
         weights: Some(&weights),
         uv_domain: None,
     })
+}
+
+/// Join existing arc spans, keeping their control points and internal knots unchanged.
+/// The largest half-angle bounds every span; evaluation uses each span's own width.
+fn joined_stations(pieces: &[Stations]) -> Stations {
+    Stations {
+        t: pieces
+            .iter()
+            .enumerate()
+            .flat_map(|(i, st)| st.t.iter().copied().skip(usize::from(i > 0)))
+            .collect(),
+        half: pieces.iter().map(|st| st.half).fold(0.0, f64::max),
+    }
+}
+
+/// Rebuild the one screw net used by both sweep construction and definition restore.
+/// Each consecutive station pair keeps its own rational arc width. This also covers
+/// continued supports whose first station is negative, without duplicating the fit.
+pub(crate) fn screw_net(
+    profile: &BSplineCurve,
+    motion: &ScrewMotion,
+    stations: &[f64],
+) -> Result<BSplineSurface> {
+    if stations.len() < 2
+        || stations.len() as f64 > MAX_STATIONS + 1.0
+        || stations.iter().any(|t| !t.is_finite())
+    {
+        return Err(bad("a screw net needs a bounded list of finite stations"));
+    }
+    let mut pieces = Vec::new();
+    for pair in stations.windows(2) {
+        let [from, to] = *pair else {
+            return Err(SolidError::sm_err(OP));
+        };
+        let half = 0.5 * (to - from);
+        if !(half > 0.0 && half <= crate::surface::procedural_sweep::MAX_HALF_ANGLE) {
+            return Err(bad(
+                "a screw net's stations must ascend in bounded arc spans",
+            ));
+        }
+        pieces.push(Stations {
+            t: vec![from, to],
+            half,
+        });
+    }
+    let law = motion.law();
+    let m = Screw {
+        o: motion.origin(),
+        k: motion.axis(),
+        pitch: motion.pitch(),
+        total: stations
+            .last()
+            .copied()
+            .ok_or_else(|| SolidError::sm_err(OP))?,
+        e: law.map_or(Vec3::ZERO, RadialLaw::direction),
+        angles: law.map_or_else(Vec::new, |l| l.angles().to_vec()),
+        offsets: law.map_or_else(Vec::new, |l| l.offsets().to_vec()),
+    };
+    let curve = Curve::from(profile.copy());
+    screw_wall(&m, &nurbs_of(&curve)?, &pieces)
 }
 
 /// Stitches and orients the B-rep under the identities its faces were made with.
@@ -866,7 +939,7 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
                 cylinder_piece(k, &mut brep, m, ends.start, ends.end, r + m.offset(t0), st)?;
                 continue;
             }
-            let net = screw_wall(m, wall, st)?;
+            let net = screw_wall(m, wall, std::slice::from_ref(st))?;
             let domain: Extent2d = net.natural_uv_domain();
             let mut surface = Surface::from(net);
             surface.set_sweep_definition(ProceduralSweep::create(

@@ -1299,6 +1299,24 @@ impl Ellipse {
         classify: bool,
         zone_tol: f64,
     ) -> (f64, Option<CurveLocationType>) {
+        self.step_inversion_with_seam_policy(k, point, classify, zone_tol, true)
+    }
+
+    /// Recover an existing parameter's angle without classifying a nearby point
+    /// as the seam. Periodic interval mapping is shared with point inversion.
+    pub(crate) fn parameter_angle(&self, k: &Kernel, point: Point3) -> f64 {
+        self.step_inversion_with_seam_policy(k, point, false, 0.0, false)
+            .0
+    }
+
+    fn step_inversion_with_seam_policy(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        classify: bool,
+        zone_tol: f64,
+        snap_seam: bool,
+    ) -> (f64, Option<CurveLocationType>) {
         let center = self.position.origin();
         let x_axis = self.position.x_axis();
         let y_axis = self.position.y_axis();
@@ -1347,7 +1365,8 @@ impl Ellipse {
             + self.radius_y * sin_u * self.position.y_axis();
 
         // return min seam values for closed ellipses
-        if is_zero_to_tol(end.distance(point), approx_tol)
+        if snap_seam
+            && is_zero_to_tol(end.distance(point), approx_tol)
             && are_same_to_tol(self.anal_domain.max(), angular_param, EFF_ZERO_DEG)
             && are_same_to_tol(self.anal_domain.length(), 360.0, EFF_ZERO_DEG)
         {

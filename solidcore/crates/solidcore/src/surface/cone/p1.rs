@@ -1573,6 +1573,12 @@ impl Cone {
                 }
             }
         }
+        let point = d
+            .first()
+            .and_then(|row| row.first())
+            .copied()
+            .ok_or_else(|| SolidError::invalid_input(OP_EVAL, "missing cylinder point"))?;
+        self.verify_cylinder_runtime_point(k, uv, point)?;
         Ok(d)
     }
 
@@ -1586,8 +1592,10 @@ impl Cone {
         // convert to STEP parameter
         let step_uv = self.convert_uv_from_nurbs_to_step(k, uv)?;
 
-        // pass the call along
-        self.evaluate_step_point(step_uv)
+        // Preserve the candidate, then certify the complete native conversion.
+        let point = self.evaluate_step_point(step_uv)?;
+        self.verify_cylinder_runtime_point(k, uv, point)?;
+        Ok(point)
     }
 
     /// The point and triangular derivatives at the STEP parameters `uv` (degrees,
@@ -1710,6 +1718,11 @@ impl Cone {
 
         // The formulas above are per radian; STEP U is in degrees.
         scale_step_angular_derivatives(d, hu, hv, true, false)?;
+        let point = d
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::invalid_input(OP_EVAL_STEP, "missing cylinder point"))?;
+        self.verify_cylinder_step_point(uv, point)?;
         Ok(())
     }
 
@@ -2948,6 +2961,202 @@ mod tests {
             assert_eq!(typed.is_port_failure(), before.is_port_failure());
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
+        }
+    }
+
+    #[test]
+    fn checked_cylinder_points_cover_native_rows_swaps_and_height_sense() {
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside in [false, true] {
+                let cone = Cone::create_canonical(
+                    &k,
+                    &Axis2Placement::IDENTITY,
+                    10.0,
+                    10.0,
+                    20.0,
+                    swap,
+                    inside,
+                )
+                .unwrap();
+                assert!(cone.cylinder_runtime_allowance(&k).unwrap().unwrap() > 0.0);
+                let domain = cone.rev().base().natural_uv_domain();
+                for fraction in [0.0, 0.137, 0.371, 0.829, 1.0] {
+                    let uv = Point2::new(
+                        domain.u_min() + fraction * (domain.u_max() - domain.u_min()),
+                        domain.v_min() + fraction * (domain.v_max() - domain.v_min()),
+                    );
+                    let point = cone.evaluate_point(&k, uv).unwrap();
+                    let rows = cone
+                        .evaluate_rows(&k, uv, 1, 1, EvaluateFlags::default())
+                        .unwrap();
+                    assert_eq!(point, rows[0][0]);
+                    assert!(cone
+                        .verify_cylinder_runtime_point(&k, uv, point + Vec3::X)
+                        .is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn checked_cylinder_keeps_near_seam_point_and_rejects_snapped_candidate() {
+        let k = Kernel::default();
+        let cone = Cone::create_canonical(
+            &k,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            10.0,
+            20.0,
+            false,
+            false,
+        )
+        .unwrap();
+        let domain = cone.rev().base().natural_uv_domain();
+        let uv = Point2::new(
+            domain.u_max() - (domain.u_max() - domain.u_min()) * 1e-12,
+            domain.v_min(),
+        );
+        // Conversion preserves the interior parameter; independently reject the
+        // exact endpoint that the former tolerance-based inversion returned.
+        let converted = cone.convert_uv_from_nurbs_to_step(&k, uv).unwrap().x;
+        assert!(
+            converted > 0.0 && converted < 360.0,
+            "seam branch: {converted}"
+        );
+        let snapped = cone.evaluate_step_point(Point2::new(360.0, 0.0)).unwrap();
+        assert!(cone.verify_cylinder_runtime_point(&k, uv, snapped).is_err());
+        let point = cone.evaluate_point(&k, uv).unwrap();
+        assert!(point.y < 0.0);
+        let rows = cone
+            .evaluate_rows(&k, uv, 1, 1, EvaluateFlags::default())
+            .unwrap();
+        assert_eq!(rows[0][0], point);
+    }
+    #[test]
+    fn checked_internal_m20_bore_keeps_its_nonendpoint_polar_point() {
+        let k = Kernel::default();
+        let mut placement = Axis2Placement::IDENTITY;
+        placement.set_origin(Vec3::new(-1.0, -64.0, -2.5));
+        let cone = Cone::create_canonical(
+            &k,
+            &placement,
+            8.646835306586814,
+            8.646835306586814,
+            25.0,
+            false,
+            false,
+        )
+        .unwrap();
+        let uv = Point2::new(54.329668551919475, 2.5);
+        let polar = cone.rev().polar_curve().unwrap();
+        let chart_point = polar.base().evaluate_point(uv.x).unwrap();
+        let local = chart_point - placement.origin();
+        let radial = Vec3::new(local.x, local.y, 0.0);
+        let expected =
+            placement.origin() + radial * (8.646835306586814 / radial.length()) + Vec3::Z * uv.y;
+        assert!(expected.y < -64.0);
+        let cap = cone.cylinder_runtime_allowance(&k).unwrap().unwrap();
+        let snapped = cone.evaluate_step_point(Point2::new(360.0, uv.y)).unwrap();
+        assert!((snapped - expected).length() > cap);
+        assert!(cone.verify_cylinder_runtime_point(&k, uv, snapped).is_err());
+        let actual = cone.evaluate_point(&k, uv).unwrap();
+        assert!((actual - expected).length() <= cap);
+        assert!(actual.y < -64.0);
+        let rows = cone
+            .evaluate_rows(&k, uv, 1, 1, EvaluateFlags::default())
+            .unwrap();
+        assert_eq!(rows[0][0], actual);
+    }
+
+    #[test]
+    fn checked_cylinder_derivatives_match_polar_chart_and_native_rows() {
+        use crate::nurbs::knots::Side;
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside in [false, true] {
+                let placement = Axis2Placement::new(Vec3::new(-1.0, -64.0, -2.5), Vec3::X, Vec3::Y);
+                let cone = Cone::create_canonical(
+                    &k,
+                    &placement,
+                    8.646835306586814,
+                    8.646835306586814,
+                    25.0,
+                    swap,
+                    inside,
+                )
+                .unwrap();
+                let polar = cone.rev().polar_curve().unwrap();
+                let interval = polar.base().natural_interval();
+                for fraction in [-0.1, 0.0, 0.137, 0.25, 0.5, 0.75, 1.0 - 5e-13, 1.0, 1.1] {
+                    let u = interval.min() + fraction * interval.length();
+                    for side in [Side::Left, Side::Right] {
+                        let uv = if swap {
+                            Point2::new(2.5, u)
+                        } else {
+                            Point2::new(u, 2.5)
+                        };
+                        let flags = EvaluateFlags {
+                            u_side: side,
+                            v_side: side,
+                            non_zero_tangents: false,
+                            only_upper_half: false,
+                        };
+                        let jets = cone.evaluate_rows(&k, uv, 4, 4, flags).unwrap();
+                        assert_eq!(jets[0][0], cone.evaluate_point(&k, uv).unwrap());
+                        let native = cone.rev().base().evaluate(uv, 4, 4, flags).unwrap();
+                        let curve = polar
+                            .base()
+                            .evaluate(u, 2, side == Side::Left, false)
+                            .unwrap();
+                        let mut q = curve[0] - placement.origin();
+                        q.z = 0.0;
+                        let mut d = curve[1];
+                        d.z = 0.0;
+                        let mut dd = curve[2];
+                        dd.z = 0.0;
+                        let l = q.length();
+                        let a = q.dot(d);
+                        let radius = 8.646835306586814;
+                        let first = (d / l - q * (a / l.powi(3))) * radius;
+                        let second = (dd / l
+                            - d * (2.0 * a / l.powi(3))
+                            - q * ((d.dot(d) + q.dot(dd)) / l.powi(3) - 3.0 * a * a / l.powi(5)))
+                            * radius;
+                        let (actual_first, actual_second, axial) = if swap {
+                            (jets[0][1], jets[0][2], jets[1][0])
+                        } else {
+                            (jets[1][0], jets[2][0], jets[0][1])
+                        };
+                        assert!(
+                            (actual_first - first).length() < 1e-11,
+                            "{swap} {inside} {fraction} {side:?}"
+                        );
+                        assert!(
+                            (actual_second - second).length() < 1e-11,
+                            "{swap} {inside} {fraction} {side:?}"
+                        );
+                        assert!(
+                            (axial - Vec3::Z * if inside { -1.0 } else { 1.0 }).length() < 1e-13
+                        );
+                        for (i, row) in jets.iter().enumerate() {
+                            for (j, value) in row.iter().enumerate() {
+                                assert!(
+                                    value.x.is_finite()
+                                        && value.y.is_finite()
+                                        && value.z.is_finite()
+                                );
+                                // Only the position is replaced by analytic STEP
+                                // evaluation. Preserve every native derivative,
+                                // including cancellation roundoff in mixed rows.
+                                if i > 0 || j > 0 {
+                                    assert_eq!(*value, native[i][j]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

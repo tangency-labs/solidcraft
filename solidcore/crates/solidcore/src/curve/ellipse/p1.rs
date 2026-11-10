@@ -241,9 +241,10 @@ fn extract(s: &mut InputStream, slot: &mut f64) {
 impl PolarConversion {
     /// The STEP angle in degrees of the NURB parameter `nurbs_param` of `curve` (the
     /// ellipse owning this table) and whether the conversion is exact (always, when it
-    /// succeeds) (`ConvertToPolarParameter`). The NURB ends (within `SM_EFF_ZERO`) map
-    /// to the STEP domain ends (swapped for an inside-out ellipse); other parameters
-    /// are evaluated and inverted (`STEPInversion`). On a closed curve the seam
+    /// succeeds) (`ConvertToPolarParameter`). The exact NURB ends map
+    /// to the STEP domain ends (swapped for an inside-out ellipse). Clamping follows
+    /// the base curve's out-of-bounds setting before choosing an endpoint. Other parameters
+    /// are evaluated and converted without point-inversion seam snapping. On a closed curve the seam
     /// parameter returns the angle of its own end of the domain (`-/+ 360`).
     ///
     /// # Errors
@@ -264,7 +265,17 @@ impl PolarConversion {
         // avoid roundoff errors at boundaries
         let anal_ivl = curve.step_interval();
         let nurb_ivl = curve.base.natural_interval();
-        let point_type = nurb_ivl.classify_point(nurbs_param, EFF_ZERO);
+        // Use the same parameter as BSplineCurve::evaluate_point. A clamped
+        // endpoint is known exactly; recovering it through atan2 would lose
+        // which end of a closed curve the caller reached.
+        let nurbs_param = if !curve.base.is_out_of_bounds_enabled()
+            && !nurb_ivl.contains_value(nurbs_param, 0.0)
+        {
+            nurb_ivl.clamp_value(nurbs_param)
+        } else {
+            nurbs_param
+        };
+        let point_type = nurb_ivl.classify_point(nurbs_param, 0.0);
 
         // switch on ePointType - map boundary values and invert internal values
         let mut polar_deg = match point_type {
@@ -288,7 +299,7 @@ impl PolarConversion {
             | ExtentPointType::Inside => {
                 // use a conversion based arcTan2 (EvaluatePoint status ignored)
                 let point = ignored(curve.base.evaluate_point(nurbs_param))?.unwrap_or(Vec3::UNDEF);
-                curve.step_inversion(k, point, false, 0.0).0
+                curve.parameter_angle(k, point)
             }
         };
 
@@ -3360,6 +3371,72 @@ mod tests {
                 .unwrap(),
             "an ordinary ellipse whose NURB is moved 1e-8"
         );
+    }
+
+    #[test]
+    fn parameter_conversion_preserves_the_clamped_end_of_a_closed_curve() {
+        let k = kernel();
+        for (start, end) in [(0.0, 360.0), (-180.0, 180.0), (-148.628451, 211.371549)] {
+            for inside_out in [false, true] {
+                let mut e = Ellipse::new_circle(
+                    &k,
+                    Point3::new(1.0, 2.0, 3.0),
+                    Vec3::X,
+                    Vec3::Y,
+                    Extent1d::from_min_max(start, end),
+                    8.646_835_306_586_814,
+                    &EllipseOptions {
+                        inside_out,
+                        ..EllipseOptions::default()
+                    },
+                )
+                .unwrap();
+                let domain = e.base.natural_interval();
+                for (fraction, expected) in [
+                    (-0.1, if inside_out { end } else { start }),
+                    (1.1, if inside_out { start } else { end }),
+                ] {
+                    let parameter = domain.evaluate(fraction);
+                    assert_eq!(
+                        e.convert_t_from_nurbs_to_step(&k, parameter).unwrap(),
+                        expected
+                    );
+                    e.set_out_of_bounds_enabled(true);
+                    let angle = e.convert_t_from_nurbs_to_step(&k, parameter).unwrap();
+                    let point = e.base.evaluate_point(parameter).unwrap();
+                    let radial = point - e.position().origin();
+                    let projected =
+                        e.position().origin() + radial * (e.x_radius() / radial.length());
+                    assert!((e.evaluate_step_point(angle).unwrap() - projected).length() < 1e-12);
+                    assert!((angle - expected).abs() > 1.0);
+                    e.set_out_of_bounds_enabled(false);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parameter_conversion_preserves_points_just_inside_a_closed_seam() {
+        let k = kernel();
+        let e = circle(&k, 0.0, 360.0, 8.646_835_306_586_814);
+        let domain = e.base.natural_interval();
+        for fraction in [1e-10, 1.0 - 1e-10] {
+            let parameter = domain.evaluate(fraction);
+            let point = e.base.evaluate_point(parameter).unwrap();
+            let angle = e.convert_t_from_nurbs_to_step(&k, parameter).unwrap();
+            assert!(angle > 0.0 && angle < 360.0, "{fraction}: {angle}");
+            assert!((e.evaluate_step_point(angle).unwrap() - point).length() < 1e-12);
+        }
+        assert_eq!(
+            e.convert_t_from_nurbs_to_step(&k, domain.min()).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            e.convert_t_from_nurbs_to_step(&k, domain.max()).unwrap(),
+            360.0
+        );
+        let near_end = e.base.evaluate_point(domain.evaluate(1.0 - 1e-10)).unwrap();
+        assert_eq!(e.step_inversion(&k, near_end, false, 0.0).0, 0.0);
     }
 
     /// The trimmed arc of the fork's capi test `scenario_ellipse_trimmed_just_short_of_its_seam`

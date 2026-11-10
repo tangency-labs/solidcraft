@@ -146,7 +146,7 @@ fn to_u32(x: usize) -> Result<u32> {
 }
 
 /// A NURBS curve's stored numbers.
-fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
+pub(crate) fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
     let nurb = c
         .nurb
         .as_ref()
@@ -169,7 +169,7 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
 }
 
 /// A NURBS surface's stored numbers.
-fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
+pub(crate) fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
     let nurb = s
         .gw_nurb()
         .ok_or_else(|| SolidError::surface_failed(OP_TO, "the B-spline surface has no NURB"))?;
@@ -384,7 +384,7 @@ fn stored_point(
 }
 
 /// The curve a record holds, its NURB as stored (no knot fix-up).
-fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
+pub(crate) fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
     let p = degree_of(r.degree)?;
     non_decreasing(&r.knots)?;
     let mut pw = Vec::new();
@@ -400,7 +400,7 @@ fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
 }
 
 /// The surface a record holds, its NURB as stored (no knot fix-up).
-fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
+pub(crate) fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
     let p = degree_of(r.u_degree)?;
     let q = degree_of(r.v_degree)?;
     non_decreasing(&r.u_knots)?;
@@ -459,7 +459,7 @@ pub fn exact_to_record(k: &Kernel, surface: &Surface) -> Result<ExactRoundRecord
             return Err(SolidError::Unsupported {
                 operation: OP_EXACT_TO,
                 reason: "an exact net of this kind has no label",
-            })
+            });
         }
     };
     let Some(form) = as_b_spline(k, net)? else {
@@ -533,7 +533,7 @@ pub fn exact_from_record(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> 
                 return Err(SolidError::invalid_input(
                     OP_EXACT_FROM,
                     "an exact round's supports are faces",
-                ))
+                ));
             }
         });
     }
@@ -839,7 +839,7 @@ pub fn corner_to_record(k: &Kernel, surface: &Surface) -> Result<CornerRecord> {
             return Err(SolidError::invalid_input(
                 OP_CORNER_TO,
                 "a ball's patch is recorded as its B-rep face, not as a corner record",
-            ))
+            ));
         }
         CornerDefinition::Swept(d) => CornerRecord::Swept(SweptCornerRecord {
             common: support_record(k, &d.common, 1)?,
