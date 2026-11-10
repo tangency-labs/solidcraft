@@ -361,24 +361,23 @@ const PIPE_BEND_SAMPLES_PER_SPAN: u32 = 16;
 /// swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu, "Analysis and
 /// applications of pipe surfaces", CAGD 15(5), 1998).
 ///
-/// Measured at [`PIPE_BEND_SAMPLES_PER_SPAN`] samples per knot span. A `true` is proved by
-/// the sample that found the bend; a `false` only says that no sample found one. A sample
-/// whose curvature cannot be computed (a zero-length tangent) proves nothing and is
-/// skipped. A pipe that crosses itself between distant parts of its path is not found
-/// here.
+/// Measured at [`PIPE_BEND_SAMPLES_PER_SPAN`] samples per knot span, over the whole
+/// natural interval, `U[0]` to `U[m]`, as the sweep runs over it. An unclamped path also
+/// reaches before `U[degree]` and past `U[n + 1]`, where it is evaluated as its end spans'
+/// polynomials carried on; a clamped one's extra knot intervals have zero length. A `true`
+/// is proved by the sample that found the bend; a `false` only says that no sample found
+/// one. A sample whose curvature cannot be computed (a zero-length tangent) proves nothing
+/// and is skipped. A pipe that crosses itself between distant parts of its path is not
+/// found here.
 fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
     let Some(nurb) = path.nurb.as_ref() else {
-        return false;
-    };
-    // A clamped curve's spans run between knots[degree] and knots[n + 1].
-    let Some(span_knots) = nurb.knots().get(nurb.degree()..=nurb.n() + 1) else {
         return false;
     };
     let reaches = |u: f64, side: Side| {
         nurb.eval_curvature(u, side, false)
             .is_ok_and(|c| c.kappa * radius >= 1.0)
     };
-    span_knots.windows(2).any(|ends| {
+    nurb.knots().windows(2).any(|ends| {
         let &[start, end] = ends else {
             return false;
         };
@@ -1260,6 +1259,30 @@ mod tests {
         assert!(invalid(&create_pipe_sweep(&mut k, 2.02, Some(&c), true)));
         let inside = create_pipe_sweep(&mut k, 1.98, Some(&c), true).expect("pipe");
         assert!(crate::topology::brep::p2::is_manifold_solid(&inside).unwrap());
+    }
+
+    /// The sweep runs over the path's natural interval, `U[0]` to `U[m]`, so a bend of an
+    /// unclamped path before `U[degree]` is checked too. This quadratic one, on uniform
+    /// knots 0 to 5, is C(t) = a t² + b t + c on its one clamped span [2, 3] (t = u - 2),
+    /// with a = (0, 1, 0) and b = (0.1, 3, 0). Its tightest bend there has radius about 135;
+    /// carried on to the parabola's vertex, t = -1.5 (u = 0.5), it bends with radius
+    /// 0.1² / 2 = 0.005.
+    #[test]
+    fn a_pipe_is_checked_over_an_unclamped_paths_whole_interval() {
+        let mut k = Kernel::default();
+        let points = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.1, 3.0, 0.0),
+            Point3::new(0.2, 8.0, 0.0),
+        ];
+        let nurb = crate::nurbs::crv_basic::Curve::new(
+            points.map(crate::nurbs::math::CPoint::from_point).to_vec(),
+            2,
+            vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0],
+        )
+        .expect("unclamped quadratic");
+        let path = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
+        assert!(invalid(&create_pipe_sweep(&mut k, 1.0, Some(&path), false)));
     }
 
     #[test]
