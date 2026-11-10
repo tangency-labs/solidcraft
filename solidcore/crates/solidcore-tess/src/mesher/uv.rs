@@ -4,7 +4,7 @@
 
 use crate::vec::VecExt as _;
 use solidcore::eval::plan::EvalSurface;
-pub(crate) use solidcore::eval::plan::uv::{Domain, degenerate_within, domain, unwrap};
+pub(crate) use solidcore::eval::plan::uv::{Domain, domain, unwrap};
 
 use super::edges::{QUARTER_TURN, turn};
 use super::size::Rules;

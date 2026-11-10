@@ -89,7 +89,10 @@ fn sweeps_lofts_and_screws() {
     let b = Brep::loft_to_point(&base, [0.0, 0.0, 15.0]).unwrap();
     assert_close(solid_volume(&b, "pyramid"), 2000.0, 1e-9, "pyramid");
     assert_eq!(Brep::loft_to_point(&base, [3.0, 4.0, 0.0]).err(), Some(Error::Argument), "apex in the base's plane");
-    assert_eq!(Brep::loft_to_point(&[circle([0.0; 3], 5.0)], [0.0, 0.0, 5.0]).err(), Some(Error::Argument), "curved base");
+    // A circle to a point 5 above it: the cone, pi r^2 h / 3 (#11216); in its plane it is refused.
+    let b = Brep::loft_to_point(&[circle([0.0; 3], 5.0)], [0.0, 0.0, 5.0]).unwrap();
+    assert_close(solid_volume(&b, "cone"), 125.0 * PI / 3.0, 1e-6, "cone");
+    assert_eq!(Brep::loft_to_point(&[circle([0.0; 3], 5.0)], [1.0, 2.0, 0.0]).err(), Some(Error::Argument), "circle, apex in its plane");
     let tooth = polygon(&[[4.0, 0.0, 0.0], [4.4, 0.0, 0.0], [4.4, 0.0, 0.4], [4.0, 0.0, 0.4]]);
     let b = Brep::screw_sweep(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, 1e-4).unwrap();
     assert_close(solid_volume(&b, "screw"), 0.16 * TAU * 4.2 * 3.0, 1e-4, "screw sweep");

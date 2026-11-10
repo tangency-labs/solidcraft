@@ -99,7 +99,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_walls_touch_refused = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_missing_surface_fails = true;

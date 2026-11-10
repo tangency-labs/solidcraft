@@ -13,9 +13,11 @@ fn box_corner() -> (Body, [Vec3; 3]) {
 
 /// The worst curvature jump across the seams of the faces that are none of the box's planes or
 /// rounds (the corner's: a sphere, or a patch), and the same clear of the hole's corners: a station counts there when
-/// it is at least `share` of its seam's side (its edge and the edge that continues it smoothly:
-/// SMLib splits each side in two) from the end of the side at a corner, a vertex where the seam
-/// turns.
+/// it is at least `share` of its seam's side (its edge, and the edge that continues it smoothly
+/// where the side is split in two) from each end of the side at a corner, a vertex where the
+/// seam turns. A side may be one edge between two corners (the blend corner's Setback,
+/// tangency-labs/solidcore#2988) or two, split at a vertex where it does not turn (the N x N
+/// corner before it); the rule is the same for both.
 fn corner_seams(body: &Body, share: f64) -> (f64, f64, usize) {
     let rec = brep_record(body).unwrap();
     let corner_faces: Vec<usize> = rec
@@ -48,17 +50,19 @@ fn corner_seams(body: &Body, share: f64) -> (f64, f64, usize) {
         let (p0, p1) = (s.points[0], *s.points.last().unwrap());
         let d0 = (s.points[1] - p0).normalized().unwrap();
         let d1 = (s.points[s.points.len() - 2] - p1).normalized().unwrap();
-        let corner_end = if turns(p0, d0) {
-            Some(0.0)
-        } else if turns(p1, d1) {
-            Some(1.0)
-        } else {
-            None
-        };
+        let (c0, c1) = (turns(p0, d0), turns(p1, d1));
+        // The length of the seam continuing this one smoothly at an end that does not turn (it
+        // leaves that end the opposite way), 0 where there is none.
+        let beyond =
+            |p: Vec3, d: Vec3| ends.iter().filter(|(q, e, _)| q.dist(p) < 1e-6 && d.dot(*e) <= -0.9998).map(|(_, _, l)| *l).fold(0.0, f64::max);
+        let (l0, l1) = (if c0 { 0.0 } else { beyond(p0, d0) }, if c1 { 0.0 } else { beyond(p1, d1) });
+        let side = s.length + l0 + l1;
         for st in &s.stations {
             all = all.max(st.curvature_jump_per_mm);
-            // Half a side per edge: `share` of the side is twice that of the edge.
-            if corner_end.is_none_or(|c| (st.edge_fraction - c).abs() >= 2.0 * share) {
+            // How far along the side the station is from each of its ends.
+            let along = st.edge_fraction * s.length;
+            let (from0, from1) = (l0 + along, l1 + (s.length - along));
+            if !(c0 || c1) || from0.min(from1) >= share * side {
                 clear = clear.max(st.curvature_jump_per_mm);
                 n += 1;
             }
@@ -109,7 +113,8 @@ fn set_back_8_the_g2_corner_lies_between_the_hull_and_the_prisms() {
     let prisms = 512.0 - 225.0 * (1.0 - pi / 4.0) - 125.0 * (2f64.sqrt() - 1.0);
     eprintln!("G2 corner set back 8: volume {v:.6} in [{:.6}, {:.6}]", outside + 299.0201, outside + prisms);
     assert!(v > outside + 299.0201 && v < outside + prisms);
-    let (_, clear, _) = corner_seams(&g2, 0.15);
+    let (_, clear, n) = corner_seams(&g2, 0.15);
+    eprintln!("G2 corner set back 8: jump clear of the corners {clear:.3e} ({n} stations)");
     assert!(clear <= CURVATURE_SHARE / 5.0, "{clear}");
 }
 

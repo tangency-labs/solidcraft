@@ -115,9 +115,18 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
         }
     }
     let reached: Vec<(usize, &ExportProduct)> = products.iter().enumerate().filter(|(i, _)| reach.get(*i).copied().unwrap_or(false)).collect();
-    // The context states the models' accuracy: the loosest of their records' tolerances.
-    let uncertainty =
-        reached.iter().flat_map(|(_, p)| &p.bodies).map(|b| b.body.record().tolerance).filter(|t| t.is_finite()).fold(MIN_UNCERTAINTY, f64::max);
+    // The context states the models' accuracy: the loosest tolerance of their records, edges
+    // and vertices. STEP keeps no tolerance per edge, so an edge that lies off its faces (an
+    // intersection curve fitted within its tolerance) is only as good as the file says (#11997).
+    let uncertainty = reached
+        .iter()
+        .flat_map(|(_, p)| &p.bodies)
+        .flat_map(|b| {
+            let r = b.body.record();
+            std::iter::once(r.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).chain(r.vertices.iter().map(|v| v.tolerance))
+        })
+        .filter(|t| t.is_finite())
+        .fold(MIN_UNCERTAINTY, f64::max);
 
     let mut w = Writer::new();
     let app = w.add_distinct("APPLICATION_CONTEXT", &[s("managed model based 3d engineering")]);
@@ -339,6 +348,38 @@ mod tests {
         assert_eq!(hollow.shell_count(), 2);
         let text = crate::step_export(&[&hollow], "test").unwrap();
         assert_eq!(text.matches("BREP_WITH_VOIDS").count(), 1, "{text}");
+    }
+
+    /// The uncertainty a file states covers every edge and vertex of its bodies (#11997): STEP
+    /// keeps no tolerance per edge, so the context's is the only place an edge's deviation goes.
+    /// A body whose edge may lie 3e-3 mm off its faces (its tolerance) was written with its
+    /// record's tolerance, 2e-5, so a reader takes its geometry as good to 2e-5.
+    #[test]
+    fn uncertainty_covers_the_edge_and_vertex_tolerances() {
+        let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let mut record = bx.record().clone();
+        let own = record.tolerance;
+        assert!(own < 1e-4, "{own}");
+        let edge = record.edges.first_mut().unwrap();
+        edge.tolerance = 3e-3;
+        let ends = edge.vertices;
+        for v in ends {
+            record.vertices.get_mut(v as usize).unwrap().tolerance = 4e-3;
+        }
+        let tolerant = crate::Body::from_record(record).unwrap();
+        let text = crate::step_export(&[&tolerant], "test").unwrap();
+        let stated = |text: &str| -> Vec<f64> {
+            let ex = p21::parse(text).unwrap();
+            ex.entities
+                .values()
+                .filter(|e| e.name() == "UNCERTAINTY_MEASURE_WITH_UNIT")
+                .filter_map(|e| e.params().first().and_then(p21::Param::as_f64))
+                .collect()
+        };
+        assert_eq!(stated(&text), vec![4e-3], "the vertex tolerance");
+        // A body without tolerant edges states its own tolerance, as before.
+        let text = crate::step_export(&[&bx], "test").unwrap();
+        assert_eq!(stated(&text), vec![own]);
     }
 
     #[test]
