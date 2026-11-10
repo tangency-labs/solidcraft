@@ -336,31 +336,57 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let limit = depth.unwrap_or(reach * 2.0 + 1.0);
     let step = (limit.min(reach * 2.0 + 1.0) / 400.0).max(1e-3);
     let overlap = (len / samples as f64 * 2.0).max(step * 2.0).min(t);
-    let mut far = Vec::with_capacity(along.len());
-    for q in &along {
+    // How far the wall runs across the plane from curve point `q`.
+    let across = |q: Vec2| -> Result<f64> {
         let mut hit = None;
         let mut k = 1;
         while (k as f64) * step <= limit + step && k < 100_000 {
-            if inside(*q + n * (k as f64 * step)) {
+            if inside(q + n * (k as f64 * step)) {
                 // Refine between the last outside and the first inside sample.
                 let (mut lo, mut hi) = ((k - 1) as f64 * step, k as f64 * step);
                 for _ in 0..30 {
                     let m = 0.5 * (lo + hi);
-                    if inside(*q + n * m) { hi = m } else { lo = m }
+                    if inside(q + n * m) { hi = m } else { lo = m }
                 }
                 hit = Some(hi);
                 break;
             }
             k += 1;
         }
-        let h = match (hit, depth) {
-            (Some(h), Some(d)) if h >= d => d,
-            (Some(h), _) => h + overlap,
-            (None, Some(d)) => d,
-            (None, None) => return Err(DocError::Invalid("the rib curves do not face a body (give a depth)".into())),
-        };
-        far.push(*q + n * h);
+        match (hit, depth) {
+            (Some(h), Some(d)) if h >= d => Ok(d),
+            (Some(h), _) => Ok(h + overlap),
+            (None, Some(d)) => Ok(d),
+            (None, None) => Err(DocError::Invalid("the rib curves do not face a body (give a depth)".into())),
+        }
+    };
+    let mut wall: Vec<(Vec2, f64)> = Vec::with_capacity(along.len());
+    for q in &along {
+        let h = across(*q)?;
+        // A run-on end meets the wall it reaches between two samples, where the run across the
+        // plane jumps (from the far side to straight into that wall): find the jump closely, so
+        // the outline does not cut a wedge off the corner there.
+        if extend
+            && let Some(&(q0, h0)) = wall.last()
+            && (h - h0).abs() > t
+        {
+            let (mut lo, mut hi, mut h_lo, mut h_hi) = (0.0, 1.0, h0, h);
+            for _ in 0..12 {
+                let m = 0.5 * (lo + hi);
+                let hm = across(q0.lerp(*q, m))?;
+                if (hm - h0).abs() < (hm - h).abs() {
+                    (lo, h_lo) = (m, hm);
+                } else {
+                    (hi, h_hi) = (m, hm);
+                }
+            }
+            wall.push((q0.lerp(*q, lo), h_lo));
+            wall.push((q0.lerp(*q, hi), h_hi));
+        }
+        wall.push((*q, h));
     }
+    let along: Vec<Vec2> = wall.iter().map(|(q, _)| *q).collect();
+    let far: Vec<Vec2> = wall.iter().map(|(q, h)| *q + n * *h).collect();
     let mut poly = along.clone();
     poly.extend(far.into_iter().rev());
     let mut lp = Loop2::polygon(&poly);
