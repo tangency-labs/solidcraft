@@ -77,6 +77,7 @@ pub mod drawing_view;
 pub mod edit;
 pub mod features;
 pub mod file;
+pub mod hole_callout;
 pub mod inspect;
 pub mod joints;
 pub mod libraries;

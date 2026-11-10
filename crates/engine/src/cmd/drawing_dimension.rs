@@ -12,7 +12,8 @@ use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Silhouette, Status, TextPlace, check_chain_length,
+    Candidate, DEFAULT_DECIMALS, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Silhouette, Status, TextPlace,
+    check_chain_length,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
@@ -44,8 +45,6 @@ const DEFAULT_OFFSET_MM: f64 = 10.0;
 const LOOK_PAST_MM: f64 = 0.5;
 /// How near the middle of a view's model box, in model mm, a line's middle is on it.
 const ON_CENTRE_MM: f64 = 1e-6;
-/// How many decimals a new dimension shows unless told.
-const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))
