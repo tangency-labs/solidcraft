@@ -735,7 +735,7 @@ impl BSplineSurface {
             .nurb
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let sur = elevate_degree(sur_p, increm, dir).map_err(SolidError::nl_ser(OP))?;
+        let sur = elevate_degree(sur_p, increm, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // place output sur in a temporary and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
@@ -762,7 +762,7 @@ impl BSplineSurface {
             .ok_or_else(|| SolidError::null_pointer(OP))?;
 
         // Make sur with the union of surP target knot vector and the new knots
-        let sur = insert_knots(sur_p, new_knots, dir).map_err(SolidError::nl_ser(OP))?;
+        let sur = insert_knots(sur_p, new_knots, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // build a surface from it and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
@@ -793,7 +793,8 @@ impl BSplineSurface {
             .nurb
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let sur = insert_knot(sur_p, new_knot, count, dir).map_err(SolidError::nl_ser(OP))?;
+        let sur =
+            insert_knot(sur_p, new_knot, count, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // build a surface from it and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
@@ -835,7 +836,7 @@ impl BSplineSurface {
         } else {
             remove_all_knots(sur_p, approx_tol_3d, dir)
         }
-        .map_err(SolidError::nl_ser(OP))?;
+        .map_err(SolidError::nurbs_routine(OP))?;
 
         self.nurb = Self::from_gw_nurb(&sur).nurb;
         Ok(())

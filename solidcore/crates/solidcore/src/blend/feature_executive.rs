@@ -1719,10 +1719,7 @@ fn planar_cap_rebuild(k: &mut Kernel, patch: &mut Brep, loop_curves: &[LoopCurve
                 e
             } else {
                 // SER_MSG(.., "Couldn't make a planar cap. Loop edges non-planar?")
-                let code = match e {
-                    SolidError::Upstream { code, .. } => code,
-                    _ => SM_ERR,
-                };
+                let code = e.upstream_status().unwrap_or(SM_ERR);
                 SolidError::Upstream {
                     code,
                     operation: OP,

@@ -408,7 +408,9 @@ pub(crate) fn put_default_geom(
         match s.surface.evaluate_point(k, uv) {
             Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
             Err(e) if e.is_unported() => return Err(e),
-            Err(SolidError::Upstream { code, .. }) => v.extend([f64::from(code), 0.0, 0.0, 0.0]),
+            Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => {
+                v.extend([f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1)), 0.0, 0.0, 0.0]);
+            }
             Err(e) => return Err(e),
         }
     }
@@ -494,7 +496,9 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1.0,
     }
 }
@@ -1346,9 +1350,9 @@ fn rust_edgeuse_body(
                     Ok(p) => v.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
                     Err(e) => {
-                        let st = match e {
-                            SolidError::Upstream { code, .. } => f64::from(code),
-                            _ => return Err(e),
+                        let st = match solidcore::error::nurbs::upstream_status(&e) {
+                            Some(code) => f64::from(code),
+                            None => return Err(e),
                         };
                         v.extend([st, 0.0, 0.0, 0.0]);
                     }
@@ -1362,7 +1366,7 @@ fn rust_edgeuse_body(
             }
             put_default_geom(&k, &mut v, &fs.solver, id, &pseudo, faces, fu, fv)?;
         }
-        Err(SolidError::Upstream { code, .. }) => v.push(f64::from(code)),
+        Err(e) if solidcore::error::nurbs::upstream_status(&e).is_some() => v.push(f64::from(solidcore::error::nurbs::upstream_status(&e).unwrap_or(-1))),
         Err(e) => return Err(e),
     }
     put_eu_state(&k, &mut v, b, Some(eu))?;

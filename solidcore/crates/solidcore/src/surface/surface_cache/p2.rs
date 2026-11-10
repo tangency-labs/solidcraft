@@ -205,7 +205,7 @@ pub fn create_bezier_patch_block(source: &NurbSurface) -> Result<BezierPatchBloc
 
     // store a bezier patch for every non-zero span
     // order: [patch00, patch01, ... patch0N, patch10, ... patchMN]
-    let rows = decompose_srf(source).map_err(SolidError::nl_ser(OP_BEZ_BLOCK))?;
+    let rows = decompose_srf(source).map_err(SolidError::nurbs_routine(OP_BEZ_BLOCK))?;
     let beziers: Vec<NurbSurface> = rows.into_iter().flatten().collect();
     if beziers.len() != num_u_spans * num_v_spans {
         return Err(invalid(OP_BEZ_BLOCK, "decomposition patch count mismatch"));
