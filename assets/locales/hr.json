@@ -4902,7 +4902,7 @@
   "ui.pitch": "Korak",
   "ui.placement": "Postavljanje",
   "ui.placement_handles": "Ručice za postavljanje",
-  "ui.placement_handles_tip": "Ručice na pregledu oslonca, ispusta ili škljocajućeg spoja: povucite oznaku kako biste je pomaknuli po modelu, okrenite je njezinim prstenom",
+  "ui.placement_handles_tip": "Oznaka za povlačenje značajke po modelu i, gdje se značajka može okretati, prsten za njezino okretanje.",
   "ui.plane": "Ravnina",
   "ui.plane_at_angle": "Ravnina pod kutom",
   "ui.plugins": "Proširenja",

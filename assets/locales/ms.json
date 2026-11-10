@@ -4909,7 +4909,7 @@
   "ui.pitch": "Pic",
   "ui.placement": "Penempatan",
   "ui.placement_handles": "Pemegang penempatan",
-  "ui.placement_handles_tip": "Pemegang pada pratonton Penyokong, Bonggol atau Sambungan Sentap: seret penanda untuk menggerakkannya merentasi model, putarkannya melalui cincinnya",
+  "ui.placement_handles_tip": "Penanda untuk menyeret ciri merentasi model dan, jika ciri boleh dipusingkan, gelang untuk memusingkannya.",
   "ui.plane": "Satah",
   "ui.plane_at_angle": "Satah Bersudut",
   "ui.plugins": "Pemalam",

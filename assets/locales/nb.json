@@ -4909,7 +4909,7 @@
   "ui.pitch": "Stigning",
   "ui.placement": "Plassering",
   "ui.placement_handles": "Plasseringshåndtak",
-  "ui.placement_handles_tip": "Håndtak på forhåndsvisningen av et anlegg, skruefeste eller snap-fit: dra markøren for å flytte den over modellen, drei den med ringen",
+  "ui.placement_handles_tip": "En markør for å dra funksjonen over modellen og, der funksjonen kan dreies, en ring for å dreie den.",
   "ui.plane": "Plan",
   "ui.plane_at_angle": "Plan i vinkel",
   "ui.plugins": "Programtillegg",

@@ -3379,7 +3379,7 @@
   "ui.pitch": "Pitch",
   "ui.placement": "Placement",
   "ui.placement_handles": "Placement handles",
-  "ui.placement_handles_tip": "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its ring",
+  "ui.placement_handles_tip": "Маркер за влачене на елемента по модела и, където елементът може да се завърта, пръстен за завъртането му.",
   "ui.plane": "Plane",
   "ui.plane_at_angle": "Plane at Angle",
   "ui.plugins": "Plugins",

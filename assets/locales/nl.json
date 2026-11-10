@@ -4920,7 +4920,7 @@
   "ui.pitch": "Steek",
   "ui.placement": "Plaatsing",
   "ui.placement_handles": "Plaatsingsgrepen",
-  "ui.placement_handles_tip": "Grepen op het voorbeeld van een Rustvlak, Nok of Snapverbinding: sleep de markering om hem over het model te verplaatsen, draai hem aan de ring",
+  "ui.placement_handles_tip": "Een markering om het kenmerk over het model te slepen en, waar het kenmerk kan draaien, een ring om het te draaien.",
   "ui.plane": "Vlak",
   "ui.plane_at_angle": "Vlak onder hoek",
   "ui.plugins": "Plug-ins",
