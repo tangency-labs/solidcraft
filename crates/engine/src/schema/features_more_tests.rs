@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use super::{BoundaryFillParams, EmbossParams, RemoveParams, RibParams};
+use super::{BoundaryFillParams, EmbossParams, RemoveParams, ReplaceFaceParams, RibParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -310,5 +310,50 @@ fn the_features_reply_with_their_schemas() {
     let r = bracket(ParamCheck::Warn).execute("solid.rib", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
     assert!(r["param_warnings"].to_string().contains("flp"), "{r}");
     let error = bracket(ParamCheck::Strict).execute("solid.rib", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`flp`"), "{error}");
+}
+
+/// A low block, 20 mm wide and 10 high, and a high one 20 high beside it at x = 30.
+fn low_and_high(level: ParamCheck) -> Session {
+    session(
+        level,
+        &[
+            ("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Low"})),
+            ("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [30, 0, 0], "body_name": "High"})),
+        ],
+    )
+}
+
+/// Replace Face describes its keys, keeps today's errors, and takes both kinds of target; its
+/// reply fits the feature result.
+#[test]
+fn replace_face_contract_and_reply() {
+    assert_keys(
+        input_schema_for::<ReplaceFaceParams>(),
+        &["body", "body_name", "body_names", "faces", "name", "participants", "target", "target_face"],
+    );
+    assert_strict_keeps_todays_errors(&[
+        ("solid.replace_face", json!({"target": "XY"})),
+        ("solid.replace_face", json!({"faces": 3, "target": "XY"})),
+        ("solid.replace_face", json!({"faces": [], "target": "XY"})),
+        ("solid.replace_face", json!({"faces": [true], "target": "XY"})),
+    ]);
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let calls = [
+        json!({"faces": [[10, 10, 10]], "target": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}),
+        json!({"faces": [[10, 10, 10]], "target_face": [40, 10, 20], "name": "Flush", "body": "Low"}),
+    ];
+    for p in calls {
+        let r = low_and_high(ParamCheck::Strict).execute("solid.replace_face", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+}
+
+/// With its contract, Replace Face refuses an unknown key in strict.
+#[test]
+fn replace_face_checks_its_keys() {
+    let p = json!({"faces": [[10, 10, 10]], "target": "XY", "flp": true});
+    let error = low_and_high(ParamCheck::Strict).execute("solid.replace_face", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`flp`"), "{error}");
 }

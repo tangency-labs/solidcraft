@@ -362,6 +362,9 @@ mod tests {
         h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
         crate::documents::new_design(&mut h.app);
         h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        // One dialog per tab is the preference's behaviour; by default several unsaved designs
+        // are asked about once, in one list (#11680).
+        h.app.preferences.save_prompt_one_at_a_time = true;
         crate::documents::request_quit(&mut h.app);
         for i in 0..2 {
             let answer = picker(&mut h.app, true);
@@ -584,7 +587,7 @@ mod tests {
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         }
         let path = h.dir.join("image.png");
-        let png = solidcraft_engine::render::png(1, 1, vec![255, 0, 0, 255]).unwrap();
+        let png = solidcraft_viewport::png(1, 1, vec![255, 0, 0, 255]).unwrap();
         std::fs::write(&path, png).unwrap();
         let answer = picker(&mut h.app, false);
         h.app.start(command);

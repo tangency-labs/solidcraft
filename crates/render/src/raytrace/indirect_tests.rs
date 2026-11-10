@@ -1,5 +1,5 @@
 use super::*;
-use crate::clear_coat::ClearCoat;
+use solidcraft_viewport::clear_coat::ClearCoat;
 
 fn white() -> OpaqueSurface {
     OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 0.0, 1.0, 1.0).unwrap()
@@ -280,7 +280,7 @@ fn authored_point_zero_two_base_and_coated_path_pdf_use_the_exact_unclamped_fini
     let original = white();
     let finish = original.with_authored_finish(Vec3::new(1.0, 1.0, 1.0), 1.0, 0.02).unwrap();
     for coat_weight in [0.0, 0.6] {
-        let coat = crate::clear_coat::ClearCoat::new(coat_weight, 0.2, 1.5).unwrap();
+        let coat = solidcraft_viewport::clear_coat::ClearCoat::new(coat_weight, 0.2, 1.5).unwrap();
         let surface = finish.with_clear_coat(coat);
         let a2 = 0.02_f64.powi(4);
         let ca2 = 0.2_f64.powi(4);

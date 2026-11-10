@@ -243,7 +243,7 @@ pub(crate) fn dispatch(app: &mut SolveApp, ctx: &egui::Context, owner: &str, eve
                 return;
             }
             let mut camera = app.cam;
-            camera.fit(&bounds);
+            camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
             let params = json!({"camera":{"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"fov":camera.fov,"roll":camera.roll}});
             if let Err(error) = app.run("view.apply", params) {
                 app.set_status(error, true);

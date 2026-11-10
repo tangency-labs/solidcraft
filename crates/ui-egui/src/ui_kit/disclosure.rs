@@ -8,7 +8,7 @@ use solidcraft_theme::Tokens;
 pub(crate) fn disclosure(painter: &Painter, center: Pos2, open: bool, ink: Color32) {
     let size = Tokens::get().form_section_icon_size;
     let rect = Rect::from_center_size(center, vec2(size, size));
-    crate::icons::paint_ink(painter, rect, if open { "chevron" } else { "chevron_right" }, ink);
+    crate::ui_kit::icons::paint_ink(painter, rect, if open { "chevron" } else { "chevron_right" }, ink);
 }
 
 /// Fold action in existing chrome. Stable identity across state changes, with the caller's
@@ -44,7 +44,7 @@ fn disclosure_button_with_hover(ui: &mut Ui, rect: Rect, open: bool, label: &str
 
 /// Dropdowns always point down, independently of popup state. Preserve their existing size.
 pub(crate) fn dropdown_indicator(painter: &Painter, rect: Rect, ink: Color32) {
-    crate::icons::paint_ink(painter, rect, "chevron", ink);
+    crate::ui_kit::icons::paint_ink(painter, rect, "chevron", ink);
 }
 
 /// Bottom-strip fold action: down to hide, matching up chevron and title to restore.
@@ -59,9 +59,9 @@ pub(crate) fn strip_toggle(ui: &mut Ui, expanded: bool, label: &str) -> Response
     let ink = if response.hovered() || response.has_focus() { t.form_ink } else { t.form_dim };
     let icon = Rect::from_min_size(rect.min, vec2(t.control_height, t.control_height)).shrink(t.form_icon_inset);
     if expanded {
-        crate::icons::paint_ink(ui.painter(), icon, "chevron", ink);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", ink);
     } else {
-        crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
+        crate::ui_kit::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
     }
     if let Some(title) = title {
         ui.painter().galley(pos2(rect.left() + t.control_height + t.space_6, rect.center().y - title.size().y / 2.0), title, t.form_ink);
@@ -69,7 +69,3 @@ pub(crate) fn strip_toggle(ui: &mut Ui, expanded: bool, label: &str) -> Response
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
 }
-
-#[cfg(test)]
-#[path = "disclosure_tests.rs"]
-mod tests;

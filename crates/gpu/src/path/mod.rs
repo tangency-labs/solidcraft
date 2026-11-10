@@ -128,16 +128,16 @@ pub fn host() -> Result<ImageHost> {
 /// Elsewhere a viewport on another backend is reopened on the same GPU through one of them.
 /// Without a usable adapter the executor is unavailable; CPU image methods remain usable.
 pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
-    let policy = crate::select::Policy::from_env().map_err(gpu)?;
+    let policy = crate::env::policy().map_err(gpu)?;
     let info = adapter.get_info();
-    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(crate::select::path_backends()) {
+    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(solidcraft_viewport_gpu::select::path_backends()) {
         return Err(gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)));
     }
-    if !policy.admits(crate::select::tier_of(info.device_type)) {
+    if !policy.admits(solidcraft_viewport_gpu::select::tier_of(info.device_type)) {
         return Err(gpu(format!("viewport adapter does not satisfy SOLIDCRAFT_GPU={}", policy.name())));
     }
     if !matches!(info.backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal) {
-        let (picked, _) = crate::select::pick_path(policy, |i| i.vendor == info.vendor && i.device == info.device)
+        let (picked, _) = solidcraft_viewport_gpu::select::pick_path(policy, |i| i.vendor == info.vendor && i.device == info.device)
             .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)))?;
         let (device, queue) = open_device(&picked)?;
         log::info!("gpu-path viewport GPU: {} through Vulkan or Metal", info.name);
@@ -153,7 +153,7 @@ const VULKAN_ONLY: &str = "the GPU path tracer requires a Vulkan driver (Metal o
 
 /// Backends a viewport's path device may open, before any driver is loaded.
 fn viewport_path_backends(backend: wgpu::Backend, windows: bool) -> wgpu::Backends {
-    if windows { wgpu::Backends::from(backend) } else { crate::select::path_backends() }
+    if windows { wgpu::Backends::from(backend) } else { solidcraft_viewport_gpu::select::path_backends() }
 }
 
 // Path resources need six storage buffers (geometry, BVH, accumulation, HDRI,
@@ -180,15 +180,15 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     let required_limits = device_limits(adapter.limits())?;
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("solidcraft progressive path"),
-        required_features: crate::depth_features(adapter),
+        required_features: solidcraft_viewport_gpu::depth_features(adapter),
         required_limits,
         ..Default::default()
     }))
     .map_err(gpu)
 }
 fn open_headless() -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
-    let policy = crate::select::Policy::from_env().map_err(gpu)?;
-    let (adapter, _) = crate::select::pick_path(policy, |_| true)
+    let policy = crate::env::policy().map_err(gpu)?;
+    let (adapter, _) = solidcraft_viewport_gpu::select::pick_path(policy, |_| true)
         .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; no Vulkan or Metal adapter satisfies SOLIDCRAFT_GPU={}", policy.name())))?;
     let (device, queue) = open_device(&adapter)?;
     Ok((adapter, device, queue))
@@ -1798,7 +1798,7 @@ impl Task {
             height: self.output_request.height,
             exposure: 2.0f64.powf(self.options.exposure_ev),
             tone_map: self.options.tone_map,
-            background: self.request.background.map(solidcraft_render::surface::srgb8_to_linear),
+            background: self.request.background.map(solidcraft_viewport::surface::srgb8_to_linear),
             transparent: self.request.transparent_background,
         };
         // Pixels are independent: encode contiguous chunks on every core.

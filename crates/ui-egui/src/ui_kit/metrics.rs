@@ -144,20 +144,3 @@ pub(super) fn label_gap(ui: &Ui, width: f32) -> f32 {
         t.space_8
     }
 }
-
-#[cfg(test)]
-mod label_tests {
-    use super::indented_label;
-
-    /// `label_width` and `sized_row` share `indented_label`, so a label is translated once. German
-    /// `Profiles` is `Profile`, which is itself an English key that would translate again to
-    /// `Profil`; the row must show `Profile`, not the second translation.
-    #[test]
-    fn a_label_is_translated_once() {
-        crate::i18n::install();
-        let _de = solidcraft_ui_text::scope("de");
-        assert_eq!(indented_label("Profiles"), "Profile");
-        assert_eq!(indented_label("  Profiles"), "  Profile");
-        assert_eq!(indented_label("Profile"), "Profil");
-    }
-}

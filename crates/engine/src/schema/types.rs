@@ -284,7 +284,7 @@ impl JsonSchema for AxisDir {
 /// `Camera`, with finite fields, a positive distance and a field of view in [0, π), and the
 /// handlers' message, "invalid camera", for anything else (#10898).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraParam(pub solidcraft_render::Camera);
+pub struct CameraParam(pub solidcraft_viewport::Camera);
 
 impl<'de> Deserialize<'de> for CameraParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -306,10 +306,10 @@ impl JsonSchema for CameraParam {
                 "pitch": {"description": "Elevation above the ground plane, from -π/2 (looking up) to π/2 (looking down).", "type": "number"},
                 "roll": {"description": "Turn about the viewing direction; 0 keeps the up axis upright. Default: 0.", "type": "number", "default": 0.0},
                 "distance": {"description": "From the target to the eye, in mm.", "type": "number", "exclusiveMinimum": 0},
-                "fov": {"description": "Vertical field of view; 0 is orthographic.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI},
+                "fov": {"description": "Vertical field of view; 0 is orthographic. Default: 0.", "type": "number", "minimum": 0, "exclusiveMaximum": std::f64::consts::PI, "default": 0.0},
                 "up": {"description": "The world's up axis. Default: z.", "enum": ["z", "y"], "default": "z"}
             },
-            "required": ["target", "yaw", "pitch", "distance", "fov"]
+            "required": ["target", "yaw", "pitch", "distance"]
         })
     }
 }

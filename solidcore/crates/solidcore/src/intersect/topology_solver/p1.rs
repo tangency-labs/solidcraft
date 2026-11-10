@@ -113,7 +113,7 @@ use crate::geom::solution_array::{
 };
 use crate::geom::tol::{zone_tol_3d, SmallTopoType};
 use crate::geom::tree::Tree;
-use crate::geom::vector2d::Vec2;
+use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
 use crate::intersect::point_class::PointClassification;
 use crate::kernel::Kernel;
@@ -164,7 +164,7 @@ pub trait TopologyObjects<O> {
         &self,
         _k: &Kernel,
         _face: O,
-        _uv: crate::math::Point2,
+        _uv: Point2,
         _tolerance: f64,
         _boundaries: bool,
         _use_uv: bool,
@@ -1876,15 +1876,78 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                     } else {
                         Some(&s.opt_vectors)
                     },
-                    requested: SolutionRequested::All,
+                    requested: if op == SolverOperation::ProjectedMaximize
+                        && s.solution_requested == SolutionRequested::Single
+                    {
+                        SolutionRequested::Single
+                    } else {
+                        SolutionRequested::All
+                    },
                 },
             )?
         };
+
+        // A face standing in for one of its silhouette curves (no edge of its
+        // own) is measured through that traced curve, so a certified Single
+        // maximum is a maximum over the curve, not yet over the face. Its
+        // answer stands only if the face point it names, evaluated on the
+        // face's own surface, measures the reported value to rounding of that
+        // measurement (#13678); a traced curve off the surface refuses.
+        let faces = if self.swap_order {
+            [
+                self.curve_face2.filter(|_| self.curve_edge2.is_none()),
+                self.curve_face.filter(|_| self.curve_edge.is_none()),
+            ]
+        } else {
+            [
+                self.curve_face.filter(|_| self.curve_edge.is_none()),
+                self.curve_face2.filter(|_| self.curve_edge2.is_none()),
+            ]
+        };
+        let attain = op == SolverOperation::ProjectedMaximize
+            && ts.base.solution_requested == SolutionRequested::Single
+            && faces.iter().any(Option::is_some);
+        let normal = ts.base.opt_vectors.first().copied();
 
         for found in solutions.as_slice() {
             let mut sol = *found;
             let t1 = sol.start.param(0)?;
             let t2 = sol.start.param(1)?;
+            if attain {
+                let mut native = [Point3::default(); 2];
+                for (((point, face), uv_curve), (curve, t)) in native
+                    .iter_mut()
+                    .zip(faces)
+                    .zip([uv_curve1, uv_curve2])
+                    .zip([(this, t1), (other, t2)])
+                {
+                    *point = match (face, uv_curve) {
+                        (Some(face), Some(uv_curve)) => {
+                            let uv = uv_curve.evaluate_point(k, t)?;
+                            objects
+                                .surface(objects.face_surface(face)?)?
+                                .evaluate_point(k, Point2::new(uv.x, uv.y))?
+                        }
+                        _ => curve.curve.evaluate_point(k, t)?,
+                    };
+                }
+                let [p1, p2] = native;
+                let normal =
+                    normal.ok_or(null_deref(OP_CC, "projected maximum without a normal"))?;
+                let measured = normal.cross(p1 - p2).cross(normal).length();
+                let reported = sol.start.solution_value;
+                // 8 ulps of the measured coordinates' scale, the frame test's
+                // convention (`from_parameters::axes`): rounding, not tolerance.
+                let scale = normal.dot(normal) * (p1.length() + p2.length());
+                // a NaN measurement does not attain
+                let attained = (reported - measured).abs() <= 8.0 * f64::EPSILON * scale;
+                if !attained {
+                    return Err(SolidError::Unsupported {
+                        operation: OP_CC,
+                        reason: "silhouette point does not measure its value on the surface",
+                    });
+                }
+            }
             sol.objects[0] = sol_objects[0];
             sol.objects[1] = sol_objects[1];
             sol.num_objects = count;

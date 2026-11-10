@@ -9,9 +9,9 @@ use solidcraft_engine::Session;
 use solidcraft_engine::control_pending;
 use solidcraft_engine::panels::ActionSink;
 use solidcraft_engine::panels::commands::LayoutCatalogue;
-use solidcraft_engine::render::StandardView;
 use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
+use solidcraft_viewport::StandardView;
 
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
 /// `document.inspect`, `ui.view`, `ui.render`, `ui.screenshot`, `control.running`, and
@@ -609,7 +609,7 @@ impl Remote {
         let steps = params.get("commands").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         if self.param_check == ParamCheck::Strict {
             if let Some(refusal) = solidcraft_engine::batch_preflight::contracts(steps) {
-                return Ok(refusal.reply(steps.len()));
+                return Ok(refusal.reply(steps.len(), params.get("rollback").and_then(Value::as_bool).unwrap_or(true)));
             }
             return self.call_once("engine.batch", params, true);
         }
@@ -733,13 +733,14 @@ impl Headless {
         if steps.len() > 100_000 {
             return Err("script too long".into());
         }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
         if method == "engine.batch"
             && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, self.session.param_check, &[])
         {
-            return Ok(refusal.reply(steps.len()));
+            return Ok(refusal.reply(steps.len(), rollback));
         }
         let panels = steps.iter().filter(|step| step_command(step).is_some_and(commands::is_command)).count();
-        if method == "engine.batch" && p.get("rollback").and_then(Value::as_bool).unwrap_or(true) {
+        if method == "engine.batch" && rollback {
             if panels != steps.len() {
                 return Err(commands::error_text(error(
                     Rule::Capability,
@@ -803,7 +804,7 @@ impl Headless {
                     "fit" => {
                         let b = solidcraft_engine::view::bounds(s).map_err(|e| e.to_string())?;
                         if let Some(c) = s.camera.as_mut() {
-                            c.fit(&b);
+                            c.fit(&solidcraft_engine::render::view_bounds(&b));
                         }
                     }
                     _ => {

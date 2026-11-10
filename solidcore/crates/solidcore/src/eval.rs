@@ -20,6 +20,8 @@ pub mod curve;
 pub mod form;
 pub mod geometry;
 pub mod normal_section;
+#[rustfmt::skip]
+pub mod plan;
 pub mod pole;
 pub mod sphere;
 pub mod spline;
