@@ -117,6 +117,7 @@ fn open_windows(app: &SolveApp) -> Vec<&'static str> {
     [
         (app.params.is_some(), "parameters.change"),
         (app.design_properties.is_some(), "document.metadata"),
+        (app.review_notes.is_some(), "document.review"),
         (app.sketch_report.is_some(), "sketch.inspect"),
         (app.bom.is_some(), "assembly.bom"),
         (app.material_card_review.is_some(), "material.properties.validate"),
@@ -3527,6 +3528,17 @@ mod tests {
             assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("takes no ui.start params"), "{r}");
             assert!(h.app.dialog.is_none() && h.app.tool.is_none() && h.app.session.analysis.is_none(), "{command} started nothing");
         }
+    }
+
+    #[test]
+    fn review_window_is_reported_without_opening_from_programmatic_reads() {
+        let mut h = crate::scenario::Harness::new();
+        let reply = h.call("engine.execute", json!({"command": "document.review", "params": {}}));
+        assert!(reply.get("error").is_none(), "{reply}");
+        assert!(h.app.review_notes.is_none());
+        let opened = h.call("ui.start", json!({"command": "document.review"}));
+        assert_eq!(opened["result"]["windows"], json!(["document.review"]));
+        assert_eq!(h.call("ui.inspect", json!({}))["result"]["windows"], json!(["document.review"]));
     }
 
     /// #9087: the dialog is reported as data (its command, inputs and what OK runs), not as the

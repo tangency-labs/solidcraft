@@ -244,6 +244,7 @@ pub(crate) mod refused_part;
 mod render_ui;
 pub mod render_workspace;
 pub mod resume_ui;
+pub(crate) mod review_notes;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -628,6 +629,8 @@ pub struct SolveApp {
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
+    /// Text notes and occurrence-local review pins; saved in document metadata.
+    pub review_notes: Option<review_notes::ReviewNotes>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
@@ -925,6 +928,7 @@ impl SolveApp {
             remembered_commands: Vec::new(),
             params: None,
             design_properties: None,
+            review_notes: None,
             sketch_report: None,
             bom: None,
             material_card_review: None,
@@ -2186,6 +2190,10 @@ impl SolveApp {
         }
         if matches!(id, "document.metadata" | "document.metadata.set") {
             design_properties::open(self);
+            return;
+        }
+        if id == "document.review" {
+            review_notes::open(self);
             return;
         }
         if id == "sketch.inspect" {
@@ -3713,6 +3721,7 @@ impl SolveApp {
         }
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
+        review_notes::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());

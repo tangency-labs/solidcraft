@@ -82,3 +82,15 @@ pub struct MetadataRemoveResult {
 #[cfg(test)]
 #[path = "metadata_tests.rs"]
 mod tests;
+
+/// Parameters for reading the Context Pointer notebook without opening a UI.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewParams {}
+
+/// The notebook is returned verbatim, including fields written by newer clients.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ReviewResult {
+    pub key: String,
+    pub value: Option<serde_json::Value>,
+}

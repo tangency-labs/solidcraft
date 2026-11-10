@@ -488,6 +488,7 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("export_json", "Export Design as JSON…", "", "export", true));
     rows.push(FileRow::Separator);
     rows.push(row("document.metadata", &format!("{}…", app.tr_label("Design Properties")), "", "settings", shown));
+    rows.push(row("document.review", app.tr("cmd.document.review"), "", "list", shown));
     rows.push(FileRow::Separator);
     // The browser can install SolidCraft as an app (`install`): only while it offers to.
     if crate::install::offered(app).is_some() {
@@ -521,6 +522,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
+        "document.review" => FileAction::Command("document.review").run(app),
         "pointcloud.insert" | "file.send_to_slicer" => app.start(id),
         "save" => FileAction::Save.run(app),
         "save_as" => FileAction::SaveAs.run(app),

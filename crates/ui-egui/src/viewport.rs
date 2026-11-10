@@ -3631,6 +3631,9 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
 /// What a click would pick: the first hit the open dialog's active input accepts, or with no
 /// dialog the first hit (sketch entities only belong to the active sketch).
 pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
+    if crate::review_notes::picking(app) {
+        return hits.iter().find_map(|h| crate::review_notes::picked(h).map(|s| (h.clone(), s)));
+    }
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
         return hits
@@ -3642,6 +3645,9 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
 
 /// Every hit a click could pick, in order, each with its selection (Select Other).
 pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
+    if crate::review_notes::picking(app) {
+        return hits.iter().filter_map(|h| crate::review_notes::picked(h).map(|s| (h.clone(), s))).collect();
+    }
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         // The face under the cursor is looked up once for every sketch point a face place may
         // snap to, before Select Other caps its rows.
@@ -5315,7 +5321,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         Some(sel) => select(app, Some(sel), add, allow_toggle),
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
-                        None if !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
+                        None if !add
+                            && !resp.double_clicked()
+                            && !crate::review_notes::picking(app)
+                            && crate::select_other::cycle_click(app, &proj, p) => {}
                         None => {
                             let sel = cand.and_then(|c| c.1);
                             select(app, sel.clone(), add, allow_toggle);
@@ -5389,6 +5398,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Double-click a face: edit a linked component in place, activate another component, or
         // else open the editor of the feature that made the face (as the Browser's row does).
         if resp.double_clicked()
+            && !crate::review_notes::picking(app)
             && !held
             && !dim_edit
             && mods.is_none()
@@ -5579,7 +5589,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
     // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
     // draws a selection box instead, as a drag from empty space does.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held {
+    if app.tool.is_none()
+        && app.dialog.is_none()
+        && primary_nav.is_none()
+        && mode.is_none()
+        && app.session.active_sketch.is_none()
+        && !held
+        && !crate::review_notes::picking(app)
+    {
         if resp.drag_started_by(egui::PointerButton::Primary)
             // Physical Ctrl on macOS is not the primary click-selection modifier, but must
             // still keep a modified drag from moving a part.
@@ -5720,6 +5737,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::sketch_tools::show(app, ui, &painter, &proj);
     crate::sketch_line_arc::paint_mode(app, ui, &painter, &proj);
     crate::design_properties::overlay(app, &painter, &proj);
+    crate::review_notes::overlay(app, ui, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
     crate::select_other::show(app, ui.ctx());
     if !app.universal_panel_host_enabled() {
