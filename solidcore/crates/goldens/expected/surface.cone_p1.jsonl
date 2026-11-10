@@ -1805,7 +1805,7 @@
 {"case":"r3_01099_ep_canon_far_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.8,-99998.93333333333,30001.0],"status":[1000.0]}}
 {"case":"r3_01107_ts_canon_far_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[269.9999999998332,0.0],"status":[1000.0]}}
 {"case":"r3_01117_ev_canon_far_in_1e-12_0.999999999999_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[29939.17975951644,230078.667282316,-11225.884655842818]],"n":27},"status":[1000.0]}}
-{"case":"r3_01121_ts_canon_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-8.33779267850332e-10,0.9999999999990001],"status":[1000.0]}}
+{"case":"r3_01121_ts_canon_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.9999999999990001],"status":[1000.0]}}
 {"case":"r3_01122_tn_canon_far_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"r3_01124_tn_canon_far_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"r3_01127_iso_canon_far_in_0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
@@ -2106,7 +2106,7 @@
 {"case":"r3_03659_ep_canon_io_rot_in_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.0,-0.9999999999999998,4.333333333333333],"status":[1000.0]}}
 {"case":"r3_03667_ts_canon_io_rot_in_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[270.0,3.0],"status":[1000.0]}}
 {"case":"r3_03680_ep_canon_io_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.000000000001,-0.9999999999997999,4.3333333333336],"status":[1000.0]}}
-{"case":"r3_03681_ts_canon_io_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241017025958138e-10,2.000000000001],"status":[1000.0]}}
+{"case":"r3_03681_ts_canon_io_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241144248145397e-10,2.000000000001],"status":[1000.0]}}
 {"case":"r3_03693_iso_canon_io_rot_in_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"r3_03694_isod_canon_io_rot_in_0_0.3_[0.1, 0.2, 0.9, 0.7]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"r3_03711_iso_canon_io_rot_in_0_1.2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
@@ -2193,7 +2193,7 @@
 {"case":"r3_04427_ep_canon_io_far_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100001.0,-99998.66666666667,30002.0],"status":[1000.0]}}
 {"case":"r3_04434_ep_canon_io_far_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100001.59999999999,-100001.20000000001,30003.0],"status":[1000.0]}}
 {"case":"r3_04435_ts_canon_io_far_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[269.9999999998332,3.0],"status":[1000.0]}}
-{"case":"r3_04449_ts_canon_io_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.667501208395266e-10,2.000000000001],"status":[1000.0]}}
+{"case":"r3_04449_ts_canon_io_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,2.000000000001],"status":[1000.0]}}
 {"case":"r3_04453_tn_canon_io_far_oob_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0],"status":[1000.0]}}
 {"case":"r3_04454_tn_canon_io_far_oob_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-999997.0],"status":[1000.0]}}
 {"case":"r3_04455_iso_canon_io_far_oob_0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
@@ -2945,7 +2945,7 @@
 {"case":"r3_11602_ep_unb45_rot_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-1.2000000000000002,2.4],"status":[1000.0]}}
 {"case":"r3_11604_ev_unb45_rot_oob_-0.1_1.1_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.1,-0.7400000000000002,4.68],"status":[1000.0]}}
 {"case":"r3_11612_ev_unb45_rot_oob_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.999999999999,-0.8000000000006,4.5999999999992,1.0,0.5999999999954744,0.8000000000033942,-2.1369233980856517e-15,-9.050966799242895,6.788225099352167,-1.0684616830355885e-15,-4.525483399623709,3.39411254967778],"status":[1000.0]}}
-{"case":"r3_11617_ts_unb45_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.2410712442308e-10,0.999999999999],"status":[1000.0]}}
+{"case":"r3_11617_ts_unb45_rot_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.2411312751854994e-10,0.999999999999],"status":[1000.0]}}
 {"case":"r3_11618_tn_unb45_rot_oob_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"r3_11619_tn_unb45_rot_oob_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1.0],"status":[1000.0]}}
 {"case":"r3_11621_tn_unb45_rot_oob_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,3.0],"status":[1000.0]}}
@@ -3007,7 +3007,7 @@
 {"case":"r3_12107_ep_unb45_far_oob_1.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100001.2,-99998.4,30001.0],"status":[1000.0]}}
 {"case":"r3_12114_ep_unb45_far_oob_0.75_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.8,-100000.59999999999,30000.0],"status":[1000.0]}}
 {"case":"r3_12125_ev_unb45_far_oob_1e-12_0.999999999999_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[29907.903953849684,230121.66072144822,-11845.783838013314]],"n":27},"status":[1000.0]}}
-{"case":"r3_12129_ts_unb45_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[6.576271025361176e-10,0.999999999999],"status":[1000.0]}}
+{"case":"r3_12129_ts_unb45_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241131275151306e-10,0.999999999999],"status":[1000.0]}}
 {"case":"r3_12132_tn_unb45_far_oob_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"r3_12136_isod_unb45_far_oob_0_0.0_[0.1, 0.2, 0.9, 0.7]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r3_12169_isod_unb45_far_oob_1_0.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[249274.04216951138,1814957.8671187495,5603267.48001269]],"n":58},"status":[1000.0]}}
@@ -3476,7 +3476,7 @@
 {"case":"r3_16463_ev_unbneg_far_in_0.75_0.0_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[30001.52843964611,230005.9416949493,-10017.798360255954]],"n":27},"status":[1000.0]}}
 {"case":"r3_16464_ev_unbneg_far_in_0.75_0.0_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[30003.401704804633,230007.8149601078,-9972.537051653111]],"n":24},"status":[1000.0]}}
 {"case":"r3_16476_ev_unbneg_far_in_1e-12_0.999999999999_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.03618442753,-99999.95175409663,30002.58178425684,0.0,0.0,1.064177772475912,-0.7202530529154113,0.5401897896931397,3.0607489485562674e-12,0.0,0.0,-5.327802607483197e-17],"status":[1000.0]}}
-{"case":"r3_16481_ts_unbneg_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-1.6677859093761072e-10,0.999999999999],"status":[1000.0]}}
+{"case":"r3_16481_ts_unbneg_far_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
 {"case":"r3_16482_tn_unbneg_far_in_0.0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.0],"status":[1000.0]}}
 {"case":"r3_16483_tn_unbneg_far_in_720.0_1.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[6.283185307210985,1.0],"status":[1000.0]}}
 {"case":"r3_16484_tn_unbneg_far_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
@@ -4091,7 +4091,7 @@
 {"case":"r3_22078_ts_semi_inf_rot_in_0.25_0.5","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[89.99999999999999,0.5],"status":[1000.0]}}
 {"case":"r3_22093_ev_semi_inf_rot_in_0.75_0.0_001101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,-1.6,2.7],"status":[1000.0]}}
 {"case":"r3_22110_ev_semi_inf_rot_in_1e-12_0.999999999999_310101","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-1253.0670776615193,1657.074480921911,-26997.280918704542]],"n":24},"status":[1000.0]}}
-{"case":"r3_22113_ts_semi_inf_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.2409891296280653e-10,0.999999999999],"status":[1000.0]}}
+{"case":"r3_22113_ts_semi_inf_rot_in_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[3.241127765259366e-10,0.999999999999],"status":[1000.0]}}
 {"case":"r3_22116_tn_semi_inf_rot_in_-725.0_-2.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,-2.0],"status":[1000.0]}}
 {"case":"r3_22117_tn_semi_inf_rot_in_359.9999999_3.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.9999999996914665,3.0],"status":[1000.0]}}
 {"case":"r3_22118_tn_semi_inf_rot_in_1000000.0_1000000.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,1000000.0],"status":[1000.0]}}
@@ -5651,7 +5651,7 @@
 {"case":"r3_36686_ev_small_far_oob_0.75_0.0_110000","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.00008,-100000.00006,30000.0,0.2666666507720947,-0.20000004768371582,1.0,0.000339411199092865,0.0004525482654571533,0.0,1.131371259689331,1.5084939002990723,0.0],"status":[1000.0]}}
 {"case":"r3_36701_ev_small_far_oob_1e-12_0.999999999999_221011","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[29986.35738106872,230023.50223653967,-10301.042042832269]],"n":27},"status":[1000.0]}}
 {"case":"r3_36704_ep_small_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[100000.20006,-99999.73325333334,30001.0],"status":[1000.0]}}
-{"case":"r3_36705_ts_small_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.000015007740046257823,0.999999999999],"status":[1000.0]}}
+{"case":"r3_36705_ts_small_far_oob_1e-12_0.999999999999","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[0.0,0.999999999999],"status":[1000.0]}}
 {"case":"r3_36711_iso_small_far_oob_0_0.0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"r3_36717_iso_small_far_oob_0_0.3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[6.0,"inf","NaN"]],"n":41},"status":[1000.0]}}
 {"case":"r3_36727_isod_small_far_oob_0_1.0_[-0.5, -0.5, 1.5, 1.5]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[74021.00162000001,474021.00114000007,622157.0234400004]],"n":22},"status":[1000.0]}}
@@ -6156,7 +6156,7 @@
 {"case":"r4_01414_tr_semisw11_1e-13_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"r4_01420_build_semisw11_1e-13_rot_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_01425_es_semisw11_1e-13_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460828796,1000004.9748610744,1000005.8133017564]],"n":27},"status":[1000.0]}}
-{"case":"r4_01435_tos_semisw11_1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,-0.999999999],"status":[1000.0]}}
+{"case":"r4_01435_tos_semisw11_1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,-0.999999999],"status":[1000.0]}}
 {"case":"r4_01445_isod_semisw11_1e-13_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_01455_isod_semisw11_1e-13_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_01458_ic_semisw11_1e-13_rot_0_0_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14454.884645748825,14488.424699844534,32382.31545816128]],"n":56},"status":[1000.0]}}
@@ -8224,7 +8224,7 @@
 {"case":"r4_09530_tr_semisw10_5e-11_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"r4_09536_build_semisw10_5e-11_rot_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_09541_es_semisw10_5e-11_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460840954,1000004.9748612703,1000005.8133048598]],"n":27},"status":[1000.0]}}
-{"case":"r4_09551_tos_semisw10_5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.3212928481646517e-9,0.999999999],"status":[1000.0]}}
+{"case":"r4_09551_tos_semisw10_5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[2.3212992092740144e-9,0.999999999],"status":[1000.0]}}
 {"case":"r4_09561_isod_semisw10_5e-11_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_09571_isod_semisw10_5e-11_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_09574_ic_semisw10_5e-11_rot_0_0_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14454.885015088397,14488.42505053996,32382.324330172676]],"n":56},"status":[1000.0]}}
@@ -9000,7 +9000,7 @@
 {"case":"r4_12574_tr_semisw11_5.7e-11_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"r4_12580_build_semisw11_5.7e-11_rot_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_12585_es_semisw11_5.7e-11_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.146084266,1000004.9748612975,1000005.8133052951]],"n":27},"status":[1000.0]}}
-{"case":"r4_12595_tos_semisw11_5.7e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,-0.999999999],"status":[1000.0]}}
+{"case":"r4_12595_tos_semisw11_5.7e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,-0.999999999],"status":[1000.0]}}
 {"case":"r4_12605_isod_semisw11_5.7e-11_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_12615_isod_semisw11_5.7e-11_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_12618_ic_semisw11_5.7e-11_rot_0_0_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[-7869040048768.099,7869040077004.153,-188856961478151.56]],"n":56},"status":[1000.0]}}
@@ -11068,7 +11068,7 @@
 {"case":"r4_20690_tr_semisw10_-1e-13_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"r4_20696_build_semisw10_-1e-13_rot_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_20701_es_semisw10_-1e-13_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460828747,1000004.9748610737,1000005.813301744]],"n":27},"status":[1000.0]}}
-{"case":"r4_20711_tos_semisw10_-1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,0.999999999],"status":[1000.0]}}
+{"case":"r4_20711_tos_semisw10_-1e-13_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,0.999999999],"status":[1000.0]}}
 {"case":"r4_20721_isod_semisw10_-1e-13_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_20731_isod_semisw10_-1e-13_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_20734_ic_semisw10_-1e-13_rot_0_0_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14454.884645750106,14488.424699845815,32382.315458192013]],"n":56},"status":[1000.0]}}
@@ -11844,7 +11844,7 @@
 {"case":"r4_23734_tr_semisw11_-5e-11_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"r4_23740_build_semisw11_-5e-11_rot_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_23745_es_semisw11_-5e-11_rot_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[1000002.1460816589,1000004.9748608776,1000005.8132986407]],"n":27},"status":[1000.0]}}
-{"case":"r4_23755_tos_semisw11_-5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.1584271378971435e-9,-0.999999999],"status":[1000.0]}}
+{"case":"r4_23755_tos_semisw11_-5e-11_rot_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[5.158433499006507e-9,-0.999999999],"status":[1000.0]}}
 {"case":"r4_23765_isod_semisw11_-5e-11_rot_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_23775_isod_semisw11_-5e-11_rot_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_23778_ic_semisw11_-5e-11_rot_0_0_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[14454.884645748825,14488.424699844534,32382.31545816128]],"n":56},"status":[1000.0]}}
@@ -13112,7 +13112,7 @@
 {"case":"r4_31230_tr_csweep0_720_std_1_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1007.0]}}
 {"case":"r4_31236_build_sweep-360_0_std_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_31241_es_sweep-360_0_std_0_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[3.0974110123295517,4.042608341126703,11.736505844537849]],"n":27},"status":[1000.0]}}
-{"case":"r4_31251_tos_sweep-360_0_std_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.2411384154329426e-7,1e-10],"status":[1000.0]}}
+{"case":"r4_31251_tos_sweep-360_0_std_0_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.2411386502971487e-7,1e-10],"status":[1000.0]}}
 {"case":"r4_31261_isod_sweep-360_0_std_0_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_31271_isod_sweep-360_0_std_0_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_31281_ic_sweep-360_0_std_0_1_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[13704.617640687116,14433.067388155418,28189.83809511663]],"n":56},"status":[1000.0]}}
@@ -13123,7 +13123,7 @@
 {"case":"r4_31331_tr_sweep-360_0_std_0_1_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248},"status":[1000.0]}}
 {"case":"r4_31337_build_sweep-360_0_std_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[["-inf","inf","-inf"]],"n":248}}}
 {"case":"r4_31342_es_sweep-360_0_std_1_-30_1e+06","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[902562.4055307147,1347570.7471536577,2970608.1302391617]],"n":27},"status":[1000.0]}}
-{"case":"r4_31352_tos_sweep-360_0_std_1_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.2411384154329426e-7,1e-10],"status":[1000.0]}}
+{"case":"r4_31352_tos_sweep-360_0_std_1_1_1e-10","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-3.2411386502971487e-7,1e-10],"status":[1000.0]}}
 {"case":"r4_31362_isod_sweep-360_0_std_1_0_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_31372_isod_sweep-360_0_std_1_1_-0.25","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[],"status":[1001.0]}}
 {"case":"r4_31382_ic_sweep-360_0_std_1_1_1e-09","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":{"blocks":[[13704.617640687116,14433.067388155418,28189.83809511663]],"n":56},"status":[1000.0]}}
@@ -19768,7 +19768,7 @@
 {"case":"review_unb30r1_ep[0, 0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.0,0.0,0.0],"status":[1000.0]}}
 {"case":"review_unb30r1_ep[0.25, 0.75]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[8.774672092549033e-17,1.4330127018922192,0.75],"status":[1000.0]}}
 {"case":"review_unb30r1_ep[1, 1]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[1.5773502691896257,-3.863393916594582e-16,1.0],"status":[1000.0]}}
-{"case":"review_unb30r1_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-2.220446049250313e-16,0.0,-1.7320508075688776],"status":[1000.0]}}
+{"case":"review_unb30r1_ep[1000.0, -1000.0]","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-2.220446049250313e-16,5.438524293787564e-32,-1.7320508075688776],"status":[1000.0]}}
 {"case":"review_unb30r1_es00","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8905312778398414,1.3712979139266015,1.1],"status":[1000.0]}}
 {"case":"review_unb30r1_es01","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8905312778398414,1.3712979139266015,1.1,-0.3144474934771039,0.4842066781647068,1.0],"status":[1000.0]}}
 {"case":"review_unb30r1_es03","deferred":null,"error":null,"ints":{},"topology":null,"values":{"build":[1000.0],"out":[-0.8905312778398414,1.3712979139266015,1.1,-0.3144474934771039,0.4842066781647068,1.0,0.0,0.0,0.0,0.0,0.0,0.0],"status":[1000.0]}}
