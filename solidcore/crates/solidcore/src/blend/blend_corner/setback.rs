@@ -76,7 +76,7 @@ use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
 use crate::blend::blend_corner::on_face::{self, Clearance};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
-use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy};
+use crate::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy, SetbackTooShortWhy};
 use crate::blend::blend_setback::{
     bisect_thousandths, certified_scale, containment, distances, fill_hole_counted,
     fill_hole_probe, spring_curve, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
@@ -1360,6 +1360,7 @@ pub fn make_setback_topology(
             .typed(BlendRefusal::SetbackTooShort {
                 vertex: vtx,
                 least: most,
+                why: SetbackTooShortWhy::RailsCross,
             })));
         }
         corner.ease_dist = a.ease;
@@ -1435,7 +1436,18 @@ pub fn make_setback_topology(
                     fmt_g(scale.scale * a.setback)
                 )
             };
-            return Ok(Err(SetbackRefusal::no_room(why, Some(builds))));
+            let refusal = SetbackRefusal::no_room(why, Some(builds));
+            // as data where a setback builds: the least one (none fits otherwise, so none
+            // is named)
+            return Ok(Err(if fits_room {
+                refusal.typed(BlendRefusal::SetbackTooShort {
+                    vertex: vtx,
+                    least: builds,
+                    why: SetbackTooShortWhy::ConvexFill,
+                })
+            } else {
+                refusal
+            }));
         }
         for (s, &m) in sbs.iter_mut().zip(&most) {
             *s = smin(scale.scale * *s, m);
@@ -1957,7 +1969,17 @@ fn grow_curved<S: SetbackSolvers>(
                 fmt_g(hi * a.setback)
             )
         };
-        return Ok(Err(SetbackRefusal::no_room(why, Some(builds))));
+        let refusal = SetbackRefusal::no_room(why, Some(builds));
+        // as data where a setback builds: the least one (none fits otherwise, so none is
+        // named)
+        return Ok(Err(match corner.vertex.filter(|_| fits_room) {
+            Some(vertex) => refusal.typed(BlendRefusal::SetbackTooShort {
+                vertex,
+                least: builds,
+                why: SetbackTooShortWhy::ConcaveFill,
+            }),
+            None => refusal,
+        }));
     }
     Ok(Ok(ends))
 }
