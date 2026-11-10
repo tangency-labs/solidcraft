@@ -241,8 +241,12 @@ pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
 /// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
 /// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
 pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
-    app.tree.content.last_feature = None;
-    app.viewport.hover_feature = feature;
+    if feature.is_some() {
+        app.tree.content.last_feature = None;
+        app.viewport.hover_feature = feature;
+    } else if app.tree.content.last_feature.is_none() {
+        app.viewport.hover_feature = None;
+    }
 }
 
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
