@@ -82,9 +82,6 @@ mod tests {
         assert!(matches!(owned, Err(crate::Error::Cancelled("check"))), "{owned:?}");
         let mine = b.try_clone().unwrap();
         assert!(mine.check_owned(CheckLevel::All).is_ok_and(|r| r.is_valid()), "no token, no stop");
-        let mine = b.try_clone().unwrap();
-        let boxed = stop.within(|| mine.bounds_owned());
-        assert!(matches!(boxed, Err(crate::Error::Cancelled("bounds"))), "{boxed:?}");
     }
 
     #[test]

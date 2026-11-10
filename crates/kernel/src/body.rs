@@ -1046,14 +1046,7 @@ impl Body {
         if let Some(b) = *slot {
             return Ok(b);
         }
-        // Under a token (an evaluation that can be cancelled), measured on a copy the token can
-        // stop part way: a large body's tight box takes a good part of a second, and a call
-        // stopped part way may leave half-built caches on the body it reads.
-        let measured = match solidcraft_smlib::stop::current() {
-            Some(_) => self.smlib()?.try_clone().and_then(solidcraft_smlib::Brep::bounds_owned),
-            None => self.smlib()?.bounds(),
-        };
-        let (lo, hi) = measured.map_err(|e| KernelError::smlib("SMLib bounds", e))?;
+        let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
         let b = Aabb3 { min: v3(lo), max: v3(hi) };
         *slot = Some(b);
         Ok(b)
