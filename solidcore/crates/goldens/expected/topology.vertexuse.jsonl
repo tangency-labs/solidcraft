@@ -1057,8 +1057,8 @@
 {"case":"cone_vu5_seam_nouv","deferred":null,"error":null,"ints":{"q":[0,-1,0]},"topology":null,"values":{}}
 {"case":"cone_vu5_sector0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[150.9220118838108,152.9220118838108,1731.4540831866757]],"n":21}}}
 {"case":"cone_vu5_sector1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":{"blocks":[[150.9220118838108,152.9220118838108,1731.4540831866757]],"n":21}}}
-{"case":"cone_vu5_uvpt0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,15.30733729460359,1.3162874152149766e-31]}}
-{"case":"cone_vu5_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,15.30733729460359,1.3162874152149766e-31]}}
+{"case":"cone_vu5_uvpt0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,15.30733729460359,6.33005193241576e-32]}}
+{"case":"cone_vu5_uvpt1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"state":[0.0,15.30733729460359,6.33005193241576e-32]}}
 {"case":"disk_rebuild_vu2_conn16005","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}
 {"case":"disk_rebuild_vu2_conn16013","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}
 {"case":"disk_rebuild_vu2_conn16021","deferred":null,"error":null,"ints":{"q":[1]},"topology":null,"values":{}}

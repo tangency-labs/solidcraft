@@ -73,12 +73,12 @@
 //!   (upstream copies a null NURB). With the opt-in
 //!   `Kernel::fixes.nurb_cylinder_inside_out_frame` (WR-496, #1463) an inside-out
 //!   NURB gets `IsNurbSurfaceCone`'s frame (top-knot circle, reversed Z).
-//! - **Iso arcs from control points.** The recognisers' end and middle circles are made
-//!   from the iso curves' control points (`iso_arc`, The NURBS Book §7.3, §7.5), not
-//!   fitted through three samples as `IsArc` does: two fitted end circles of an extruded
-//!   arc put its axis off the extrusion's direction by more than rounding (1.4e-13 rad on a
-//!   94 mm r 40 wall), so the analytic surface was off its own NURBS form and failed the
-//!   exact-class proof (`implicit::lies_on`).
+//! - **Cylinder iso arcs from control points.** [`Cone::is_nurb_surface_cylinder`] makes its
+//!   end circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book §7.3,
+//!   §7.5), not fitted through three samples as `IsArc` does: two fitted end circles of an
+//!   extruded arc put its axis off the extrusion's direction by more than rounding (1.4e-13
+//!   rad on a 94 mm r 40 wall), so the cylinder was off its own NURBS form and failed the
+//!   exact-class proof (`implicit::lies_on`). The cone recogniser and the rebuild keep `IsArc`.
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -145,6 +145,23 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
     }
 }
 
+/// `pIsoCrv->IsArc(5, dScaledZero, ..)` of a plain B-spline iso curve.
+fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+    let arc = crate::curve::curve::p5::is_arc_base(
+        k,
+        curve,
+        |c, tol| c.is_degenerate(k, tol, None),
+        5,
+        scaled_zero,
+    )?;
+    Ok(arc.map(|(frame, radius, start_ang, end_ang)| IsoArc {
+        frame,
+        radius,
+        start_ang,
+        end_ang,
+    }))
+}
+
 /// The circle a rational quadratic iso curve is, made from its control points (not
 /// upstream, which fits a circle through three samples, `pIsoCrv->IsArc(5, dScaledZero, ..)`).
 ///
@@ -177,7 +194,7 @@ fn linear_iso_param(s: &BSplineSurface) -> SurfParamType {
 /// # Errors
 ///
 /// Those of the degeneracy test and the Bézier decomposition.
-fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
     /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
     struct Segment {
         q0: Point3,
@@ -376,20 +393,6 @@ fn end_circles(
         // not a cone - Top or Bot circular isoParameter curve is degenerate or not an arc
         _ => Ok(None),
     }
-}
-
-/// The angle tolerance (degrees) of the circle checks, `ang_tol`, at least the angle the
-/// rounding of the circles' stored points can turn a circle's plane or frame by (not upstream):
-/// points of coordinates up to `size` (the larger of the surface's corners) are known to
-/// `8 ε size`, which over the larger circle's `radius` turns its normal by up to
-/// `8 ε size / radius`. A tolerance scaled below that (a cylinder at ±1.2e6 checked at a
-/// thousandth of the default) would decide on the rounding of the input, not its shape.
-fn circle_angle_tol(ang_tol: f64, size: f64, top: &IsoArc, bot: &IsoArc) -> f64 {
-    let radius = top.radius.max(bot.radius);
-    if radius.is_nan() || radius <= 0.0 {
-        return ang_tol;
-    }
-    ang_tol.max((8.0 * f64::EPSILON * size / radius).to_degrees())
 }
 
 /// Top/bot start angles, end angles or x axes vary by more than `ang_tol`.
@@ -874,12 +877,6 @@ impl Cone {
         else {
             return Ok(None);
         };
-        let ang_tol = circle_angle_tol(
-            ang_tol,
-            min_pnt.max_dimension().max(max_pnt.max_dimension()),
-            &top,
-            &bot,
-        );
 
         // check for not a cone - top/bot start angles or top/bot end angles vary
         if twisted(&top, &bot, ang_tol)? {
@@ -1054,7 +1051,7 @@ impl Cone {
         if top_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(top) = iso_arc(k, &top_iso, pt_tol)? else {
+        let Some(top) = iso_arc_exact(k, &top_iso, pt_tol)? else {
             return Ok(None);
         };
 
@@ -1064,7 +1061,7 @@ impl Cone {
         if bot_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(bot) = iso_arc(k, &bot_iso, pt_tol)? else {
+        let Some(bot) = iso_arc_exact(k, &bot_iso, pt_tol)? else {
             return Ok(None);
         };
 
@@ -1238,14 +1235,6 @@ impl Cone {
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
             return Err(SolidError::sm_err(OP_REBUILD));
         };
-        let ang_tol = circle_angle_tol(
-            ang_tol,
-            nurb_min_point
-                .max_dimension()
-                .max(nurb_max_point.max_dimension()),
-            &top,
-            &bot,
-        );
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
         // tolerance
@@ -1712,9 +1701,9 @@ mod tests {
 
     /// The r 40 corner of the battery case's plan outline (#13536): a 0.156 rad arc about
     /// (-133.12369073537272, -163.5) extruded along z from -1 to 93, its NURBS form as the
-    /// record holds it, which SolidCraft's import recognises. Both recognisers find the
+    /// record holds it, which SolidCraft's import recognises. The cylinder recogniser finds the
     /// cylinder on the form at bound 0, with the extrusion's axis. (Their end circles were
-    /// fitted through samples: the cylinder recogniser's axis tilted 1.44e-13 rad, 1.35e-11 mm
+    /// fitted through samples: its axis tilted 1.44e-13 rad, 1.35e-11 mm
     /// off the form at the top, so the case wall had no exact class and its shell was
     /// refused.)
     #[test]
@@ -1744,10 +1733,7 @@ mod tests {
         )
         .unwrap();
         let form = BSplineSurface::from_nurb(nurb, false);
-        let found = [
-            Cone::is_nurb_surface_cylinder(&k, &form, 1.0).unwrap(),
-            Cone::is_nurb_surface_cone(&k, &form, 1.0).unwrap(),
-        ];
+        let found = [Cone::is_nurb_surface_cylinder(&k, &form, 1.0).unwrap()];
         for cone in found {
             let surface = crate::surface::surface::Surface::from(cone.expect("a cylinder"));
             let support = AnalyticSupport::of(&surface).expect("an analytic surface");
@@ -1768,19 +1754,6 @@ mod tests {
     /// middle circle's plane by about 2.5e-11 rad, more than that scaled tolerance (1.75e-11
     /// rad): the circle checks take at least the angle that rounding allows, so the cylinder is
     /// still found (#13536).
-    #[test]
-    fn a_long_cylinder_is_recognised_at_a_tight_tolerance() {
-        let k = kernel();
-        let placement = Axis2Placement::new(
-            Point3::new(-0.6585817449754678, 1.1482602439441063, 3.8088879534351),
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-        let cylinder = Cone::create_canonical_cylinder(&k, &placement, 2.941736097781478).unwrap();
-        let found = Cone::is_nurb_surface_cone(&k, cylinder.rev().base(), 0.001).unwrap();
-        assert!(found.is_some());
-    }
-
     fn canonical(k: &Kernel, bot: f64, top: f64, h: f64, swap: bool, inside: bool) -> Cone {
         Cone::create_canonical(k, &Axis2Placement::IDENTITY, bot, top, h, swap, inside).unwrap()
     }

@@ -213,12 +213,6 @@ fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
 /// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
 /// theirs, the crease's fit, as the fork's do; the cone pit has none.
-/// The kept cylinder hole, cone pit and the pocket astride the contact line moved by their
-/// last bit when the cone and cylinder recognisers began making circles from control points
-/// rather than fitting samples (#13536): the faces' analytic data now come from exact
-/// constructions, and the volumes, integrated to 1e-7, round one ulp differently. The r 1.9
-/// cylinder boss and hole moved by 1.1e-11 (5e-16 relative), the boss's error against its
-/// closed form going from +2.0e-7 by that much and the hole's toward it.
 fn assert_pinned(feature: Feature, r: f64, volume: f64, faces: usize) {
     let (v, n) = rounded_with(feature, r).unwrap();
     // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
@@ -274,9 +268,9 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
     assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 9);
-    assert_pinned(cylinder_hole, 8.0, 23402.501835298492, 9);
-    assert_pinned(cylinder_boss, 1.9, 24031.843348068342, 9);
-    assert_pinned(cylinder_hole, 1.9, 23906.1796413692, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 9);
+    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 9);
+    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 9);
 }
 
 /// Planar walls: each crease is an exact section.
@@ -290,7 +284,7 @@ fn prisms_keep_their_pinned_volumes() {
 #[test]
 fn cones_keep_their_pinned_volumes() {
     assert_pinned(cone_boss, 8.0, 23501.985588856085, 11);
-    assert_pinned(cone_pit, 8.0, 23427.540889392814, 9);
+    assert_pinned(cone_pit, 8.0, 23427.54088939281, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -334,7 +328,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    assert_pinned(astride, 8.0, 23371.292359915955, 12);
+    assert_pinned(astride, 8.0, 23371.292359915951, 12);
 }
 
 // ---- Work ----
