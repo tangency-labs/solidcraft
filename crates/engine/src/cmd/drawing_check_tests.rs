@@ -720,3 +720,15 @@ fn a_notes_branch_covers_the_feature_it_points_at() {
     let entry = coverage_of(&reply, chamfer.as_u64().unwrap());
     assert_eq!((&entry["state"], &entry["by"]), (&json!("covered"), &json!([{"kind": "note", "id": note}])), "{reply}");
 }
+
+/// A note on the model that a view drawing an exploded view holds back is listed out of date as a note,
+/// with why, and covers nothing, as a held dimension does.
+#[test]
+fn a_note_an_exploded_view_holds_back_is_a_note_out_of_date_and_covers_nothing() {
+    let mut note = Value::Null;
+    let (mut s, _, plate) = exploded(|s, view| note = note_on(s, view, [50.0, 0.0, 0.0]));
+    let reply = checked(&mut s, json!({}));
+    let why = "its view draws an exploded view: not supported yet, so it isn't drawn".to_string();
+    assert_eq!(whys(&reply, "out_of_date"), [("note".to_string(), note.as_str().unwrap().to_string(), why)], "{reply}");
+    assert_eq!(coverage_of(&reply, plate)["state"], json!("not_covered"), "{reply}");
+}

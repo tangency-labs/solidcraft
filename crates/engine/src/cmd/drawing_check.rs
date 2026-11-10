@@ -102,7 +102,13 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
     let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
     let exploded = "its view draws an exploded view: not supported yet, so it isn't drawn";
     for id in shown.out_of_date {
-        let kind = if d.view(id).is_some() { CheckedKind::View } else { CheckedKind::Dimension };
+        let kind = if d.view(id).is_some() {
+            CheckedKind::View
+        } else if d.dimension(id).is_some() {
+            CheckedKind::Dimension
+        } else {
+            CheckedKind::Note
+        };
         let why = if held.contains(&id) { exploded } else { last };
         out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), why.into()));
     }
@@ -236,7 +242,7 @@ fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::
     let held = crate::drawing_scene::held_by_exploded(d, d.views.iter().filter(|v| sheets.contains(&v.sheet)).map(|v| v.id));
     let dimensions = d.dimensions.iter().filter(|dim| on(dim.view) && !held.contains(&dim.id));
     let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
-    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
+    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on) && !held.contains(&n.id));
     let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.references().collect()));
     let state = |state: coverage::State| match state {
         coverage::State::Covered => CoverageState::Covered,
