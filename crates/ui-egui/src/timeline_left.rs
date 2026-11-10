@@ -413,7 +413,7 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         } else {
             Rect::from_min_size(pos2(header.center().x - side / 2.0, header.top() + i as f32 * (side + t.space_2)), vec2(side, side))
         };
-        let response = control.show(ui, rect, app.timeline_playback.is_some());
+        let response = control.show(ui, rect, app.timeline_playback.is_some(), crate::timeline::play_labels());
         crate::timeline::transport_response(app, control, &response);
     }
 }

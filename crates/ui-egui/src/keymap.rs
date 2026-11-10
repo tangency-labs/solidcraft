@@ -890,15 +890,16 @@ fn shortcut_row(
             *text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr("prefs.shortcuts_press").to_owned());
         }
     }
+    let unassigned = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
     let widths: Vec<f32> = slots
         .iter()
         .map(|(slot, text, assigned)| {
             if capturing && *slot == app.keymap.slot {
                 ui_kit::ContentWidth::button(ui, text)
             } else if *assigned {
-                ui_kit::shortcut_binding_width(ui, text)
+                ui_kit::shortcut_binding_width(ui, text, unassigned)
             } else if keys.is_empty() {
-                ui_kit::shortcut_binding_width(ui, "")
+                ui_kit::shortcut_binding_width(ui, "", unassigned)
             } else {
                 t.control_height
             }
@@ -962,9 +963,9 @@ fn shortcut_row(
                         let capture = if active {
                             ui_kit::button(ui, text, ui_kit::Button::Primary)
                         } else if *assigned {
-                            ui_kit::shortcut_binding(ui, text, editing)
+                            ui_kit::shortcut_binding(ui, text, unassigned, editing)
                         } else if keys.is_empty() {
-                            ui_kit::shortcut_binding(ui, "", editing)
+                            ui_kit::shortcut_binding(ui, "", unassigned, editing)
                         } else {
                             let (r, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
                             ui_kit::quiet_icon_button_at(ui, r, "plus", app.tr_label("Click, then press the new key"))

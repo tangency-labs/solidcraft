@@ -12,6 +12,7 @@ fn bar(steps: usize, marker: usize, play: bool) -> Bar<'static> {
         marker_tip: "Drag me",
         play,
         playing: false,
+        play_labels: crate::ui_kit::PlayLabels { play: "Play", stop: "Stop" },
         accent: crate::workspace::tab_accent(&t, "MODEL"),
         drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker,

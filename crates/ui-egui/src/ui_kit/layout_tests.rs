@@ -10,7 +10,7 @@ fn theme_browser_has_equal_end_padding_and_screenful_arrows_without_selecting() 
     let ctx = crate::ui_kit::test_support::context();
     let clicked = std::cell::Cell::new(false);
     let draw = |ui: &mut Ui| {
-        theme_browser(ui, "padding_browser", 10, false, None, |ui, i, width| {
+        theme_browser(ui, "padding_browser", 10, false, None, &PageLabels { previous: "Previous themes", next: "Next themes" }, |ui, i, width| {
             let card = theme_card(
                 ui,
                 &ThemeCard {
@@ -150,6 +150,7 @@ fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
                         ui.set_width(width);
                         settings_axis_row(
                             ui,
+                            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
                             "Pan X",
                             0.5,
                             [0.2, 0.3],

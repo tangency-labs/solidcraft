@@ -945,6 +945,11 @@ const BAR_HANDLES: history_bar::Handles<'static> =
 /// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
 type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
 
+/// The History Play control's names: SolidCraft's commands that play and stop History.
+pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+}
+
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
 fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
@@ -953,6 +958,7 @@ fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
         marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
         play: app.preferences.history_play_button,
         playing: app.timeline_playback.is_some(),
+        play_labels: play_labels(),
         accent: crate::workspace::tab_accent(&t, &app.ui.tab),
         drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker: 0,

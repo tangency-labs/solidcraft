@@ -24,6 +24,7 @@ pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
 }
 
 mod design;
+pub(crate) mod figures;
 mod general;
 mod graphics;
 mod interface;
@@ -3564,6 +3565,20 @@ fn theme_option_rows<'a>(
         .collect()
 }
 
+/// What the theme options list says, from SolidCraft's catalogs.
+fn theme_options_text() -> ui_kit::ThemeOptionsText<'static> {
+    ui_kit::ThemeOptionsText {
+        count: |count| {
+            let id = if count == 1 { "prefs.appearance.option_count_one" } else { "prefs.appearance.option_count" };
+            solidcraft_ui_text::format(id, &[("count", &count.to_string())])
+        },
+        more: |count| solidcraft_ui_text::format("prefs.theme_options_more", &[("count", &count.to_string())]),
+        reset: solidcraft_ui_text::tr("prefs.theme_options_reset"),
+        blur_off: solidcraft_ui_text::tr("prefs.blur_off"),
+        blur_cost: solidcraft_ui_text::tr("prefs.blur_cost"),
+    }
+}
+
 fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     let availability = blur_availability(app);
     let Some(file) = active_theme_file(app).cloned() else { return };
@@ -3585,12 +3600,15 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     for (id, identity, text) in problems {
         let key = theme_notice_key(&file.id, &id, &identity);
-        if !app.blur_session.dismissed(key) && ui_kit::theme_option_notice(ui, &id, &text, false).1 {
+        if !app.blur_session.dismissed(key)
+            && ui_kit::theme_option_notice(ui, &id, &text, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), false).1
+        {
             app.blur_session.dismiss(key);
         }
     }
     if app.blur_session.guard.notice {
-        let (undo, dismiss) = ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), true);
+        let (undo, dismiss) =
+            ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), true);
         if undo {
             app.blur_session.guard.undo();
             ui.ctx().request_repaint();
@@ -3605,7 +3623,7 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     }
     let before = values.clone();
-    let reset = ui_kit::settings_card(ui, |ui| ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values)).inner;
+    let reset = ui_kit::settings_card(ui, |ui| ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values, &theme_options_text())).inner;
     let changes: BTreeMap<_, _> = values.into_iter().filter(|(id, value)| before.get(id) != Some(value)).collect();
     if reset || !changes.is_empty() {
         let update = if reset { json!({}) } else { json!(changes) };
@@ -7569,7 +7587,7 @@ mod tests {
                     },
                     |ui| {
                         ui_kit::scope(ui, |ui| {
-                            ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                            ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values, &super::theme_options_text());
                         });
                     },
                 );
@@ -7612,7 +7630,7 @@ mod tests {
                             },
                             |ui| {
                                 ui_kit::scope(ui, |ui| {
-                                    ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                                    ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values, &super::theme_options_text());
                                 })
                             },
                         );

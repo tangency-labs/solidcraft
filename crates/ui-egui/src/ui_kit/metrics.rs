@@ -14,7 +14,7 @@ pub(crate) fn header_height() -> f32 {
 }
 
 /// Sanitize an input dimension. Tokens: `none`.
-pub(super) fn dimension(value: f32) -> f32 {
+pub(crate) fn dimension(value: f32) -> f32 {
     if value.is_finite() { value.max(0.0) } else { 0.0 }
 }
 

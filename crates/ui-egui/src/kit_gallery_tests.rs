@@ -32,6 +32,12 @@ const APP_ELEMENTS: &[Element] = &[
         let allowed = [Continuity::G1, Continuity::G2];
         continuity_row_explained(ui, "Gallery", "gallery_continuity", &mut order, &allowed, &continuity_tip(&allowed));
     }),
+    element!("preference_specimens", |ui, _| {
+        crate::prefs::figures::scale_specimen(ui, 1.1);
+        crate::prefs::figures::status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
+        crate::prefs::figures::autosave_timeline(ui, 5.0);
+        crate::prefs::figures::pointer_preview(ui, true, "Normal", true);
+    }),
     element!("continuity_tip", "dialog:row:Gallery", None, |ui, _| {
         let tip = continuity_tip(&[Continuity::G0, Continuity::G1]);
         row(ui, "Gallery", |ui| ui.label(tip));

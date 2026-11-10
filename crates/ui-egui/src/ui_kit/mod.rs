@@ -94,7 +94,7 @@ pub(crate) use layout::*;
 pub use look_chain::{LookStep, look_chain};
 pub use menu::{Item, LIST_W};
 pub(crate) use menu::{Menu, MenuItem, WorkspaceMenu, WorkspaceStyle, rename_menu, workspace_menu};
-pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
+pub(crate) use metrics::{ContentWidth, dimension, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};
 pub(crate) use navigation::*;
 pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
@@ -133,6 +133,7 @@ pub(crate) use status::*;
 pub(crate) use table::*;
 #[cfg(test)]
 pub(crate) use text::ellipsize_middle;
+pub(crate) use text::paint_text;
 pub(crate) use text_menu::menu_open as text_menu_open;
 pub(crate) use theme_picker::*;
 pub(crate) use tree::*;

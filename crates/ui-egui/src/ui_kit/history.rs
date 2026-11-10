@@ -177,6 +177,13 @@ pub(crate) fn history_marker(p: &Painter, rect: Rect, vertical: bool, accent: Ta
     p.circle(centre, outer_radius - t.space_2 / 2.0, if vertical { t.panel } else { t.timeline }, Stroke::new(t.space_2, accent.color));
 }
 
+/// The host's names for the Play control: playing History, and stopping it while it plays.
+#[derive(Clone, Copy, Debug)]
+pub struct PlayLabels<'a> {
+    pub play: &'a str,
+    pub stop: &'a str,
+}
+
 /// The same controls are used in every History orientation: first, previous, Play History, next
 /// and last, or the four without Play when `history_play_button` is off.
 #[derive(Clone, Copy, PartialEq)]
@@ -207,26 +214,26 @@ impl HistoryTransport {
         }
     }
 
-    pub(crate) fn label(self, playing: bool) -> &'static str {
-        solidcraft_ui_text::tr(match self {
-            Self::First => "ui.history_first",
-            Self::Back => "ui.history_back",
-            Self::Play if playing => "cmd.timeline_stop",
-            Self::Play => "cmd.timeline_play",
-            Self::Forward => "ui.history_forward",
-            Self::Last => "ui.history_last",
-        })
+    pub(crate) fn label(self, playing: bool, play: PlayLabels<'_>) -> &str {
+        match self {
+            Self::First => solidcraft_ui_text::tr("ui.history_first"),
+            Self::Back => solidcraft_ui_text::tr("ui.history_back"),
+            Self::Play if playing => play.stop,
+            Self::Play => play.play,
+            Self::Forward => solidcraft_ui_text::tr("ui.history_forward"),
+            Self::Last => solidcraft_ui_text::tr("ui.history_last"),
+        }
     }
 
-    /// `playing` turns the Play button into Stop; the other controls ignore it. Published as
-    /// `history:` and its [`HistoryTransport::id`].
-    pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
-        self.show_as(ui, rect, playing, "history:")
+    /// `playing` turns the Play button into Stop, named by `play`; the other controls ignore
+    /// both. Published as `history:` and its [`HistoryTransport::id`].
+    pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool, play: PlayLabels<'_>) -> egui::Response {
+        self.show_as(ui, rect, playing, "history:", play)
     }
 
     /// [`HistoryTransport::show`], published in the widget registry as `prefix` followed by its
     /// [`HistoryTransport::id`].
-    pub fn show_as(self, ui: &mut egui::Ui, rect: Rect, playing: bool, prefix: &str) -> egui::Response {
+    pub fn show_as(self, ui: &mut egui::Ui, rect: Rect, playing: bool, prefix: &str, play: PlayLabels<'_>) -> egui::Response {
         let t = Tokens::get();
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
         solidcraft_ui_registry::publish_target(&format!("{prefix}{}", self.id()), rect);
@@ -235,7 +242,7 @@ impl HistoryTransport {
         }
         let glyph = if self == Self::Play && playing { "pause" } else { self.id() };
         crate::ui_kit::icons::glyphs::transport_glyph(ui.painter(), rect.center(), glyph, t.icon);
-        let label = self.label(playing);
+        let label = self.label(playing, play);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
         response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(label)
     }

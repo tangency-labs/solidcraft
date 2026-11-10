@@ -15,7 +15,7 @@ pub(crate) fn settings_page<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R
     .inner
 }
 
-pub(super) fn settings_page_active(ui: &Ui) -> bool {
+pub(crate) fn settings_page_active(ui: &Ui) -> bool {
     ui.stack().iter().any(|node| node.tags().contains(SETTINGS_PAGE))
 }
 
@@ -295,42 +295,6 @@ pub(crate) fn settings_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut 
         super::number_field(ui, value, range, speed, "")
     })
     .inner
-}
-
-/// An illustrative half-hour of autosave marks, using the actual configured interval.
-pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
-    let t = Tokens::get();
-    let (r, _) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), t.space_24 + t.space_12 + t.space_2), Sense::hover());
-    let line = r;
-    if settings_page_active(ui) {
-        solidcraft_ui_registry::publish_rect("prefs:autosave_timeline", r);
-    }
-    ui.painter().hline(line.x_range(), r.top() + t.space_10, Stroke::new(2.0, t.dialog_rule));
-    if minutes.is_finite() && minutes > 0.0 {
-        let ticks = (30.0 / minutes).floor().clamp(0.0, 60.0) as u32;
-        for i in 0..=ticks {
-            let x = line.right() - line.width() * (f64::from(i) * minutes / 30.0) as f32;
-            ui.painter().vline(x, r.top() + t.space_4..=r.top() + t.space_16, Stroke::new(2.0, t.form_primary));
-        }
-    }
-    for (share, key) in [(0.0, "prefs.timeline_half_hour"), (0.5, "prefs.timeline_quarter_hour"), (1.0, "prefs.timeline_now")] {
-        if settings_page_active(ui) && share == 0.5 {
-            continue;
-        }
-        ui.painter().text(
-            pos2(line.left() + line.width() * share, r.top() + t.space_24),
-            if share == 0.0 {
-                egui::Align2::LEFT_TOP
-            } else if share == 1.0 {
-                egui::Align2::RIGHT_TOP
-            } else {
-                egui::Align2::CENTER_TOP
-            },
-            solidcraft_ui_text::tr(key),
-            FontId::proportional(t.font_small),
-            t.form_dim,
-        );
-    }
 }
 
 /// A keyboard binding table: keycaps are separate from actions and never imply fixed bindings.

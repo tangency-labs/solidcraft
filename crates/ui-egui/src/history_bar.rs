@@ -9,7 +9,7 @@
 //! Slots count the steps the bar shows: slot `k` is the gap before the `k`-th of them, slot
 //! `steps` the end. The marker sits in one; a drop lands in one, on one side of the marker.
 
-use crate::ui_kit::{self, BackingTooltipExt as _, HistoryChip, HistoryStyle, HistoryTransport};
+use crate::ui_kit::{self, BackingTooltipExt as _, HistoryChip, HistoryStyle, HistoryTransport, PlayLabels};
 use egui::{Painter, Pos2, Rect, Sense, UiBuilder, pos2, vec2};
 use solidcraft_theme::{TabAccent, Tokens};
 
@@ -36,6 +36,8 @@ pub struct Bar<'a> {
     pub play: bool,
     /// History is playing: Play shows Stop.
     pub playing: bool,
+    /// The Play control's names.
+    pub play_labels: PlayLabels<'a>,
     pub accent: TabAccent,
     /// A dragged chip's colour and its drop bar's.
     pub drag_accent: TabAccent,
@@ -171,7 +173,7 @@ pub fn header(ui: &mut egui::Ui, bar: &Bar, rect: Rect) -> HeaderOut {
     let mut actions = Vec::new();
     for &control in HistoryTransport::shown(bar.play) {
         let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, rect.center().y), vec2(t.space_24, t.space_24));
-        let response = control.show_as(ui, br, bar.playing, bar.handles.controls);
+        let response = control.show_as(ui, br, bar.playing, bar.handles.controls, bar.play_labels);
         actions.extend(transport_actions(control, &response));
         x += t.space_24 + t.space_2;
     }

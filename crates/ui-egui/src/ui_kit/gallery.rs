@@ -15,6 +15,12 @@ pub(crate) struct Sample {
     pub(crate) checked: bool,
 }
 
+/// The style names a host passes to [`text_emphasis`].
+const SAMPLE_EMPHASIS: EmphasisLabels<'static> = EmphasisLabels { bold: "Bold", italic: "Italic", no_bold: "This font has no bold face" };
+
+/// The paging arrows' names a host passes to [`theme_browser`].
+const SAMPLE_ARROWS: PageLabels<'static> = PageLabels { previous: "Previous themes", next: "Next themes" };
+
 /// One gallery specimen: its name, the published rect it fills, the handle inside it, and how
 /// to draw it.
 pub(crate) struct Element {
@@ -99,7 +105,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         );
     }),
     element!("theme_browser_grid", |ui, _| {
-        theme_browser(ui, "gallery_grid", 14, true, None, |ui, _, width| {
+        theme_browser(ui, "gallery_grid", 14, true, None, &SAMPLE_ARROWS, |ui, _, width| {
             theme_card(
                 ui,
                 &ThemeCard {
@@ -164,7 +170,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         theme_empty(ui, "No theme matches these filters.", "Clear filters", || {});
     }),
     element!("theme_browser", |ui, _| {
-        theme_browser(ui, "gallery_browser", 9, false, None, |ui, i, width| {
+        theme_browser(ui, "gallery_browser", 9, false, None, &SAMPLE_ARROWS, |ui, i, width| {
             theme_card(
                 ui,
                 &ThemeCard {
@@ -351,7 +357,15 @@ pub(crate) const ELEMENTS: &[Element] = &[
         checkbox_at(ui, rect, "Enabled", &mut sample.checked);
     }),
     element!("settings_plugin_card", |ui, sample| {
-        settings_plugin_card(ui, "sample", "Gear generator", "1.2.0", "Adds a parametric gear feature.", &mut sample.checked);
+        settings_plugin_card(
+            ui,
+            "sample",
+            "Gear generator",
+            "1.2.0",
+            "Adds a parametric gear feature.",
+            &mut sample.checked,
+            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled" },
+        );
     }),
     element!("text_button", |ui, _| {
         text_button(ui, "Reset", true);
@@ -622,7 +636,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
             row(ui, "Autosave every", |ui| {
                 field(ui, &mut state.value);
             });
-            below_row_control(ui, "Autosave every", 260.0, |ui| settings_autosave_timeline(ui, 5.0));
+            below_row_control(ui, "Autosave every", 260.0, |ui| settings_inline_note(ui, "Every 5 minutes"));
         });
     }),
     element!("named_control", "dialog:widget:Profile name", Some("dialog:Profile name"), |ui, state| {
@@ -652,7 +666,13 @@ pub(crate) const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true }),
+                |ui, ()| {
+                    layout_preview(
+                        ui,
+                        LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true },
+                        "Where the panels go",
+                    )
+                },
             )
         });
     }),
@@ -712,7 +732,6 @@ pub(crate) const ELEMENTS: &[Element] = &[
             ],
             &mut state.selected,
         );
-        settings_pointer_preview(ui, true, "Normal", true);
     }),
     element!("picture_card", |ui, _| {
         use super::preferences_figure_data as figures;
@@ -910,11 +929,17 @@ pub(crate) const ELEMENTS: &[Element] = &[
         });
     }),
     element!("preference_specimens", |ui, _| {
-        scale_specimen(ui, 1.1);
-        status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());
-        settings_autosave_timeline(ui, 5.0);
-        settings_axis_row(ui, "Push X", 0.6, [0.1, 0.2], |_| {}, |_| {}, |_| {});
+        settings_axis_row(
+            ui,
+            &AxisColumns { axis: "Axis", live_input: "Live input", speed: "Speed", source: "Source" },
+            "Push X",
+            0.6,
+            [0.1, 0.2],
+            |_| {},
+            |_| {},
+            |_| {},
+        );
         settings_mouse_mapping(ui, &[(vec!["Shift".into(), "Middle drag".into()], "Orbit".into())], |_| {});
     }),
     element!("assistant_entry", |ui, _| {
@@ -1043,7 +1068,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
             let side = Tokens::get().space_24;
             for control in HistoryTransport::ALL {
                 let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
-                control.show(ui, rect, false);
+                control.show(ui, rect, false, PlayLabels { play: "Play", stop: "Stop" });
             }
         });
     }),
@@ -1739,7 +1764,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
-            text_emphasis(ui, &mut s.checked, &mut false, true);
+            text_emphasis(ui, &mut s.checked, &mut false, true, &SAMPLE_EMPHASIS);
         });
     }),
     element!("value_pair_named", "dialog:row:Position", Some("dialog:Distance X"), |ui, s| {
@@ -2007,11 +2032,11 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("shortcut_binding", |ui, _| {
         ui.horizontal(|ui| {
-            shortcut_binding(ui, "Ctrl+Shift+PageDown", true);
-            shortcut_binding(ui, "Option+Enter", false);
-            shortcut_binding(ui, "Ctrl++", true);
+            shortcut_binding(ui, "Ctrl+Shift+PageDown", "Not assigned", true);
+            shortcut_binding(ui, "Option+Enter", "Not assigned", false);
+            shortcut_binding(ui, "Ctrl++", "Not assigned", true);
         });
-        shortcut_binding(ui, "", true);
+        shortcut_binding(ui, "", "Not assigned", true);
     }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
@@ -2338,7 +2363,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
         let mut italic = false;
         let mut selected = 0;
         let mut draw = |ui: &mut Ui| {
-            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true));
+            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true, &SAMPLE_EMPHASIS));
             row(ui, "Alignment", |ui| {
                 segmented(
                     ui,
@@ -2518,7 +2543,7 @@ fn gallery_covers_every_inline_element() {
                 // Inherited labels, state keys and accessors, parsers and size measurements do not render elements.
                 if !matches!(
                     name.as_str(),
-                    "eye_drag_id" | "expressions" | "icon_label_width" | "label" | "parse_number" | "placement_field_content_size"
+                    "dimension" | "eye_drag_id" | "expressions" | "icon_label_width" | "label" | "parse_number" | "placement_field_content_size"
                 ) {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
