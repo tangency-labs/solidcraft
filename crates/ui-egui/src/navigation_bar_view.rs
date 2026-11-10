@@ -560,6 +560,7 @@ fn display_pick(app: &mut SolveApp, item: &str) {
 mod tests {
     use super::*;
     use crate::navigation_bar::*;
+    use crate::navigation_slots::CATALOGUE;
     use serde_json::json;
 
     #[test]

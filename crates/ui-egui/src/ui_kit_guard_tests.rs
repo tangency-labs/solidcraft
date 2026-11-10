@@ -1367,22 +1367,7 @@ fn host_names() -> std::collections::BTreeSet<String> {
 
 /// Host names still in a component, until they move to the host as data. Only shrinks: the
 /// test fails on a listed name the file no longer holds.
-const PENDING_HOST_NAMES: &[(&str, &[&str])] = &[(
-    // SolidCraft's slot catalogue (slot -> command), still in the component.
-    "navigation_bar.rs",
-    &[
-        "view.tool.zoom",
-        "view.tool",
-        "view.spin",
-        "view.fit",
-        "view.normal_to",
-        "view.home",
-        "view.visual_style",
-        "view.grid",
-        "view.ground_shadow",
-        "view.ambient_occlusion",
-    ],
-)];
+const PENDING_HOST_NAMES: &[(&str, &[&str])] = &[];
 
 #[test]
 fn shared_code_holds_no_host_tab_names_or_command_ids() {

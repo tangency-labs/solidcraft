@@ -808,6 +808,7 @@ fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
 
 #[test]
 fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
+    crate::navigation_slots::install();
     for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 450.0, 2.0), (700.0, 360.0, 2.0)] {
         let vp = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(width, height - 30.0));
         let baseline = layout(vp, &[], scale, crate::prefs::NavigatorStyle::Axes, true);

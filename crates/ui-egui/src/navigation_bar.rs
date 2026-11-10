@@ -1,4 +1,5 @@
-//! Stored navigation slots and their catalogue. Painting lives in `navigation_bar_view`.
+//! Stored navigation slots, checked against the host's slot catalogue. Painting lives in
+//! `navigation_bar_view`; SolidCraft's catalogue is `navigation_slots`.
 use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,50 +35,40 @@ pub(crate) fn visual_style_icon(style: u8) -> &'static str {
     }
 }
 
+/// One slot the bar can hold, as the host's catalogue describes it.
+#[derive(Debug, PartialEq)]
 pub(crate) struct Slot {
     pub id: &'static str,
     pub kind: NavigationKind,
     pub icon: &'static str,
+    /// Message ids of the slot's name and of what it does.
     pub label: &'static str,
     pub description: &'static str,
+    /// The command the slot runs, if any.
     pub command: Option<&'static str>,
+    /// The slot works only on a canvas whose camera may orbit.
+    pub needs_orbit: bool,
+    /// The slot works only where what is under the pointer can be picked.
+    pub needs_pick: bool,
 }
 
-macro_rules! slot {
-    ($id:literal, $kind:ident, $icon:literal, $command:expr) => {
-        Slot {
-            id: $id,
-            kind: NavigationKind::$kind,
-            icon: $icon,
-            label: concat!("navbar.", $id),
-            description: concat!("navbar.description.", $id),
-            command: $command,
-        }
-    };
+/// The host's slot catalogue, installed once per process ([`install_catalogue`]).
+static CATALOGUE: std::sync::OnceLock<&'static [Slot]> = std::sync::OnceLock::new();
+
+/// Installs the host's slot catalogue: the slots a bar may hold, in the order the customiser
+/// lists them. The first call installs it; a later call with the same table does nothing and one
+/// with another table is ignored. Returns whether `catalogue` is the installed one.
+pub(crate) fn install_catalogue(catalogue: &'static [Slot]) -> bool {
+    *CATALOGUE.get_or_init(|| catalogue) == catalogue
 }
 
-/// The zoom slot's command: the drag-zoom tool, which a key held down also starts.
-pub(crate) const ZOOM_TOOL: &str = "view.tool.zoom";
-
-pub(crate) const CATALOGUE: &[Slot] = &[
-    slot!("orbit", Tool, "orbit", Some("view.tool")),
-    slot!("pan", Tool, "pan", Some("view.tool")),
-    slot!("zoom", Tool, "zoom", Some(ZOOM_TOOL)),
-    slot!("spin", Toggle, "spin", Some("view.spin")),
-    slot!("fit", Action, "fit", Some("view.fit")),
-    slot!("look_at", Action, "lookat", Some("view.normal_to")),
-    slot!("home", Action, "home", Some("view.home")),
-    slot!("visual_style", Menu, "style_shaded_edges", Some("view.visual_style")),
-    slot!("projection", Toggle, "perspective", None),
-    slot!("display", Menu, "display", None),
-    slot!("grid", Toggle, "grid", Some("view.grid")),
-    slot!("ground_shadow", Toggle, "ground_shadow", Some("view.ground_shadow")),
-    slot!("ambient_occlusion", Toggle, "ambient_occlusion", Some("view.ambient_occlusion")),
-    slot!("separator", Separator, "", None),
-];
+/// The installed slot catalogue, or none before [`install_catalogue`].
+pub(crate) fn catalogue() -> &'static [Slot] {
+    CATALOGUE.get().copied().unwrap_or_default()
+}
 
 pub(crate) fn find(id: &str) -> Option<&'static Slot> {
-    CATALOGUE.iter().find(|slot| slot.id == id)
+    catalogue().iter().find(|slot| slot.id == id)
 }
 
 impl Slot {
@@ -88,13 +79,7 @@ impl Slot {
     /// Whether the slot works on the current canvas: `orbit` when its camera may orbit, `pick`
     /// when what is under the pointer can be picked.
     pub(crate) fn available(&self, orbit: bool, pick: bool) -> bool {
-        if !orbit {
-            return !matches!(self.id, "orbit" | "spin" | "look_at" | "projection" | "visual_style");
-        }
-        if !pick && matches!(self.id, "look_at" | "visual_style") {
-            return false;
-        }
-        true
+        (orbit || !self.needs_orbit) && (pick || !self.needs_pick)
     }
 }
 

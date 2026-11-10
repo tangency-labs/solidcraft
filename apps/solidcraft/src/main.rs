@@ -936,6 +936,7 @@ fn main() -> eframe::Result {
     solidcraft_ui_egui::i18n::install();
     solidcraft_ui_egui::icon_svg::install();
     solidcraft_ui_egui::workspace::install_tabs();
+    solidcraft_ui_egui::navigation_slots::install();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with
