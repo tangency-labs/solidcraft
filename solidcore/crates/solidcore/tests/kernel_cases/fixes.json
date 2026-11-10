@@ -206,7 +206,6 @@
   "fillet_tangent_point_one_sided_step",
   "precise_properties_body_length_scale",
   "integrator_propagates_failure",
-  "brep_area_between_solid_and_void",
   "is_topological_vertex_rejects_cusps_and_tangent_errors",
   "offset_extension_from_base",
   "offset_extension_as_itself",

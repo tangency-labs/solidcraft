@@ -175,7 +175,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_corner_ball_center_from_axes = true;
     f.boolean2d_plane_covers_far_faces = true;
-    f.brep_area_between_solid_and_void = true;
     f.boolean_splits_definition_across_split = true;
     f.curve_tight_box_interval_knots = true;
     f.fillet_refuse_overlapping_bands = true;

@@ -65,7 +65,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "boolean_vertex_by_best_crossing",
     "boolean_wire_edge_keeps_faceuse_shell",
     "box_face_failures_propagate",
-    "brep_area_between_solid_and_void",
     "brep_edit_statuses_pass_on",
     "bspline_check_min_radius",
     "bspline_simple_offset_matches_parameterization",
