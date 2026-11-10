@@ -7501,9 +7501,18 @@ fn gpu_punctual_offset_preserves_small_shift_after_large_local_barycentric_displ
 fn shared_bvh_node_walk_preserves_original_ordinary_and_compensated_hit_bits() {
     // Frozen f53 policy, not re-derived from the new implementation. Only its
     // test-local function name changes; it still calls the byte-identical old
-    // ordered walker for zero low parts. This reference entry inlines three
-    // real walks, rather than compiling the historical seven-walk main.
-    let legacy = r#"fn legacy_precise_policy(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
+    // ordered walker for zero low parts, and carries the old triangle_ahead_precise
+    // the shader no longer needs. This reference entry inlines three real walks,
+    // rather than compiling the historical seven-walk main.
+    let legacy = r#"fn triangle_ahead_precise(t: Triangle, o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>) -> bool {
+    if all(o_low==vec3<f32>(0.0)) { return triangle_ahead(t,o,d); }
+    let lo=precise_point_delta(min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
+    let hi=precise_point_delta(max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
+    if any((lo>=vec3<f32>(0.0))&(d<vec3<f32>(0.0))) || any((hi<=vec3<f32>(0.0))&(d>vec3<f32>(0.0))) { return false; }
+    if any((d==vec3<f32>(0.0))&((lo>vec3<f32>(0.0))|(hi<vec3<f32>(0.0)))) { return false; }
+    return true;
+}
+fn legacy_precise_policy(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool, limit: f32, blocker: f32) -> Hit {
     // Dispatch once before traversal. Ordinary rays keep the original lean BVH
     // loop, without precision-helper branches inside every candidate/node test.
     if all(o_low==vec3<f32>(0.0)) { return trace_ordered_within(o,d,any_hit,excluded,minimum,inside,limit,blocker); }

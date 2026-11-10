@@ -356,10 +356,8 @@ fn triangle_ahead(t: Triangle, o: vec3<f32>, d: vec3<f32>) -> bool {
     if any((d==vec3<f32>(0.0))&((o<lo)|(o>hi))) { return false; }
     return true;
 }
-fn triangle_ahead_precise(t: Triangle, o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>) -> bool {
-    if all(o_low==vec3<f32>(0.0)) { return triangle_ahead(t,o,d); }
-    let lo=precise_point_delta(min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
-    let hi=precise_point_delta(max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz)),vec3<f32>(0.0),o,o_low);
+// The same test from the bounds' integer-defined deltas to an anchored origin.
+fn deltas_ahead(lo: vec3<f32>, hi: vec3<f32>, d: vec3<f32>) -> bool {
     if any((lo>=vec3<f32>(0.0))&(d<vec3<f32>(0.0))) || any((hi<=vec3<f32>(0.0))&(d>vec3<f32>(0.0))) { return false; }
     if any((d==vec3<f32>(0.0))&((lo>vec3<f32>(0.0))|(hi<vec3<f32>(0.0)))) { return false; }
     return true;
@@ -429,6 +427,19 @@ fn difference_products(a: f32, b: f32, c: f32, d: f32) -> f32 {
     }
     return split_difference_products(a,b,c,d);
 }
+// Signed edge functions of a projected triangle: weight k pairs the two vertices
+// after vertex k. Native compilers inline difference_products at every call
+// site, so all three weights share one.
+fn edge_weights(a: vec2<f32>, b: vec2<f32>, c: vec2<f32>) -> vec3<f32> {
+    var weights=vec3<f32>(0.0);
+    for (var k=0u; k<3u; k+=1u) {
+        // Selected, not indexed: the pairs (b,c), (c,a), (a,b) stay in registers.
+        let e=select(select(a,c,k==1u),b,k==0u);
+        let f=select(select(b,a,k==1u),c,k==0u);
+        weights[k]=difference_products(e.x,f.y,e.y,f.x);
+    }
+    return weights;
+}
 struct Hit { distance: f32, triangle: u32, bary: vec3<f32> };
 // A closed continuation that leaves its producing triangle at a shared edge or
 // vertex can meet an adjacent face of the same body within the origin's rounding
@@ -453,7 +464,8 @@ fn tie_preferred(t: Triangle, d: vec3<f32>, inside: bool) -> bool {
     return front!=inside;
 }
 fn trace_precise(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32, minimum: f32, inside: bool) -> Hit {
-    if all(o_low==vec3<f32>(0.0)) { return trace_ordered_within(o,d,any_hit,excluded,minimum,inside,FAR,-1.0); }
+    // Without a low part, trace_precise_within is the ordered walk: the same
+    // origin, pad, error bound and candidate test. One walk is inlined here.
     return trace_precise_within(o,o_low,d,any_hit,excluded,minimum,inside,FAR,-1.0);
 }
 // Only hits closer than `limit` are reported, and nodes beyond it are culled.
@@ -526,85 +538,72 @@ fn trace_precise_within(o: vec3<f32>, o_low: vec3<f32>, d: vec3<f32>, any_hit: b
             // IDs join only connected, exactly coplanar uploaded f32 triangles
             // of one body; curved facets and other bodies remain candidates.
             if excluded!=0xffffffffu && geometry[geometry[3]+i]==geometry[geometry[3]+excluded] { continue; }
-            // The ordinary source uses exactly the former ordered candidate
-            // branch. Sharing only the node walk avoids another inlined BVH.
-            if !has_origin_residual {
-                let t = triangle(i);
-                if !triangle_ahead(t,o,d) { continue; }
-                let pa=t.p0.xyz-o; let pb=t.p1.xyz-o; let pc=t.p2.xyz-o;
-                let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
-                let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
-                let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-                let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
-                if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
+            let t = triangle(i);
+            let lo=min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz));
+            let hi=max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz));
+            // Native compilers inline the candidate arithmetic once per call site,
+            // so one candidate test serves three policies, each evaluated exactly
+            // as on its own:
+            // 0: an origin without residual takes the former ordered test;
+            // 1: a residual origin's candidate beyond near_radius uses ordinary
+            //    arithmetic from the rounded origin while each decision clears
+            //    its error bound, and otherwise takes
+            // 2: integer-defined deltas from the anchored origin.
+            var policy=0u;
+            if has_origin_residual { policy=select(2u,1u,any(max(lo-rounded,rounded-hi)>vec3<f32>(near_radius))); }
+            // Each pass ends with break (next candidate) or, once, continue (policy 2).
+            loop {
+                var p=array<vec3<f32>,3>(t.p0.xyz-rounded,t.p1.xyz-rounded,t.p2.xyz-rounded);
+                if policy==0u {
+                    if !triangle_ahead(t,o,d) { break; }
+                } else if policy==1u {
+                    // The rounded origin is within origin_error of the true one on each
+                    // axis. Bound and edge decisions that close to their threshold could
+                    // flip, while a nearby neighbour across the edge is tested exactly:
+                    // a crossing would fall between them. Such candidates take policy 2.
+                    if any((rounded<=lo-vec3<f32>(origin_error))&(d<vec3<f32>(0.0))) || any((rounded>=hi+vec3<f32>(origin_error))&(d>vec3<f32>(0.0))) { break; }
+                    if any((d==vec3<f32>(0.0))&((rounded<lo-vec3<f32>(origin_error))|(rounded>hi+vec3<f32>(origin_error)))) { break; }
+                } else {
+                    // Bound deltas first: a candidate that is not ahead is rejected
+                    // before its vertex deltas are formed. The five points lo, hi,
+                    // p0, p1, p2 share one delta call site.
+                    var low=vec3<f32>(0.0);
+                    var ahead=true;
+                    for (var k=0u; k<5u; k+=1u) {
+                        let point=select(select(select(t.p2.xyz,t.p1.xyz,k==3u),t.p0.xyz,k==2u),select(hi,lo,k==0u),k<2u);
+                        let delta=precise_point_delta(point,vec3<f32>(0.0),o,o_low);
+                        if k==0u { low=delta; }
+                        else if k==1u { if !deltas_ahead(low,delta,d) { ahead=false; break; } }
+                        else if k==2u { p[0]=delta; }
+                        else if k==3u { p[1]=delta; }
+                        else { p[2]=delta; }
+                    }
+                    if !ahead { break; }
+                }
+                let a=vec2<f32>(p[0][kx]-shear.x*p[0][kz],p[0][ky]-shear.y*p[0][kz]);
+                let b=vec2<f32>(p[1][kx]-shear.x*p[1][kz],p[1][ky]-shear.y*p[1][kz]);
+                let c=vec2<f32>(p[2][kx]-shear.x*p[2][kz],p[2][ky]-shear.y*p[2][kz]);
+                let weights=edge_weights(a,b,c);
+                if policy==1u && !all(abs(weights)>origin_error*vec3<f32>(length(b-c),length(c-a),length(a-b))) { policy=2u; continue; }
+                if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { break; }
                 let det=weights.x+weights.y+weights.z;
-                if det==0.0 { continue; }
+                // As before, policy 1 has no det test: each weight cleared a
+                // nonnegative bound. Nor does it test a repeated crossing.
+                if det==0.0 && policy!=1u { break; }
                 // Retain all three directly evaluated weights: 1-u-v can erase a
                 // small corner clearance when the other two weights sum to one.
                 let bary=weights/det;
-                let depth=surface_ray_depth(t,bary,o,kz);
+                var depth=0.0;
+                if policy==2u { depth=surface_ray_depth_precise(t,bary,o,o_low,kz); }
+                else { depth=surface_ray_depth(t,bary,rounded,kz); }
                 let distance=depth*shear.z;
                 let key=depth*order;
-                if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
+                if policy!=1u && excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { break; }
                 if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
                     hit = Hit(distance,i,bary); best=key;
                     if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
                 }
-                continue;
-            }
-            let t = triangle(i);
-            let lo=min(t.p0.xyz,min(t.p1.xyz,t.p2.xyz));
-            let hi=max(t.p0.xyz,max(t.p1.xyz,t.p2.xyz));
-            let gap=max(lo-rounded,rounded-hi);
-            if any(gap>vec3<f32>(near_radius)) {
-                // The rounded origin is within origin_error of the true one on each
-                // axis. Bound and edge decisions that close to their threshold could
-                // flip, while a nearby neighbour across the edge is tested exactly:
-                // a crossing would fall between them. Such candidates take the exact
-                // path below.
-                if any((rounded<=lo-vec3<f32>(origin_error))&(d<vec3<f32>(0.0))) || any((rounded>=hi+vec3<f32>(origin_error))&(d>vec3<f32>(0.0))) { continue; }
-                if any((d==vec3<f32>(0.0))&((rounded<lo-vec3<f32>(origin_error))|(rounded>hi+vec3<f32>(origin_error)))) { continue; }
-                let qa=t.p0.xyz-rounded; let qb=t.p1.xyz-rounded; let qc=t.p2.xyz-rounded;
-                let fa=vec2<f32>(qa[kx]-shear.x*qa[kz],qa[ky]-shear.y*qa[kz]);
-                let fb=vec2<f32>(qb[kx]-shear.x*qb[kz],qb[ky]-shear.y*qb[kz]);
-                let fc=vec2<f32>(qc[kx]-shear.x*qc[kz],qc[ky]-shear.y*qc[kz]);
-                let far_weights=vec3<f32>(difference_products(fb.x,fc.y,fb.y,fc.x),difference_products(fc.x,fa.y,fc.y,fa.x),difference_products(fa.x,fb.y,fa.y,fb.x));
-                let edge_error=origin_error*vec3<f32>(length(fb-fc),length(fc-fa),length(fa-fb));
-                if all(abs(far_weights)>edge_error) {
-                    if any(far_weights<vec3<f32>(0.0)) && any(far_weights>vec3<f32>(0.0)) { continue; }
-                    let far_det=far_weights.x+far_weights.y+far_weights.z;
-                    let far_bary=far_weights/far_det;
-                    let far_depth=surface_ray_depth(t,far_bary,rounded,kz);
-                    let far_distance=far_depth*shear.z;
-                    let far_key=far_depth*order;
-                    if far_distance > minimum && far_distance < limit && (far_key < best || (far_key == best && tie_preferred(t,d,inside))) {
-                        hit = Hit(far_distance,i,far_bary); best=far_key;
-                        if any_hit || (far_distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
-                    }
-                    continue;
-                }
-            }
-            if !triangle_ahead_precise(t,o,o_low,d) { continue; }
-            let pa=precise_point_delta(t.p0.xyz,vec3<f32>(0.0),o,o_low);
-            let pb=precise_point_delta(t.p1.xyz,vec3<f32>(0.0),o,o_low);
-            let pc=precise_point_delta(t.p2.xyz,vec3<f32>(0.0),o,o_low);
-            let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
-            let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
-            let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
-            if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
-            let det=weights.x+weights.y+weights.z;
-            if det==0.0 { continue; }
-            // Retain all three directly evaluated weights: 1-u-v can erase a
-            // small corner clearance when the other two weights sum to one.
-            let bary=weights/det;
-            let depth=surface_ray_depth_precise(t,bary,o,o_low,kz);
-            let distance=depth*shear.z;
-            let key=depth*order;
-            if excluded!=0xffffffffu && repeated_crossing(t,source,d,inside,distance,origin_error) { continue; }
-            if distance > minimum && distance < limit && (key < best || (key == best && tie_preferred(t,d,inside))) {
-                hit = Hit(distance,i,bary); best=key;
-                if any_hit || (distance < blocker && (t.base.w<=0.0 || t.coat.w<=0.0)) { return hit; }
+                break;
             }
         }
     }
@@ -669,7 +668,7 @@ fn trace_ordered_within(o: vec3<f32>, d: vec3<f32>, any_hit: bool, excluded: u32
             let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
             let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
             let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            let weights=edge_weights(a,b,c);
             if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
             let det=weights.x+weights.y+weights.z;
             if det==0.0 { continue; }
@@ -727,7 +726,7 @@ fn origin_on_boundary(t: Triangle, o: vec3<f32>) -> bool {
     let x=(axis+1u)%3u;let y=(x+1u)%3u;
     let pa=t.p0.xyz-o;let pb=t.p1.xyz-o;let pc=t.p2.xyz-o;
     let a=vec2<f32>(pa[x],pa[y]);let b=vec2<f32>(pb[x],pb[y]);let c=vec2<f32>(pc[x],pc[y]);
-    let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+    let weights=edge_weights(a,b,c);
     return !(any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)));
 }
 fn origin_boundary(o: vec3<f32>, d: vec3<f32>) -> OriginBoundary {
@@ -784,10 +783,16 @@ fn origin_boundary(o: vec3<f32>, d: vec3<f32>) -> OriginBoundary {
             // Keep the ray projection homogeneous: a rounded d[kx]/d[kz]
             // must not turn an exact uploaded-f32 edge tangent into a crossing.
             // All projected coordinates share d[kz], so barycentrics are invariant.
-            let a=vec2<f32>(difference_products(pa[kx],d[kz],d[kx],pa[kz]),difference_products(pa[ky],d[kz],d[ky],pa[kz]));
-            let b=vec2<f32>(difference_products(pb[kx],d[kz],d[kx],pb[kz]),difference_products(pb[ky],d[kz],d[ky],pb[kz]));
-            let c=vec2<f32>(difference_products(pc[kx],d[kz],d[kx],pc[kz]),difference_products(pc[ky],d[kz],d[ky],pc[kz]));
-            let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+            // Coordinate k is vertex k/2 on axis kx (even k) or ky (odd k), all
+            // six from one inlined difference_products.
+            var a=vec2<f32>(0.0);var b=vec2<f32>(0.0);var c=vec2<f32>(0.0);
+            for (var k=0u; k<6u; k+=1u) {
+                let point=select(select(pc,pb,k<4u),pa,k<2u);
+                let axis=select(kx,ky,(k&1u)!=0u);
+                let value=difference_products(point[axis],d[kz],d[axis],point[kz]);
+                if k<2u { a[k]=value; } else if k<4u { b[k-2u]=value; } else { c[k-4u]=value; }
+            }
+            let weights=edge_weights(a,b,c);
             if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
             let det=weights.x+weights.y+weights.z;
             if det==0.0 { continue; }
@@ -1777,7 +1782,7 @@ fn ordering_candidate(t: Triangle, o: vec3<f32>, d: vec3<f32>) -> vec2<f32> {
     let a=vec2<f32>(pa[kx]-shear.x*pa[kz],pa[ky]-shear.y*pa[kz]);
     let b=vec2<f32>(pb[kx]-shear.x*pb[kz],pb[ky]-shear.y*pb[kz]);
     let c=vec2<f32>(pc[kx]-shear.x*pc[kz],pc[ky]-shear.y*pc[kz]);
-    let weights=vec3<f32>(difference_products(b.x,c.y,b.y,c.x),difference_products(c.x,a.y,c.y,a.x),difference_products(a.x,b.y,a.y,b.x));
+    let weights=edge_weights(a,b,c);
     let det=weights.x+weights.y+weights.z;
     let bary=weights/det;
     let distance=surface_ray_depth(t,bary,o,kz)*shear.z;
