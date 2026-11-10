@@ -1,5 +1,26 @@
 {
   "en": {
     "ui.agent_chat_context_write_failed": "This conversation isn't being saved: {reason}"
+  },
+  "ar": {
+    "ui.agent_chat_context_write_failed": "لا تُحفَظ هذه المحادثة: {reason}"
+  },
+  "de": {
+    "ui.agent_chat_context_write_failed": "Diese Unterhaltung wird nicht gespeichert: {reason}"
+  },
+  "he": {
+    "ui.agent_chat_context_write_failed": "השיחה הזו אינה נשמרת: {reason}"
+  },
+  "ja": {
+    "ui.agent_chat_context_write_failed": "この会話は保存されていません: {reason}"
+  },
+  "ko": {
+    "ui.agent_chat_context_write_failed": "이 대화는 저장되지 않고 있습니다: {reason}"
+  },
+  "vi": {
+    "ui.agent_chat_context_write_failed": "Cuộc trò chuyện này không được lưu: {reason}"
+  },
+  "zh": {
+    "ui.agent_chat_context_write_failed": "此对话未被保存：{reason}"
   }
 }
