@@ -27,6 +27,7 @@ pub mod fillet_removal;
 pub mod fillet_section;
 pub mod fillet_solver;
 pub mod fillet_standard_solver;
+pub mod fillet_tangent_rollover;
 pub mod hcr;
 pub mod identify_fillet;
 pub mod law_corners;

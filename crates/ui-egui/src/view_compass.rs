@@ -3,7 +3,6 @@
 //! ([`Compass`], [`ViewAxes`]) and returns the [`ViewAction`] chosen, and [`orbit`] returns a drag's
 //! [`OrbitStep`]; the app turns the camera.
 //! Every tip publishes its handle (`axis_view:<axis>`) to the widget registry while it is drawn.
-use crate::icons::navigation::AXIS_RADIUS;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Pos2, Rect, Sense, Stroke, pos2, vec2};
 use solidcraft_theme::Tokens;
@@ -107,7 +106,7 @@ pub fn tips(axes: &ViewAxes, c: Pos2) -> Vec<Tip> {
 
 /// The front-most tip within reach of `p`.
 pub fn hit(tips: &[Tip], p: Pos2) -> Option<usize> {
-    tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
+    tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= crate::ui_kit::icons::glyphs::axis_radius()).map(|(i, _)| i)
 }
 
 /// Draw the compass; a tip or Home clicked this frame (a drag on it is [`orbit`]'s).
@@ -128,7 +127,7 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
             // The origin dot sits behind the three front axes and over the three back ones.
             painter.circle(c, 3.6, t.text.gamma_multiply(0.9), Stroke::new(1.4, t.panel));
         }
-        crate::icons::navigation::axis_tip(&painter, c, name, *d, *at, *depth, hovered == Some(i), t);
+        crate::ui_kit::icons::glyphs::axis_tip(&painter, c, name, *d, *at, *depth, hovered == Some(i), t);
         solidcraft_ui_registry::publish_handle(&format!("axis_view:{name}"), *at);
     }
     solidcraft_ui_registry::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));
@@ -152,7 +151,7 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     let hr = ui.interact(home, ui.scope_id().with("axis_view_home"), Sense::click());
     // The home button sits in its own small round chip.
     painter.circle(home.center(), 12.0, t.overlay.gamma_multiply(if hr.hovered() { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
-    crate::icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
+    crate::ui_kit::icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
     // Cursors: a grabbing hand while orbiting, an open hand over the circle, a pointer on the home
     // chip (the axis ends keep their pointing hand).
     if hr.hovered() {
@@ -252,7 +251,7 @@ mod tests {
 
     fn run(ctx: &egui::Context, events: Vec<Event>, hover: Option<Pos2>, drag: &mut Drag) -> (Option<ViewAction>, Orbit) {
         let mut out = (None, Orbit::default());
-        crate::test_support::frame(
+        crate::ui_kit::test_support::raw_frame(
             ctx,
             RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))), events, focused: true, ..Default::default() },
             |ui| {
@@ -275,13 +274,13 @@ mod tests {
     fn click(ctx: &egui::Context, at: Pos2) -> Option<ViewAction> {
         let mut drag = Drag::default();
         run(ctx, vec![Event::PointerMoved(at)], Some(at), &mut drag);
-        let pressed = run(ctx, crate::test_support::pointer(at, true), Some(at), &mut drag).0;
-        pressed.or(run(ctx, crate::test_support::pointer(at, false), Some(at), &mut drag).0)
+        let pressed = run(ctx, crate::ui_kit::test_support::pointer(at, true), Some(at), &mut drag).0;
+        pressed.or(run(ctx, crate::ui_kit::test_support::pointer(at, false), Some(at), &mut drag).0)
     }
 
     #[test]
     fn a_click_on_a_tip_or_home_returns_its_view_from_plain_axes() {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let tips = tips(&FRONT, pos2(200.0, 200.0));
         let x = tips.iter().find(|t| t.0 == "x").map(|t| t.2).unwrap();
         assert_eq!(x, pos2(200.0 + (38.0 * 0.84) as f32, 200.0), "X points right");
@@ -294,11 +293,11 @@ mod tests {
 
     #[test]
     fn a_drag_on_the_compass_returns_orbit_steps_and_ends_on_release() {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut drag = Drag::default();
         let start = pos2(180.0, 215.0);
         run(&ctx, vec![Event::PointerMoved(start)], Some(start), &mut drag);
-        let (_, pressed) = run(&ctx, crate::test_support::pointer(start, true), Some(start), &mut drag);
+        let (_, pressed) = run(&ctx, crate::ui_kit::test_support::pointer(start, true), Some(start), &mut drag);
         assert!(pressed.grabbed && pressed.step.is_none());
         let mut steps = Vec::new();
         for x in [190.0, 200.0, 230.0] {
@@ -311,7 +310,7 @@ mod tests {
         assert!(!steps.is_empty());
         assert_eq!(travel, (50.0, -10.0, false), "the steps add up to the pointer's travel once the drag is decided");
         let end = pos2(230.0, 205.0);
-        let (_, released) = run(&ctx, crate::test_support::pointer(end, false), Some(end), &mut drag);
+        let (_, released) = run(&ctx, crate::ui_kit::test_support::pointer(end, false), Some(end), &mut drag);
         assert!(released.released && drag.at.is_none());
     }
 }

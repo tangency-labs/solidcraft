@@ -40,7 +40,8 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::implicit::{
-    check_exact_net, lies_on, AnalyticSupport, ClassSurface, ExactNetCheck, Implicit, LeaderMap,
+    check_exact_net, lies_on, net_miss, AnalyticSupport, ClassSurface, ExactNetCheck, Implicit,
+    LeaderMap,
 };
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::surface::Surface;
@@ -356,6 +357,28 @@ impl ExactRound {
             },
         )?;
         Ok(0.0)
+    }
+
+    /// How far `net` strays from the surface of the class its supports give
+    /// ([`net_miss`]): the surface [`Self::recertify`] checks it against (a chord's plane
+    /// through its contacts, any other class's surface from the supports); `None` where they
+    /// give it none.
+    ///
+    /// # Errors
+    ///
+    /// Those of reading the supports' quadrics and of the evaluations.
+    pub fn miss(&self, k: &Kernel, net: &Surface) -> Result<Option<f64>> {
+        let [a, b] = &self.supports;
+        let blend = classify_supports(k, [a, b], &self.inputs)?;
+        let surface = if self.class == ExactClass::Chord {
+            chord_implicit(&blend).map(ClassSurface::Implicit)
+        } else {
+            class_surface(&blend, self.leader.as_ref(), &self.map)
+        };
+        match surface {
+            Some(surface) => net_miss(k, net, &surface).map(Some),
+            None => Ok(None),
+        }
     }
 
     /// A round of the circle class: the torus `net` is ([`own_torus`]: its revolution's

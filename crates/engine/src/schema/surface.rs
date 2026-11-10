@@ -1,5 +1,5 @@
 //! Contracts for the surface edit commands in `cmd/surface.rs` (#12627): Stitch, Unstitch, Reverse
-//! Normal, Thicken, Offset Surface, Untrim and Fair Surface. Each adds a feature and returns
+//! Normal, Thicken, Offset Surface, Untrim, Fair Surface, Extend and Trim. Each adds a feature and returns
 //! `add_feature`'s reply, a [`super::features::FeatureResult`].
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
@@ -13,12 +13,12 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
-use super::types::{FeatureCommon, LengthExpr, OperationParam, Point3, TouchingParam, feature_common, present};
+use super::types::{FeatureCommon, LengthExpr, OperationParam, PlaneParam, Point3, TouchingParam, feature_common, present};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The most faces, or holes, one call may pick, as `cmd/surface.rs` reads them.
@@ -405,6 +405,212 @@ pub struct FairParams {
     /// How far a control point may move. Default: a thousandth of the body's size.
     #[serde(default)]
     pub tolerance: Option<LengthExpr>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Surface Extend's `edges`: 1 to 10 000 points, all with the handler's message. The handler
+/// skips an item that isn't a point; the contract refuses it.
+fn extend_edges<'de, D: Deserializer<'de>>(d: D) -> Result<Option<FacePoints>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Array(points) if !points.is_empty() && points.len() <= MAX_PICKS && points.iter().all(|p| params::vec3(p).is_some()) => {
+            Ok(Some(FacePoints(points)))
+        }
+        _ => Err(D::Error::custom(whole("`edges` must list points on the edges to extend"))),
+    }
+}
+
+fn extend_edges_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Points on the boundary edges to push out: 1 to 10 000.",
+        "type": "array",
+        "items": point_schema(generator),
+        "minItems": 1,
+        "maxItems": MAX_PICKS
+    })
+}
+
+/// Surface Extend's `mode`, with the handler's message for an unknown one. The handler reads a
+/// `mode` that isn't text as left out; the contract refuses it.
+fn extend_mode<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(m) if ["natural", "tangent", "curvature"].contains(&m.trim()) => Ok(Some(m)),
+        Value::String(m) => Err(D::Error::custom(whole(format!("`mode` must be natural, tangent or curvature, not `{}`", m.trim())))),
+        _ => Err(D::Error::custom("must be natural, tangent or curvature")),
+    }
+}
+
+fn extend_mode_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "How the surface continues: natural, the surface itself continued; tangent, tangent to it across the edge (G1); curvature, keeping its curvature across the edge too (G2). Default: natural.",
+        "type": "string",
+        "enum": ["natural", "tangent", "curvature"]
+    })
+}
+
+/// A face picked by a point on it, as `{body, point}`.
+fn face_on_body(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "type": "object",
+        "properties": {
+            "body": {"type": "string", "description": "The body, by name."},
+            "point": point_schema(generator)
+        },
+        "required": ["body", "point"],
+        "additionalProperties": false
+    })
+}
+
+fn up_to_schema(generator: &mut SchemaGenerator) -> Schema {
+    let face = face_on_body(generator);
+    let plane = generator.subschema_for::<PlaneParam>();
+    json_schema!({
+        "description": "Extend up to this instead of by `distance`: `bounds`, back to the surface's own bounds (natural mode only); a face, its surface extended; or a plane.",
+        "anyOf": [{"const": "bounds"}, face, plane]
+    })
+}
+
+fn extend_required(schema: &mut Schema) {
+    require(schema, "edges");
+    schema.insert("anyOf".into(), json!([{"required": ["distance"]}, {"required": ["up_to"]}]));
+}
+
+/// Push boundary edges of a surface body out. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = extend_required)]
+pub struct SurfaceExtendParams {
+    /// The surface body, by name.
+    #[serde(deserialize_with = "body_name")]
+    pub body: String,
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message.
+    #[serde(default, deserialize_with = "extend_edges", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "extend_edges_schema")]
+    pub edges: Option<FacePoints>,
+    /// How far the edges move.
+    #[serde(default)]
+    pub distance: Option<LengthExpr>,
+    #[serde(default, deserialize_with = "extend_mode", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "extend_mode_schema")]
+    pub mode: Option<String>,
+    // Kept as given: the handler reads its forms, with its messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "up_to_schema")]
+    pub up_to: Option<Value>,
+    /// True: the edges next to an extended edge are lengthened to meet it. False: the extension's
+    /// sides run square to the edge. Default: true.
+    #[serde(default)]
+    pub neighbours: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// A point or a list of points, as the handler's `keep_points` reads `key`, with its message.
+/// `null` reads as left out.
+fn keep_points<'de, D: Deserializer<'de>>(d: D, key: &str) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let fits = match &v {
+        Value::Null => return Ok(None),
+        v if params::vec3(v).is_some() => true,
+        Value::Array(a) => !a.is_empty() && a.len() <= MAX_PICKS && a.iter().all(|p| params::vec3(p).is_some()),
+        _ => false,
+    };
+    if fits { Ok(Some(v)) } else { Err(D::Error::custom(whole(format!("`{key}` must be [x, y, z] or a list of them")))) }
+}
+
+fn trim_keep<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    keep_points(d, "keep")
+}
+
+fn trim_keep_with<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    keep_points(d, "keep_with")
+}
+
+fn keep_points_schema(generator: &mut SchemaGenerator) -> Schema {
+    let point = point_schema(generator);
+    json_schema!({
+        "description": "A point on the side to keep, or points on the regions to keep: the pieces that hang together once cut.",
+        "anyOf": [point, {"type": "array", "items": point, "minItems": 1, "maxItems": MAX_PICKS}]
+    })
+}
+
+/// A mutual trim's other surface, with the handler's message.
+fn trim_with<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::String(name) => Ok(Some(name)),
+        _ => Err(D::Error::custom(whole("`with` must name a surface body"))),
+    }
+}
+
+fn trim_with_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Mutual trim: another surface body, one face each; each is cut where the other's surface (extended) meets it. Leave out `plane`, `tool` and `curves`.",
+        "type": "string"
+    })
+}
+
+fn trim_tool_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut face = face_on_body(generator);
+    face.insert("description".into(), json!("A face to cut with, its surface extended."));
+    face
+}
+
+fn trim_curves_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Sketch curves to cut with.",
+        "type": "object",
+        "properties": {
+            "sketch": {"description": "The sketch: its id or name.", "type": ["integer", "string"]},
+            "curves": {"description": "Curve ids, chains meeting end to end. Default: every curve.", "type": "array", "items": {"type": "string"}, "maxItems": 1000},
+            "direction": {"description": "`normal`, along the sketch's normal (the default), or a direction [x, y, z] to sweep the curves onto the surface along."}
+        },
+        "required": ["sketch"],
+        "additionalProperties": false
+    })
+}
+
+fn trim_required(schema: &mut Schema) {
+    require(schema, "keep");
+    schema.insert("anyOf".into(), json!([{"required": ["plane"]}, {"required": ["tool"]}, {"required": ["curves"]}, {"required": ["with"]}]));
+}
+
+/// Cut a surface body with a plane, a face or sketch curves and keep the side or regions asked
+/// for, or trim two surfaces against each other. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = trim_required)]
+pub struct SurfaceTrimParams {
+    /// The surface body, by name.
+    #[serde(deserialize_with = "body_name")]
+    pub body: String,
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message.
+    #[serde(default, deserialize_with = "trim_keep", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "keep_points_schema")]
+    pub keep: Option<Value>,
+    /// The plane to cut with.
+    #[serde(default)]
+    pub plane: Option<PlaneParam>,
+    // `tool` and `curves` are kept as given: the handler reads them, with its messages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "trim_tool_schema")]
+    pub tool: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "trim_curves_schema")]
+    pub curves: Option<Value>,
+    #[serde(default, deserialize_with = "trim_with", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "trim_with_schema")]
+    pub with: Option<String>,
+    #[serde(default, deserialize_with = "trim_keep_with", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "keep_points_schema")]
+    pub keep_with: Option<Value>,
+    /// Mutual trim: a surface that stops short of the other is extended to meet it.
+    #[serde(default)]
+    pub extend: Option<bool>,
+    /// Mutual trim: the kept pieces are sewn into `body`, and `with` is then gone.
+    #[serde(default)]
+    pub stitch: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

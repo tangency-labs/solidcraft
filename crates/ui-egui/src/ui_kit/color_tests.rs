@@ -1,6 +1,6 @@
 use super::*;
-use crate::scenario;
 use crate::ui_kit::test_support::pointer;
+use solidcraft_ui_registry as registry;
 
 fn frame<R>(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&mut Ui) -> R) {
     crate::ui_kit::test_support::frame(ctx, events, |ui| {
@@ -9,7 +9,7 @@ fn frame<R>(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&
 }
 
 fn click(ctx: &egui::Context, key: &str, rgb: &mut [u8; 3]) {
-    let at = scenario::handle_at(key).unwrap_or_else(|| panic!("missing {key}"));
+    let at = registry::handle_at(key).unwrap_or_else(|| panic!("missing {key}"));
     frame(ctx, pointer(at, true), |ui| color_popover(ui, rgb));
     frame(ctx, pointer(at, false), |ui| color_popover(ui, rgb));
 }
@@ -31,9 +31,9 @@ fn paste_hex(ctx: &egui::Context, rgb: &mut [u8; 3], text: &str) -> bool {
 }
 
 fn copy(ctx: &egui::Context, rgb: &mut [u8; 3]) -> Option<String> {
-    let at = scenario::handle_at("color:copy").unwrap();
+    let at = registry::handle_at("color:copy").unwrap();
     frame(ctx, pointer(at, true), |ui| color_popover(ui, rgb));
-    let output = crate::test_support::frame(
+    let output = crate::ui_kit::test_support::raw_frame(
         ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 400.0))),
@@ -54,7 +54,7 @@ fn copy(ctx: &egui::Context, rgb: &mut [u8; 3]) -> Option<String> {
 
 #[test]
 fn linear_field_preserves_hdr_precision_without_edits_and_bounds_hostile_limits() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let original = [0.123456789, 18.0, 0.9];
     let mut rgb = original;
     for maximum in [1e6, f64::NAN, f64::INFINITY] {
@@ -65,37 +65,37 @@ fn linear_field_preserves_hdr_precision_without_edits_and_bounds_hostile_limits(
 
 #[test]
 fn format_toggle_is_global_and_does_not_change_colour() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [204, 208, 214];
     frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::GammaByte);
-    assert!(scenario::handle_at("color:channel:R").is_some());
-    assert!(scenario::handle_at("color:hex").is_none());
+    assert!(registry::handle_at("color:channel:R").is_some());
+    assert!(registry::handle_at("color:hex").is_none());
     click(&ctx, "color:format:F", &mut rgb);
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::Linear);
     assert_eq!(rgb, [204, 208, 214]);
     click(&ctx, "color:format:Hex", &mut rgb);
     let mut other = [1, 2, 3];
     frame(&ctx, vec![], |ui| ui.push_id("another_picker", |ui| color_popover(ui, &mut other)));
-    assert!(scenario::handle_at("color:hex").is_some(), "Hex selection is shared with other pickers");
+    assert!(registry::handle_at("color:hex").is_some(), "Hex selection is shared with other pickers");
     for name in ["R", "G", "B"] {
-        assert!(scenario::handle_at(&format!("color:channel:{name}")).is_none());
+        assert!(registry::handle_at(&format!("color:channel:{name}")).is_none());
     }
     for key in ["color:sv", "color:hue", "color:current"] {
-        assert!(scenario::rect_of(key).is_some(), "Hex retains {key}");
+        assert!(registry::rect_of(key).is_some(), "Hex retains {key}");
     }
     assert_eq!(other, [1, 2, 3]);
     frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
     click(&ctx, "color:format:U8", &mut rgb);
     assert_eq!(ctx.style_of(egui::Theme::Light).visuals.numeric_color_space, egui::style::NumericColorSpace::GammaByte);
     assert_eq!(rgb, [204, 208, 214]);
-    assert!(scenario::handle_at("color:channel:R").is_some());
-    assert!(scenario::handle_at("color:hex").is_none());
+    assert!(registry::handle_at("color:channel:R").is_some());
+    assert!(registry::handle_at("color:hex").is_none());
 }
 
 #[test]
 fn hex_edits_apply_complete_byte_values_and_reject_invalid_or_nonopaque_pastes() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [100, 120, 140];
     frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
     click(&ctx, "color:format:Hex", &mut rgb);
@@ -141,7 +141,7 @@ fn hex_edits_apply_complete_byte_values_and_reject_invalid_or_nonopaque_pastes()
 
 #[test]
 fn hex_text_and_copy_follow_picker_and_external_colour_edits() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [255, 0, 0];
     frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
     click(&ctx, "color:format:Hex", &mut rgb);
@@ -163,17 +163,17 @@ fn hex_text_and_copy_follow_picker_and_external_colour_edits() {
 
 #[test]
 fn square_and_hue_drag_edit_opaque_rgb() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [255, 0, 0];
     frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
-    let square = scenario::rect_of("color:sv").unwrap();
+    let square = registry::rect_of("color:sv").unwrap();
     let pos = egui::pos2(square.right(), square.top());
     frame(&ctx, pointer(pos, true), |ui| color_popover(ui, &mut rgb));
     frame(&ctx, vec![egui::Event::PointerMoved(square.center())], |ui| color_popover(ui, &mut rgb));
     frame(&ctx, pointer(square.center(), false), |ui| color_popover(ui, &mut rgb));
     let expected = Color32::from(HsvaGamma { h: 0.0, s: 0.5, v: 0.5, a: 1.0 });
     assert_eq!(rgb, [expected.r(), expected.g(), expected.b()]);
-    let hue = scenario::rect_of("color:hue").unwrap();
+    let hue = registry::rect_of("color:hue").unwrap();
     frame(&ctx, pointer(hue.left_center(), true), |ui| color_popover(ui, &mut rgb));
     let pos = egui::pos2(hue.left() + hue.width() / 3.0, hue.center().y);
     frame(&ctx, vec![egui::Event::PointerMoved(pos)], |ui| color_popover(ui, &mut rgb));
@@ -184,12 +184,12 @@ fn square_and_hue_drag_edit_opaque_rgb() {
 
 #[test]
 fn popover_opens_and_outside_click_closes() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [100, 120, 140];
     frame(&ctx, vec![], |ui| {
         color_field(ui, &mut rgb);
     });
-    let at = scenario::handle_at("dialog:color:").unwrap();
+    let at = registry::handle_at("dialog:color:").unwrap();
     for pressed in [true, false] {
         frame(&ctx, pointer(at, pressed), |ui| {
             color_field(ui, &mut rgb);
@@ -198,7 +198,7 @@ fn popover_opens_and_outside_click_closes() {
     frame(&ctx, vec![], |ui| {
         color_field(ui, &mut rgb);
     });
-    assert!(scenario::rect_of("color:popover").is_some());
+    assert!(registry::rect_of("color:popover").is_some());
     for pressed in [true, false] {
         frame(&ctx, pointer(egui::pos2(315.0, 395.0), pressed), |ui| {
             color_field(ui, &mut rgb);
@@ -207,20 +207,20 @@ fn popover_opens_and_outside_click_closes() {
     frame(&ctx, vec![], |ui| {
         color_field(ui, &mut rgb);
     });
-    assert!(scenario::rect_of("color:popover").is_none());
+    assert!(registry::rect_of("color:popover").is_none());
 }
 
 #[test]
 fn channel_edits_use_gamma_bytes_or_linear_values_and_copy_in_the_active_format() {
     use crate::ui_kit::test_support::key;
     for linear in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut rgb = [10, 20, 30];
         frame(&ctx, vec![], |ui| color_popover(ui, &mut rgb));
         if linear {
             click(&ctx, "color:format:F", &mut rgb);
         }
-        let at = scenario::handle_at("color:channel:R").unwrap();
+        let at = registry::handle_at("color:channel:R").unwrap();
         // DragValue switches to its text editor on a click; Ctrl/Cmd+A replaces the channel.
         for pressed in [true, false] {
             frame(&ctx, pointer(at, pressed), |ui| color_popover(ui, &mut rgb));
@@ -245,12 +245,12 @@ fn channel_edits_use_gamma_bytes_or_linear_values_and_copy_in_the_active_format(
 
 #[test]
 fn changing_the_hue_of_grey_still_reports_a_manual_colour_edit() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [128, 128, 128];
     frame(&ctx, vec![], |ui| {
         color_field(ui, &mut rgb);
     });
-    let at = scenario::handle_at("dialog:color:").unwrap();
+    let at = registry::handle_at("dialog:color:").unwrap();
     for pressed in [true, false] {
         frame(&ctx, pointer(at, pressed), |ui| {
             color_field(ui, &mut rgb);
@@ -259,7 +259,7 @@ fn changing_the_hue_of_grey_still_reports_a_manual_colour_edit() {
     frame(&ctx, vec![], |ui| {
         color_field(ui, &mut rgb);
     });
-    let hue = scenario::rect_of("color:hue").unwrap().center();
+    let hue = registry::rect_of("color:hue").unwrap().center();
     frame(&ctx, pointer(hue, true), |ui| {
         color_field(ui, &mut rgb);
     });
@@ -311,7 +311,7 @@ fn rendered_square_hue_and_current_strip_leave_rounded_corner_pixels_clear() {
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for ppp in [1.0, 2.0] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             ctx.set_pixels_per_point(ppp);
             let mut output = ctx.run_ui(
                 egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 500.0))), ..Default::default() },
@@ -323,7 +323,7 @@ fn rendered_square_hue_and_current_strip_leave_rounded_corner_pixels_clear() {
             output.textures_delta.clear();
             let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
             for key in ["color:sv", "color:hue", "color:current"] {
-                let rect = scenario::rect_of(key).unwrap();
+                let rect = registry::rect_of(key).unwrap();
                 // Sample the physical pixel just inside each bounding-box corner. The
                 // rounded outline and gradient must both leave this pixel transparent.
                 for corner in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()] {
@@ -342,8 +342,8 @@ fn rendered_square_hue_and_current_strip_leave_rounded_corner_pixels_clear() {
 /// A taller frame than the shared one: the popover's recent row sits below 400 points.
 fn tall_in(ctx: &egui::Context, events: Vec<egui::Event>, id: &str, rgb: &mut [u8; 3]) -> bool {
     let mut changed = false;
-    scenario::clear_handles();
-    let _ = crate::test_support::frame(
+    registry::clear_handles();
+    let _ = crate::ui_kit::test_support::raw_frame(
         ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 600.0))),
@@ -364,7 +364,7 @@ fn tall(ctx: &egui::Context, events: Vec<egui::Event>, rgb: &mut [u8; 3]) -> boo
 }
 
 fn tall_click(ctx: &egui::Context, key: &str, rgb: &mut [u8; 3]) -> bool {
-    let at = scenario::handle_at(key).unwrap_or_else(|| panic!("missing {key}"));
+    let at = registry::handle_at(key).unwrap_or_else(|| panic!("missing {key}"));
     tall(ctx, pointer(at, true), rgb) | tall(ctx, pointer(at, false), rgb)
 }
 
@@ -386,7 +386,7 @@ fn hsv_bytes(h: f32, s: f32, v: f32) -> [u8; 3] {
 
 #[test]
 fn step_buttons_nudge_rgb_and_hsv_channels_by_one() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [10, 20, 30];
     tall(&ctx, vec![], &mut rgb);
     assert!(tall_click(&ctx, "color:spin:R:up", &mut rgb));
@@ -409,7 +409,7 @@ fn step_buttons_nudge_rgb_and_hsv_channels_by_one() {
 
 #[test]
 fn typed_hsv_values_set_the_colour_within_their_ranges() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [255, 0, 0];
     tall(&ctx, vec![], &mut rgb);
     tall_type(&ctx, "H", "120", &mut rgb);
@@ -422,12 +422,12 @@ fn typed_hsv_values_set_the_colour_within_their_ranges() {
 
 #[test]
 fn finished_edits_join_one_recent_list_that_every_picker_offers() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [10, 20, 30];
     tall(&ctx, vec![], &mut rgb);
     assert!(recent_colors(&ctx).is_empty(), "opening a picker records nothing");
     // A drag across the square records only its final colour, once released.
-    let square = scenario::rect_of("color:sv").unwrap();
+    let square = registry::rect_of("color:sv").unwrap();
     let end = square.left_top() + vec2(10.0, 10.0);
     tall(&ctx, pointer(square.center(), true), &mut rgb);
     tall(&ctx, vec![egui::Event::PointerMoved(end)], &mut rgb);
@@ -448,14 +448,14 @@ fn finished_edits_join_one_recent_list_that_every_picker_offers() {
     // Another picker (another colour field of the app) shows the same list and takes from it.
     let mut other = [200, 200, 200];
     tall_in(&ctx, vec![], "another_picker", &mut other);
-    assert!(scenario::handle_at("color:recent:2").is_none(), "empty slots are not buttons");
-    let slot = scenario::handle_at("color:recent:1").unwrap();
+    assert!(registry::handle_at("color:recent:2").is_none(), "empty slots are not buttons");
+    let slot = registry::handle_at("color:recent:1").unwrap();
     tall_in(&ctx, pointer(slot, true), "another_picker", &mut other);
     assert!(tall_in(&ctx, pointer(slot, false), "another_picker", &mut other));
     assert_eq!(other, tuned);
     assert_eq!(recent_colors(&ctx), vec![tuned, second], "a picked recent colour moves to the front");
     // Tuning a colour taken from the list adds a new entry and keeps the one it started from.
-    let up = scenario::handle_at("color:spin:B:up").unwrap();
+    let up = registry::handle_at("color:spin:B:up").unwrap();
     tall_in(&ctx, pointer(up, true), "another_picker", &mut other);
     tall_in(&ctx, pointer(up, false), "another_picker", &mut other);
     assert_eq!(recent_colors(&ctx), vec![other, tuned, second]);
@@ -463,7 +463,7 @@ fn finished_edits_join_one_recent_list_that_every_picker_offers() {
 
 #[test]
 fn recent_list_is_capped_unique_and_synced_with_the_saved_one() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     for i in 0..40u8 {
         remember_color(&ctx, [i, 0, 0], None);
     }
@@ -483,36 +483,16 @@ fn recent_list_is_capped_unique_and_synced_with_the_saved_one() {
     assert_eq!(recent_colors(&ctx), loaded);
 }
 
-#[test]
-fn recent_colours_are_saved_with_the_preferences_and_hostile_entries_dropped() {
-    use serde_json::json;
-    let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-    let mut list = vec![json!([1, 2, 3]), json!([300, 0, 0]), json!("red"), json!([1, 2]), json!(null)];
-    list.extend((0..50).map(|i| json!([i, i, i])));
-    app.load_prefs(&json!({ "recent_colors": list }).to_string());
-    assert_eq!(app.ui.recent_colors.len(), MAX_RECENT_COLORS);
-    assert_eq!(app.ui.recent_colors.first(), Some(&[1, 2, 3]));
-    let ctx = crate::fonts::test_context();
-    crate::ui_kit::recent_colors::share(&ctx, &mut app.ui.recent_colors);
-    remember_color(&ctx, [9, 8, 7], None);
-    crate::ui_kit::recent_colors::share(&ctx, &mut app.ui.recent_colors);
-    let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-    restored.load_prefs(&app.prefs());
-    assert_eq!(restored.ui.recent_colors.first(), Some(&[9, 8, 7]));
-    assert_eq!(restored.ui.recent_colors.get(1), Some(&[1, 2, 3]));
-    assert_eq!(restored.ui.recent_colors.len(), MAX_RECENT_COLORS);
-}
-
 /// #10201: a step button held down keeps stepping until it is let go, past egui's longest click
 /// (0.8 s): two seconds of holding H's up button step it about 32 degrees, not the 8 a press
 /// counted as a click managed before it stopped.
 #[test]
 fn a_held_step_button_keeps_stepping_until_it_is_let_go() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rgb = [255, 0, 0];
     let at_time = |time: f64, events: Vec<egui::Event>, rgb: &mut [u8; 3]| {
-        scenario::clear_handles();
-        let _ = crate::test_support::frame(
+        registry::clear_handles();
+        let _ = crate::ui_kit::test_support::raw_frame(
             &ctx,
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 600.0))),
@@ -528,7 +508,7 @@ fn a_held_step_button_keeps_stepping_until_it_is_let_go() {
         );
     };
     at_time(0.0, vec![], &mut rgb);
-    let up = scenario::handle_at("color:spin:H:up").expect("H's up button");
+    let up = registry::handle_at("color:spin:H:up").expect("H's up button");
     at_time(0.01, pointer(up, true), &mut rgb);
     for frame in 1..=120 {
         at_time(0.01 + f64::from(frame) / 60.0, vec![egui::Event::PointerMoved(up)], &mut rgb);

@@ -38,13 +38,13 @@ use solidcraft_geom::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::f64::consts::TAU;
 
+use solidcore_ops::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{
     self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
     Surface as BSurface, Vertex,
 };
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
-use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 
 use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Transform, dot, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
@@ -87,6 +87,11 @@ const MAX_TOLERANCE: f64 = 1.0;
 const VERTEX_GAP_MARGIN: f64 = 1.5;
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
+/// The least span of a face's parameter box along a direction of its surface that is not
+/// closed on itself, where its natural range has room ([`face_domain`]): 50 times the 2e-5 mm
+/// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
+/// 1e-5 mm wide).
+const OPEN_DOMAIN_SPAN: f64 = 1e-3;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
 /// record check measures it: with margin, as a vertex's.
 const EDGE_GAP_MARGIN: f64 = 1.5;
@@ -673,7 +678,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 for k in 0..=EDGE_GAP_SAMPLES {
                     let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
                     // A point a pcurve or surface lacks is the record check's to name.
-                    let (Some(q), Some(p)) = (solidcraft_geom::brep::pcurve::eval(c, t), eval.point(t)) else { continue };
+                    let (Some(q), Some(p)) = (solidcore_ops::pcurve::eval(c, t), eval.point(t)) else { continue };
                     if let Some(s) = on.point(q) {
                         gap = gap.max(s.dist(p));
                     }
@@ -949,6 +954,10 @@ impl<'b, 'a> Builder<'b, 'a> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
+        let slits = self.drop_inner_slits();
+        if slits > 0 {
+            notes.push(format!("{slits} slits of no area left out of the faces they lie in"));
+        }
         let at_poles = self.split_at_poles()?;
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
@@ -1265,8 +1274,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             out_shells.push(Shell::Faces { faces, wires: Vec::new() });
         }
         let brep = Brep { version: brep::VERSION, tolerance: self.tol, regions, shells: out_shells, faces, edges, vertices };
-        solidcraft_geom::brep::check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
-        solidcraft_geom::brep::geometry::check(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
+        solidcore_ops::record_check::validate(&brep).map_err(|e| format!("the record is invalid: {e}"))?;
+        solidcore_ops::record_check::agreement(&brep).map_err(|e| format!("the record's geometry disagrees: {e}"))?;
         Ok(Solid { item, name, product: None, brep, face_origin, sheet, notes, turned: turned_faces })
     }
 
@@ -1370,7 +1379,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         // Each use starts near where the one before it ends, along a bounded direction that
         // does not wrap: a loop around a closed spline surface without a seam edge jumps across
         // its domain.
-        let natural = solidcraft_geom::brep::label::surface_natural(&surface);
+        let natural = solidcore_ops::label::surface_natural(&surface);
         // At a pole (where the surface collapses to a point across a direction, to within the
         // tolerance of the vertex the two uses meet at) a loop may jump in that direction: the
         // seam's two uses meet there a period apart, and a side collapsed to within the vertex's
@@ -1382,10 +1391,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
                 let [a, b] = c.interval().ok_or("pcurve interval")?;
-                let (s, e) = (
-                    solidcraft_geom::brep::pcurve::eval(c, a).ok_or("pcurve start")?,
-                    solidcraft_geom::brep::pcurve::eval(c, b).ok_or("pcurve end")?,
-                );
+                let (s, e) = (solidcore_ops::pcurve::eval(c, a).ok_or("pcurve start")?, solidcore_ops::pcurve::eval(c, b).ok_or("pcurve end")?);
                 ends.push(if forward { (s, e) } else { (e, s) });
             }
             for k in 0..ends.len() {
@@ -1538,7 +1544,7 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
 
 /// A spline surface's parameter box: its knot ranges.
 fn natural_box(s: &BSurface) -> Option<[[f64; 2]; 2]> {
-    match solidcraft_geom::brep::label::surface_natural(s) {
+    match solidcore_ops::label::surface_natural(s) {
         [Natural::Range(a, b), Natural::Range(c, d)] if [a, b, c, d].iter().all(|x| x.is_finite()) => Some([[a, b], [c, d]]),
         _ => None,
     }
@@ -1564,7 +1570,7 @@ fn reverse(uses: &mut [(u32, bool)]) {
 }
 
 fn natural_periods(s: &BSurface) -> [bool; 2] {
-    solidcraft_geom::brep::label::surface_natural(s).map(|n| matches!(n, Natural::Periodic))
+    solidcore_ops::label::surface_natural(s).map(|n| matches!(n, Natural::Periodic))
 }
 
 /// The signed area a loop encloses in (u, v) (positive counter-clockwise), or `None` when it
@@ -1576,7 +1582,7 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
         for k in 0..=16 {
             let s = f64::from(k) / 16.0;
             let t = if forward { a + (b - a) * s } else { b - (b - a) * s };
-            pts.push(solidcraft_geom::brep::pcurve::eval(c, t)?);
+            pts.push(solidcore_ops::pcurve::eval(c, t)?);
         }
     }
     let (first, last) = (*pts.first()?, *pts.last()?);
@@ -1613,7 +1619,7 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
             }
         }
     }
-    let natural = solidcraft_geom::brep::label::surface_natural(surface);
+    let natural = solidcore_ops::label::surface_natural(surface);
     let mut out = [[0.0; 2]; 2];
     for d in 0..2 {
         let (a, b) = (lo[d], hi[d]);
@@ -1629,9 +1635,21 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                     y = a + TAU;
                 }
             }
+            // A direction not closed on itself: the box is the reader's to choose within the
+            // natural range (all of it for a plane, or along a cylinder's axis), and SMLib
+            // refuses a surface whose opposite sides lie within its tolerance of each other
+            // (`SmSurface` test #6, "partially coincident boundaries"), so a sliver face's box
+            // is at least `OPEN_DOMAIN_SPAN` across where its range has room: widened about its
+            // middle, and shifted off a bound it would cross. Pcurves wholly outside the range
+            // stay an empty box.
             Some(Natural::Range(n0, n1)) => {
                 x = x.max(*n0);
                 y = y.min(*n1);
+                if x < y && y - x < OPEN_DOMAIN_SPAN {
+                    let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    (x, y) = (lo, (lo + span).min(*n1));
+                }
             }
             None => {}
         }

@@ -309,6 +309,32 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
+/// pick, then its Quantity, Spacing and (for features) Alignment, in the same order for both
+/// directions, so a direction's settings sit together (#9634).
+fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
+    let (key, title, quantity_label, spacing_label) = if index == 0 {
+        ("pattern_direction1", "Direction 1", "Quantity", "Spacing")
+    } else {
+        ("pattern_direction2", "Direction 2", "Quantity 2", "Spacing 2")
+    };
+    let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
+    ui_kit::section(ui, key, title, true, |ui| {
+        let mut enter = false;
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index + 1..index + 2);
+        if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
+            let (count, spacing) = if index == 0 { (count, spacing) } else { (count2, spacing2) };
+            enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
+            enter |= expr_row(ui, spacing_label, spacing);
+        }
+        if features {
+            feature_pattern_alignment_row(ui, &mut d.extra, index);
+        }
+        enter
+    })
+    .unwrap_or(false)
+}
+
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
     if value == "g2" { 3 } else { FILLET_TYPES.iter().position(|(_, key)| *key == value).unwrap_or(0) }
@@ -381,6 +407,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
+    } else if matches!(d.kind, Kind::PatternRect { .. }) {
+        // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -660,15 +689,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
             }
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
-            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= expr_row(ui, "Spacing", spacing);
-            enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= expr_row(ui, "Spacing 2", spacing2);
-            if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
-                feature_pattern_alignment_row(ui, &mut d.extra, 0);
-                feature_pattern_alignment_row(ui, &mut d.extra, 1);
-            }
+        Kind::PatternRect { .. } => {
+            enter |= pattern_direction_group(app, d, ui, 0);
+            enter |= pattern_direction_group(app, d, ui, 1);
         }
         Kind::PatternCirc { count, angle } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
@@ -826,9 +849,51 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     enter
 }
 
+/// The distances along a Section Analysis's plane at which the cut goes through the model, or
+/// `None` while the dialog has no plane or there is no model to cut.
+fn section_span(app: &SolveApp, d: &Dialog) -> Option<(f64, f64)> {
+    if !matches!(d.kind, Kind::Section { .. }) {
+        return None;
+    }
+    let (_, params) = apply_commands(app, d).ok()?.into_iter().next()?;
+    params.get("plane")?;
+    let cut_at = |distance: &str| {
+        let mut p = params.clone();
+        p["offset"] = json!(distance);
+        let mut scratch = app.session.scratch();
+        scratch.execute("inspect.section", &p).ok()?;
+        scratch.section
+    };
+    let origin = cut_at("0 mm")?.0;
+    let along = cut_at("1 mm")?.0 - origin;
+    let b = crate::viewport::model_bounds(app);
+    let distances = [b.min.x, b.max.x]
+        .into_iter()
+        .flat_map(|x| [b.min.y, b.max.y].into_iter().map(move |y| (x, y)))
+        .flat_map(|(x, y)| [b.min.z, b.max.z].into_iter().map(move |z| Vec3::new(x, y, z)))
+        .map(|corner| (corner - origin).dot(along));
+    let (lo, hi) = distances.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), d| (lo.min(d), hi.max(d)));
+    (lo.is_finite() && hi.is_finite() && lo < hi).then_some((lo, hi))
+}
+
+/// A slider under Section Analysis's Distance. The field keeps what was typed until the slider
+/// is dragged, and a distance typed outside the model widens the slider to reach it.
+fn section_slider(app: &SolveApp, ui: &mut egui::Ui, offset: &mut String, (lo, hi): (f64, f64)) {
+    let doc = &app.session.doc;
+    let mut shown = crate::length_input::eval(doc, offset, solidcraft_engine::doc::expr::Kind::Length).ok().filter(|x| x.is_finite()).unwrap_or(0.0);
+    let range = lo.min(shown)..=hi.max(shown);
+    form_row(ui, "", |ui| {
+        let slider = ui_kit::Slider { show_value: false, ..Default::default() };
+        if ui_kit::slider(ui, &mut shown, range, slider).changed() {
+            *offset = crate::length_input::model(doc, shown);
+        }
+    });
+}
+
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    let section_span = section_span(app, d);
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -949,9 +1014,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else {
                 &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
             };
-            for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
+            // A planar To face as the plane it lies in: the moved face comes onto it along its
+            // normal only, without sliding across to the picked point.
+            let to_snaps: &[(&str, &str)] = if *components {
+                snaps
+            } else {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin"), ("Onto Plane", "plane")]
+            };
+            for (label, key, choices) in [("From Snap", "from_snap", snaps), ("To Snap", "to_snap", to_snaps)] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, snaps);
+                    extra_choice(ui, &mut d.extra, key, key, choices);
                 });
             }
             if *components {
@@ -1122,6 +1194,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch } => {
             enter |= expr_row(ui, "Distance", offset);
+            if let Some(span) = section_span {
+                section_slider(app, ui, offset, span);
+            }
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("Hatch", hatch)]);
             if section_turns_off(&app.session, &d.inputs) && !d.extra.contains_key("plane") {
                 ui_kit::text(ui, tr("section.off_hint"), ui_kit::Text::Hint("section_off"));

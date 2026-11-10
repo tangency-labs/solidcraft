@@ -7,10 +7,8 @@ use super::{
 use crate::{EngineError, Result, Session};
 use serde_json::{Value, json};
 use solidcraft_io::vfs::PathScope;
-use solidcraft_render::{
-    Camera,
-    job::{CancelToken, Phase, RetainedMetadata},
-};
+use solidcraft_render::job::{CancelToken, Phase, RetainedMetadata};
+use solidcraft_viewport::Camera;
 use std::mem::size_of;
 
 fn bad(message: &str) -> EngineError {

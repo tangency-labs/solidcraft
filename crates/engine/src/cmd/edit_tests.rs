@@ -1,6 +1,7 @@
 //! Edit Feature must replace the selections as well as the numerical definition.
 
 use serde_json::{Value, json};
+use solidcraft_geom::MeshGeom;
 
 use crate::{Sel, Session};
 

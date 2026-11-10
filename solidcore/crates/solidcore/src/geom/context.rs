@@ -411,6 +411,9 @@ impl Context {
             }
         }
         // Only key uniqueness is shared, not model data.
+        // Rust 1.99 deprecates `fetch_update` as a rename of `try_update`, which rust-version
+        // 1.85 doesn't have yet, so it stays (#14360).
+        #[allow(deprecated, reason = "try_update is newer than 1.85 (#14360)")]
         let n = self
             .identities
             .geometry_issued
