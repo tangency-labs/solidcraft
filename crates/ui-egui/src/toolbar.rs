@@ -2427,12 +2427,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
             }
-            // With a menu open, V runs that menu's Show/Hide on what the menu is for.
-            Key::V => {
-                if !crate::context_menu::press_shortcut(app, "V") {
-                    crate::context_menu::toggle_visibility(app);
-                }
-            }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {
                     let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
