@@ -7,7 +7,7 @@ use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetBody, SheetRule};
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{FacePick, Position};
-use solidcraft_doc::{FeatureKind, FlangeEdge};
+use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, Ring};
 
@@ -46,7 +46,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<FeatureResult>)
         .params(
         "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
-         edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?} for an edge with its own angle and height] + \
+         edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
+         or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
+         fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
          height (along the flange, to its far edge), angle? (default 90 deg), radius? (default: rule), \
          height_from?: outer|inner|tangent (where the height is measured from: the outer virtual sharp (default), \
          the inner virtual sharp, or past 90 deg the line square to the flange touching the bend's outside (tangent; up to 90 deg the outer sharp)), \
@@ -249,6 +251,13 @@ fn flange_edges(s: &Session, p: &Value, cmd: &str) -> Result<Vec<FlangeEdge>> {
                 check_expr(s, e, kind, cmd, &format!("edges[{i}].{k}"))?;
             }
         }
+        for (j, seg) in edge.segments.iter().enumerate() {
+            for (k, e, kind) in [("angle", &seg.angle, Kind::Angle), ("height", &seg.height, Kind::Length)] {
+                if let Some(e) = e {
+                    check_expr(s, e, kind, cmd, &format!("edges[{i}].segments[{j}].{k}"))?;
+                }
+            }
+        }
         edges.push(edge);
     }
     Ok(edges)
@@ -266,16 +275,20 @@ pub(crate) fn flange_edge_list(v: Option<&Value>) -> std::result::Result<&Vec<Va
     Ok(a)
 }
 
+/// Most segments one picked edge may be split into (`sheet.flange`'s `segments`), in the style
+/// of [`MAX_THEN`]; each bend costs two flat pieces, so this keeps the flat budget reachable.
+pub(crate) const MAX_SEGMENTS: usize = 64;
+
 /// Item `i` of an edge flange's `edges`, without the design: whether its expressions suit the
 /// design is checked by the handler.
 pub(crate) fn flange_edge(i: usize, v: &Value) -> std::result::Result<FlangeEdge, String> {
-    const KEYS: [&str; 3] = ["point", "angle", "height"];
+    const KEYS: [&str; 4] = ["point", "angle", "height", "segments"];
     // A bare point, as before: [x, y, z] or {x, y, z}.
     let Some(o) = v.as_object().filter(|o| KEYS.iter().any(|k| o.contains_key(*k))) else {
         return vec3(v).map(FlangeEdge::at).ok_or_else(|| format!("edges[{i}]: {FLANGE_EDGE_LIST}"));
     };
     if let Some(k) = o.keys().find(|k| !KEYS.contains(&k.as_str())) {
-        return Err(format!("edges[{i}]: unknown key `{k}` (an edge takes point, angle and height)"));
+        return Err(format!("edges[{i}]: unknown key `{k}` (an edge takes point, angle, height and segments)"));
     }
     let point = o.get("point").and_then(vec3).ok_or_else(|| format!("edges[{i}]: `point` must be [x, y, z]"))?;
     let own = |k: &str| -> std::result::Result<Option<solidcraft_doc::Expr>, String> {
@@ -284,7 +297,68 @@ pub(crate) fn flange_edge(i: usize, v: &Value) -> std::result::Result<FlangeEdge
         }
         expr(v, k).map(Some).ok_or_else(|| format!("edges[{i}]: `{k}` {}", expr_problem(v.get(k))))
     };
-    Ok(FlangeEdge { point: Position(point), angle: own("angle")?, height: own("height")? })
+    let segments = match o.get("segments").filter(|v| !v.is_null()) {
+        Some(v) => flange_segments(i, v)?,
+        None => Vec::new(),
+    };
+    Ok(FlangeEdge { point: Position(point), angle: own("angle")?, height: own("height")?, segments })
+}
+
+/// The `segments` of edge `i`: 1…[`MAX_SEGMENTS`] stretches of the edge that tile it, each
+/// `{from, to, angle?, height?, flip?}`. `from` and `to` are fractions of the stretch the sheet
+/// still has there, so they are read here; the angle and height expressions are checked by the
+/// handler. Every refusal says which segment it is about, never clamps a value.
+pub(crate) fn flange_segments(i: usize, v: &Value) -> std::result::Result<Vec<FlangeSegment>, String> {
+    let list = format!("edges[{i}].segments must list segments {{from, to, angle?, height?, flip?}}");
+    let a = v.as_array().ok_or_else(|| list.clone())?;
+    if a.is_empty() || a.len() > MAX_SEGMENTS {
+        return Err(format!("edges[{i}].segments must list 1…{MAX_SEGMENTS} segments"));
+    }
+    let mut out: Vec<FlangeSegment> = Vec::with_capacity(a.len());
+    let mut last_to = 0.0;
+    for (j, seg) in a.iter().enumerate() {
+        let o = seg.as_object().ok_or_else(|| format!("edges[{i}].segments[{j}]: {list}"))?;
+        if let Some(k) = o.keys().find(|k| !matches!(k.as_str(), "from" | "to" | "angle" | "height" | "flip")) {
+            return Err(format!("edges[{i}].segments[{j}]: unknown key `{k}` (a segment takes from, to, angle, height and flip)"));
+        }
+        let fraction = |k: &str| -> std::result::Result<f64, String> {
+            o.get(k)
+                .and_then(Value::as_f64)
+                .filter(|x| (0.0..=1.0).contains(x))
+                .ok_or_else(|| format!("edges[{i}].segments[{j}].{k} must be a fraction from 0 to 1"))
+        };
+        let (from, to) = (fraction("from")?, fraction("to")?);
+        if !(to > from) {
+            return Err(format!("edges[{i}].segments[{j}].to must be more than its from"));
+        }
+        if j == 0 && from.abs() > sheet::SEGMENT_JOIN_EPS {
+            return Err(format!("edges[{i}].segments[0].from must be 0: the segments cover the whole edge"));
+        }
+        if j > 0 && (from - last_to).abs() > sheet::SEGMENT_JOIN_EPS {
+            return Err(format!(
+                "edges[{i}].segments[{j}].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)"
+            ));
+        }
+        let flip = match o.get("flip").filter(|v| !v.is_null()) {
+            Some(v) => Some(v.as_bool().ok_or_else(|| format!("edges[{i}].segments[{j}].flip must be true or false"))?),
+            None => None,
+        };
+        let own = |k: &str| -> std::result::Result<Option<solidcraft_doc::Expr>, String> {
+            if o.get(k).is_none_or(Value::is_null) {
+                return Ok(None);
+            }
+            expr(seg, k).map(Some).ok_or_else(|| format!("edges[{i}].segments[{j}]: `{k}` {}", expr_problem(o.get(k))))
+        };
+        let angle = own("angle")?;
+        let height = own("height")?;
+        last_to = to;
+        out.push(FlangeSegment { from, to, angle, height, flip });
+    }
+    if (last_to - 1.0).abs() > sheet::SEGMENT_JOIN_EPS {
+        let n = out.len() - 1;
+        return Err(format!("edges[{i}].segments[{n}].to must be 1: the segments cover the whole edge"));
+    }
+    Ok(out)
 }
 
 fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
@@ -325,6 +399,14 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     if ty != "edge" && p.get("then").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`then` (further bends) is only for edge flanges"));
     }
+    if ty != "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "segments is only for edge flanges (a base or contour flange has no edge to divide)"));
+    }
+    // A top-level `segments` is a whole-edge bend's key, not a flange's: it belongs in an `edges`
+    // item, and saying so is better than a flange that quietly ignores it.
+    if ty == "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`segments` belongs inside an `edges` item: edges [{point, segments}]"));
+    }
     match flange_type(&ty).map_err(|why| bad(cmd, why))? {
         FlangeType::Base => {
             let sketch = feature_sketch(s, p, cmd)?;
@@ -360,6 +442,9 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         FlangeType::Edge => {
             let edges = flange_edges(s, p, cmd)?;
             let then = then_steps(s, p, cmd)?;
+            if !then.is_empty() && edges.iter().any(|e| !e.segments.is_empty()) {
+                return Err(bad(cmd, "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)"));
+            }
             let height = req_expr(cmd, p, "height")?;
             check_expr(s, &height, Kind::Length, cmd, "height")?;
             let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());

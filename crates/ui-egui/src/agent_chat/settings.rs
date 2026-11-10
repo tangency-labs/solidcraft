@@ -734,7 +734,7 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
-            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
+            |ui, (visible, speed, follow)| crate::prefs::figures::pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
         );
     });
 }
@@ -772,7 +772,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.agent_chat.detecting.is_some() {
             ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
         } else if all.is_empty() {
-            if std::env::var_os("FLATPAK_ID").is_some() {
+            if super::panel::sandboxed() {
                 super::panel::no_agents(ui);
             } else {
                 ui_kit::empty_box(ui, "assistant_agents", tr("ai.prefs.no_agents"));
@@ -1262,7 +1262,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
                     if let Some(url) = s.insecure_http_endpoint() {
                         let mut allow = s.allow_insecure_http();
-                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).on_hover_text(tr("ai.http.warning"));
+                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).backing_on_hover_text(tr("ai.http.warning"));
                         solidcraft_ui_registry::publish_target("ai_add:allow_insecure_http", r.rect);
                         if r.changed() {
                             if allow {

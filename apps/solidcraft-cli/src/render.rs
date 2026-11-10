@@ -152,7 +152,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
             camera
         } else {
             let mut camera = RenderSetup::default().camera;
-            camera.fit(&solidcraft_engine::product_scene::extract(&session).map_err(|e| e.to_string())?.bounds);
+            camera.fit(&solidcraft_engine::render::view_bounds(
+                &solidcraft_engine::product_scene::extract(&session).map_err(|e| e.to_string())?.bounds,
+            ));
             camera
         };
         params["settings"]["camera"] = json!(camera);

@@ -28,14 +28,8 @@ const BOUNDARY_WEIGHT: f64 = 10.0;
 /// A collapse may turn a face's normal by at most this (cosine): about 80°.
 const MIN_TURN_COS: f64 = 0.2;
 
-/// A simplified copy of a mesh.
-#[derive(Clone, Debug, Default)]
-pub struct Level {
-    pub positions: Vec<Vec3>,
-    pub triangles: Vec<[u32; 3]>,
-    /// How far (mm) its vertices and triangle centres lie from the original surface, at most.
-    pub error: f64,
-}
+/// A simplified copy of a mesh: solidcore-tess's, the type the viewport draws levels of detail from.
+pub use solidcore_tess::simplify::Level;
 
 /// The mesh (`positions`, and `triangles` indexing them; corners at the same position are one
 /// vertex) simplified to each of `targets` triangles in turn (largest first), one [`Level`] per

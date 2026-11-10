@@ -1,6 +1,8 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_geom::{Aabb3, Mesh};
-use solidcraft_render::{Camera, ProductMesh, StandardView, surface::OpaqueSurface};
+use solidcraft_render::ProductMesh;
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 
 fn executor() -> Option<Executor> {
     let (adapter, device, queue) = match open_headless() {
@@ -8,7 +10,7 @@ fn executor() -> Option<Executor> {
         Err(e) => {
             // The path tracer runs on Vulkan or Metal only: where the backends in use leave both out
             // (`WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
-            let available = !crate::select::path_backends().is_empty();
+            let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
             assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("gpu-path device test skipped: {e}");
             return None;
@@ -2439,11 +2441,11 @@ fn render_lights_path_visibility_uniform_keeps_the_shader_contract() {
 /// #3217: the path tracer opens Vulkan adapters, or Metal on macOS, never D3D12 or GL.
 #[test]
 fn path_devices_are_vulkan_or_metal_only() {
-    let picked = crate::select::pick_path(crate::select::Policy::Auto, |_| true);
+    let picked = solidcraft_viewport_gpu::select::pick_path(solidcraft_viewport_gpu::select::Policy::Auto, |_| true);
     if let Some((adapter, _)) = &picked {
         assert!(matches!(adapter.get_info().backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal));
     }
-    if crate::select::path_backends().is_empty() {
+    if solidcraft_viewport_gpu::select::path_backends().is_empty() {
         assert!(picked.is_none());
     }
 }
@@ -2479,7 +2481,7 @@ fn viewport_path_backends_keep_windows_on_its_selected_backend() {
 #[test]
 fn viewport_path_backends_preserve_other_platforms() {
     for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Gl, wgpu::Backend::Metal] {
-        assert_eq!(viewport_path_backends(backend, false), crate::select::path_backends());
+        assert_eq!(viewport_path_backends(backend, false), solidcraft_viewport_gpu::select::path_backends());
     }
 }
 
@@ -2636,8 +2638,8 @@ fn gpu_brdf_matches_f64_surface_oracle() {
 fn viewport_brdf_probe_source() -> String {
     format!(
         "{}\n{}\n{}",
-        crate::view::SHADER,
-        crate::pbr::SOURCE,
+        solidcraft_viewport_gpu::view::SHADER,
+        solidcraft_viewport_gpu::pbr::SOURCE,
         r#"
 struct Probe { base: vec4<f32>, parameters: vec4<f32>, view: vec4<f32>, light: vec4<f32>, };
 // Bindings 0 and 1 belong to the production viewport uniform and palette.
@@ -3003,7 +3005,7 @@ fn gpu_clear_coat_brdf_matches_f64_surface_oracle() {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
                     .unwrap()
-                    .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
+                    .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
                 let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
                 for (view, light) in [
                     (Vec3::Z, Vec3::Z),
@@ -3058,12 +3060,13 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
         compilation_options: Default::default(),
         cache: None,
     });
-    for metallic in [0.0, 1.0] {
+    // The diffuse share of the density follows metallic: kept, halved and gone.
+    for metallic in [0.0, 0.5, 1.0] {
         for roughness in [0.045, 0.12, 0.5] {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
                     .unwrap()
-                    .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
+                    .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
                 let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
                 for (view, light) in [
                     (Vec3::Z, Vec3::Z),
@@ -3088,7 +3091,7 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
                     context.queue.submit([encoder.finish()]);
                     task.sample = 1;
                     let actual = task.read_linear().unwrap()[0];
-                    let expected = solidcraft_render::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
+                    let expected = solidcraft_viewport::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
                     for (a, b) in actual.iter().zip([expected, 0.0, 0.0]) {
                         assert!((f64::from(*a) - b).abs() <= 3e-3 * b.abs() + 2e-5, "m={metallic}, r={roughness}, ior={ior}: {a} vs {b}");
                     }
@@ -3118,47 +3121,161 @@ fn gpu_clear_coat_samples_the_pdf_mixture_components() {
         compilation_options: Default::default(),
         cache: None,
     });
-    for weight in [0.0, 0.4, 1.0] {
-        let surface = OpaqueSurface::new(Vec3::new(0.02, 0.02, 0.02), 0.0, 0.45, 1.5)
-            .unwrap()
-            .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
-        let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
-        let p = weight * 0.5;
-        // One variate strictly inside each nonempty mixture interval.
-        for component in [(1.0 - p) * 0.25, (1.0 - p) * 0.75, 1.0 - p * 0.5] {
-            if component >= 1.0 {
-                continue;
-            }
-            for x in [0.125_f64, 0.75] {
-                let mut params = vec![0; 48];
-                scene::vector(&mut params, Vec3::ZERO, 0.0);
-                scene::vector(&mut params, Vec3::Z, 0.0);
-                scene::vector(&mut params, Vec3::Z, 0.0);
-                scene::vector(&mut params, Vec3::new(component, x, 0.25), 0.0);
-                context.queue.write_buffer(&task.uniform, 0, &params);
-                let mut encoder = context.device.create_command_encoder(&Default::default());
-                {
-                    let mut pass = encoder.begin_compute_pass(&Default::default());
-                    pass.set_pipeline(&pipeline);
-                    pass.set_bind_group(0, &task.bind, &[]);
-                    pass.dispatch_workgroups(1, 1, 1);
+    // The lobe intervals come from the f64 oracle that surface_pdf uses, so the GPU samples
+    // the mixture its density describes. A pure metal's diffuse interval is empty: even the
+    // first variate, zero, picks its specular lobe.
+    for metallic in [0.0, 0.5, 1.0] {
+        for weight in [0.0, 0.4, 1.0] {
+            let surface = OpaqueSurface::new(Vec3::new(0.02, 0.02, 0.02), metallic, 0.45, 1.5)
+                .unwrap()
+                .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
+            let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
+            let [diffuse, specular, coat] = solidcraft_viewport::clear_coat::lobe_probabilities(surface);
+            // One variate inside each interval (the start of an empty diffuse one).
+            for component in [diffuse * 0.5, diffuse + specular * 0.5, 1.0 - coat * 0.5] {
+                if component >= 1.0 {
+                    continue;
                 }
-                context.queue.submit([encoder.finish()]);
-                task.sample = 1;
-                let actual = task.read_linear().unwrap()[0];
-                let expected = if component < (1.0 - p) * 0.5 {
-                    Vec3::new(0.0, x.sqrt(), (1.0 - x).sqrt())
-                } else {
-                    let r = if component >= 1.0 - p { 0.12_f64 } else { 0.45_f64 };
-                    let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
-                    Vec3::new(2.0 * c * (1.0 - c * c).sqrt(), 0.0, 2.0 * c * c - 1.0)
-                } + Vec3::new(2.0, 2.0, 2.0);
-                for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z]) {
-                    assert!((f64::from(*a) - b).abs() < 2e-5, "weight={weight}, component={component}, x={x}: {actual:?}, {expected:?}");
+                for x in [0.125_f64, 0.75] {
+                    let mut params = vec![0; 48];
+                    scene::vector(&mut params, Vec3::ZERO, 0.0);
+                    scene::vector(&mut params, Vec3::Z, 0.0);
+                    scene::vector(&mut params, Vec3::Z, 0.0);
+                    scene::vector(&mut params, Vec3::new(component, x, 0.25), 0.0);
+                    context.queue.write_buffer(&task.uniform, 0, &params);
+                    let mut encoder = context.device.create_command_encoder(&Default::default());
+                    {
+                        let mut pass = encoder.begin_compute_pass(&Default::default());
+                        pass.set_pipeline(&pipeline);
+                        pass.set_bind_group(0, &task.bind, &[]);
+                        pass.dispatch_workgroups(1, 1, 1);
+                    }
+                    context.queue.submit([encoder.finish()]);
+                    task.sample = 1;
+                    let actual = task.read_linear().unwrap()[0];
+                    let expected = if component < diffuse {
+                        Vec3::new(0.0, x.sqrt(), (1.0 - x).sqrt())
+                    } else {
+                        let r = if component >= 1.0 - coat { 0.12_f64 } else { 0.45_f64 };
+                        let c = ((1.0 - x) / (1.0 + (r.powi(4) - 1.0) * x)).sqrt();
+                        Vec3::new(2.0 * c * (1.0 - c * c).sqrt(), 0.0, 2.0 * c * c - 1.0)
+                    } + Vec3::new(2.0, 2.0, 2.0);
+                    for (a, b) in actual.iter().zip([expected.x, expected.y, expected.z]) {
+                        assert!(
+                            (f64::from(*a) - b).abs() < 2e-5,
+                            "metallic={metallic}, weight={weight}, component={component}, x={x}: {actual:?}, {expected:?}"
+                        );
+                    }
                 }
             }
         }
     }
+}
+
+#[test]
+fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_hit() {
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let shader = context
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("indirect clamp oracle"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+    let layout = context.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&context.layout)],
+        immediate_size: 0,
+    });
+    // Like production, a job with a limit uses the pipeline with the clamp compiled in.
+    let pipeline = |constants| {
+        context.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: None,
+            layout: Some(&layout),
+            module: &shader,
+            entry_point: Some("contribution_reference"),
+            compilation_options: wgpu::PipelineCompilationOptions { constants, ..Default::default() },
+            cache: None,
+        })
+    };
+    let (ordinary, clamped) = (pipeline(&[]), pipeline(CLAMP_INDIRECT));
+    // (limit, bounce, contribution, expected): the limit reaches the shader through the job's
+    // own uniform packing, with or without a volume.
+    let cases: &[(Option<f64>, u32, [f64; 3], [f64; 3])] = &[
+        (None, 1, [8.0, 4.0, 1.0], [8.0, 4.0, 1.0]),
+        (Some(2.0), 0, [8.0, 4.0, 1.0], [8.0, 4.0, 1.0]),
+        (Some(2.0), 1, [8.0, 4.0, 1.0], [2.0, 1.0, 0.25]),
+        (Some(2.0), 5, [0.0, 6.0, 3.0], [0.0, 2.0, 1.0]),
+        (Some(2.0), 1, [3.0, 1.5, 0.75], [2.0, 1.0, 0.5]),
+        (Some(2.0), 1, [1.5, 0.5, 0.25], [1.5, 0.5, 0.25]),
+        (Some(2.0), 1, [2.0, 2.0, 2.0], [2.0, 2.0, 2.0]),
+        (Some(0.000_001), 2, [1.0, 0.5, 0.0], [0.000_001, 0.000_000_5, 0.0]),
+    ];
+    for volume in [None, Some(solidcraft_render::job::volume::HomogeneousVolume { extinction_per_mm: 0.01, ..Default::default() })] {
+        for &(limit, bounce, value, expected) in cases {
+            let lighting = Some(solidcraft_render::job::StudioLighting { environment: [1.0; 3], ..Default::default() });
+            let options = JobOptions { clamp_indirect: limit, volume, lighting, ..Default::default() };
+            options.validate().unwrap();
+            let mut task = Task::new(context.clone(), sphere(white()), request(1), options, CancelToken::default()).unwrap();
+            let mut params = task.parameters(1).unwrap();
+            params[16..20].copy_from_slice(&bounce.to_le_bytes());
+            let mut up = Vec::new();
+            scene::vector(&mut up, Vec3::new(value[0], value[1], value[2]), 0.0);
+            params[64..80].copy_from_slice(&up);
+            context.queue.write_buffer(&task.uniform, 0, &params);
+            let mut encoder = context.device.create_command_encoder(&Default::default());
+            {
+                let mut pass = encoder.begin_compute_pass(&Default::default());
+                pass.set_pipeline(if limit.is_some() { &clamped } else { &ordinary });
+                pass.set_bind_group(0, &task.bind, &[]);
+                pass.dispatch_workgroups(1, 1, 1);
+            }
+            context.queue.submit([encoder.finish()]);
+            task.sample = 1;
+            let actual = task.read_linear().unwrap()[0];
+            for (a, b) in actual.iter().zip(expected) {
+                assert!((f64::from(*a) - b).abs() <= 1e-6 * b, "limit={limit:?}, bounce={bounce}, {value:?}: {actual:?} vs {expected:?}");
+            }
+            // Hue: every channel keeps its share of the brightest one.
+            let peak = value.iter().copied().fold(0.0, f64::max);
+            let actual_peak = actual[..3].iter().copied().fold(0.0, f32::max);
+            for (a, v) in actual.iter().zip(value) {
+                assert!((f64::from(*a / actual_peak) - v / peak).abs() < 1e-6, "{actual:?} vs {value:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn gpu_indirect_clamp_bounds_every_bounce_and_leaves_what_the_camera_sees_directly() {
+    let Some(executor) = executor() else { return };
+    // White furnace: a camera ray that misses sees the environment (1.0) directly; one that hits
+    // the sphere adds light only from the first bounce on, each path at most once.
+    let furnace = |clamp_indirect| {
+        let options = JobOptions { samples: 16, max_depth: 8, seed: 11, clamp_indirect, ..Default::default() };
+        let mut task = Task::new(executor.context.clone(), sphere(white()), request(8), options, CancelToken::default()).unwrap();
+        task.environment = 1.0;
+        task.studio = 0.0;
+        for _ in 0..options.samples {
+            task.complete_sample().unwrap();
+        }
+        task.read_linear().unwrap()
+    };
+    let off = furnace(None);
+    // A limit above every contribution changes nothing, bit for bit.
+    assert_eq!(off, furnace(Some(1_000_000.0)));
+    let clamped = furnace(Some(0.25));
+    let (mut covered, mut background) = (0, 0);
+    for (raw, limited) in off.iter().zip(&clamped) {
+        assert_eq!(raw[3], limited[3], "coverage is never clamped");
+        if raw[3] == 1.0 {
+            covered += 1;
+            assert!(raw[0] > 0.5, "unclamped furnace sphere: {raw:?}");
+            assert!(limited[..3].iter().all(|c| *c <= 0.25 + 1e-6), "{limited:?}");
+        } else if raw[3] == 0.0 {
+            background += 1;
+            assert_eq!(raw, limited, "the environment seen directly is the camera's first hit");
+            assert_eq!(raw[0], 1.0);
+        }
+    }
+    assert!(covered >= 4 && background >= 4, "{covered} covered, {background} background pixels");
 }
 
 #[test]
@@ -3838,8 +3955,9 @@ fn texture_admission_rejects_glass_and_stale_identity_and_honors_cancellation() 
 fn host_readiness_includes_unmapped_non_nested_glass() {
     let Some(executor) = executor() else { return };
     let context = &executor.context;
-    assert!(context.prepared_scene_pipeline(true, false, false).is_ok());
-    assert!(context.prepared_scene_pipeline(false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
+    assert!(context.prepared_scene_pipeline(true, false, false, false).is_ok());
+    assert!(context.prepared_scene_pipeline(false, false, false, false).is_ok(), "a ready host must already prepare ordinary unmapped glass");
+    assert!(context.clamped_pipelines.iter().all(|slot| slot.get().is_none()), "indirect-clamp programs stay lazy");
     let plain = scene_pipeline_variant(false, false, false).unwrap();
     assert!(context.scene_pipelines[plain].get().is_some());
     for (opaque, maps, nested) in [(true, true, false), (false, false, true), (false, true, false), (false, true, true)] {
@@ -3855,6 +3973,56 @@ fn host_readiness_includes_unmapped_non_nested_glass() {
     let pixels = task.read_linear().unwrap();
     assert_eq!(pixels.len(), 4);
     assert!(pixels.iter().flatten().all(|value| value.is_finite()));
+    // A clamped job builds only its own scene's clamped program.
+    let options = JobOptions { clamp_indirect: Some(2.0), ..options };
+    let mut clamped = Task::new(context.clone(), sphere(white()), request(2), options, CancelToken::default()).unwrap();
+    clamped.complete_sample().unwrap();
+    let opaque = clamped_pipeline_variant(true, false, false);
+    for (index, slot) in context.clamped_pipelines.iter().enumerate() {
+        assert_eq!(slot.get().is_some(), index == opaque, "clamped program {index}");
+    }
+}
+
+#[test]
+fn a_clamped_job_uses_the_clamped_optical_glass_and_caustic_programs() {
+    use solidcraft_render::job::{CausticOptions, PunctualLightOptions, PunctualLights, StudioLighting};
+    let Some(executor) = executor() else { return };
+    let context = &executor.context;
+    let lighting = Some(StudioLighting {
+        punctual_lights: PunctualLights::new(&[PunctualLightOptions {
+            position_mm: [0.0, 0.0, 4.0],
+            color: [1.0; 3],
+            intensity: 1.0,
+            reference_distance_mm: 1.0,
+            minimum_distance_mm: 0.001,
+            cone: None,
+        }])
+        .unwrap(),
+        ..Default::default()
+    });
+    let options = JobOptions { samples: 4, max_depth: 8, lighting, clamp_indirect: Some(0.5), ..Default::default() };
+    // Rough glass connects lights in the optical programs; a clamped job gets their clamped copy.
+    let rough = rough_glass_fixture(false, 0.5, Vec3::ZERO, 0.0);
+    let task = Task::new(context.clone(), rough.clone(), request(2), options, CancelToken::default()).unwrap();
+    let clamped = context.clamped_glass.get().expect("the clamped optical program is built by the clamped job");
+    assert_eq!(task.render_pipeline, clamped.camera);
+    assert_ne!(Some(&task.render_pipeline), context.glass.get().map(|pipelines| &pipelines.camera));
+    let pixel = rough_glass_pixel(context.clone(), rough, options);
+    assert!(pixel.iter().all(|value| value.is_finite() && *value >= 0.0), "{pixel:?}");
+    if context.device.limits().max_storage_buffers_per_shader_stage < 7 {
+        return;
+    }
+    // Caustics on an opaque scene run the caustic camera program, clamped for a clamped job.
+    let caustics = JobOptions { caustics: Some(CausticOptions { photons: 64, radius_mm: 1.0, ..Default::default() }), ..options };
+    let mut task = Task::new(context.clone(), sphere(white()), request(2), caustics, CancelToken::default()).unwrap();
+    let shared = context.photons.get().expect("caustic programs are built by the caustic job");
+    assert_eq!(Some(&task.render_pipeline), shared.clamped_render.get());
+    assert_ne!(task.render_pipeline, shared.render);
+    for _ in 0..caustics.samples {
+        task.complete_sample().unwrap();
+    }
+    assert!(task.photons.as_ref().unwrap().ready());
+    assert!(task.read_linear().unwrap().iter().flatten().all(|value| value.is_finite() && *value >= 0.0));
 }
 
 #[test]
@@ -3880,6 +4048,19 @@ fn opaque_scene_specialization_preserves_body_face_and_volume_media() {
         }
     }
     assert_eq!(variants.len(), SCENE_PIPELINE_CACHE_SLOTS + 1);
+    // Each of the six programs has its own clamped slot.
+    let mut clamped = std::collections::BTreeMap::new();
+    for opaque in [false, true] {
+        for maps in [false, true] {
+            for nested in [false, true] {
+                let slot = clamped_pipeline_variant(opaque, maps, nested);
+                assert!(slot < CLAMPED_PIPELINE_CACHE_SLOTS);
+                clamped.entry(slot).or_insert_with(std::collections::BTreeSet::new).insert(scene_pipeline_variant(opaque, maps, nested));
+            }
+        }
+    }
+    assert_eq!(clamped.len(), CLAMPED_PIPELINE_CACHE_SLOTS);
+    assert!(clamped.values().all(|programs| programs.len() == 1), "one clamped slot per scene program: {clamped:?}");
     let mut scene = sphere(white());
     let options = JobOptions::default();
     assert!(use_opaque_pipeline(&scene, options));
@@ -3968,9 +4149,9 @@ fn gpu_quality_texture_preserves_minor_axis_detail_and_linear_mip_precision() {
     use image::ImageEncoder;
     use solidcraft_render::{
         job::textures::{PlanarFrame, RuntimeTextures, TextureMap},
-        surface::srgb8_to_linear,
         texture_input::MapRole,
     };
+    use solidcraft_viewport::surface::srgb8_to_linear;
     let Some(executor) = executor() else { return };
     let context = &executor.context;
     let source = texture_fixture(PlanarFrame { origin: [0.0; 3], u: [2.0, 0.0, 0.0], v: [0.0, 2.0, 0.0] });
@@ -5264,7 +5445,7 @@ fn packed_gpu_mips_preserve_odd_size_linear_color_and_data_means() {
         let expected = (0..15)
             .map(|i| {
                 let value = if i & 1 == 0 { 64 } else { 192 };
-                if linear { solidcraft_render::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
+                if linear { solidcraft_viewport::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
             })
             .sum::<f64>()
             / 15.;
@@ -6173,7 +6354,7 @@ fn display_bloom_slices_refuse_invalid_ranges_without_panicking() {
 fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
     use solidcraft_render::lighting::environment::EnvironmentSource;
     let Ok((_, device, _queue)) = open_headless() else {
-        let available = !crate::select::path_backends().is_empty();
+        let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
         assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
@@ -6199,7 +6380,7 @@ fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
 #[test]
 fn failed_resource_creation_unwinds_gpu_error_scopes() {
     let Ok((_, device, _queue)) = open_headless() else {
-        let available = !crate::select::path_backends().is_empty();
+        let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
         assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
@@ -6406,11 +6587,10 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
     use image::ImageEncoder;
     use serde_json::json;
     use solidcraft_render::{
-        clear_coat::ClearCoat,
         job::textures::{PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
-        surface::srgb8_to_linear,
         texture_input::MapRole,
     };
+    use solidcraft_viewport::{clear_coat::ClearCoat, surface::srgb8_to_linear};
     let Some(executor) = executor() else { return };
     let mut session = solidcraft_engine::Session::default();
     session.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
@@ -6428,7 +6608,7 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
         roll: 0.0,
         distance: 61.06594959585294,
         fov: 0.0,
-        up: solidcraft_render::UpAxis::Z,
+        up: solidcraft_viewport::UpAxis::Z,
     };
     let options: JobOptions = serde_json::from_value(json!({
         "samples":4,"max_depth":3,"seed":7,"exposure_ev":0.5,"tone_map":"aces_fitted",

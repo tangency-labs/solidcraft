@@ -1369,7 +1369,7 @@ impl Cone {
             // within `tol_3d`. Every point whose inversion succeeds is unchanged.
             match self.step_inversion(k, point_on_surface, tol_3d, None) {
                 Ok(inv) => inv.uv,
-                Err(SolidError::Upstream { code, .. }) if code == SM_ERR => Point2::new(
+                Err(e) if e.upstream_status() == Some(SM_ERR) => Point2::new(
                     self.rev.anal_uv_domain.min().x,
                     height_step_ivl.clamp_value(param),
                 ),

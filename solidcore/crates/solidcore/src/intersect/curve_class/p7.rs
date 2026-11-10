@@ -332,12 +332,18 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input - lInterval index is valid
         if index >= self.size() {
-            return Err(SolidError::sm_err(OP_COLLAPSE));
+            return Err(SolidError::intersect_failed(
+                OP_COLLAPSE,
+                "the interval index is past the end of the classification",
+            ));
         }
 
         // Do not squeeze out the only interval.  [B232]
         if self.size() < 2 {
-            return Err(SolidError::sm_err(OP_COLLAPSE));
+            return Err(SolidError::intersect_failed(
+                OP_COLLAPSE,
+                "the only interval of the classification is not squeezed out",
+            ));
         }
 
         // locals
@@ -359,7 +365,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // no work and an error - CurveClassification interval is not degenerate
         if !curve_is_degenerate(k, Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
-            return Err(SolidError::sm_err(OP_COLLAPSE));
+            return Err(SolidError::intersect_failed(
+                OP_COLLAPSE,
+                "the interval to collapse is not degenerate",
+            ));
         }
 
         // pick the PtClassification data to persist
@@ -1249,14 +1258,12 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl
-            .start
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        let other_v = other_ivl
-            .start
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_v = this_ivl.start.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's start")
+        })?;
+        let other_v = other_ivl.start.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's start")
+        })?;
         let point = vertex_point(access.geometry(), other_v)?;
         access.set_vertex_point(this_v, point)?;
     }
@@ -1268,14 +1275,12 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl
-            .end
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        let other_v = other_ivl
-            .end
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_v = this_ivl.end.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's end")
+        })?;
+        let other_v = other_ivl.end.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's end")
+        })?;
         let point = vertex_point(access.geometry(), other_v)?;
         access.set_vertex_point(this_v, point)?;
     }
@@ -1289,18 +1294,16 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         }
 
         // this mid edge
-        let this_edge = this_ivl
-            .mid
-            .edge_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_edge = this_ivl.mid.edge_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the edge of this interval's middle")
+        })?;
         let this_edge_curve = edge_curve(access.geometry(), this_edge)?;
         let this_edge_ivl = edge_interval(access.geometry(), Some(this_edge))?;
 
         // other mid edge
-        let other_edge = other_ivl
-            .mid
-            .edge_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let other_edge = other_ivl.mid.edge_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the edge of the other interval's middle")
+        })?;
         let other_edge_curve = edge_curve(access.geometry(), other_edge)?;
         let other_edge_ivl = edge_interval(access.geometry(), Some(other_edge))?;
 
@@ -1504,10 +1507,9 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.start.point_class() {
         PointClassType::Vertex => {
             did_min = true;
-            let v = ivl
-                .start
-                .object()
-                .ok_or(SolidError::null_pointer(OP_FACE))?;
+            let v = ivl.start.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's start")
+            })?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             min = access.find_vertex_sector(
                 k,
@@ -1524,10 +1526,9 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_min = true;
-            let e = ivl
-                .start
-                .object()
-                .ok_or(SolidError::null_pointer(OP_FACE))?;
+            let e = ivl.start.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the edge at the interval's start")
+            })?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             min = access.edge_curve_on_classify(
                 k,
@@ -1549,7 +1550,9 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.end.point_class() {
         PointClassType::Vertex => {
             did_max = true;
-            let v = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
+            let v = ivl.end.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's end")
+            })?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             max = access.find_vertex_sector(
                 k,
@@ -1566,7 +1569,9 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_max = true;
-            let e = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
+            let e = ivl.end.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the edge at the interval's end")
+            })?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             max = access.edge_curve_on_classify(
                 k,
@@ -1693,8 +1698,12 @@ fn partial_coincidence<O: ClassObject>(
     o_mid: &PointClassification<O>,
     check: CoinCheck,
 ) -> Result<Option<PartialCoincidence>> {
-    let edge = mid.object().ok_or(SolidError::null_pointer(OP_PARTIAL))?;
-    let o_edge = o_mid.object().ok_or(SolidError::null_pointer(OP_PARTIAL))?;
+    let edge = mid.object().ok_or_else(|| {
+        SolidError::intersect_missing(OP_PARTIAL, "the edge of the interval's middle")
+    })?;
+    let o_edge = o_mid.object().ok_or_else(|| {
+        SolidError::intersect_missing(OP_PARTIAL, "the edge of the other interval's middle")
+    })?;
     let curve = edge_curve(geometry, edge)?;
     let o_curve = edge_curve(geometry, o_edge)?;
     let edge_ivl = edge_interval(geometry, Some(edge))?;
@@ -1894,7 +1903,7 @@ fn connect_target<O: ClassObject>(
 /// `SmEdge::GetCurve`; a `NULL` curve is dereferenced by every caller.
 fn edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<&Curve> {
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetCurve")?;
-    edge::curve(b, e)?.ok_or(SolidError::null_pointer(OP_GEOM))
+    edge::curve(b, e)?.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the edge's curve"))
 }
 
 /// `SmEdge::GetInterval` (of the edge object of a classification; a `NULL` edge is
@@ -1903,7 +1912,8 @@ fn edge_interval<O: ClassObject>(
     geometry: &impl ClassGeometry<O>,
     edge: Option<O>,
 ) -> Result<Extent1d> {
-    let edge = edge.ok_or(SolidError::null_pointer(OP_GEOM))?;
+    let edge =
+        edge.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the classification's edge"))?;
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetInterval")?;
     edge::interval(b, e)
 }

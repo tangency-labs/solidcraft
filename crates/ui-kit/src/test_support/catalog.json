@@ -1,0 +1,5 @@
+{
+  "ui.expand": "Expand",
+  "ui.view_compass_tip": "View from {axis}. Click again to reverse. Drag to orbit.",
+  "ui.view_compass_tip_snap": "View from {axis}. Click again to reverse. Drag to orbit; hold Shift to snap."
+}

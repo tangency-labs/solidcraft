@@ -44,6 +44,13 @@ fn headless_panel_single_batch_and_script_keep_one_backend_and_never_change_the_
     one.call("engine.script", json!({"commands":[{"command":"layout.save","params":{"name":"MCP saved"}},{"command":"layout.reset"}]})).unwrap();
     one.call("engine.execute", json!({"command":"layout.apply","params":{"name":"MCP saved"}})).unwrap();
     assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
+    // A layout batch refused before its first step ran nothing: `rolled_back` as a rollback that
+    // went back reports it (#10749).
+    let refused = json!([panel_mcp_steps()[1], {"command":"solid.boxx","params":{}}]);
+    let reply = one.call("engine.batch", json!({"commands":refused})).unwrap();
+    assert_eq!((&reply["completed"], &reply["rolled_back"]), (&json!(0), &json!(true)), "{reply}");
+    assert_eq!(one.call("engine.batch", json!({"commands":refused,"rollback":false})).unwrap()["rolled_back"], false);
+    assert_eq!(one.call("engine.execute", json!({"command":"layout.get"})).unwrap()["state"]["layout"], state["state"]["layout"]);
 }
 #[test]
 fn mcp_panel_tools_publish_structured_errors_and_committed_state_through_shared_backend() {
@@ -247,7 +254,8 @@ fn atomic_tool_layout_batches_never_emulate_an_unavailable_backend_with_document
         assert_eq!(tool["structuredContent"]["panel_error"]["rule"], "capability");
         assert_eq!(body["completed"], 0);
         assert_eq!(body["applied"], json!([]));
-        assert_eq!(body["rolled_back"], false);
+        // Nothing ran, so the design is where the batch started (#10749).
+        assert_eq!(body["rolled_back"], true);
         assert_eq!(backend.calls, vec![("engine.batch".into(), String::new())], "no checkpoint, inspection or single layout call");
         assert_eq!(backend.headless.panels.as_ref().unwrap().service.inspect(), before);
         assert_eq!(backend.headless.panels.as_ref().unwrap().catalogue.state(), &catalogue);
@@ -323,14 +331,14 @@ fn document_only_atomic_tool_fallback_keeps_existing_checkpoint_rollback_behavio
 /// tests install the same one. `false`, with the reason printed, on a machine without a GPU
 /// adapter: the screenshots are then left out of the test.
 fn renders() -> bool {
-    match solidcraft_gpu::capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             solidcraft_engine::capture::install(std::sync::Arc::new(move |scene, cam, w, h| {
                 c.rgba(scene, cam, w, h).map(|rgba| solidcraft_engine::capture::Picture { rgba, renderer: c.renderer() }).map_err(|e| e.to_string())
             }));
             true
         }
-        Err(e @ solidcraft_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+        Err(e @ solidcraft_viewport_gpu::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
             eprintln!("screenshots left out: {e}");
             false
         }
@@ -486,6 +494,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-sheetmetal", "SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
+        ("solidcraft-sheetmetal", "reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
     ];
     for (skill, file, expected) in docs {
         let args = json!({"skill": skill, "file": file});
@@ -502,7 +512,7 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 #[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling"];
+    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-sheetmetal"];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -551,6 +561,22 @@ fn export_tool_writes_a_urdf_package() {
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
+#[test]
+fn export_tool_format_argument_accepts_iges() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-iges-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (format, expect) in [("iges", "Iges"), ("igs", "Iges"), ("stp", "Step")] {
+        let path = dir.join(format!("part-{format}.out"));
+        let r = tool(&mut s, "export", json!({"path": path.to_string_lossy(), "format": format}));
+        assert_eq!(r["format"], expect, "{format}: {r}");
+        assert!(std::fs::metadata(&path).unwrap().len() > 0, "{format}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1138,6 +1164,12 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone(), body["undone"].clone()), (json!(0), json!(20), json!(0)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("closest: `solid.extrude`")), "{body}");
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
+    // Nothing ran, so the design is where the batch started (#10749); without `rollback` the
+    // reply claims no rollback, as at a step's turn.
+    assert_eq!(body["rolled_back"], true, "{body}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps, "rollback": false}));
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["completed"], &body["rolled_back"]), (&json!(0), &json!(false)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
 }
@@ -1156,6 +1188,7 @@ fn batch_refuses_a_step_with_an_unknown_key() {
     let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(body["rolled_back"], true, "nothing ran (#10749): {body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
@@ -2674,6 +2707,68 @@ fn instructions_recipe_builds_a_parametric_shelled_box() {
     axes(&mut s, 30.0, 20.0);
 }
 
+/// The worked example in `skills/solidcraft-sheetmetal/reference.md` is what agents copy: one
+/// request in words, one flange feature with segments, and the numbers the file states.
+#[test]
+fn sheetmetal_skill_example_builds_as_documented() {
+    let doc = include_str!("../../../skills/solidcraft-sheetmetal/reference.md");
+    let start = doc.find("{\"commands\":[").expect("the reference has a worked example");
+    let end = start + doc[start..].find("```").expect("the example's code block ends");
+    let example: Value = serde_json::from_str(&doc[start..end]).expect("the example is JSON");
+    let mut s = server();
+    tool(&mut s, "batch", example);
+    // AL2 rule (2 mm, K 0.5, R 1 mm); 200x100 base; 150 mm at 90 deg / 20 mm, 50 mm at 45 deg / 15 mm.
+    let setback45 = 3.0 * 22.5f64.to_radians().tan();
+    let want = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 150.0 * (PI + 17.0) + 50.0 * (PI / 2.0 + 15.0 - setback45));
+    let volume = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().expect("a volume");
+    assert!((volume - want).abs() < 1e-4, "the reference states {want} mm3, the build gives {volume}");
+    // The volumes the reference publishes are the ones the arithmetic gives, so a wrong number in
+    // the reference fails here instead of passing beside a correct build.
+    let published = |text: &str, after: &str| -> f64 {
+        let mut from = 0;
+        loop {
+            let at = text[from..].find(after).map(|i| from + i).unwrap_or_else(|| panic!("the reference states `{after}`"));
+            let rest = text[at + after.len()..].trim_start();
+            let number: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if number.chars().any(|c| c.is_ascii_digit()) {
+                return number.parse().expect("a volume");
+            }
+            from = at + after.len();
+        }
+    };
+    let stated = published(doc, "folded volume ");
+    assert!((stated - want).abs() < 1e-6, "the reference states {stated} mm3 for the example, the arithmetic gives {want}");
+    let leg45 = 15.0 - setback45;
+    let want_three = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 100.0 * (PI + 17.0) + 50.0 * (PI + 12.0) + 50.0 * (PI / 2.0 + leg45));
+    let stated_three = published(doc, "volume of ");
+    assert!(
+        (stated_three - want_three).abs() < 1e-6,
+        "the reference states {stated_three} mm3 for the three-stretch variant, the arithmetic gives {want_three}"
+    );
+    let reply = tool(&mut s, "execute", json!({"command":"sheet.export_bend_table","params":{"format":"json"}}));
+    let table: Value = serde_json::from_str(reply["text"].as_str().expect("a JSON bend table")).expect("the bend table is JSON");
+    let bends = table["bends"].as_array().expect("bends");
+    assert_eq!(bends.len(), 2, "{table}");
+    let num = |b: &Value, k: &str, i: usize| b[k][i].as_f64().expect("a coordinate");
+    for (bend, (length, angle, allowance)) in bends.iter().zip([(150.0, 90.0, PI), (50.0, 45.0, PI / 2.0)]) {
+        assert!((bend["length"].as_f64().expect("a length") - length).abs() < 1e-9, "{table}");
+        assert!((bend["angle_deg"].as_f64().expect("an angle") - angle).abs() < 1e-9, "{table}");
+        assert!((bend["allowance"].as_f64().expect("an allowance") - allowance).abs() < 1e-9, "{table}");
+        assert_eq!(bend["direction"], "up", "{table}");
+    }
+    // The two bends' flat centre lines meet and cover the whole 200 mm edge, so the partition
+    // tiles it and the boundary sits where the request put it.
+    let span = |b: &Value| {
+        let xs = [num(b, "start", 0), num(b, "end", 0)];
+        (xs[0].min(xs[1]), xs[0].max(xs[1]), num(b, "start", 1) - num(b, "end", 1))
+    };
+    let (a0, a1, dy0) = span(&bends[0]);
+    let (b0, b1, dy1) = span(&bends[1]);
+    assert!((a1 - b0).abs() < 1e-6, "the bends meet: {table}");
+    assert!((a0.min(b0)).abs() < 1e-6 && (a1.max(b1) - 200.0).abs() < 1e-6, "the bends cover the edge: {table}");
+    assert!(dy0.abs() < 1e-9 && dy1.abs() < 1e-9, "the bend lines run along x: {table}");
+}
+
 /// The skill reference's sketch-plane table: where sketch (10, 20) lands and which way +distance goes.
 #[test]
 fn sketch_plane_axes_match_the_skill_reference() {
@@ -2770,6 +2865,8 @@ fn skills_name_only_real_tools_and_commands() {
         include_str!("../../../skills/solidcraft-mechanisms/reference.md"),
         include_str!("../../../skills/solidcraft-reporting/SKILL.md"),
         include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/reference.md"),
     ];
     let mut s = server();
     let tools: Vec<String> = tool_definitions().iter().filter_map(|t| t["name"].as_str()).map(str::to_owned).collect();
@@ -3273,6 +3370,90 @@ fn running_is_asked_at_once_behind_a_request_still_running() {
     assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "still outstanding: {e}");
 }
 
+/// #14007 over stdio: a `batch` the fake app holds, then a `running` call, sent once the app has
+/// the batch or (`back_to_back`) in the same write, before the server has taken the batch.
+/// Returns the reply ids in the order they came, and whether the app was asked `control.running`
+/// while it held the batch, which it can only be on a connection of its own: the fake app reads a
+/// connection's next request only after answering the last. The batch is held until the test has
+/// read the first reply (at most 10 s), so the order of the replies is not a race.
+fn running_during_a_held_batch(back_to_back: bool) -> (Vec<Value>, bool) {
+    use std::io::{BufRead, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    let asked = std::sync::Arc::new(AtomicBool::new(false));
+    let release = std::sync::Arc::new(AtomicBool::new(false));
+    let (seen_running, released) = (asked.clone(), release.clone());
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let start = Instant::now();
+            while !released.load(Ordering::SeqCst) && start.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let held = seen_running.load(Ordering::SeqCst);
+            json!({"ok": true, "result": {"ok": true, "results": [{"ok": true, "result": {"running_seen_while_held": held}}]}})
+        }
+        Some("control.running") => {
+            seen_running.store(true, Ordering::SeqCst);
+            json!({"ok": true, "result": {"running": [{"id": 1, "method": "engine.batch", "steps": 1, "self": false}]}})
+        }
+        _ => json!({"ok": true, "result": null}),
+    });
+    let (stdin, mut to_server) = std::io::pipe().unwrap();
+    let (from_server, stdout) = std::io::pipe().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut s = Server::new(Box::new(crate::Remote::new(&addr, None)));
+        s.serve(std::io::BufReader::new(stdin), stdout).unwrap();
+    });
+    let call =
+        |id: u64, name: &str, args: Value| json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}});
+    let steps = json!({"commands": [{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}], "verbose": false});
+    if back_to_back {
+        write!(to_server, "{}\n{}\n", call(1, "batch", steps), call(2, "running", json!({}))).unwrap();
+    } else {
+        writeln!(to_server, "{}", call(1, "batch", steps)).unwrap();
+        let start = Instant::now();
+        while !seen.lock().unwrap().1.iter().any(|m| m == "engine.batch") && start.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        writeln!(to_server, "{}", call(2, "running", json!({}))).unwrap();
+    }
+    let mut replies = std::io::BufReader::new(from_server);
+    let mut read = || {
+        let mut line = String::new();
+        replies.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    let first = read();
+    release.store(true, Ordering::SeqCst);
+    let second = read();
+    drop(to_server);
+    server.join().unwrap();
+    for r in [&first, &second] {
+        assert_ne!(r["result"]["isError"], true, "{r}");
+    }
+    let batch = if first["id"] == 1 { &first } else { &second };
+    let held = batch["result"]["content"][0]["text"].as_str().unwrap_or_default().contains("\"running_seen_while_held\": true");
+    (vec![first["id"].clone(), second["id"].clone()], held)
+}
+
+/// #14007: a `running` call sent while a long `batch` is in the app is answered at once, on a
+/// connection of its own, not after the batch.
+#[test]
+fn running_answers_at_once_while_a_long_batch_runs() {
+    let (order, held) = running_during_a_held_batch(false);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #14007: also when `running` comes in right behind the `batch`, before the server has taken
+/// the batch off its queue.
+#[test]
+fn running_sent_right_behind_a_batch_is_not_queued_behind_it() {
+    let (order, held) = running_during_a_held_batch(true);
+    assert_eq!(order, [json!(2), json!(1)], "`running` first");
+    assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
 /// A request still running after the wait is left to the `pending` tool: the error says so
 /// (and that it will still apply, or only write its file), later calls are not sent behind it, and `pending` returns
 /// its result once it lands, on the same connection.
@@ -3619,6 +3800,11 @@ fn a_bridged_server_checks_calls_at_its_param_check_level() {
     let reply: Value = serde_json::from_str(&text(&r)).unwrap();
     assert_eq!((&reply["failed"]["index"], &reply["completed"], &reply["not_run"]), (&json!(1), &json!(0), &json!([0, 1])), "{reply}");
     assert!(reply["failed"]["error"].as_str().unwrap_or_default().contains(warning), "{reply}");
+    // Nothing was sent, so the design is where the batch started (#10749).
+    assert_eq!((&reply["rolled_back"], &reply["applied"]), (&json!(true), &json!([])), "{reply}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt], "rollback": false}));
+    let reply: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!(reply["rolled_back"], json!(false), "no rollback asked for: {reply}");
     assert_eq!(sent("engine.batch"), 0, "refused unsent");
 
     let mut s = bridged(ParamCheck::Warn);

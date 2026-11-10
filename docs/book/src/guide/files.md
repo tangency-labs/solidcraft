@@ -2,7 +2,8 @@
 
 Everything here starts from the **File** menu at the top left.
 
-![The File menu, numbered 1 to 5](../media/files/menu.png)
+<img class="dark-ui" src="../media/files/menu.png" alt="The File menu, numbered 1 to 5">
+<img class="light-ui" src="../media/files/menu.light.png" alt="The File menu, numbered 1 to 5">
 
 **1** Open a design (or a STEP, IGES or mesh file as a new one) · **2** Insert a file into the open
 design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSON ·
@@ -117,8 +118,9 @@ is started on its own first, SolidCraft waits up to ten seconds for it to be rea
 file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
 treated as PrusaSlicer 3, and any other entry is left as it is.
 
-Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
-`mesh.convert` command (command palette, scripts and the control channel).
+Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
+scripts and the control channel): a mesh with a constant cross-section as analytic planar and
+cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate

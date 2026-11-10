@@ -157,7 +157,7 @@ pub struct AgentCursor {
     /// Click ripples: where and when.
     ripples: Vec<(Pos2, f64)>,
     /// The view before a followed sketch (restored when it finishes).
-    saved_view: Option<solidcraft_engine::render::Camera>,
+    saved_view: Option<solidcraft_viewport::Camera>,
 }
 
 impl AgentCursor {
@@ -170,6 +170,11 @@ impl AgentCursor {
     /// the command.
     pub fn computing(&self) -> Option<(f64, String)> {
         self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.steps.shown()))
+    }
+
+    /// The steps of the command [`Self::computing`] reports.
+    pub(crate) fn computing_steps(&self) -> Option<std::sync::Arc<crate::control_job::Steps>> {
+        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| a.steps.clone())
     }
 
     /// Follow the pointer input an agent sends itself (`ui.move`, `ui.click`, `ui.drag`,

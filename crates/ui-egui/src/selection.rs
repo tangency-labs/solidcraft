@@ -24,6 +24,7 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     let point = |s: &Sel| match s {
         Sel::SketchPoint { id } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // Horizontal/Vertical takes no origin axis yet: a selection with one isn't consumed.
         _ => None,
     };
     let (a, b) = (point(a)?, point(b)?);
@@ -37,6 +38,8 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
     let operand = |s: &Sel| match s {
         Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // An origin axis, either operand: the command projects it into the sketch.
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(serde_json::json!({"axis": name})),
         _ => None,
     };
     let (a, b) = (operand(a)?, operand(b)?);
@@ -136,6 +139,7 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for
             // what they are: an input that takes curves too (Measure) takes the line as its curve.
             Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),
@@ -380,7 +384,7 @@ fn segments_cross(p: Pos2, q: Pos2, r: Pos2, s: Pos2) -> bool {
 mod tests {
     use super::*;
     use egui::pos2;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     #[test]
     fn origin_widget_keeps_its_screen_size() {
