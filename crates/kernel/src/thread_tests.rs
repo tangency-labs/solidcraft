@@ -65,9 +65,9 @@ fn a_long_thread_cuts_to_its_groove_volume() {
 
 /// The test above at a real M8 × 60 bolt's length: 48 turns, about 19,000 groove triangles.
 /// Ignored because the boolean's time grows about as the square of the turns (750 s of a 945 s
-/// test on CI at this size); run it with `--ignored` when working on that.
+/// test on CI at this size, #14453); run it with `--ignored` when working on that.
 #[test]
-#[ignore = "48 turns: about 15 minutes, the boolean grows about as the square of the turns"]
+#[ignore = "48 turns: about 15 minutes, the boolean grows about as the square of the turns (#14453)"]
 fn a_bolt_length_thread_cuts_to_its_groove_volume() {
     long_thread(48);
 }
