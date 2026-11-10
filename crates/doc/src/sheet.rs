@@ -481,6 +481,12 @@ thread_local! {
     static MATERIAL_BOOLEANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+// The complexity of each chunk a union read back, in order, for the tests that compare it.
+#[cfg(test)]
+thread_local! {
+    static CHUNK_NODES: std::cell::RefCell<Vec<(usize, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
     #[cfg(test)]
     MATERIAL_BOOLEANS.with(|n| n.set(n.get() + 1));
@@ -494,23 +500,79 @@ pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp,
     Ok(regions)
 }
 
-// Merge in balanced rounds so hundreds of disjoint holes or adjoining panels do not
-// repeatedly arrange a growing accumulated boundary against just one small region.
+/// How many groups [`material_union`] unites in one planar boolean: a power of two.
+const UNION_CHUNK: usize = 32;
+
+/// The material of `regions` united, overlapping ones merged.
+///
+/// The union follows a balanced pairwise tree: the regions in order are leaves, each round pairs
+/// consecutive groups from the first and carries an odd last group up as it is. Its nodes are
+/// taken [`UNION_CHUNK`] = `C` = 2^k groups at a time, aligned to the first region: one planar
+/// boolean unites a chunk, the kernel uniting each operand's regions in balanced rounds of 2D
+/// booleans that carry each round's sheets into the next, and the chunks' results (read back as
+/// regions) are the next level's groups. A union of `n` disjoint holes is about
+/// `n · ceil(log_C n)` 2D booleans, where uniting two groups per planar boolean, each reading both
+/// back and rebuilding their sheets, was about `n log2 n`.
+///
+/// The flat work charged is never more than the pairwise union charged, if the chunks read back
+/// with the segment counts of the pairwise union's nodes:
+/// - by construction, a chunk of `C` groups aligned to the first region is the subtree of the
+///   pairwise tree over those groups (`C` a power of two, rounds pairing from the first, the odd
+///   group last), including the last, partial chunk;
+/// - each chunk is charged the pairwise union's terms for its first round, the same formula
+///   ([`material_boolean`]'s) on the same operands: the leaves at the first level, the chunks
+///   read back above it. Its inner rounds are not charged, so a chunk is charged at most what
+///   the pairwise union charged for the same subtree;
+/// - only measured: a chunk's read-back equals the pairwise union's node above the first level
+///   (the same material, computed with no read-back between its rounds; arcs agree to about
+///   1e-14). The charges can differ only where those read-back segment counts differ.
 pub(crate) fn material_union(regions: Vec<Region2>, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    material_union_in_chunks(regions, work, UNION_CHUNK)
+}
+
+fn material_union_in_chunks(regions: Vec<Region2>, work: &mut FlatWork, chunk: usize) -> Result<Vec<Region2>> {
     region_complexity(&regions)?;
+    let chunk = chunk.max(2);
     let mut groups: Vec<Vec<Region2>> = regions.into_iter().map(|r| vec![r]).collect();
     while groups.len() > 1 {
-        let mut next = Vec::new();
+        let mut next = Vec::with_capacity(groups.len().div_ceil(chunk));
         let mut iter = groups.into_iter();
-        while let Some(a) = iter.next() {
-            match iter.next() {
-                Some(b) => next.push(material_boolean(&a, &b, kernel::BoolOp::Union, work)?),
-                None => next.push(a),
+        loop {
+            let part: Vec<Vec<Region2>> = iter.by_ref().take(chunk).collect();
+            if part.is_empty() {
+                break;
             }
+            next.push(chunk_union(part, work)?);
         }
         groups = next;
     }
     Ok(groups.pop().unwrap_or_default())
+}
+
+/// The groups of one chunk united in one planar boolean, the first half's regions with the
+/// second's. Charged the pairwise union's first round over the groups: each consecutive pair as
+/// [`material_boolean`] charges it on their complexities. One group is returned as it is.
+fn chunk_union(groups: Vec<Vec<Region2>>, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    if groups.len() < 2 {
+        return Ok(groups.into_iter().flatten().collect());
+    }
+    let complexity = groups.iter().map(|g| region_complexity(g)).collect::<Result<Vec<_>>>()?;
+    for &[(ae, ap), (be, bp)] in complexity.as_chunks::<2>().0 {
+        let edges = ae.saturating_add(be);
+        work.charge(edges.saturating_mul(edges).saturating_add(edges.saturating_mul(ap.saturating_add(bp))).saturating_mul(8))?;
+    }
+    #[cfg(test)]
+    MATERIAL_BOOLEANS.with(|n| n.set(n.get() + 1));
+    let half = groups.len().div_ceil(2);
+    let mut iter = groups.into_iter();
+    let a: Vec<Region2> = iter.by_ref().take(half).flatten().collect();
+    let b: Vec<Region2> = iter.flatten().collect();
+    let (a, b) = (welded_regions(&a), welded_regions(&b));
+    let regions = kernel::planar_regions_boolean(a.as_ref(), b.as_ref(), kernel::BoolOp::Union, 1e-7)?;
+    region_complexity(&regions)?;
+    #[cfg(test)]
+    CHUNK_NODES.with(|n| n.borrow_mut().push(region_complexity(&regions).unwrap_or_default()));
+    Ok(regions)
 }
 
 /// Cut a loop along the line `at`–`tip` and back: a zero-width slit. `at` is anchored on the loop
@@ -11422,5 +11484,170 @@ mod tests {
             lp.segs.iter().any(|s| matches!(s, Seg2::Line { a, b } if a.dist(anchor) <= 1e-6 && b.dist(tip) <= 1e-6)),
             "the slit runs from the anchor to the tip"
         );
+    }
+
+    fn circle_region(c: Vec2, r: f64) -> Region2 {
+        Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Arc { center: c, radius: r, start: 0.0, sweep: std::f64::consts::PI },
+                    Seg2::Arc { center: c, radius: r, start: std::f64::consts::PI, sweep: std::f64::consts::PI },
+                ],
+            },
+            holes: vec![],
+        }
+    }
+
+    /// `n` circles of radius `r` on a square grid `spacing` apart, row by row.
+    fn circle_grid(n: usize, r: f64, spacing: f64) -> Vec<Region2> {
+        let cols = (n as f64).sqrt().ceil() as usize;
+        (0..n).map(|k| circle_region(Vec2::new(spacing * (k % cols) as f64, spacing * (k / cols) as f64), r)).collect()
+    }
+
+    /// The area of `circle_grid(n, r, spacing)` united where neighbours overlap but no three
+    /// circles meet (`spacing` between `r √2` and `2r`): `n π r²` less a lens per neighbouring
+    /// pair. With its number of holes: one gap in each 2 × 2 block.
+    fn grid_union_area(n: usize, r: f64, d: f64) -> (f64, usize) {
+        let cols = (n as f64).sqrt().ceil() as usize;
+        let (full, last) = (n / cols, n % cols);
+        let pairs = full * (cols - 1) + last.saturating_sub(1) + (full - 1) * cols + last;
+        let holes = (full - 1) * (cols - 1) + last.saturating_sub(1);
+        let lens = 2.0 * r * r * (d / (2.0 * r)).acos() - d / 2.0 * (4.0 * r * r - d * d).sqrt();
+        (n as f64 * std::f64::consts::PI * r * r - pairs as f64 * lens, holes)
+    }
+
+    /// The union two groups at a time that `material_union` replaced: every group read back as
+    /// regions, each round's unions charged by `material_boolean`. With the complexity of its
+    /// groups after each round.
+    fn pairwise_union(regions: Vec<Region2>, work: &mut FlatWork) -> Result<(Vec<Region2>, Vec<Vec<(usize, usize)>>)> {
+        region_complexity(&regions)?;
+        let mut groups: Vec<Vec<Region2>> = regions.into_iter().map(|r| vec![r]).collect();
+        let mut rounds = Vec::new();
+        while groups.len() > 1 {
+            let mut next = Vec::new();
+            let mut iter = groups.into_iter();
+            while let Some(a) = iter.next() {
+                match iter.next() {
+                    Some(b) => next.push(material_boolean(&a, &b, kernel::BoolOp::Union, work)?),
+                    None => next.push(a),
+                }
+            }
+            groups = next;
+            rounds.push(groups.iter().map(|g| region_complexity(g)).collect::<Result<Vec<_>>>()?);
+        }
+        Ok((groups.pop().unwrap_or_default(), rounds))
+    }
+
+    fn total_area(regions: &[Region2]) -> f64 {
+        regions.iter().map(Region2::area).sum()
+    }
+
+    /// #732: a perforated panel's hundreds of holes are united a chunk of groups per planar
+    /// boolean, the kernel carrying each round of a chunk's balanced union into the next: 5 planar
+    /// booleans for 100 holes (4 chunks, then the chunks), where uniting them two groups at a
+    /// time read every group back as regions and built its sheets again (99 planar booleans, about
+    /// `n log2 n` 2D booleans: 8985 for the 1000 holes of the engine's perforated sheet test).
+    #[test]
+    fn a_union_of_many_holes_takes_a_planar_boolean_per_chunk() {
+        let r = 0.5;
+        let holes = circle_grid(100, r, 1.5);
+        let centres: Vec<Vec2> = (0..100).map(|k| Vec2::new(1.5 * (k % 10) as f64, 1.5 * (k / 10) as f64)).collect();
+        MATERIAL_BOOLEANS.with(|n| n.set(0));
+        let united = material_union(holes, &mut FlatWork::new()).unwrap();
+        assert_eq!(MATERIAL_BOOLEANS.with(std::cell::Cell::get), 5);
+        // Every hole whole and apart, in its place.
+        assert_eq!(united.len(), 100);
+        assert!((total_area(&united) - 100.0 * std::f64::consts::PI * r * r).abs() < 1e-9, "{}", total_area(&united));
+        for u in &united {
+            assert!(u.holes.is_empty() && u.outer.segs.len() == 2, "{u:?}");
+            let Some(Seg2::Arc { center, .. }) = u.outer.segs.first() else { panic!("{u:?}") };
+            assert!(centres.iter().any(|c| c.dist(*center) < 1e-12), "{u:?}");
+            assert!(
+                u.outer
+                    .segs
+                    .iter()
+                    .all(|s| matches!(s, Seg2::Arc { center: c, radius, .. } if c.dist(*center) < 1e-12 && (radius - r).abs() < 1e-12)),
+                "{u:?}"
+            );
+        }
+        // Overlapping regions still merge: a row of touching-over squares is one strip.
+        let squares: Vec<Region2> = (0..9).map(|k| rect_region(Vec2::new(k as f64 * 9.0, 0.0), 10.0)).collect();
+        let strip = material_union(squares, &mut FlatWork::new()).unwrap();
+        assert_eq!(strip.len(), 1);
+        assert!((strip[0].area() - 82.0 * 10.0).abs() < 1e-9, "{}", strip[0].area());
+    }
+
+    fn rect_region(lo: Vec2, size: f64) -> Region2 {
+        let (a, b, c, d) = (lo, lo + Vec2::new(size, 0.0), lo + Vec2::new(size, size), lo + Vec2::new(0.0, size));
+        Region2 {
+            outer: Loop2 { segs: vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: d }, Seg2::Line { a: d, b: a }] },
+            holes: vec![],
+        }
+    }
+
+    /// The chunked union charges no more flat work than the pairwise union it replaced, and its
+    /// chunks read back with the segment counts of the pairwise union's nodes (each chunk of `C`
+    /// groups is the node `log2 C` rounds up). Disjoint holes, a grid of crossing circles (no three
+    /// meet, so its area and holes are closed form), heavily overlapping small circles, circles a
+    /// hair apart and a hair overlapping, at chunks of 32 and of 4 (more chunk levels).
+    #[test]
+    fn a_chunked_union_charges_no_more_than_the_pairwise_union() {
+        let cases: Vec<(&str, Vec<Region2>, Option<(f64, usize)>)> = vec![
+            ("disjoint", circle_grid(300, 0.5, 1.5), Some((300.0 * std::f64::consts::PI * 0.25, 0))),
+            ("crossing", circle_grid(300, 0.5, 0.8), Some(grid_union_area(300, 0.5, 0.8))),
+            ("heavy overlap", circle_grid(300, 0.05, 0.03), None),
+            ("a hair apart", circle_grid(64, 0.5, 1.0 + 1e-6), Some((64.0 * std::f64::consts::PI * 0.25, 0))),
+            ("a hair overlapping", circle_grid(64, 0.5, 1.0 - 1e-6), Some(grid_union_area(64, 0.5, 1.0 - 1e-6))),
+        ];
+        for (name, regions, closed) in cases {
+            let mut main_work = FlatWork(usize::MAX);
+            let (main, rounds) = pairwise_union(regions.clone(), &mut main_work).unwrap();
+            let main_charge = usize::MAX - main_work.0;
+            for chunk in [4, 32] {
+                CHUNK_NODES.with(|n| n.borrow_mut().clear());
+                let mut work = FlatWork(usize::MAX);
+                let united = material_union_in_chunks(regions.clone(), &mut work, chunk).unwrap();
+                let charge = usize::MAX - work.0;
+                assert!(charge <= main_charge, "{name}, chunks of {chunk}: {charge} > {main_charge}");
+                // The chunks' read-backs against the pairwise nodes: level `l` is round `l log2 C`
+                // (the last round once it is one group), less a last chunk of one group, which
+                // is carried up without a boolean.
+                let levels = chunk.trailing_zeros() as usize;
+                let mut expected = Vec::new();
+                let mut count = regions.len();
+                let mut level = 1;
+                while count > 1 {
+                    let round = (level * levels).min(rounds.len());
+                    let nodes = &rounds[round - 1];
+                    let carried = count % chunk == 1;
+                    expected.extend_from_slice(&nodes[..nodes.len() - usize::from(carried)]);
+                    count = nodes.len();
+                    level += 1;
+                }
+                let nodes = CHUNK_NODES.with(|n| n.borrow().clone());
+                assert_eq!(nodes, expected, "{name}, chunks of {chunk}: chunk read-backs");
+                assert_eq!(united.len(), main.len(), "{name}");
+                assert!((total_area(&united) - total_area(&main)).abs() <= 1e-12 * total_area(&main), "{name}");
+                if let Some((area, holes)) = closed {
+                    assert!((total_area(&united) - area).abs() <= 1e-9 * area, "{name}: {} vs {area}", total_area(&united));
+                    assert_eq!(united.iter().map(|u| u.holes.len()).sum::<usize>(), holes, "{name}");
+                }
+            }
+        }
+    }
+
+    /// Charged as the pairwise union charges its first rounds, a grid of 100 crossing circles
+    /// fits a budget well under what the pairwise union charged (3,592,960), and is their
+    /// material: 100 πr² less the 180 lenses of neighbours 0.8 apart (no three meet), one region
+    /// with the 81 gaps the 2 × 2 blocks enclose.
+    #[test]
+    fn a_union_of_crossing_circles_is_their_closed_form_material() {
+        let mut work = FlatWork::new();
+        let united = material_union(circle_grid(100, 0.5, 0.8), &mut work).unwrap();
+        assert!(MAX_FLAT_WORK - work.0 < 3_592_960, "{}", MAX_FLAT_WORK - work.0);
+        assert_eq!(united.len(), 1);
+        assert_eq!(united[0].holes.len(), 81);
+        let (area, _) = grid_union_area(100, 0.5, 0.8);
+        assert!((united[0].area() - area).abs() < 1e-9 * area, "{} vs {area}", united[0].area());
     }
 }
