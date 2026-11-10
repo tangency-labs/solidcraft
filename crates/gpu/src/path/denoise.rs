@@ -22,15 +22,8 @@ pub(super) struct Pipelines {
 }
 
 impl Pipelines {
-    // The guide program inlines the path tracer's BVH walks, so it compiles under the
-    // process-wide lock of the path programs (#6706), never beside one of them. A job cancelled
-    // while it waited for another compile returns before starting its own; a compile that ran is
-    // kept for the next job. Warming up waits on the GPU, so it runs after the lock is released.
-    fn new(context: &Context, cancel: &CancelToken) -> Result<Self> {
+    fn new(context: &Context) -> Result<Self> {
         let device = &context.device;
-        cancel.check()?;
-        let compiling = one_compile_at_a_time();
-        cancel.check()?;
         let error_scopes = scopes(device);
         let guide_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("denoise guides"),
@@ -86,18 +79,28 @@ impl Pipelines {
             cache: None,
         });
         checked(error_scopes)?;
-        drop(compiling);
         warm_up(device, &context.queue, &guide, &placeholder_bind(device, &context.layout, 7)?, &context.healthy)?;
         warm_up(device, &context.queue, &filter, &placeholder_bind(device, &filter_layout, 4)?, &context.healthy)?;
         warm_up(device, &context.queue, &classify, &placeholder_bind(device, &filter_layout, 4)?, &context.healthy)?;
         Ok(Self { guide, filter, classify, filter_layout })
     }
 
+    // The guide program inlines the path tracer's BVH walks, so it compiles under the
+    // process-wide lock of the path programs (#6706), never beside one of them. As for a scene
+    // program, the lock is held until the pipelines are published: a job that waited for another
+    // job's compile then uses its pipelines instead of compiling them again, and a job cancelled
+    // while it waited returns before compiling. A compile that ran is kept for the next job.
     fn shared<'a>(context: &'a Context, cancel: &CancelToken) -> Result<&'a Self> {
         if let Some(pipelines) = context.denoise.get() {
             return Ok(pipelines);
         }
-        let built = Self::new(context, cancel)?;
+        cancel.check()?;
+        let _compiling = one_compile_at_a_time();
+        if let Some(pipelines) = context.denoise.get() {
+            return Ok(pipelines);
+        }
+        cancel.check()?;
+        let built = Self::new(context)?;
         Ok(context.denoise.get_or_init(|| built))
     }
 }
