@@ -393,9 +393,10 @@ mod tests {
             assert!(result.qp_peak_rows_held <= result.qp_rows_built);
             assert!(result.qp_steps >= result.solves);
             // Work budgets leave room for floating-point branch differences while
-            // rejecting the former full matrices (up to 693,051 retained rows) and the
-            // degrees below 9 a failing attempt tried (on aarch64 the fork's 20b1c01 took
-            // 120,513 steps in one degree-7 programme of the first corner).
+            // rejecting the former full matrices (up to 693,051 retained rows) and, on
+            // aarch64, the degrees below 9 a failing attempt tried (the fork's 20b1c01 took
+            // 120,513 steps in one degree-7 programme of the first corner); the QP counts
+            // above reject that order on every platform.
             assert!(result.qp_rows_built <= 12_000_000);
             assert!(result.qp_peak_rows_held <= 16_000);
             assert!(result.qp_steps <= 25_000);
