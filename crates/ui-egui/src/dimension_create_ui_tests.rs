@@ -2152,5 +2152,6 @@ fn the_pointer_ring_stays_off_the_value_being_placed() {
     assert!(value.contains(pointer), "the value follows the pointer: {value:?} {pointer:?}");
     let tool = h.app.tool.as_ref().expect("the Dimension tool");
     assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
+    assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
     assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
 }
