@@ -90,9 +90,8 @@ only definitions is `blend::definition_check::is_definition`, which is
 own surface kind (a torus stays a torus, so every match on the kind still sees it) and carries its
 definition beside it.
 
-The blend definitions are opt-in today: `UpstreamFixes::fillet_round_as_definition` (with
-`fillet_gn_section_generator`) builds and reads them, and every `UpstreamFixes` flag is off by
-default (`kernel.rs`). Tests turn them on (`UpstreamFixes::all`).
+The blend definitions are opt-in today: `UpstreamFixes::fillet_round_as_definition` builds and
+reads them, and every `UpstreamFixes` flag is off by default (`kernel.rs`). Tests turn them on (`UpstreamFixes::all`).
 
 ### 3.2 Exact nets: lines, arcs and quadrics
 

@@ -1,5 +1,5 @@
 //! Contracts for the surface edit commands in `cmd/surface.rs` (#12627): Stitch, Unstitch, Reverse
-//! Normal, Thicken, Offset Surface, Untrim, Fair Surface, Extend and Trim. Each adds a feature and returns
+//! Normal, Thicken, Offset Surface, Untrim, Fair Surface, Extend, Trim and Surface Loft. Each adds a feature and returns
 //! `add_feature`'s reply, a [`super::features::FeatureResult`].
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
@@ -14,11 +14,17 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
+use solidcraft_geom::fill::{MAX_CROWN, MIN_CROWN};
+use solidcraft_kernel::Construction;
 
-use super::check::whole;
+use super::check::{truncate, whole};
 use super::config::NameList;
 use super::motion::require;
-use super::types::{FeatureCommon, LengthExpr, OperationParam, PlaneParam, Point3, TouchingParam, feature_common, present};
+use super::surface_boundary::message;
+use super::types::{
+    FeatureCommon, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam, feature_common,
+    guide_rails_problem, present,
+};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The most faces, or holes, one call may pick, as `cmd/surface.rs` reads them.
@@ -611,6 +617,227 @@ pub struct SurfaceTrimParams {
     /// Mutual trim: the kept pieces are sewn into `body`, and `with` is then gone.
     #[serde(default)]
     pub stitch: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// `surface_loft`'s name for itself, for the readers the contract shares with it.
+const LOFT: &str = "surface.loft";
+
+/// What `surface_loft` says about one section before it looks a sketch up: its message, or `None`.
+/// The handler skips an edge point that isn't a point, and ignores a `body` that isn't text and a
+/// key a section doesn't take; the contract refuses those too.
+fn loft_section_problem(section: &Value, index: usize) -> Option<String> {
+    let body = section.get("body");
+    let known: &[&str] = if body.is_some_and(Value::is_string) {
+        let edges = section.get("edges").and_then(Value::as_array);
+        if !edges.is_some_and(|e| (1..=MAX_PICKS).contains(&e.len()) && e.iter().all(|p| params::vec3(p).is_some())) {
+            return Some(whole("`sections.edges` must list 1 to 10000 points on the edges of a chain"));
+        }
+        if section.get("sketch").is_some() {
+            return Some(whole("a section is either a sketch chain or a body edge chain"));
+        }
+        &["body", "edges"]
+    } else {
+        if crate::cmd::sketch_key(section.get("sketch")).is_none() {
+            return Some(whole("`sections.sketch` must be a sketch id or name"));
+        }
+        match params::string_list(LOFT, section, "curves") {
+            Ok(curves) if curves.len() > 1000 => return Some(whole("at most 1000 curves a section")),
+            Ok(_) => {}
+            Err(e) => return Some(whole(message(e))),
+        }
+        if let Some(Err(e)) = section.get("profiles").map(|v| ProfilesParam::deserialize(v.clone())) {
+            return Some(e.to_string());
+        }
+        if body.is_some() {
+            return Some("`sections.body` must name a body".to_string());
+        }
+        &["sketch", "curves", "profiles"]
+    };
+    let key = section.as_object()?.keys().find(|k| !known.contains(&k.as_str()))?;
+    let key = truncate(key, 64);
+    Some(whole(format!("unknown key `{key}` in `sections[{index}]`: a section takes {}", known.join(", "))))
+}
+
+/// A loft's `sections`, read as `surface_loft` reads them before it looks anything up, with its
+/// messages. Kept as given, for the handler. Whether the sketches, curves and bodies exist, and
+/// whether the sections make a loft, are the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoftSections(pub Value);
+
+impl<'de> Deserialize<'de> for LoftSections {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let Some(sections) = v.as_array() else {
+            return Err(D::Error::custom(whole("`sections` must list the sections in order")));
+        };
+        if !(2..=50).contains(&sections.len()) {
+            return Err(D::Error::custom(whole("a loft needs 2…50 sections")));
+        }
+        match sections.iter().enumerate().find_map(|(i, section)| loft_section_problem(section, i)) {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(LoftSections(v)),
+        }
+    }
+}
+
+impl JsonSchema for LoftSections {
+    fn schema_name() -> Cow<'static, str> {
+        "LoftSections".into()
+    }
+    fn inline_schema() -> bool {
+        true
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let sketch = generator.subschema_for::<SketchRef>();
+        let profiles = generator.subschema_for::<ProfilesParam>();
+        let point = point_schema(generator);
+        json_schema!({
+            "description": "The sections in order, 2 to 50, all open or all closed. Each is one chain: {\"sketch\", \"curves\"?, \"profiles\"?} (a profile without holes, or curves meeting end to end) or {\"body\", \"edges\"} (points on a chain of a body's edges; the face the chain bounds is the surface that end repeats).",
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 50,
+            "items": {
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "sketch": sketch,
+                            "curves": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "maxItems": 1000}, {"type": "null"}]},
+                            "profiles": profiles
+                        },
+                        "required": ["sketch"],
+                        "additionalProperties": false
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "body": {"type": "string"},
+                            "edges": {"type": "array", "items": point, "minItems": 1, "maxItems": MAX_PICKS}
+                        },
+                        "required": ["body", "edges"],
+                        "additionalProperties": false
+                    }
+                ]
+            }
+        })
+    }
+}
+
+/// A loft's `continuity`: one word for each end, with the handler's messages.
+fn loft_continuity<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let Some(words) = v.as_array().filter(|a| a.len() == 2) else {
+        return Err(D::Error::custom(whole("`continuity` must be two words, one per end")));
+    };
+    for word in words {
+        params::continuity(LOFT, Some(word), "a `continuity` entry", Construction::Bridge).map_err(|e| D::Error::custom(whole(message(e))))?;
+    }
+    Ok(Some(v))
+}
+
+fn loft_continuity_schema(_: &mut SchemaGenerator) -> Schema {
+    let word = json!({"type": "string", "pattern": "^\\s*[gG][0-3]\\s*$"});
+    json_schema!({
+        "description": "How much of the surface at the first and at the last section the loft repeats: g0 (the default), g1 the tangent plane, g2 also the curvature, g3 also how that curvature changes.",
+        "type": "array",
+        "items": word,
+        "minItems": 2,
+        "maxItems": 2
+    })
+}
+
+/// A loft's `crown`: one number for each end, with the handler's messages; `null` is 0.
+fn loft_crown<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if v.is_null() {
+        return Ok(None);
+    }
+    let Some(ends) = v.as_array().filter(|a| a.len() == 2) else {
+        return Err(D::Error::custom(whole("`crown` must be two numbers, one per end")));
+    };
+    if ends.iter().all(|x| x.as_f64().is_some_and(|x| x.is_finite() && (MIN_CROWN..=MAX_CROWN).contains(&x))) {
+        Ok(Some(v))
+    } else {
+        Err(D::Error::custom(whole("each `crown` entry must be between -0.9 (flattest) and 3 (fullest)")))
+    }
+}
+
+fn loft_crown_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "How full each end leaves, -0.9 flattest to 3 fullest. Default: 0 at both.",
+        "type": ["array", "null"],
+        "items": {"type": "number", "minimum": MIN_CROWN, "maximum": MAX_CROWN},
+        "minItems": 2,
+        "maxItems": 2
+    })
+}
+
+/// A loft's guide `rails`, as `features::guide_rails` reads them before it looks the sketches up,
+/// with its messages: a list of `{sketch, curves}`. Kept as given, for the handler, which also
+/// checks how many rails a loft takes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoftRails(pub Value);
+
+impl<'de> Deserialize<'de> for LoftRails {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        match guide_rails_problem(&v, None, false) {
+            Some(why) => Err(D::Error::custom(why)),
+            None => Ok(LoftRails(v)),
+        }
+    }
+}
+
+impl JsonSchema for LoftRails {
+    fn schema_name() -> Cow<'static, str> {
+        "LoftRails".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let sketch = generator.subschema_for::<SketchRef>();
+        json_schema!({
+            "description": "Guide rails (the command checks how many a loft takes), each {\"sketch\": the sketch its curves are in, \"curves\": its curve ids in order, 1 to 1000 (one id may be given as text)}. Sketch sections only, both ends g0.",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sketch": sketch,
+                    "curves": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1000}]}
+                },
+                "required": ["sketch", "curves"],
+                "additionalProperties": false
+            }
+        })
+    }
+}
+
+fn sections_required(schema: &mut Schema) {
+    require(schema, "sections");
+}
+
+/// A surface body through sections in order, ruled between two and smooth through three or more,
+/// with no caps. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = sections_required)]
+pub struct SurfaceLoftParams {
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message, which the contract gives `null` (`present`: it goes to `LoftSections`).
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "LoftSections")]
+    pub sections: Option<LoftSections>,
+    #[serde(default, deserialize_with = "loft_continuity", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "loft_continuity_schema")]
+    pub continuity: Option<Value>,
+    #[serde(default, deserialize_with = "loft_crown", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "loft_crown_schema")]
+    pub crown: Option<Value>,
+    #[serde(default)]
+    pub rails: Option<LoftRails>,
+    /// How the rails reshape the sections. Default: scale. Used only with `rails`.
+    #[serde(default)]
+    pub rail_fit: Option<RailFitParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

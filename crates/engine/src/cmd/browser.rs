@@ -1233,7 +1233,7 @@ fn replace_body_name(v: &mut Value, old: &str, new: &str, names_body: bool, dept
 
 /// A frame member feature's bodies by line id, as its own result made them: what pins each
 /// member's name to its line. `None` for any other feature, or when they don't pair up.
-fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
+pub(super) fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
     let f = s.doc.feature(fid)?;
     let result = s.model.result(fid)?;
     let lines = solidcraft_doc::frame::member_line_ids(&result.state, &f.kind).ok()?;
@@ -1437,6 +1437,16 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
             for link in &mut sketch.links {
                 if link.auto_face && matches!(&link.source,solidcraft_sketch::LinkSource::Face {body,..} if *body==old) {
                     link.face_name = Some(anchor.target.name.clone());
+                }
+            }
+        }
+        if let FeatureKind::FrameEndCap { ends, .. } = &mut f.kind {
+            for end in ends {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut end.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
                 }
             }
         }
@@ -2590,6 +2600,34 @@ mod tests {
         assert!(!crate::view::sketch_shown(&s, sketch), "the Extrude uses it: it hides itself");
         run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
         assert!(crate::view::sketch_shown(&s, sketch), "shown on its own, it stays shown");
+    }
+
+    /// #12125: a sketch on a body face, right before the History marker, stayed drawn after its
+    /// eye hid it, and hiding it again changed nothing. The user's hide wins over the marker; a
+    /// sketch hidden only because a feature uses it is still shown at the marker (#5202).
+    #[test]
+    fn a_sketch_hidden_with_its_eye_stays_hidden_right_before_the_history_marker() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 20]}, "name": "OnTop"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [6, 6]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Later"}));
+        run(&mut s, "timeline.roll_to", json!({"position": 2}));
+        assert_eq!(s.doc.marker, Some(2), "the sketch is the last step before the marker");
+        assert!(crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": false}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "hidden with its eye, it is not drawn at the marker");
+        let d = run(&mut s, "document.inspect", json!({}));
+        assert!(d["sketches"].as_array().unwrap().iter().all(|x| x["visible"] == false), "{d}");
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch));
+        // Used by an Extrude placed at the marker, it hides itself; stepping back onto it shows it.
+        run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 2}));
+        run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "the Extrude uses it");
+        run(&mut s, "timeline.roll_to", json!({"position": 2}));
+        assert!(crate::view::sketch_shown(&s, sketch), "a used sketch shows while it is the current step");
     }
 
     #[test]

@@ -132,8 +132,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         id: 100,
         name: "Pivot".into(),
         kind: JointKind::Revolute,
-        a: JointOrigin { occurrence: 0, snap: Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) } },
-        b: JointOrigin { occurrence, snap: Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) } },
+        a: JointOrigin::new(0, Snap::Frame { origin: pick, z: Vec3::Z, x: Some(Vec3::X) }),
+        b: JointOrigin::new(occurrence, Snap::FaceCenter { pick, face: None, x: Some(XRef::Dir(Vec3::X)) }),
         values: vec![0.0],
         limits: Vec::new(),
         flip: true,
@@ -181,7 +181,7 @@ fn joint_face_measurements_never_follow_a_replaced_body_or_stale_offset() {
     let mut doc = Document::new("replaced joint geometry");
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 10.0).unwrap(), 0));
-    let origin = JointOrigin { occurrence: 0, snap: Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None } };
+    let origin = JointOrigin::new(0, Snap::FaceCenter { pick: Vec3::new(0.0, 0.0, 10.0), face: None, x: None });
     let work = counted(|| {
         joints::resolve_origin(&doc, &state, &origin).unwrap();
     });
@@ -210,7 +210,7 @@ fn an_edge_origin_measures_its_faces_once() {
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap(), 0));
     let pick = Vec3::new(5.0, 0.0, 10.0);
-    let origin = JointOrigin { occurrence: 0, snap: Snap::Edge { pick, edge: None, face: None, corner: None, axis: None } };
+    let origin = JointOrigin::new(0, Snap::Edge { pick, edge: None, face: None, corner: None, axis: None });
     let work = counted(|| {
         for _ in 0..8 {
             let frame = joints::resolve_origin(&doc, &state.clone(), &origin).unwrap();
@@ -1412,6 +1412,7 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
+        continuous_flanks: false,
         old_auto_size: false,
     }
 }
@@ -1998,4 +1999,22 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
     // A point on a side wall drills into that wall.
     let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
     assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
+}
+
+/// A hole's look at the material over its entry face (#10695) is best effort: when the kernel
+/// cannot build the run-on's column (here a column of no width), the hole keeps its full run-on
+/// and cuts nothing out of its tools, as before the check, instead of failing.
+#[test]
+fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
+    let mut state = ModelState::default();
+    state.bodies.push(ModelBody::new("Over".into(), kernel::box_solid(Vec3::new(-5.0, -5.0, 0.5), Vec3::new(5.0, 5.0, 2.0)).unwrap(), 0));
+    for reach in [0.0, f64::NAN] {
+        let (top, near) = super::hole_run_on(&state, &Plane::XY, reach, 1.0);
+        assert_eq!(top, 1.0, "reach {reach}");
+        assert!(near.is_empty(), "reach {reach}");
+    }
+    // With a column, the body 0.5 over the face halves the run-on to its gap.
+    let (top, near) = super::hole_run_on(&state, &Plane::XY, 3.0, 1.0);
+    assert!((top - 0.25).abs() < 1e-6, "top {top}");
+    assert!(near.is_empty());
 }

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.sketch.snap_to_visible_grid": "Snap to the grid's visible crossings",
+    "prefs.sketch_snap_to_visible_grid_note": "A point in a sketch snaps to the crossings of the lines the grid draws when the pointer means one, and to the finer lattice between them otherwise. Off: the point snaps to the finer lattice only, as before."
+  },
+  "ar": {
+    "prefs.sketch.snap_to_visible_grid": "الالتقاط عند تقاطع الشبكة المرئي",
+    "prefs.sketch_snap_to_visible_grid_note": "تلتصق النقطة في الرسم عند تقاطع الخطوط التي ترسمها الشبكة عندما يشير المؤشر إلى أحدها، وإلا تلتصق بالشبكة الأدق بينها. عند الإيقاف: تلتصق النقطة بالشبكة الأدق فقط، كما كان."
+  },
+  "de": {
+    "prefs.sketch.snap_to_visible_grid": "Am sichtbaren Schnittpunkt des Rasters fangen",
+    "prefs.sketch_snap_to_visible_grid_note": "Ein Punkt in einer Skizze rastet am Schnittpunkt der vom Raster gezeichneten Linien ein, wenn der Zeiger auf einen davon zeigt, sonst am feineren Gitter zwischen ihnen. Aus: Der Punkt rastet nur am feineren Gitter ein, wie zuvor."
+  },
+  "he": {
+    "prefs.sketch.snap_to_visible_grid": "הצמדה למפגשים הנראים של הרשת",
+    "prefs.sketch_snap_to_visible_grid_note": "נקודה בסקיצה נצמדת למפגש של הקווים שהרשת מציירת כשהמצביע מכוון לאחד מהם, ולרשת הדקה שביניהם אחרת. כבוי: הנקודה נצמדת לרשת הדקה בלבד, כמו קודם."
+  },
+  "ja": {
+    "prefs.sketch.snap_to_visible_grid": "グリッドの交点にスナップ",
+    "prefs.sketch_snap_to_visible_grid_note": "スケッチ内の点は、グリッドが描画する線の交点にポインターが指しているときはその交点にスナップし、それ以外ではその間のより細かい格子の交点にスナップします。オフ: 前也是一样で、点はより細かい格子の交点にだけスナップします。"
+  },
+  "ko": {
+    "prefs.sketch.snap_to_visible_grid": "격자의 보이는 교차점에 스냅",
+    "prefs.sketch_snap_to_visible_grid_note": "스케치의 점은 포인터가 가리키는 경우 격자가 그리는 선들의 교차점에 스냅되고, 그렇지 않으면 그 사이의 더 촘촘한 격자에 스냅됩니다. 끄기: 이전과 같이 점은 촘촘한 격자에만 스냅됩니다."
+  },
+  "vi": {
+    "prefs.sketch.snap_to_visible_grid": "Bắt vào giao điểm nhìn thấy của lưới",
+    "prefs.sketch_snap_to_visible_grid_note": "Một điểm trong phác thảo bắt vào giao điểm của các đường mà lưới vẽ khi con trỏ chỉ vào một giao điểm, và vào lưới mịn hơn giữa chúng trong trường hợp khác. Tắt: điểm chỉ bắt vào lưới mịn hơn, như trước."
+  },
+  "zh": {
+    "prefs.sketch.snap_to_visible_grid": "捕捉网格可见的交点",
+    "prefs.sketch_snap_to_visible_grid_note": "当指针指向网格绘制的线的交点时，草图中的点捕捉到该交点，否则捕捉到交点之间更细的网格。关闭：点只捕捉到更细的网格，与之前相同。"
+  }
+}

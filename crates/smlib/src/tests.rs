@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 63] = [
+const ANSWERING: [&str; 64] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -159,6 +159,7 @@ const ANSWERING: [&str; 63] = [
     "loft_to_point",
     "screw_sweep",
     "screw_sweep_radial",
+    "screw_sweep_with_options",
 ];
 
 /// Every `pub fn` of the files that hold the crate's kernel entry points is accounted for.
@@ -278,6 +279,17 @@ fn every_entry_point_answers() {
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
+    says(
+        "screw_sweep_with_options",
+        Brep::screw_sweep_with_options(
+            &lines,
+            p(30.0, 0.0, 0.0),
+            p(0.0, 0.0, 1.0),
+            12.0,
+            1.0,
+            crate::sweeps::ScrewSweepOptions { law: None, join_spline_walls: true, tolerance: 0.01 },
+        ),
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -339,15 +351,15 @@ fn a_failing_solidcore_call_leaves_a_dump_and_names_itself() {
 /// ending them 0.1 um short) is held at that tolerance.
 #[test]
 fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() {
+    use solidcore_ops::pcurve::TrimEdge;
     use solidcore_record::brep::{Curve, Curve2};
-    use solidcraft_geom::brep::pcurve::TrimEdge;
     let line = Curve::Line { start: [0.0, 0.0, 0.0], end: [2.0, 0.0, 0.0] };
     let edge = TrimEdge { curve: &line, nurbs: None, interval: [0.0, 1.0], vertices: [0, 1], tolerance: 1e-5 };
     let theirs = [0.0, 1.0 - 2e-8];
     let pc = Curve2::Spline { knots: vec![0.0, 0.0, theirs[1], theirs[1]], points: vec![[0.0, 0.0], [1.0, 0.0]] };
     let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs, edge.tolerance).unwrap();
     assert_eq!(mapped.interval(), Some([0.0, 1.0]));
-    assert_eq!(solidcraft_geom::brep::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
+    assert_eq!(solidcore_ops::pcurve::eval(&mapped, 1.0), Some([1.0, 0.0]));
     // 0.02 mm along the edge is past its 1e-5 mm.
     let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99], edge.tolerance).unwrap_err();
     assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
@@ -355,7 +367,7 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
     let short = Curve2::Spline { knots: vec![0.0, 0.0, 0.99, 0.99], points: vec![[0.0, 0.0], [1.0, 0.0]] };
     let held = crate::pcurves::on_our_interval(short, &edge, [0.0, 0.99], 0.03).unwrap();
     assert_eq!(held.interval(), Some([0.0, 1.0]));
-    assert_eq!(solidcraft_geom::brep::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
+    assert_eq!(solidcore_ops::pcurve::eval(&held, 1.0), Some([1.0, 0.0]));
 }
 
 /// An edge whose curve runs 2.5 um past its vertex and its face's patch (as Poppy Humanoid's
@@ -365,8 +377,8 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
 /// own interval, ending at the patch's corner.
 #[test]
 fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
+    use solidcore_ops::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     use solidcore_record::brep::{Curve, Surface};
-    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
     // S(u, v) = (10u, 10v, 2v^2), bicubic
     let g = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
     let z = [0.0, 0.0, 2.0 / 3.0, 2.0];
@@ -397,7 +409,7 @@ fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
     let pcs = crate::pcurves::SmlibTrims.trims(&face).unwrap();
     let pc = &pcs[0][0];
     assert_eq!(pc.interval(), Some([0.0, 1.0]));
-    let [u, v] = solidcraft_geom::brep::pcurve::eval(pc, 1.0).unwrap();
+    let [u, v] = solidcore_ops::pcurve::eval(pc, 1.0).unwrap();
     assert!((u - 1.0).abs() < 1e-9 && v.abs() < 1e-9, "{u} {v}");
 }
 

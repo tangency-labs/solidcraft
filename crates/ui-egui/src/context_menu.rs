@@ -96,6 +96,8 @@ pub enum Target {
     Toolbar,
     /// The History controls (first, previous, next, last, and Play when shown).
     HistoryControls,
+    /// The History folder, with History in the browser: the History controls as menu entries.
+    HistoryFolder,
     /// A feature in the History bar.
     Timeline {
         feature: u64,
@@ -364,6 +366,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
+        Target::HistoryFolder => crate::timeline::history_folder_items(app),
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
@@ -410,13 +413,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect();
             if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
         }
-        Target::VisualStyle => crate::navigation_bar::VISUAL_STYLES
+        Target::VisualStyle => crate::navigation_slots::VISUAL_STYLES
             .iter()
             .enumerate()
             .map(|(index, (style, label))| {
                 let current = usize::from(app.ui.visual_style) == index;
                 let mut item = cmd(app, "view.visual_style", label).with(json!({"style": style})).key(if current { "current" } else { "" });
-                item.icon = crate::navigation_bar::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
+                item.icon = crate::navigation_slots::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
                 item
             })
             .collect(),
@@ -524,12 +527,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 params["appearance"] = json!(look.name);
                 params["color"] = json!(crate::dialogs_appearance::hex(look.color));
                 params["opacity"] = json!(look.opacity);
-                let mut child = cmd(app, "appearance.assign", &look.name).with(params);
+                // The A key opens the editor, so only the editor's row shows it.
+                let mut child = cmd(app, "appearance.assign", &look.name).key("").with(params);
                 child.swatch = Some(look.color);
                 item.children.push(child);
             }
             item.children.push(Item::sep());
-            item.children.push(cmd(app, "appearance.assign", "Remove override").with(targets));
+            item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
     v
@@ -941,6 +945,8 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
+/// The menu of the placement at `path`: its component's menu, with the rows aimed at this
+/// placement, and "Relink Source…" for it alone when the component is placed more than once.
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
     let mut entries = component_items(app, placement.component);
@@ -993,6 +999,18 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         }
         _ => {}
     });
+    // One placement of several can show another design on its own, above the row for all of them.
+    if app.session.doc.links.contains_key(&placement.component)
+        && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1
+    {
+        let one =
+            act("ui.relinkPlacement", "Relink Source…", "update").with(json!({"component": placement.component, "occurrence": placement.occurrence}));
+        each_item(&mut entries, &mut |item: &mut Item| {
+            if let Some(i) = item.children.iter().position(|c| c.id == "ui.relinkSource") {
+                item.children.insert(i, one.clone());
+            }
+        });
+    }
     entries
 }
 
@@ -1523,9 +1541,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
-        "ui.relinkSource" => {
+        "ui.relinkSource" | "ui.relinkPlacement" => {
             if let Some(component) = id_of(&p, "component") {
-                crate::linked_source::start(app, component);
+                crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
         "ui.extractComponent" => {
@@ -1647,7 +1665,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
-            let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
+            let body = bodies.first().map(String::as_str);
+            let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
             app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
         }
         "ui.findBrowser" => {
@@ -1820,6 +1839,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(e, true);
             }
         }
+        "ui.historyTransport" => {
+            if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|c| Some(c.id()) == p["control"].as_str()) {
+                crate::timeline::run_transport(app, control);
+            }
+        }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
             if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
@@ -1929,7 +1953,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
-            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(solidcore_record::Plane::named) {
+            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(|name| crate::dialogs::plane_by_name(&app.session, name)) {
                 let mut to = app.cam.looking_from(crate::dialogs::facing(app, plane.normal(), true));
                 to.target = plane.origin;
                 app.animate_to(to);
@@ -1957,6 +1981,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 if calibrate {
                     app.set_status(solidcraft_ui_text::tr("browser.calibrate_click_a"), false);
                 }
+            }
+        }
+        "ui.straightenCanvas" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.straighten_click_a"), false);
             }
         }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
@@ -2018,7 +2048,12 @@ pub fn delete(app: &mut SolveApp) {
 pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
     let Some(at) = app.viewport.context_menu else { return false };
     let target = app.menu.target.clone();
-    let Some(item) = entries(app, &target).into_iter().find(|i| i.shortcut == key && i.children.is_empty()) else { return false };
+    // "V" is the tag of Show/Hide rows, which run on Show/Hide's own key: a command row showing V
+    // has V bound to it and is not what that key means (#13241).
+    let Some(item) = entries(app, &target).into_iter().find(|i| i.shortcut == key && i.children.is_empty() && (key != "V" || i.label == "Show/Hide"))
+    else {
+        return false;
+    };
     if item.enabled {
         close(app);
         run_item(app, &item, at);
@@ -2026,8 +2061,24 @@ pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
     true
 }
 
+/// The key a menu row shows for its `shortcut` tag: Show/Hide rows are tagged "V" and show the
+/// key Show/Hide has now (#13241), or none.
+pub fn shortcut_shown(app: &SolveApp, tag: &str) -> String {
+    if tag == "V" { crate::keymap::display_for(app, "ui.toggle_visibility").unwrap_or_default() } else { tag.to_string() }
+}
+
+/// Only Show/Hide rows carry the `V` tag for that command: another row showing V has V bound to it.
+pub(crate) fn show_current_keys(app: &SolveApp, list: &mut [Item]) {
+    for item in list {
+        if item.label == "Show/Hide" {
+            item.shortcut = shortcut_shown(app, &item.shortcut);
+        }
+        show_current_keys(app, &mut item.children);
+    }
+}
+
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
-/// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
+/// visibility (bodies, faces' and edges' bodies, sketches and profiles' sketches, construction and origin planes and
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
 /// A clicked folder takes precedence, and toggles its own visibility without changing its items.
 pub fn toggle_visibility(app: &mut SolveApp) {
@@ -2045,13 +2096,19 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     for c in app.tree.picked_components.clone() {
         bodies.extend(component_bodies(app, c));
     }
-    let sketches: Vec<u64> = app
+    // A picked profile stands for its sketch, as a picked face stands for its body (#13026).
+    let mut sketches: Vec<u64> = app
         .session
         .selection
         .iter()
-        .filter_map(|s| if let Sel::Feature { id } = s { Some(*id) } else { None })
+        .filter_map(|s| match s {
+            Sel::Feature { id } | Sel::Profile { sketch: id, .. } => Some(*id),
+            _ => None,
+        })
         .filter(|id| app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
         .collect();
+    sketches.sort_unstable();
+    sketches.dedup();
     let origin: Vec<String> = app
         .session
         .selection
@@ -2329,6 +2386,8 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
         }),
         Target::Feature { id } => feature(*id),
+        // The browser lists History while it is docked there and the design has features.
+        Target::HistoryFolder => app.preferences.history_in_browser && !doc.features.is_empty(),
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
@@ -2379,7 +2438,10 @@ pub fn describe(app: &SolveApp) -> Value {
     let Some(at) = app.viewport.context_menu else {
         return json!({ "open": false, "pending": app.menu.pending.is_some() });
     };
-    let radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    let mut radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    show_current_keys(app, &mut radial);
+    let mut rows = items(app, &app.menu.target);
+    show_current_keys(app, &mut rows);
     /// A row with its `placeholder` flag, and a flyout's rows likewise.
     fn describe_items(items: Vec<Item>) -> Vec<Value> {
         items
@@ -2401,7 +2463,7 @@ pub fn describe(app: &SolveApp) -> Value {
         "at": [at.x, at.y],
         "target": app.menu.target,
         "radial": describe_items(radial),
-        "items": describe_items(items(app, &app.menu.target)),
+        "items": describe_items(rows),
         "rename": app.menu.rename.as_ref().map(|r| r.text.clone()),
     })
 }
@@ -2571,7 +2633,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
-    let list = items(app, &target);
+    let mut list = items(app, &target);
+    show_current_keys(app, &mut list);
     let mut picked: Option<Item> = None;
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
@@ -2638,7 +2701,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             if target == Target::Workspace {
-                picked = crate::ui_kit::workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
+                picked = workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
                 menu_frame(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
             }
@@ -2825,6 +2888,35 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bo
         let _ = commit_rename(app, &r);
     }
     true
+}
+
+/// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).
+fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
+    use crate::ui_kit::WorkspaceStyle;
+    use solidcraft_theme::AccentRamp;
+    let planned = |slug, description| WorkspaceStyle { slug, description, tabs: None, ramp: None };
+    Some(match item.label.as_str() {
+        "Design" => {
+            WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
+        }
+        "Render" => WorkspaceStyle {
+            slug: "render",
+            description: "ui.workspace_render_description",
+            tabs: Some("ui.workspace_render_tabs"),
+            ramp: Some(AccentRamp::Render),
+        },
+        "Animation" => planned("animation", "ui.workspace_animation_description"),
+        "Simulation" => planned("simulation", "ui.workspace_simulation_description"),
+        "Manufacture" => planned("manufacture", "ui.workspace_manufacture_description"),
+        "Drawing" => planned("drawing", "ui.workspace_drawing_description"),
+        _ => return None,
+    })
+}
+
+/// The kit's workspace menu over SolidCraft's workspaces (`items` of [`Target::Workspace`]).
+pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
+    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: solidcraft_ui_text::tr("ui.workspace_footer") };
+    crate::ui_kit::workspace_menu(ui, &menu, key_row, height)
 }
 
 #[cfg(test)]
@@ -3418,7 +3510,7 @@ mod workspace_menu_tests {
         let app = SolveApp::new(Default::default(), Default::default());
         let list = items(&app, &Target::Workspace);
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            crate::ui_kit::workspace_menu(ui, &list, None, 1000.0);
+            workspace_menu(ui, &list, None, 1000.0);
         });
         output.textures_delta.clear();
         let titles: Vec<_> = output

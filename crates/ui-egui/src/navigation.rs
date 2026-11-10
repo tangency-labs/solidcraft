@@ -36,6 +36,11 @@ impl NavCaps {
     pub const MODEL: NavCaps = NavCaps { orbit: true, pick: true };
     /// The Render workspace's product preview: shared navigation and product picking.
     pub const RENDER: NavCaps = NavCaps { orbit: true, pick: true };
+
+    /// Whether the navigation bar shows `slot` on a page with these caps.
+    pub fn shows(self, slot: &crate::navigation_bar::Slot) -> bool {
+        slot.available(self.orbit, self.pick)
+    }
 }
 
 /// Give a panel the wheel delta left by its children, one movable axis at a time.
@@ -454,11 +459,26 @@ fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::I
         || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some())
 }
 
+/// How much one keyboard zoom press changes the camera distance (#717).
+const KEY_ZOOM_FACTOR: f64 = 1.25;
+
+/// The zoom direction a key asks for (true: in), if it is a keyboard zoom key (#717). `+` is
+/// Shift+`=` on many layouts, so Shift is accepted on all of them; the keys say what they mean,
+/// so the invert-zoom preference does not apply.
+fn zoom_key(key: egui::Key) -> Option<bool> {
+    match key {
+        egui::Key::PageUp | egui::Key::Plus | egui::Key::Equals => Some(true),
+        egui::Key::PageDown | egui::Key::Minus => Some(false),
+        _ => None,
+    }
+}
+
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
 /// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
-/// selected face, plane or sketch. Held longer than a tap, an arrow keeps turning the view at a
-/// steady rate (`step_key_hold`); the operating system's key repeat does nothing. Not while a
-/// menu, the command box or a focused widget has the arrows. Returns whether the key was used.
+/// selected face, plane or sketch. PageUp/PageDown and +/− zoom (#717). Held longer than a tap,
+/// an arrow keeps turning the view at a steady rate (`step_key_hold`); the operating system's key
+/// repeat does nothing. Not while a menu, the command box or a focused widget has the keys.
+/// Returns whether the key was used.
 pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, mods: egui::Modifiers, repeat: bool) -> bool {
     use egui::Key;
     let menu_open = view_keys_blocked(app, ctx, None);
@@ -469,6 +489,26 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     let result = crate::render_workspace::result_active(app);
     if key == Key::Num8 && ctrl && !mods.shift && !result {
         crate::viewport::look_at_selection(app);
+        return true;
+    }
+    // Keyboard zoom (#717): PageUp/PageDown and +/−, around the view's centre (no cursor anchor —
+    // the keyboard does not know where the pointer is). Ctrl belongs to other shortcuts (the
+    // Preferences page zooms the UI with Ctrl+Plus/Minus), so plain keys only; OS repeat does
+    // nothing, like the arrows.
+    if !ctrl && let Some(zoom_in) = zoom_key(key) {
+        if !repeat {
+            let f = if zoom_in { 1.0 / KEY_ZOOM_FACTOR } else { KEY_ZOOM_FACTOR };
+            let zoom = |app: &mut SolveApp| {
+                app.cancel_view_animation();
+                app.viewport.orbit_free = None;
+                app.cam.zoom_at(f, None);
+            };
+            if result {
+                crate::render_workspace::with_result_camera(app, zoom);
+            } else {
+                zoom(app);
+            }
+        }
         return true;
     }
     let (action, dx, dy): (&'static str, f32, f32) = match key {
@@ -890,7 +930,12 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
                     let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
+                    let horizontal = app.preferences.nav == "maya"
+                        && app.preferences.maya_horizontal_zoom
+                        && button == Some(crate::prefs::NavButton::Right)
+                        && mods.alt;
+                    let movement = if horizontal { -delta.x } else { delta.y };
+                    app.cam.zoom_at((f64::from(movement) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
                 }
                 _ => {}
             }
@@ -2132,7 +2177,8 @@ mod tests {
                                 out.textures_delta.clear();
                             };
                             let from = pos2(200.0, 300.0);
-                            let to = from + vec2(0.0, dy);
+                            let horizontal = preset == "maya" && !tool;
+                            let to = from + if horizontal { vec2(dy, 0.0) } else { vec2(0.0, dy) };
                             frame(vec![Event::PointerMoved(from)]);
                             frame(vec![Event::PointerButton { pos: from, button, pressed: true, modifiers: mods }]);
                             frame(vec![Event::PointerMoved(to)]);
@@ -2141,7 +2187,7 @@ mod tests {
                             assert!(app.cam.is_valid());
                             assert_ne!(app.cam.distance, before.distance, "the drag must zoom");
                             // Creo zooms in on a downward drag by default; the preference reverses that too.
-                            let default_zooms_out = if preset == "creo" { dy < 0.0 } else { dy > 0.0 };
+                            let default_zooms_out = if preset == "creo" || horizontal { dy < 0.0 } else { dy > 0.0 };
                             assert_eq!(
                                 app.cam.distance > before.distance,
                                 default_zooms_out != reverse,
@@ -2708,6 +2754,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn maya_right_drag_zooms_horizontally_without_turning_or_editing() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"nav":"maya"}));
+        h.settle();
+        let before = h.app.cam;
+        let at = h.app.viewport.rect.expect("viewport").center();
+        let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
+            h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+dx,"y1":at.y+dy,"button":"right","alt":true,"steps":20}));
+        };
+        drag(&mut h, 60.0, 0.0);
+        assert!(h.app.cam.distance < before.distance, "Alt+right drag to the right zooms in");
+        drag(&mut h, -60.0, 0.0);
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-6, "left reverses the zoom");
+        drag(&mut h, 0.0, 60.0);
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-6, "vertical movement does not zoom");
+        assert_eq!(h.app.cam.target, before.target);
+        assert_eq!(h.app.cam.back(), before.back());
+        assert!(h.app.tool.is_none() && h.app.dialog.is_none());
+        assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn maya_zoom_axis_keeps_other_presets_and_the_zoom_tool_vertical() {
+        use crate::prefs::{NAV_PRESETS, NavButton};
+        use crate::viewport::NavMode;
+        use serde_json::json;
+        for preset in NAV_PRESETS {
+            for binding in preset.bindings.iter().filter(|binding| binding.mode == NavMode::Zoom) {
+                for horizontal in [false, true] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.call("ui.prefs", json!({"nav":preset.id,"maya_horizontal_zoom":horizontal}));
+                    let at = h.app.viewport.rect.expect("viewport").center();
+                    let before = h.app.cam;
+                    let button = match binding.button {
+                        NavButton::Left => "left",
+                        NavButton::Middle => "middle",
+                        NavButton::Right => "right",
+                    };
+                    let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
+                        let out = h.call(
+                            "ui.drag",
+                            json!({"x0":at.x,"y0":at.y,"x1":at.x+dx,"y1":at.y+dy,
+                            "button":button,"alt":binding.keys.alt,"ctrl":binding.keys.ctrl,"shift":binding.keys.shift,"steps":20}),
+                        );
+                        assert_eq!(out["ok"], true, "{out}");
+                    };
+                    let uses_x = preset.id == "maya" && horizontal;
+                    drag(&mut h, 40.0, 0.0);
+                    if uses_x {
+                        assert!(h.app.cam.distance < before.distance);
+                    } else {
+                        assert_eq!(h.app.cam.distance, before.distance, "{} ignores horizontal zoom", preset.id);
+                    }
+                    h.app.cam = before;
+                    drag(&mut h, 0.0, 40.0);
+                    if uses_x {
+                        assert_eq!(h.app.cam.distance, before.distance, "Maya ignores vertical zoom");
+                    } else {
+                        assert_eq!(h.app.cam.distance < before.distance, preset.reverse_drag_zoom, "{} keeps its vertical direction", preset.id);
+                    }
+                    assert_eq!(h.app.cam.target, before.target);
+                    assert_eq!(h.app.cam.back(), before.back());
+                    assert!(h.app.session.undo.is_empty());
+                }
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"nav":"maya"}));
+        h.app.run("view.tool", json!({"tool":"zoom"})).unwrap();
+        h.settle();
+        let at = h.app.viewport.rect.expect("viewport").center();
+        let before = h.app.cam;
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+40.0,"y1":at.y,"steps":20}));
+        assert_eq!(h.app.cam.distance, before.distance, "the fixed Zoom tool ignores horizontal motion");
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x,"y1":at.y+40.0,"steps":20}));
+        assert!(h.app.cam.distance > before.distance, "the fixed Zoom tool keeps vertical zoom");
+    }
+
     /// Surface anchoring for the cap, bridge and drag-zoom is opt-in (#7435), independent of
     /// the wheel preference. Off keeps the old target fixed and lets the eye enter the model.
     #[test]
@@ -2939,6 +3065,44 @@ mod view_key_tests {
             }
         }
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
+    }
+
+    /// #717: PageUp/PageDown and +/− zoom the view; the keys are reserved like the arrows, OS
+    /// repeat does nothing, and a focused text field keeps them for typing.
+    #[test]
+    fn zoom_keys_zoom_the_view() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let near = |a: f64, b: f64| ((a / b) - 1.0).abs() < 1e-9;
+        let before = h.app.cam.distance;
+        h.step(&json!({"key": "PageUp"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "PageUp zooms in: {}", h.app.cam.distance);
+        h.step(&json!({"key": "PageDown"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before), "PageDown zooms back out: {}", h.app.cam.distance);
+        h.step(&json!({"key": "Plus"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "Plus zooms in");
+        h.step(&json!({"key": "Equals"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25 / 1.25), "Equals zooms in too");
+        h.step(&json!({"key": "Minus"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "Minus zooms out");
+        for name in ["PageUp", "PageDown", "Plus", "Shift+Plus", "Minus", "Equals"] {
+            assert!(crate::keymap::RESERVED.contains(&name), "{name} must be reserved");
+        }
+        // OS key repeat does nothing, and a focused widget keeps the keys for typing (#717).
+        let ctx = egui::Context::default();
+        let d = h.app.cam.distance;
+        assert!(crate::navigation::view_key(&mut h.app, &ctx, egui::Key::PageUp, egui::Modifiers::NONE, true));
+        assert_eq!(h.app.cam.distance, d, "key repeat does nothing");
+        ctx.memory_mut(|m| m.request_focus(egui::Id::unique("field")));
+        assert!(!crate::navigation::view_key(&mut h.app, &ctx, egui::Key::PageUp, egui::Modifiers::NONE, false));
+        assert_eq!(h.app.cam.distance, d, "a focused widget keeps the key");
     }
 
     fn arrow(pressed: bool, repeat: bool) -> egui::Event {

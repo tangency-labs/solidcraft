@@ -2,6 +2,7 @@
   "blend.fillet_executive_p3": {
     "issue-2349-teardrop-full-r0.5": "tangency-labs/solidcore#2349: the closed round's first span is off the true round by 7.9e-4 against a 4e-5 edge tolerance; the curved-spine mitre and both exact pcurves remain unimplemented",
     "issue-2349-teardrop-full-r3": "tangency-labs/solidcore#2349: the closed-angle mitre is not certified; tangency-labs/solidcore#2404 tracks the refusal size whose fresh build fails validity",
+    "private-upstream-rollover-404-cyl-on-box1-edge12-r2": "tangency-labs/solidcraft#13694: fails in the rollover (1001) once the WR-682 surface-plane trace is taken; main's default built it, and the trace's curves agree with the two-points intersector's to the tolerance, so the cause is not found yet",
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5": "tangency-labs/solidcore#3053: with every fix off the round builds a body that is not closed (29 vertices, 44 edges, 9 faces, mass status 1007), where it was refused with status 1001"
   },
   "intersect.topology_solver_p2": {

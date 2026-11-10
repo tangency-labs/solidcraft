@@ -18,10 +18,16 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketch.snapping_guides"), |ui| {
         let available = ui.available_width();
         let figure_width = t.space_24 * 5.0;
-        let labels_width = ["prefs.sketch.tracking_guides", "prefs.sketch.tracking_points", "prefs.sketch.recent_snap", "prefs.sketch.align_points"]
-            .into_iter()
-            .map(|id| check_width(ui, app.tr(id), true))
-            .fold(0.0, f32::max);
+        let labels_width = [
+            "prefs.sketch.tracking_guides",
+            "prefs.sketch.tracking_points",
+            "prefs.sketch.recent_snap",
+            "prefs.sketch.align_points",
+            "prefs.sketch.snap_to_visible_grid",
+        ]
+        .into_iter()
+        .map(|id| check_width(ui, app.tr(id), true))
+        .fold(0.0, f32::max);
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_14;
@@ -60,6 +66,13 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.sketch.align_points_note"),
                     &mut app.preferences.sketch_align_points,
                 );
+                check(
+                    ui,
+                    "sketch_snap_to_visible_grid",
+                    "prefs.sketch.snap_to_visible_grid",
+                    Some("prefs.sketch_snap_to_visible_grid_note"),
+                    &mut app.preferences.sketch_snap_to_visible_grid,
+                );
             });
         });
         let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.hold_stop_snapping"));
@@ -95,6 +108,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
+            "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
             "prefs.sketch.shortcut_cycles_modes",
@@ -102,6 +116,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "ui.project_face_edges_sketch",
             "ui.project_references_construction",
             "prefs.sketch.project_options",
+            "prefs.sketch.cursor_coordinates",
         ];
         let natural = [left_labels.as_slice(), right_labels.as_slice()]
             .map(|labels| labels.iter().map(|id| check_width(ui, app.tr(id), true)).fold(0.0, f32::max));
@@ -170,6 +185,15 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("ui.first_dimension_scales_tip"),
                     &mut app.preferences.first_dimension_scales,
                 );
+                ui.add_enabled_ui(app.preferences.first_dimension_scales, |ui| {
+                    check(
+                        ui,
+                        "first_dimension_scales_about_origin",
+                        "ui.first_dimension_scales_about_origin",
+                        Some("ui.first_dimension_scales_about_origin_tip"),
+                        &mut app.preferences.first_dimension_scales_about_origin,
+                    );
+                });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -204,12 +228,42 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("prefs.project_options_dialog_note"),
                     &mut app.preferences.project_options_dialog,
                 );
+                check(
+                    ui,
+                    "sketch_cursor_coordinates",
+                    "prefs.sketch.cursor_coordinates",
+                    Some("prefs.sketch.cursor_coordinates_note"),
+                    &mut app.preferences.sketch_cursor_coordinates,
+                );
             });
         });
         if let Some(child) = detached {
             crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
         }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        sketch_size(app, ui, t.space_24 * 8.0 + t.space_8);
+    });
+}
+
+/// The most points or curves one sketch holds (#10874): a dense SVG or DXF drawing needs more
+/// than the default.
+fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+    let label = app.tr("prefs.sketch.max_points").to_string();
+    let unit = app.tr("prefs.sketch.max_points_unit").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.max_points_note"), label_width, |ui| {
+        ui.horizontal(|ui| {
+            let t = Tokens::get();
+            ui.spacing_mut().item_spacing.x = t.space_4;
+            let field = ui
+                .scope(|ui| {
+                    ui.spacing_mut().interact_size.x = t.space_24 * 3.0;
+                    ui_kit::number_field(ui, &mut app.preferences.max_sketch_points, DEFAULT_POINTS..=CEILING_POINTS, 100.0, "")
+                })
+                .inner;
+            crate::scenario::publish_rect("prefs:max_sketch_points", field.rect);
+            ui_kit::settings_inline_note(ui, &unit);
+        });
     });
 }
 
@@ -359,6 +413,11 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        // Larger constraint glyphs, readable at any zoom (#10794).
+        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
+        ui_kit::settings_form(ui, label_width, |ui| {
+            setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
+        });
     });
 }
 
@@ -439,6 +498,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.select_hidden_edges",
             Some("prefs.select_hidden_edges_help"),
             &mut app.preferences.select_hidden_edges,
+        );
+        check(
+            ui,
+            "select_3d_curve_points",
+            "prefs.sketch.select_3d_curve_points",
+            Some("prefs.sketch.select_3d_curve_points_help"),
+            &mut app.preferences.select_3d_curve_points,
         );
         check(
             ui,
@@ -555,11 +621,11 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
                 });
             });
         });

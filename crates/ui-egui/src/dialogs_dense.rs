@@ -82,6 +82,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             _ => k.simple_metadata().map(|(command, _)| command),
         },
         Kind::Frame(_) => Some("frame.member"),
+        Kind::EndCap(_) => Some("frame.end_cap"),
         Kind::Plastic(k) => match k {
             crate::dialogs_plastic::Pl::SnapFit { .. } => Some("plastic.snap_fit"),
             crate::dialogs_plastic::Pl::Assign { .. } => Some("plastic.assign_rule"),
@@ -283,7 +284,7 @@ fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Ma
 fn fillet_turn_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
     let before = extra.get("turn").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_turn", |ui| extra_choice(ui, extra, "fi_turn", "turn", &FILLET_TURNS)));
-    row.response.on_hover_text(tr("ui.fillet_turn_tip"));
+    row.response.backing_on_hover_text(tr("ui.fillet_turn_tip"));
     if extra.get("turn") != before.as_ref() {
         settle_fillet_options(extra, "turn", setback);
     }
@@ -815,6 +816,20 @@ pub(crate) fn primitive_label(key: &str) -> &str {
     }
 }
 
+/// Cylinder and Sphere take their size as a diameter or a radius (#6609). Switching converts the
+/// size, so the part stays as it is, and OK sends the one shown.
+fn round_size_row(ui: &mut egui::Ui, fields: &mut [(&'static str, String)]) {
+    let Some(field) = fields.iter_mut().find(|(k, _)| matches!(*k, "diameter" | "radius")) else { return };
+    let current = usize::from(field.0 == "radius");
+    let mut selected = current;
+    form_row(ui, "Size", |ui| ui_kit::segmented(ui, &mut selected, &["Diameter", "Radius"], Default::default()));
+    if selected != current {
+        let diameter = selected == 0;
+        field.1 = crate::length_input::scaled(&field.1, diameter);
+        field.0 = if diameter { "diameter" } else { "radius" };
+    }
+}
+
 /// The coil's section, where the section sits on the diameter, the way it turns and where it
 /// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
 fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
@@ -1117,6 +1132,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            if matches!(*cmd, "solid.cylinder" | "solid.sphere") {
+                round_size_row(ui, fields);
+            }
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
@@ -1168,6 +1186,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
+        Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
         Kind::Section { offset, flip, hatch } => {

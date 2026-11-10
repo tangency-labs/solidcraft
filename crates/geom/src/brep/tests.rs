@@ -1,5 +1,6 @@
 use super::*;
 use crate::prelude::*;
+use solidcore_ops::{label, pcurve, record_check as check};
 use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -288,7 +289,7 @@ fn every_form_validates_and_round_trips_without_a_kernel() {
         ("lower forms", sheet_with_lower_forms()),
     ] {
         check::validate(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
-        geometry::check(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
+        solidcore_ops::record_check::agreement(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = serde_json::to_vec(&body).unwrap();
         let restored: Brep = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body, restored, "{name}");
@@ -366,13 +367,13 @@ fn a_pcurve_a_rounding_short_of_its_edge_is_read_at_its_end() {
         *k = short;
     }
     check::validate(&b).unwrap();
-    geometry::check(&b).unwrap();
+    solidcore_ops::record_check::agreement(&b).unwrap();
 }
 
 /// One geometric defect each, structurally valid: every one is refused, naming the record.
 #[test]
 fn geometric_defects_are_refused_by_record() {
-    use geometry::{Problem, Record};
+    use solidcore_ops::record_check::{Problem, Record};
     let off = |what| move |p: &Problem| matches!(p, Problem::Off { what: w, .. } if *w == what);
     let cases: Vec<(&str, Record, Box<dyn Fn(&Problem) -> bool>, Brep)> = vec![
         ("vertex off its curve's start", Record::Edge(0), Box::new(off("curve start misses its start vertex")), {
@@ -462,7 +463,7 @@ fn geometric_defects_are_refused_by_record() {
     ];
     for (name, record, problem, body) in cases {
         check::validate(&body).unwrap_or_else(|e| panic!("{name}: structurally valid: {e}"));
-        let error = geometry::check(&body).err().unwrap_or_else(|| panic!("{name} was accepted"));
+        let error = solidcore_ops::record_check::agreement(&body).err().unwrap_or_else(|| panic!("{name} was accepted"));
         assert_eq!(error.record, record, "{name}: {error}");
         assert!(problem(&error.problem), "{name}: {error}");
     }
@@ -509,7 +510,7 @@ fn hostile_records_never_panic_the_geometry_check() {
     b.faces[0].surface = Surface::PlacedRevolution { profile: circle, origin: [0.; 3], axis: [0., 0., 1.], matrix: identity, forward: true };
     cases.push(b);
     for (i, b) in cases.iter().enumerate() {
-        let checked = std::panic::catch_unwind(|| geometry::check(b));
+        let checked = std::panic::catch_unwind(|| solidcore_ops::record_check::agreement(b));
         assert!(matches!(checked, Ok(Err(_))), "case {i}: {checked:?}");
     }
 }
@@ -762,4 +763,37 @@ fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
         assert_eq!(u_knots(&form), (q, q + 4.0), "seam at {start}");
         assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
     }
+}
+
+/// A disc (a plane bounded by a circle) mapped by a scaling and a shear stays a plane bounded by
+/// an ellipse: the record is valid and agrees with its topology, the circle's NURBS form mapped
+/// with its parameter lies on the ellipse labelling it, and a reflection is left to the kernel.
+#[test]
+fn a_disc_scaled_and_sheared_is_a_plane_bounded_by_an_ellipse() {
+    use solidcore_record::Vec3;
+    let disc = one_face(
+        Surface::Plane { origin: [1., 2., 3.], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] },
+        [[-3., 3.], [-3., 3.]],
+        vec![(Curve::Circle { frame: a_frame(), radius: 2. }, [0., TAU], [0, 0])],
+        &[[3., 2., 3.]],
+        &[(0, true)],
+    );
+    check::validate(&disc).unwrap();
+    let m = [[2., 0., 0., 0.], [0.7, 3., 0., 0.], [0.3, 0., 0.5, 0.], [4., -1., 2., 1.]];
+    let mapped = placement::mapped(&disc, &m).unwrap();
+    check::validate(&mapped).unwrap();
+    solidcore_ops::record_check::agreement(&mapped).unwrap();
+    assert!(matches!(mapped.faces[0].surface, Surface::Plane { .. }));
+    let edge = &mapped.edges[0];
+    let Curve::Ellipse { frame, radii } = &edge.curve else { panic!("{:?}", edge.curve) };
+    let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+    let form = eval::CurveEval::new(edge.nurbs.as_ref().unwrap()).unwrap();
+    for k in 0..12 {
+        let t = edge.interval[0] + (edge.interval[1] - edge.interval[0]) * k as f64 / 12.0;
+        let d = form.jet(t).unwrap().point - o;
+        let on = (d.dot(x) / radii[0]).powi(2) + (d.dot(y) / radii[1]).powi(2);
+        assert!((on - 1.0).abs() < 1e-9 && d.dot(x.cross(y)).abs() < 1e-9, "{t}: {on}");
+    }
+    let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    assert!(placement::mapped(&disc, &mirror).is_none());
 }

@@ -1,6 +1,7 @@
 //! Contact Sets, Motion Study and Exploded views.
 
 use solidcraft_geom::prelude::*;
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
@@ -8,7 +9,7 @@ use solidcore_record::Vec3;
 use solidcraft_doc::Mat;
 use solidcraft_doc::joints::{self, JointKind};
 use solidcraft_doc::motion::{ContactSet, ExplodedView, MotionStudy, StudyKey};
-use solidcraft_geom::Aabb3;
+use solidcraft_geom::{Aabb3, Bvh};
 use solidcraft_kernel::Body;
 
 use super::CommandSpec;
@@ -353,9 +354,10 @@ fn tris(m: &solidcraft_geom::Mesh) -> Vec<[Vec3; 3]> {
     m.triangles.iter().filter_map(|t| m.tri(t)).collect()
 }
 
-/// The deepest any sample point of `a` lies inside `b` (0 if none).
+/// The deepest any sample point of `a` lies inside `b` (0 if none). `b`'s triangles are indexed
+/// once ([`Surface`]), so each point and edge looks only at the triangles near it.
 fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f64 {
-    let tb = tris(b);
+    let sb = Surface::new(tris(b));
     let bx = b.bounds();
     let mut pts: Vec<Vec3> = a.positions.clone();
     let mut edges: Vec<(Vec3, Vec3)> = Vec::new();
@@ -374,23 +376,23 @@ fn deepest(a: &solidcraft_geom::Mesh, b: &solidcraft_geom::Mesh, tol: f64) -> f6
         {
             continue;
         }
-        let d = tb.iter().map(|[a, b, c]| closest(p, *a, *b, *c).dist(p)).fold(f64::MAX, f64::min);
-        if d > tol.max(best) && inside(p, &tb) {
+        let d = sb.distance(p, tol.max(best));
+        if d > tol.max(best) && sb.inside(p) {
             best = d;
         }
     }
     for (p, q) in edges.into_iter().take(200_000) {
-        best = best.max(crossing(p, q, &tb, bx, tol));
+        best = best.max(crossing(p, q, &sb, bx, tol));
     }
     best
 }
 
-/// Where the edge `p`→`q` of one mesh reaches through the surface `tb` of the other: the
+/// Where the edge `p`→`q` of one mesh reaches through the surface `sb` of the other: the
 /// depth, or 0 when it misses, only touches, or grazes (the middle of the chord it cuts must
 /// lie inside, deeper than `tol`, as elsewhere in the check). Two plates crossing each other's
 /// faces put no vertex, mid-edge or triangle centre of either inside the other — the chord an
 /// edge cuts is how that crossing is seen (#3323).
-fn crossing(p: Vec3, q: Vec3, tb: &[[Vec3; 3]], bx: Aabb3, tol: f64) -> f64 {
+fn crossing(p: Vec3, q: Vec3, sb: &Surface, bx: Aabb3, tol: f64) -> f64 {
     if p.x.max(q.x) < bx.min.x - tol
         || p.x.min(q.x) > bx.max.x + tol
         || p.y.max(q.y) < bx.min.y - tol
@@ -408,7 +410,7 @@ fn crossing(p: Vec3, q: Vec3, tb: &[[Vec3; 3]], bx: Aabb3, tol: f64) -> f64 {
     // Where the edge crosses the surface, along the edge. A crossing at a vertex or along an
     // edge shared by two triangles is found twice (or more); merges of neighbours leave the
     // entry and exit of each chord as one pair each.
-    let mut hits: Vec<f64> = tb.iter().filter_map(|t| contact_sweep::segment_hits_triangle(p, q, t)).map(|h| (h - p).dot(d) / len2).collect();
+    let mut hits: Vec<f64> = sb.segment_hits(p, q).into_iter().map(|h| (h - p).dot(d) / len2).collect();
     if hits.len() < 2 {
         return 0.0;
     }
@@ -420,43 +422,182 @@ fn crossing(p: Vec3, q: Vec3, tb: &[[Vec3; 3]], bx: Aabb3, tol: f64) -> f64 {
             break;
         }
         let m = p + d * ((pair[0] + pair[1]) * 0.5);
-        let deep = tb.iter().map(|[a, b, c]| closest(m, *a, *b, *c).dist(m)).fold(f64::MAX, f64::min);
-        if deep > tol.max(best) && inside(m, tb) {
+        let deep = sb.distance(m, tol.max(best));
+        if deep > tol.max(best) && sb.inside(m) {
             best = deep;
         }
     }
     best
 }
 
-/// Ray parity along a skew direction (no axis-aligned edge hits).
-fn inside(p: Vec3, tris: &[[Vec3; 3]]) -> bool {
-    // Fixed ray coordinates, not an approximation used to compute Euler's constant.
-    #[allow(clippy::approx_constant)]
-    let dir = Vec3::new(0.577_215_664_9, 0.327_118_441_9, 0.751_891_438_7);
-    let mut n = 0;
-    for [a, b, c] in tris {
-        let (e1, e2) = (*b - *a, *c - *a);
-        let h = dir.cross(e2);
-        let det = e1.dot(h);
-        if det.abs() < 1e-14 {
+/// A closed mesh's triangles under a bounding volume hierarchy, for [`deepest`]: the distance
+/// from a point, ray parity and the hits of a segment, answered as a scan of every triangle
+/// would answer them (the same values, from the same per-triangle tests) while testing only
+/// the triangles near the query.
+///
+/// Each triangle's box is grown by half its longest edge and a millionth of the mesh's
+/// coordinate scale, and a segment's box by half its length. A triangle is left out of a query
+/// only when the query misses its grown box, which is far more than the rounding of the
+/// per-triangle tests can move an answer: they are solved with a condition bounded by their
+/// own thresholds and by the shape test below. Triangles that bound fails for (a vertex that is
+/// not finite, a sliver whose area is all but 0, or a plane all but parallel to `inside`'s ray)
+/// are tested by every query instead.
+struct Surface {
+    tris: Vec<[Vec3; 3]>,
+    tree: Bvh,
+    /// Triangles every query tests, ascending.
+    loose: Vec<u32>,
+}
+
+/// The fixed skew direction of [`inside`]'s ray.
+// Fixed ray coordinates, not an approximation used to compute Euler's constant.
+#[allow(clippy::approx_constant)]
+const RAY: Vec3 = Vec3::new(0.577_215_664_9, 0.327_118_441_9, 0.751_891_438_7);
+
+impl Surface {
+    fn new(tris: Vec<[Vec3; 3]>) -> Surface {
+        let scale = tris.iter().flatten().filter(|v| v.is_finite()).fold(0.0f64, |m, v| m.max(v.x.abs()).max(v.y.abs()).max(v.z.abs()));
+        let mut loose = Vec::new();
+        let boxes: Vec<Aabb3> = tris
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let [a, b, c] = *t;
+                let (ab, ac, bc) = (b - a, c - a, c - b);
+                let (l2, m2, n2) = (ab.dot(ab), ac.dot(ac), bc.dot(bc));
+                let cr = ab.cross(ac);
+                let area2 = cr.dot(cr);
+                let sum = l2 + m2 + n2;
+                let det = ab.dot(RAY.cross(ac));
+                let ill =
+                    !t.iter().all(|v| v.is_finite()) || !(area2 >= 1e-10 * sum * sum) || !(det.abs() >= 1e-6 * l2.sqrt() * m2.sqrt() * RAY.len());
+                if ill {
+                    loose.push(i as u32);
+                    return Aabb3::EMPTY;
+                }
+                let mut bx = Aabb3::EMPTY;
+                for v in t {
+                    bx.add(*v);
+                }
+                bx.inflated(0.5 * l2.max(m2).max(n2).sqrt() + 1e-6 * scale)
+            })
+            .collect();
+        Surface { tree: Bvh::new(&boxes), tris, loose }
+    }
+
+    /// Calls `f` with every triangle `enter` lets through, as the hierarchy's boxes do, and every
+    /// loose one.
+    fn each(&self, mut enter: impl FnMut(&Aabb3) -> bool, mut f: impl FnMut(&[Vec3; 3])) {
+        for &i in &self.loose {
+            if let Some(t) = self.tris.get(i as usize) {
+                f(t);
+            }
+        }
+        self.tree.visit(&mut enter, |i| {
+            if let Some(t) = self.tris.get(i as usize) {
+                f(t);
+            }
+        });
+    }
+
+    /// The distance from `p` to the nearest triangle (`f64::MAX` for none), as the minimum over
+    /// every triangle. Once one is found within `enough`, some distance within it is returned
+    /// instead: the caller only asks whether the nearest lies beyond `enough`.
+    fn distance(&self, p: Vec3, enough: f64) -> f64 {
+        let best = Cell::new(f64::MAX);
+        self.each(|bx| best.get() > enough && box_gap(bx, p) <= best.get(), |[a, b, c]| best.set(best.get().min(closest(p, *a, *b, *c).dist(p))));
+        best.get()
+    }
+
+    /// Whether `p` is inside, by the parity of the triangles [`inside`]'s ray crosses.
+    fn inside(&self, p: Vec3) -> bool {
+        let mut n = 0usize;
+        self.each(
+            |bx| ray_meets(p, RAY, bx),
+            |t| {
+                if ray_crosses(p, t) {
+                    n += 1;
+                }
+            },
+        );
+        n % 2 == 1
+    }
+
+    /// Where the segment `p`→`q` meets the triangles ([`contact_sweep::segment_hits_triangle`]),
+    /// in no particular order.
+    fn segment_hits(&self, p: Vec3, q: Vec3) -> Vec<Vec3> {
+        let mut around = Aabb3::EMPTY;
+        around.add(p);
+        around.add(q);
+        let around = around.inflated(0.5 * p.dist(q) + 1e-6 * p.x.abs().max(p.y.abs()).max(p.z.abs()).max(q.x.abs()).max(q.y.abs()).max(q.z.abs()));
+        let mut hits = Vec::new();
+        self.each(
+            |bx| bx.meets(&around),
+            |t| {
+                if let Some(h) = contact_sweep::segment_hits_triangle(p, q, t) {
+                    hits.push(h);
+                }
+            },
+        );
+        hits
+    }
+}
+
+/// The distance from `p` to box `bx` (0 inside it).
+fn box_gap(bx: &Aabb3, p: Vec3) -> f64 {
+    let axis = |lo: f64, hi: f64, v: f64| (lo - v).max(v - hi).max(0.0);
+    let (x, y, z) = (axis(bx.min.x, bx.max.x, p.x), axis(bx.min.y, bx.max.y, p.y), axis(bx.min.z, bx.max.z, p.z));
+    (x * x + y * y + z * z).sqrt()
+}
+
+/// Whether the ray from `o` along `d` meets box `bx` (sides included).
+fn ray_meets(o: Vec3, d: Vec3, bx: &Aabb3) -> bool {
+    let (mut t0, mut t1) = (0.0f64, f64::INFINITY);
+    for (o, d, lo, hi) in [(o.x, d.x, bx.min.x, bx.max.x), (o.y, d.y, bx.min.y, bx.max.y), (o.z, d.z, bx.min.z, bx.max.z)] {
+        if d == 0.0 {
+            if o < lo || o > hi {
+                return false;
+            }
             continue;
         }
-        let f = 1.0 / det;
-        let sv = p - *a;
-        let u = f * sv.dot(h);
-        if !(0.0..=1.0).contains(&u) {
-            continue;
-        }
-        let q = sv.cross(e1);
-        let v = f * dir.dot(q);
-        if v < 0.0 || u + v > 1.0 {
-            continue;
-        }
-        if f * e2.dot(q) > 0.0 {
-            n += 1;
+        let (a, b) = ((lo - o) / d, (hi - o) / d);
+        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        t0 = t0.max(a);
+        t1 = t1.min(b);
+        if !(t0 <= t1) {
+            return false;
         }
     }
-    n % 2 == 1
+    true
+}
+
+/// Ray parity along a skew direction (no axis-aligned edge hits).
+fn inside(p: Vec3, tris: &[[Vec3; 3]]) -> bool {
+    tris.iter().filter(|t| ray_crosses(p, t)).count() % 2 == 1
+}
+
+/// Whether the ray from `p` along [`RAY`] crosses triangle `t` (one that lies all but along
+/// the ray never does).
+fn ray_crosses(p: Vec3, t: &[Vec3; 3]) -> bool {
+    let [a, b, c] = t;
+    let (e1, e2) = (*b - *a, *c - *a);
+    let h = RAY.cross(e2);
+    let det = e1.dot(h);
+    if det.abs() < 1e-14 {
+        return false;
+    }
+    let f = 1.0 / det;
+    let sv = p - *a;
+    let u = f * sv.dot(h);
+    if !(0.0..=1.0).contains(&u) {
+        return false;
+    }
+    let q = sv.cross(e1);
+    let v = f * RAY.dot(q);
+    if v < 0.0 || u + v > 1.0 {
+        return false;
+    }
+    f * e2.dot(q) > 0.0
 }
 
 /// The point of triangle abc nearest p.

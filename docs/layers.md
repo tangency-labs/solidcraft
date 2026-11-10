@@ -34,7 +34,7 @@ The interface is built from components that another front end could use as they 
 - **publishes its handles** into `solidcraft_ui_registry` under the host's prefix, so the control channel, the scenarios and the tests find it. SolidCraft's names stay byte-identical when a piece becomes a component;
 - **is tested on plain data**, without the app. The host's own tests still pass unchanged.
 
-A piece moves into a shared crate once it depends only on what a shared crate may: the viewport crates, the theme, the text catalogs and the control channel have. The rest of the kit lives in `ui-egui` until it does. When a piece becomes a component, before/after screenshots of SolidCraft show no differing pixels.
+A piece moves into a shared crate once it depends only on what a shared crate may: the viewport crates, the theme, the text catalogs, the control channel and the UI kit (`ui-kit`, with its components) have. What a component draws from SolidCraft is SolidCraft's: its look (icon set, glyphs, interface faces and built-in themes) is the shared `look` crate, which SolidCraft and any other host install from; its tab table and messages stay in `ui-egui`, which installs them or passes them in. When a piece becomes a component, before/after screenshots of SolidCraft show no differing pixels.
 
 ## 3. Adding or moving a crate
 
