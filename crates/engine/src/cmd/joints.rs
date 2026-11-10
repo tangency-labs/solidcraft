@@ -2317,35 +2317,6 @@ mod reach_tests;
 #[cfg(test)]
 #[path = "joints_relations_tests.rs"]
 mod relations_tests;
-#[cfg(test)]
-#[path = "joints_tests.rs"]
-mod tests;
-#[cfg(test)]
-#[path = "joints_turn_tests.rs"]
-mod turn_tests;
-
-/// Per-thread work counts for ordinary engine regression tests; no production instrumentation.
-#[cfg(test)]
-pub(super) mod solve_counts {
-    use solidcraft_doc::joints::Analysis;
-    use std::cell::Cell;
-
-    thread_local! {
-        static COUNTS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
-    }
-
-    pub fn record(analysis: Analysis) {
-        COUNTS.with(|c| {
-            let (all, full) = c.get();
-            c.set((all + 1, full + usize::from(analysis == Analysis::DegreesOfFreedom)));
-        });
-    }
-
-    pub fn take() -> (usize, usize) {
-        COUNTS.with(|c| c.replace((0, 0)))
-    }
-}
-
 /// Capture Position: every moving joint keeps its current values (as the solver places them) as
 /// its captured position. Returns how many joints were captured.
 pub(in crate::cmd) fn capture_values(s: &mut Session) -> usize {
@@ -2383,4 +2354,33 @@ pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
     }
     resolve(s);
     n
+}
+
+#[cfg(test)]
+#[path = "joints_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "joints_turn_tests.rs"]
+mod turn_tests;
+
+/// Per-thread work counts for ordinary engine regression tests; no production instrumentation.
+#[cfg(test)]
+pub(super) mod solve_counts {
+    use solidcraft_doc::joints::Analysis;
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNTS: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+    }
+
+    pub fn record(analysis: Analysis) {
+        COUNTS.with(|c| {
+            let (all, full) = c.get();
+            c.set((all + 1, full + usize::from(analysis == Analysis::DegreesOfFreedom)));
+        });
+    }
+
+    pub fn take() -> (usize, usize) {
+        COUNTS.with(|c| c.replace((0, 0)))
+    }
 }
