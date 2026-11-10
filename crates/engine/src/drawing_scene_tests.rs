@@ -2931,3 +2931,15 @@ fn a_sheet_note_edited_draws_its_new_text() {
     assert_eq!(text_and_tips(group_of(&after.scene, id)).0, vec!["Revised note".to_string()]);
     assert_eq!(bytes(&after.scene), bytes(&built(&s, sheet).scene));
 }
+
+/// Each body the views of a sheet draw comes with the world state of the session its view drew from
+/// (#13054 on #13048): the two assembled views' with the design's, the exploded one's with its copy's.
+/// `drawing.check` reads what the sheet draws from these.
+#[test]
+fn each_drawn_body_comes_with_the_state_its_view_drew_from() {
+    let (s, sheet, ..) = two_assembled_one_apart();
+    let placed = s.world_state().unwrap();
+    let from_design: Vec<bool> = built(&s, sheet).bodies_drawn().map(|(state, _)| Arc::ptr_eq(state, &placed)).collect();
+    // Two cubes in each of the three views.
+    assert_eq!((from_design.len(), from_design.iter().filter(|design| **design).count()), (6, 4));
+}
