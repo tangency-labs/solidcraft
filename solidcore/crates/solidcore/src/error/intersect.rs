@@ -66,9 +66,8 @@ impl IntersectFailure {
 impl core::fmt::Display for IntersectFailure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Self::Failed(what) => f.write_str(what),
+            Self::Failed(what) | Self::OutsideDomain(what) => f.write_str(what),
             Self::Missing(what) => write!(f, "{what} is missing"),
-            Self::OutsideDomain(what) => f.write_str(what),
             Self::Inconsistent(what) => write!(f, "a consistency check failed: {what}"),
         }
     }

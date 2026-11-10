@@ -28,7 +28,6 @@ use solidcore::surface::b_spline_volume::BSplineVolume;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::volume::{Volume, VolumeKind};
-use solidcore::SolidError;
 
 /// Runner for curve classification part 8.
 pub struct Runner;

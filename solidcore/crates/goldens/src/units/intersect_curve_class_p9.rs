@@ -45,7 +45,7 @@ use solidcore::surface::surface_cache::p1::{
 use solidcore::surface::trim_srf_cache::TrimSrfCache;
 use solidcore::surface::volume::Volume;
 use solidcore::topology::{Brep, EdgeId, VertexId};
-use solidcore::{EntityRef, Result as ScResult, SolidError};
+use solidcore::{EntityRef, Result as ScResult};
 
 /// Differential runner for the two part-9 methods.
 pub struct Runner;
