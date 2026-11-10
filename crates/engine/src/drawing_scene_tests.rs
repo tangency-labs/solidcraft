@@ -878,6 +878,29 @@ fn a_sheet_makes_one_copy_for_each_choice_it_draws() {
     built(&s, sheet);
 }
 
+/// Two views at one step of a motion study share one copy, and a view at another step has its own.
+#[test]
+fn views_at_one_study_step_share_one_copy() {
+    let (mut s, designed, _) = hinge_pair();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "motion.study", json!({"name": "Open", "steps": 10, "keys": [{"joint": "Hinge", "points": [[0, 0], [10, 90]]}]}));
+    run(&mut s, "drawing.open", drawing);
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let view = |s: &mut Session, at: [f64; 2], step: u32| {
+        let p = json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": at, "pose": {"study": "Open", "step": step}});
+        ids::decode(run(s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap()
+    };
+    let at_steps = [view(&mut s, [60.0, 250.0], 4), view(&mut s, [150.0, 250.0], 4), view(&mut s, [250.0, 250.0], 7)];
+    let d = s.drawing("test").unwrap().clone();
+    let mut sessions = crate::drawing_view::ViewSessions::new(&s);
+    for view in [designed].into_iter().chain(at_steps) {
+        sessions.of(&d.resolve_view(view).unwrap()).unwrap();
+    }
+    assert_eq!(sessions.copies(), 2);
+    built(&s, sheet);
+}
+
 /// A view in a position of its own is up to date by what it draws: driving the hinge in the design
 /// draws the view of the design's placement again and leaves the posed view as it was, and editing the
 /// posed view's values draws it again and only it.

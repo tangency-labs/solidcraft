@@ -106,15 +106,26 @@ pub struct JointPose {
     pub values: Vec<f64>,
 }
 
+/// A step of one of the design's motion studies, by the study's id: a whole step, as studies count
+/// them ([`crate::motion::MotionStudy::steps`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StudyStep {
+    pub id: u64,
+    pub step: u32,
+}
+
 /// The position of its assembly a view draws (#13048): as the design places its parts (the
-/// default), or with some of its joints at values of its own. The design is never changed: the view
-/// draws a copy. A joint the design no longer has is skipped, never refuses the file.
+/// default), with some of its joints at values of its own, or at a step of one of its motion
+/// studies. The design is never changed: the view draws a copy. A joint or study the design no
+/// longer has is skipped, never refuses the file.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Pose {
     #[default]
     Designed,
     Joints(Arc<[JointPose]>),
+    Study(StudyStep),
 }
 
 /// What a view shows and how. Every field has a default: the front view at the scale that fits

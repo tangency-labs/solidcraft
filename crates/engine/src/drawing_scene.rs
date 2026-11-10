@@ -135,8 +135,8 @@ pub struct ViewState {
     pub status: Status,
     /// What working out its lines cost, when they were.
     pub stats: Option<Stats>,
-    /// What it says beside its lines, when its status doesn't say why, as a note does: the joints its
-    /// position names that are gone ([`crate::drawing_view::gone_joints_reason`]).
+    /// What it says beside its lines, when its status doesn't say why, as a note does: the joints or
+    /// motion study its position names that are gone ([`crate::drawing_view::position_reason`]).
     pub why: Option<String>,
 }
 
@@ -550,7 +550,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let why = crate::drawing_view::gone_joints_reason(crate::drawing_view::gone_joints(s, view).len());
+    let why = crate::drawing_view::position_reason(s, view);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
@@ -1642,7 +1642,7 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 /// Each is worked out only when a view drawing it is behind.
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
     // Each with what it says now: a joint deleted may leave its picture as it was.
-    let says = |view: &ResolvedView| crate::drawing_view::gone_joints_reason(crate::drawing_view::gone_joints(s, view).len());
+    let says = |view: &ResolvedView| crate::drawing_view::position_reason(s, view);
     let behind: Vec<(u64, Choice, Option<String>)> = on
         .filter_map(|id| {
             let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;

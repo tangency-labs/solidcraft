@@ -157,8 +157,9 @@ pub fn check_occurrence_paths(occurrences: &[Vec<u64>], hide: &[Vec<u64>]) -> Re
 }
 
 /// What a view's position may hold, saved or asked for: 1 to [`MAX_POSE_JOINTS`] joints, each once,
-/// each with 1 to [`MAX_JOINT_VALUES`] values, finite and at most [`MAX_POSE_VALUE`] either way. It
-/// isn't checked against the design: a joint the design no longer has is skipped where it draws.
+/// each with 1 to [`MAX_JOINT_VALUES`] values, finite and at most [`MAX_POSE_VALUE`] either way; or
+/// any study step, which its types bound. It isn't checked against the design: a joint or study the
+/// design no longer has is skipped where it draws.
 pub fn check_pose(pose: &Pose) -> Result<()> {
     let Pose::Joints(joints) = pose else { return Ok(()) };
     require(!joints.is_empty(), || "a position sets at least one joint: give \"designed\" instead".into())?;
